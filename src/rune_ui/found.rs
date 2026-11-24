@@ -390,3 +390,52 @@ pub(super) fn chosen(ui: &mut Ui) {
     super::onboarding_kit::live::continue_model(ui);
     super::onboarding_kit::live::fixture_resume(ui, super::Page::Demo);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc::channel;
+
+    /// The scan's answer is filtered as it arrives, so a file naming a model
+    /// this build can't run (an import that isn't here, as a Labs-off
+    /// Parakeet Ultra is) never reaches the model step, while a usable one
+    /// still does.
+    #[test]
+    fn a_scan_keeps_only_the_models_this_build_can_run() {
+        let models = std::env::temp_dir().join(format!("hex-found-poll-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&models);
+        std::fs::create_dir_all(&models).unwrap();
+        crate::transcription::models::set_test_models_dir(Some(models.clone()));
+
+        let mut unavailable = fixture_catalog(TranscriptionModelId::ParakeetV3);
+        unavailable.catalog = Some(TranscriptionModelId::Custom(
+            CustomModelId::parse("custom-0123456789abcdef").expect("a custom id"),
+        ));
+        let mut ui = crate::rune_ui::Ui::with(
+            crate::app_settings::AppSettings::default(),
+            crate::rune_ui::Service::Fixture(Vec::new()),
+        );
+        let (sender, receiver) = channel();
+        sender
+            .send(vec![
+                unavailable,
+                fixture_catalog(TranscriptionModelId::ParakeetV3),
+            ])
+            .unwrap();
+        ui.found.scan = Some(receiver);
+
+        assert!(poll(&mut ui), "the scan's answer changed what shows");
+        assert_eq!(
+            ui.found
+                .models
+                .iter()
+                .map(|found| found.catalog)
+                .collect::<Vec<_>>(),
+            vec![Some(TranscriptionModelId::ParakeetV3)],
+            "only the model this build offers is kept"
+        );
+
+        crate::transcription::models::set_test_models_dir(None);
+        std::fs::remove_dir_all(models).unwrap();
+    }
+}

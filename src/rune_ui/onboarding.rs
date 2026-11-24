@@ -189,10 +189,8 @@ fn apply(ui: &mut Ui, effect: Effect) {
                 // is off, an import that is gone) must say so: left alone, the
                 // tour waits on a download that never starts.
                 Err(error) => {
-                    let error = format!("{error:#}");
                     ui.found.picked = None;
-                    ui.found.error = Some(error.clone());
-                    ui.error = Some(error);
+                    ui.found.error = Some(format!("{error:#}"));
                     if let Some(tour) = &mut ui.tour {
                         tour.flow.model_failed();
                     }

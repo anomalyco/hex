@@ -959,9 +959,12 @@ CoreAudio formats, AppleScript details, or event serialization.
   (against the pin or the blob name), and removing one only forgets it. Only
   models this build offers are listed: a found file naming a catalog model its
   Labs switch hides (Parakeet Ultra with the lab off) never fills the model
-  step and never holds the recommended download, and a pick that can't run
-  says why instead of waiting at 0 of N MB on a download that never started
-  (`rune_ui::found::keep_usable`, `Flow::model_failed`).
+  step and never holds the recommended download. A pick that can't run never
+  reads as a download: the tour marks it failed and the pick clears, so the
+  list returns to the recommended row, and the plain download page (no list)
+  names the reason with Try again, Use a model file…, and Continue without a
+  model; Try again forgets that reason and retries the saved choice
+  (`rune_ui::found::keep_usable`, `Flow::model_failed`, `Flow::pick_failed`).
 - Hex has one onboarding, on every build and OS, stable and dev alike: the
   first-run story (`rune_ui/onboarding_kit/live.rs`) over the tour state
   machine (`rune_ui/onboarding.rs`, `desktop::onboarding::Flow`). No flag,

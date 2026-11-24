@@ -564,10 +564,15 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
                 t.error.is_some(),
             )
         });
-    // A pick the window refused before any download names its own reason,
-    // ahead of the service's last failure.
-    let failure = super::super::model_import::pick_failure(ui)
-        .or_else(|| super::super::model_import::download_failure(ui));
+    // A pick the window refused names its own reason only while the tour
+    // still reports that pick: once another attempt starts, a stale message
+    // must never hide that attempt's failure.
+    let picked_failed = ui.tour.as_ref().is_some_and(|tour| tour.flow.pick_failed());
+    let failure = match picked_failed {
+        true => super::super::model_import::pick_failure(ui),
+        false => None,
+    }
+    .or_else(|| super::super::model_import::download_failure(ui));
     let using_file = super::super::model_import::using_file(ui);
     // The disk and macOS checks run a few times a second, not every frame.
     let checked = ui
@@ -888,7 +893,8 @@ pub(super) fn use_file(ui: &mut Ui) {
 }
 
 /// "Try again": retries the model the person picked from the list, else the
-/// language capsule's choice.
+/// language capsule's choice. A refused pick's reason goes with it, so the
+/// next failure is the one this attempt earned.
 pub(super) fn retry_download(ui: &mut Ui) {
     let Some(live) = ui.first_run.as_mut().and_then(|s| s.live.as_mut()) else {
         return;
@@ -899,7 +905,10 @@ pub(super) fn retry_download(ui: &mut Ui) {
     let choice = live.choice.clone();
     match ui.found.picked {
         Some(index) => found_choice::pick(ui, index),
-        None => choose(ui, &choice),
+        None => {
+            ui.found.error = None;
+            found_choice::prepare(ui, choice);
+        }
     }
 }
 

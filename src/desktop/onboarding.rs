@@ -334,6 +334,12 @@ impl Flow {
         self.pick_failed = true;
     }
 
+    /// Whether that pick is still the one the page should explain: another
+    /// attempt clears it, so its reason never hides that attempt's failure.
+    pub fn pick_failed(&self) -> bool {
+        self.pick_failed
+    }
+
     pub fn step(&self) -> Step {
         self.step
     }

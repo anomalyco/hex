@@ -119,6 +119,8 @@ pub(super) fn use_file(ui: &mut Ui) {
     if !ui.live() || ui.picker.import.busy() {
         return;
     }
+    // The file replaces the pick this page refused, and its reason with it.
+    ui.found.error = None;
     choose(ui);
     ui.picker.import.use_after = ui.picker.import.chooser.is_some();
 }
@@ -141,7 +143,8 @@ pub(super) fn download_failure(ui: &Ui) -> Option<String> {
 
 /// Why the model the person picked can't run here, in one line ("… is
 /// unavailable"): the first run names it instead of waiting on a download
-/// that never started.
+/// that never started. Read only while the tour still reports that pick
+/// (`Flow::pick_failed`), so it never outlives the attempt.
 pub(super) fn pick_failure(ui: &Ui) -> Option<String> {
     ui.found
         .error

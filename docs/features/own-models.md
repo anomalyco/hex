@@ -208,9 +208,12 @@ Onboarding opens -> scan; its own download waits until it answers  // setup.foun
     │   moves on once the pick is under way: ours with its download pill on
     │   top, a found one with no download page or pill at all
     ├── A pick that can't run (an import that is gone, a model its Labs switch
-    │   hides) says why on the page instead of waiting at "0 of N MB": its row
-    │   reads "Couldn't prepare this model", with Try again, Use a model file…,
-    │   and Continue without a model (tour.flow.model_failed)
+    │   hides) never reads as a download: the tour marks it failed and the
+    │   pick clears, so the list returns to the recommended row. The plain
+    │   download page, which shows without a list, names the reason with Try
+    │   again, Use a model file…, and Continue without a model; Try again
+    │   forgets that reason and retries the saved choice
+    │   (tour.flow.model_failed, Flow::pick_failed)
     ├── A pick that fails asks again on the list
     ├── Back on the pages after it returns to the list to change the pick,
     │   even with the model ready

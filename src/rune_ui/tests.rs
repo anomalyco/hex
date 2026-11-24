@@ -3713,13 +3713,81 @@ fn an_unavailable_pick_fails_the_page_instead_of_downloading_forever() {
         crate::desktop::onboarding::ItemStatus::Failed
     );
     assert!(rt.state.found.picked.is_none(), "the pick is cleared");
-    assert!(rt.state.error.is_some(), "the window says why");
+    assert!(
+        rt.state.error.is_none(),
+        "the reason belongs to the pick, not Settings' status: {:?}",
+        rt.state.error
+    );
     let shown = texts(&rt);
     assert!(
         shown.iter().any(|text| text.ends_with("is unavailable")),
         "{shown:?}"
     );
     assert!(!shown.contains(&"0 of 731 MB".to_owned()), "{shown:?}");
+    assert!(shown.contains(&"Try again".to_owned()), "{shown:?}");
+}
+
+/// Try again after a refused pick forgets that pick's reason: the next
+/// failure is the one this attempt earned, not the old one.
+#[test]
+fn retrying_after_a_refused_pick_shows_the_next_download_failure() {
+    let mut ui = portal_fixture();
+    onboarding::fixture(&mut ui, crate::desktop::onboarding::Step::Setup, false);
+    onboarding_kit::live::fixture(&mut ui, Page::Download);
+    let mut rt = runtime_for(ui, false, PANE_SIZE);
+    let before = sent(&rt).len();
+
+    // A pick that can't run: the page names it.
+    rt.update(|ui, _| {
+        let selection = TranscriptionSelection {
+            model: unavailable_model(),
+            language: "en".into(),
+        };
+        ui.settings.transcription = selection.clone();
+        ui.found.choice = Some(selection);
+    });
+    rt.update(|ui, _| {
+        onboarding::input(
+            ui,
+            crate::desktop::onboarding::Input::Grant(crate::desktop::onboarding::SetupItem::Model),
+        )
+    });
+    settle(&mut rt);
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text.ends_with("is unavailable")),
+        "the refused pick says why"
+    );
+
+    // Try again asks for the saved model and clears the old reason.
+    tap(&mut rt, "retry-download");
+    assert!(
+        rt.state.found.error.is_none(),
+        "the pick's reason goes with it"
+    );
+    assert_eq!(sent(&rt).len(), before + 1, "the retry asks again");
+
+    // That attempt fails: its own failure is what the page names.
+    rt.update(|ui, _| {
+        if let Some(view) = &mut ui.view {
+            view.transcription.preparing = None;
+            view.transcription.error =
+                Some("Couldn't reach huggingface.co: the connection was reset".into());
+        }
+    });
+    settle(&mut rt);
+    let shown = texts(&rt);
+    assert!(
+        shown
+            .iter()
+            .any(|text| text.contains("the connection was reset")),
+        "{shown:?}"
+    );
+    assert!(
+        !shown.iter().any(|text| text.ends_with("is unavailable")),
+        "the old pick's reason must not come back: {shown:?}"
+    );
     assert!(shown.contains(&"Try again".to_owned()), "{shown:?}");
 }
 
