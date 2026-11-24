@@ -575,6 +575,8 @@ pub fn record(
             sender: sender.clone(),
             drops: drops.clone(),
             clock: capture_clock,
+            // The system supervisor fills this in with its own watch.
+            system_silence: None,
         };
         // Each source recovers on its own: losing system audio (for example
         // when ScreenCaptureKit loses its display) never stops the microphone.

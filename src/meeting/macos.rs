@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use block2::RcBlock;
 use color_eyre::eyre::{Result, WrapErr, eyre};
@@ -38,9 +38,13 @@ use screencapturekit::prelude::*;
 use screencapturekit::stream::delegate_trait::ErrorHandler;
 
 use super::SAMPLE_RATE;
-use super::capture::{LiveSource, POLL_INTERVAL, PacketSink, STALL_TIMEOUT, To16k};
+use super::capture::{LiveSource, POLL_INTERVAL, PacketSink, STALL_TIMEOUT, To16k, output_changed};
+use crate::audio::output_route::default_output_uid;
 
 const TAP_QUEUE_CAPACITY: usize = 512;
+/// How often the tap re-reads the default output device. The private
+/// aggregate names no output, so it keeps the one the tap was created on.
+const ROUTE_CHECK: Duration = Duration::from_secs(2);
 
 unsafe extern "C" {
     fn CGPreflightScreenCaptureAccess() -> bool;
@@ -166,6 +170,10 @@ struct ProcessTapSource {
     format_error: Arc<AtomicBool>,
     seen_callbacks: u64,
     last_callback: Instant,
+    /// The default output's UID when the tap was created; a different one
+    /// means the tap must be rebuilt.
+    output_uid: Option<String>,
+    route_checked: Instant,
     resample: To16k,
 }
 
@@ -175,6 +183,9 @@ unsafe impl Send for ProcessTapSource {}
 
 impl ProcessTapSource {
     fn start() -> Result<Self> {
+        // The tap hears the output that is default when it is created, so
+        // the baseline is read first; a change after this reopens the tap.
+        let output_uid = default_output_uid();
         let excluded = own_process_object()
             .map(|object| vec![NSNumber::new_u32(object)])
             .unwrap_or_default();
@@ -206,6 +217,8 @@ impl ProcessTapSource {
             format_error: Arc::new(AtomicBool::new(false)),
             seen_callbacks: 0,
             last_callback: Instant::now(),
+            output_uid,
+            route_checked: Instant::now(),
             resample: To16k::new(SAMPLE_RATE)?,
         };
         let format = tap_format(tap)?;
@@ -266,13 +279,33 @@ impl ProcessTapSource {
             "could not start the system audio tap",
         )?;
         source.last_callback = Instant::now();
-        tracing::info!(rate, channels, "system audio tap started");
+        tracing::info!(
+            rate,
+            channels,
+            output = ?source.output_uid,
+            "system audio tap started"
+        );
         Ok(source)
     }
 }
 
 impl LiveSource for ProcessTapSource {
     fn poll(&mut self, sink: &PacketSink) -> std::result::Result<(), String> {
+        if self.route_checked.elapsed() >= ROUTE_CHECK {
+            self.route_checked = Instant::now();
+            let current = default_output_uid();
+            if self.output_uid.is_none() {
+                // A read that failed when the tap was created adopts the
+                // first that works, instead of never checking this stream.
+                self.output_uid = current;
+            } else if output_changed(self.output_uid.as_deref(), current.as_deref()) {
+                return Err(format!(
+                    "the default output changed from {} to {}",
+                    self.output_uid.as_deref().unwrap_or("unknown"),
+                    current.as_deref().unwrap_or("unknown"),
+                ));
+            }
+        }
         let mut samples = Vec::new();
         match self.buffers.recv_timeout(POLL_INTERVAL) {
             Ok(first) => {

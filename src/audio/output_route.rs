@@ -56,71 +56,105 @@ fn classify(transport: u32, data_source: Option<u32>, uid: Option<&str>) -> Outp
     OutputRoute::Speakers
 }
 
-/// The route of the default output now.
+/// Reads one `u32` CoreAudio property from `object`.
 #[cfg(target_os = "macos")]
-pub(crate) fn default_output_route() -> OutputRoute {
+fn read_u32(object: u32, selector: u32, scope: u32) -> Option<u32> {
     use std::ffi::c_void;
     use std::mem::size_of;
     use std::ptr::NonNull;
 
     use objc2_core_audio::{
-        AudioObjectGetPropertyData, AudioObjectPropertyAddress, kAudioDevicePropertyDataSource,
-        kAudioDevicePropertyDeviceUID, kAudioDevicePropertyTransportType,
-        kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyElementMain,
-        kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyScopeOutput, kAudioObjectSystemObject,
+        AudioObjectGetPropertyData, AudioObjectPropertyAddress, kAudioObjectPropertyElementMain,
+    };
+
+    let mut address = AudioObjectPropertyAddress {
+        mSelector: selector,
+        mScope: scope,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let mut value = 0_u32;
+    let mut size = size_of::<u32>() as u32;
+    // SAFETY: All pointers reference initialized, correctly sized stack values.
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            object,
+            NonNull::from(&mut address),
+            0,
+            std::ptr::null(),
+            NonNull::from(&mut size),
+            NonNull::from(&mut value).cast::<c_void>(),
+        )
+    };
+    (status == 0 && size as usize == size_of::<u32>()).then_some(value)
+}
+
+/// The UID a device reports, or `None` when CoreAudio cannot name it.
+#[cfg(target_os = "macos")]
+fn read_uid(device: u32) -> Option<String> {
+    use std::ffi::c_void;
+    use std::mem::size_of;
+    use std::ptr::NonNull;
+
+    use objc2_core_audio::{
+        AudioObjectGetPropertyData, AudioObjectPropertyAddress, kAudioDevicePropertyDeviceUID,
+        kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
     };
     use objc2_core_foundation::{CFRetained, CFString};
 
-    fn read_u32(object: u32, selector: u32, scope: u32) -> Option<u32> {
-        let mut address = AudioObjectPropertyAddress {
-            mSelector: selector,
-            mScope: scope,
-            mElement: kAudioObjectPropertyElementMain,
-        };
-        let mut value = 0_u32;
-        let mut size = size_of::<u32>() as u32;
-        // SAFETY: All pointers reference initialized, correctly sized stack values.
-        let status = unsafe {
-            AudioObjectGetPropertyData(
-                object,
-                NonNull::from(&mut address),
-                0,
-                std::ptr::null(),
-                NonNull::from(&mut size),
-                NonNull::from(&mut value).cast::<c_void>(),
-            )
-        };
-        (status == 0 && size as usize == size_of::<u32>()).then_some(value)
+    let mut address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyDeviceUID,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let mut raw: *const CFString = std::ptr::null();
+    let mut size = size_of::<*const CFString>() as u32;
+    // SAFETY: `raw` and `size` are a correctly sized stack slot for the
+    // property's CFString, which CoreAudio retains for us.
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            device,
+            NonNull::from(&mut address),
+            0,
+            std::ptr::null(),
+            NonNull::from(&mut size),
+            NonNull::from(&mut raw).cast::<c_void>(),
+        )
+    };
+    // SAFETY: CoreAudio returns a retained CFString in `raw` whenever it wrote
+    // one; taking it before the checks below means a wrong size cannot leak it.
+    let string = unsafe { CFRetained::from_raw(NonNull::new(raw.cast_mut())?) };
+    if status != 0 || size as usize != size_of::<*const CFString>() {
+        return None;
     }
+    Some(string.to_string())
+}
 
-    fn read_uid(device: u32) -> Option<String> {
-        let mut address = AudioObjectPropertyAddress {
-            mSelector: kAudioDevicePropertyDeviceUID,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain,
-        };
-        let mut raw: *const CFString = std::ptr::null();
-        let mut size = size_of::<*const CFString>() as u32;
-        // SAFETY: `raw` and `size` are a correctly sized stack slot for the
-        // property's CFString, which CoreAudio retains for us.
-        let status = unsafe {
-            AudioObjectGetPropertyData(
-                device,
-                NonNull::from(&mut address),
-                0,
-                std::ptr::null(),
-                NonNull::from(&mut size),
-                NonNull::from(&mut raw).cast::<c_void>(),
-            )
-        };
-        if status != 0 || size as usize != size_of::<*const CFString>() {
-            return None;
-        }
-        // SAFETY: CoreAudio returned a retained CFString in `raw`; taking it
-        // once into a CFRetained releases it when this string drops.
-        let string = unsafe { CFRetained::from_raw(NonNull::new(raw.cast_mut())?) };
-        Some(string.to_string())
-    }
+/// The UID of the default output now, for a caller that must notice when the
+/// default output changes.
+#[cfg(target_os = "macos")]
+pub(crate) fn default_output_uid() -> Option<String> {
+    use objc2_core_audio::{
+        kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal,
+        kAudioObjectSystemObject,
+    };
+
+    let device = read_u32(
+        kAudioObjectSystemObject as u32,
+        kAudioHardwarePropertyDefaultOutputDevice,
+        kAudioObjectPropertyScopeGlobal,
+    )
+    .filter(|device| *device != 0)?;
+    read_uid(device)
+}
+
+/// The route of the default output now.
+#[cfg(target_os = "macos")]
+pub(crate) fn default_output_route() -> OutputRoute {
+    use objc2_core_audio::{
+        kAudioDevicePropertyDataSource, kAudioDevicePropertyTransportType,
+        kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyScopeOutput, kAudioObjectSystemObject,
+    };
 
     let Some(device) = read_u32(
         kAudioObjectSystemObject as u32,
