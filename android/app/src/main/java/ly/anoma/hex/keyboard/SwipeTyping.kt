@@ -27,6 +27,12 @@ internal object SwipeText {
         return true
     }
     private const val OPENING = "([{<«‹“‘„¿¡@#/"
+
+    /** Whether delete takes back [word], the word a swipe just typed: only while the cursor is still where the swipe
+     * left it ([before] is [anchor], the text then) with the word right before it. [letterByLetter] (Labs › Keyboard ›
+     * Delete swiped words letter by letter) makes delete an ordinary one, a letter at a time, as iPhone Hex's. */
+    fun takesBack(before: String, anchor: String?, word: String, letterByLetter: Boolean): Boolean =
+        !letterByLetter && anchor == before && before.endsWith(word)
 }
 
 /** Words Delete took back right after a swipe typed them, at one place in the text: the next swipe there types its

@@ -815,4 +815,14 @@ class InsertionTest {
         retries.forget()
         assertEquals(readings, retries.typing(readings, "Hello world "))
     }
+
+    // Labs › Keyboard › Delete swiped words letter by letter: on, delete after a swipe is an ordinary one.
+    @Test fun deleteTakesASwipedWordBackOnlyWhereTheSwipeLeftItAndOnlyWithTheLabOff() {
+        assertTrue(SwipeText.takesBack("Hello world", "Hello world", "world", letterByLetter = false))
+        assertFalse(SwipeText.takesBack("Hello world", "Hello world", "world", letterByLetter = true))
+        // The text changed or the cursor moved since the swipe: the word is ordinary text by then.
+        assertFalse(SwipeText.takesBack("Hello worl", "Hello world", "world", letterByLetter = false))
+        assertFalse(SwipeText.takesBack("Hello world", null, "world", letterByLetter = false))
+        assertFalse(SwipeText.takesBack("Hello world!", "Hello world!", "world", letterByLetter = false))
+    }
 }
