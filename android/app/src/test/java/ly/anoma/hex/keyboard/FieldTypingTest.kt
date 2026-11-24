@@ -38,6 +38,17 @@ class FieldTypingTest {
             options = EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING).ordinary)
     }
 
+    @Test fun editorsThatKeepTheirOwnTextTakeKeyEvents() {
+        // TYPE_NULL (a terminal): the field's text stays on its own side, so only key presses reach it.
+        val terminal = FieldTyping.of(InputType.TYPE_NULL, 0)
+        assertTrue(terminal.keyEvents)
+        assertFalse(terminal.secure)
+        assertFalse(terminal.ordinary)
+        // A flag only adds to the class: TYPE_NULL | MULTI_LINE is still TYPE_NULL.
+        assertTrue(FieldTyping.of(InputType.TYPE_NULL or InputType.TYPE_TEXT_FLAG_MULTI_LINE, 0).keyEvents)
+        assertFalse(text().keyEvents)
+    }
+
     @Test fun passwordFieldsAreSecureAndNeverOrdinary() {
         for (variation in listOf(InputType.TYPE_TEXT_VARIATION_PASSWORD, InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
             InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD)) {
