@@ -1,20 +1,18 @@
 {
-  "versionCode": 2409,
-  "versionName": "0.2.2-preview.2409",
+  "versionCode": 2412,
+  "versionName": "0.2.2-preview.2412",
   "version": "0.2.2",
   "minSdk": 31,
   "published": "2026-11-24",
-  "commit": "cd84cce59a75fa56a84868bafdc2a13e09947923",
+  "commit": "4febf41167fc637db26b2de25eb693827f28592f",
   "apk": {
-    "url": "https://github.com/anomalyco/hex/releases/download/android-preview-2409/HexPreview-0.2.2-preview.2409.apk",
+    "url": "https://github.com/anomalyco/hex/releases/download/android-preview-2412/HexPreview-0.2.2-preview.2412.apk",
     "size": 70726206,
-    "sha256": "3c2714a0f774a466dc043dd1e7399447b62a932ba663305e67bf134973676ab7"
+    "sha256": "4810445ec2162a1da3b0ca7d4d28f1122817debfc6716c37fe35bdca4e49fb49"
   },
   "notes": [
-    "New in Hex Preview › Labs: Faster English dictation. Several times faster after a one-time 135 MB download. Numbers come out as words for now, and other languages are unchanged.",
-    "Dictations of 8 to 16 seconds finish sooner, in every language.",
-    "The bottom row is no longer cut off after you turn the phone with the keyboard open.",
-    "Labs › Diagnostics now shows how long each step of your last dictation took. Numbers only, nothing you said.",
-    "Also new: symbols on every letter row with Symbols on letter keys, forms like l'heure suggested in French and Italian, and Labs › Delete swiped words letter by letter."
+    "Long dictations keep every sentence. Past 30 seconds Hex could drop a sentence here and there, most often in German and Spanish; that is fixed.",
+    "Contractions typed without their apostrophe come out right: itd gives it'd, thatd gives that'd, and eleven more.",
+    "The keyboard's menu now shows the language Automatic will dictate in, such as Automatic · English. It follows the keyboard's language, so pick yours under Dictation language if you speak a different one."
   ]
 }
