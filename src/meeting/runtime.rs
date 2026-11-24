@@ -124,6 +124,9 @@ pub(crate) fn tray_state() -> Option<MeetingTray> {
     Some(match state() {
         MeetingMenuState::Idle => MeetingTray::Idle,
         MeetingMenuState::Starting => MeetingTray::Starting,
+        // A stop under way takes no new recording, as Starting doesn't; the
+        // row says why (see `MeetingTray::Stopping`).
+        MeetingMenuState::Recording { stopping: true, .. } => MeetingTray::Stopping,
         MeetingMenuState::Recording { .. } => MeetingTray::Recording,
         MeetingMenuState::Transcribing => MeetingTray::Transcribing,
     })
@@ -161,45 +164,19 @@ fn offer_unshown(window: &rune::AppHandle<Ui>, reason: String) {
 
 /// Mirrors an event into the recording state and the window.
 fn follow(event: &ControllerEvent, window: &rune::AppHandle<Ui>) {
-    let mut state = STATE.lock().unwrap_or_else(|error| error.into_inner());
+    {
+        let mut state = STATE.lock().unwrap_or_else(|error| error.into_inner());
+        mirror(&mut state, event);
+    }
     match event {
-        ControllerEvent::Starting(_) => *state = MeetingMenuState::Starting,
-        ControllerEvent::RecordingStarted { id, title, .. } => {
-            *state = MeetingMenuState::Recording {
-                started: Instant::now(),
-                id: id.clone(),
-                title: title.clone(),
-                chapters: Vec::new(),
-                warning: None,
-            };
-        }
-        ControllerEvent::SourceWarning { warning } => state.source_warning(*warning),
-        ControllerEvent::Retitled { title } => {
-            if let MeetingMenuState::Recording { title: shown, .. } = &mut *state {
-                shown.clone_from(title);
-            }
-        }
-        ControllerEvent::Chapters(chapters) => {
-            if let MeetingMenuState::Recording {
-                chapters: shown, ..
-            } = &mut *state
-            {
-                shown.clone_from(chapters);
-            }
-        }
-        ControllerEvent::Stopping => {}
-        ControllerEvent::Transcribing => *state = MeetingMenuState::Transcribing,
         ControllerEvent::Finished(manifest) => {
             tracing::info!(id = %manifest.id, "meeting transcript ready");
-            *state = MeetingMenuState::Idle;
         }
         ControllerEvent::Discarded(id) => {
             tracing::info!(%id, "meeting had no speech; moved to the Trash");
-            *state = MeetingMenuState::Idle;
         }
         ControllerEvent::Failed { title, error } => {
             tracing::error!(%title, %error, "meeting failed");
-            *state = MeetingMenuState::Idle;
             let message = format!("{title}: {error}");
             window.update(move |ui, tx| {
                 crate::rune_ui::meeting_failed(ui, message);
@@ -232,12 +209,111 @@ fn follow(event: &ControllerEvent, window: &rune::AppHandle<Ui>) {
                 tracing::info!(%app, "the call ended; the recording continues until Stop");
             }
         }
-        ControllerEvent::Offer(..)
+        // These only move the mirror.
+        ControllerEvent::Starting(_)
+        | ControllerEvent::RecordingStarted { .. }
+        | ControllerEvent::SourceWarning { .. }
+        | ControllerEvent::Retitled { .. }
+        | ControllerEvent::Chapters(_)
+        | ControllerEvent::Stopping
+        | ControllerEvent::Transcribing
+        | ControllerEvent::Offer(..)
         | ControllerEvent::OfferWithdrawn(_)
         | ControllerEvent::Reminder { .. }
         | ControllerEvent::ReminderWithdrawn { .. }
         | ControllerEvent::CallEndedWithdrawn
         | ControllerEvent::NotesProgress(_)
         | ControllerEvent::NotesFinished(_) => {}
+    }
+}
+
+/// The recorder state the tray, the menu bar, and `hex status` read. The
+/// window's own notices go through [`follow`].
+fn mirror(state: &mut MeetingMenuState, event: &ControllerEvent) {
+    match event {
+        ControllerEvent::Starting(_) => *state = MeetingMenuState::Starting,
+        ControllerEvent::RecordingStarted { id, title, .. } => {
+            *state = MeetingMenuState::Recording {
+                started: Instant::now(),
+                id: id.clone(),
+                title: title.clone(),
+                chapters: Vec::new(),
+                warning: None,
+                stopping: false,
+            };
+        }
+        ControllerEvent::SourceWarning { warning } => state.source_warning(*warning),
+        ControllerEvent::Retitled { title } => {
+            if let MeetingMenuState::Recording { title: shown, .. } = state {
+                shown.clone_from(title);
+            }
+        }
+        ControllerEvent::Chapters(chapters) => {
+            if let MeetingMenuState::Recording {
+                chapters: shown, ..
+            } = state
+            {
+                shown.clone_from(chapters);
+            }
+        }
+        // The recorder holds this recording until it finishes transcribing.
+        ControllerEvent::Stopping => {
+            if let MeetingMenuState::Recording { stopping, .. } = state {
+                *stopping = true;
+            }
+        }
+        ControllerEvent::Transcribing => *state = MeetingMenuState::Transcribing,
+        ControllerEvent::Finished(_)
+        | ControllerEvent::Discarded(_)
+        | ControllerEvent::Failed { .. } => *state = MeetingMenuState::Idle,
+        ControllerEvent::Offer(..)
+        | ControllerEvent::OfferWithdrawn(_)
+        | ControllerEvent::Reminder { .. }
+        | ControllerEvent::ReminderWithdrawn { .. }
+        | ControllerEvent::CallEnded { .. }
+        | ControllerEvent::CallEndedWithdrawn
+        | ControllerEvent::ImportFailed { .. }
+        | ControllerEvent::TranscriptEditFailed { .. }
+        | ControllerEvent::NotesProgress(_)
+        | ControllerEvent::NotesFinished(_) => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn recorded(stopping: bool) -> MeetingMenuState {
+        MeetingMenuState::Recording {
+            started: Instant::now(),
+            id: "1700000000000".into(),
+            title: "Design sync".into(),
+            chapters: Vec::new(),
+            warning: None,
+            stopping,
+        }
+    }
+
+    #[test]
+    fn a_stop_under_way_holds_the_recording_until_transcribing() {
+        let mut state = recorded(false);
+        mirror(&mut state, &ControllerEvent::Stopping);
+        assert!(matches!(
+            state,
+            MeetingMenuState::Recording { stopping: true, .. }
+        ));
+        // `hex meetings record` refuses rather than saying it already records:
+        // nothing new started, so the caller must not read exit 0 as success.
+        assert!(matches!(
+            crate::control::meetings::plan(&state, false, None),
+            Err(crate::control::ControlReply::Error { code, .. }) if code == "busy"
+        ));
+        // Stopping again is harmless and asks the recorder for nothing.
+        assert!(matches!(
+            crate::control::meetings::plan(&state, true, None),
+            Err(crate::control::ControlReply::Done { changed: false, .. })
+        ));
+        mirror(&mut state, &ControllerEvent::Transcribing);
+        assert_eq!(state, MeetingMenuState::Transcribing);
     }
 }

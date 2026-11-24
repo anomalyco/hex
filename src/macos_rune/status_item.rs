@@ -902,6 +902,25 @@ fn meeting_menu(state: &crate::meeting::watcher::MeetingMenuState, enabled: bool
             mute: None,
             sections: Vec::new(),
         },
+        // A stop already went to the recorder: Stop hides, Record stays
+        // disabled, and the elapsed time holds until the transcription row
+        // takes over (as the tray's Stopping item does).
+        MeetingMenuState::Recording {
+            started,
+            stopping: true,
+            ..
+        } => MeetingMenu {
+            status: Some(tr("Stopping…").into()),
+            button_title: format!(
+                " {}",
+                crate::meeting::format_duration(started.elapsed().as_millis() as u64)
+            ),
+            recording: true,
+            can_start: false,
+            can_stop: false,
+            mute: None,
+            sections: Vec::new(),
+        },
         MeetingMenuState::Recording {
             started,
             title,
@@ -1399,6 +1418,7 @@ mod tests {
             title: title.into(),
             chapters,
             warning,
+            stopping: false,
         };
         let recording = meeting_menu(
             &recording_state("Zoom call — 2:30 PM", Vec::new(), None),
@@ -1458,6 +1478,18 @@ mod tests {
             transcribing.status.as_deref(),
             Some("Transcribing meeting…")
         );
+        // A stop under way keeps the recording visible with no Record and no
+        // Stop until the transcription row takes over.
+        let stopping = meeting_menu(
+            &MeetingMenuState::Recording {
+                stopping: true,
+                ..recording_state("Team sync", Vec::new(), None)
+            },
+            true,
+        );
+        assert!(!stopping.can_start && !stopping.can_stop);
+        assert!(stopping.recording);
+        assert_eq!(stopping.status.as_deref(), Some("Stopping…"));
     }
 
     #[test]
@@ -1555,6 +1587,7 @@ mod tests {
             title: "Team sync".into(),
             chapters: Vec::new(),
             warning: None,
+            stopping: false,
         };
 
         i18n::apply(Some("en"));

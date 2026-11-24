@@ -1133,6 +1133,7 @@ impl Pump {
                     title,
                     chapters: Vec::new(),
                     warning: None,
+                    stopping: false,
                 };
             }
             ControllerEvent::SourceWarning { warning } => {
@@ -1158,7 +1159,11 @@ impl Pump {
                     tracing::info!(%app, "the call ended; the recording continues until Stop");
                 }
             }
-            ControllerEvent::Stopping => {}
+            ControllerEvent::Stopping => {
+                if let MeetingMenuState::Recording { stopping, .. } = &mut self.meeting_state {
+                    *stopping = true;
+                }
+            }
             ControllerEvent::Transcribing => self.meeting_state = MeetingMenuState::Transcribing,
             ControllerEvent::Finished(manifest) => {
                 tracing::info!(id = %manifest.id, "meeting transcript ready");

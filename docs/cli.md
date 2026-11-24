@@ -42,7 +42,8 @@ hex
 ├── transcribe <file> [--model <id>] [--language L]  print an audio or video file's transcript
 ├── meetings
 │   ├── record [--title T]         as the menu bar's Record Meeting; needs meetings.enabled
-│   ├── stop                       Stop & Transcribe
+│   │                              (busy while the last meeting stops or transcribes)
+│   ├── stop                       Stop & Transcribe; unchanged once it is stopping
 │   ├── copy-last                  copy the last meeting transcript to the clipboard
 │   ├── delete <id>                move a finished meeting's Markdown and recording to the Trash
 │   └── list | show | search       read-only (docs/transcript-cli.md)
@@ -325,8 +326,13 @@ folder while Labs › Install agent skill from Annotate is on.
 
 A CLI-started meeting is the same recording the menu bar starts: the menu-bar
 state, the recording capsule, and Stop & Transcribe all apply to it.
-`meetings record` replies once the recording has started (or after 8 s);
-`meetings stop` replies once transcription has begun.
+`meetings record` replies once the recording has started (or after 8 s), and
+`meetings stop` replies once transcription has begun (or after 8 s). A stop
+leaves the recorder finishing that meeting before it takes another: until
+then `meeting.state` reads `stopping` and `record` is refused with `busy`
+(exit 1) instead of answering "Already recording". Once `meeting.state` is
+`transcribing`, `record` is refused the same way, naming the transcription;
+only `idle` starts a new recording.
 
 `meetings delete <id>` is the Meetings pane's Delete, carried out by the
 running Hex on every OS: it moves the meeting's exported Markdown, any
@@ -484,7 +490,9 @@ listener.shortcuts  Wayland portal only: [{"name": "Dictation", "trigger": "Supe
                     granted (changed in its settings or not); trigger null when it refused one
 capture.state       idle | recording | transcribing | unknown (the listener didn't answer or stopped)
 capture.recording   dictation | service | null
-meeting.state       idle | starting | recording | transcribing
+meeting.state       idle | starting | recording | stopping | transcribing
+                    (stopping: stop was asked and the recorder is closing that
+                    meeting; a new recording can start once it reads idle)
 model               the saved selection; installed is about that model
 model.backend       {"kind", "device", "crash_fallback"} for the model actually loaded, or null before a
                     load and once it unloads; kind is cpu, vulkan, cuda, rocm, metal, or another backend's
@@ -528,9 +536,10 @@ not-installed          `model use` on a model that isn't downloaded (`hex model 
 feature-off            the command needs an opt-in that is off (Meetings)
 disabled               a Labs toggle the command needs is off (the message names it)
 not-ready              Hex is waiting for setup (permissions or the dictation model)
-meeting-active         quit/restart while a meeting records (pass --force)
-busy                   something is in progress (recording, transcribing, a full queue),
-                       or the listener couldn't confirm it's idle
+meeting-active         quit/restart while a meeting records, stops, or transcribes (pass --force)
+busy                   something is in progress (recording, a meeting stopping or
+                       transcribing, a full queue), or the listener couldn't confirm
+                       it's idle
 resource-exhausted     a running Hex refused a `hex transcribe` piece as too large or too long
 discarded              `stop` dropped the clip: no audio yet, or silent; nothing transcribes
 no-speech              `dictation start --print` or `stop --print` heard no speech, or `hex transcribe`'s file had none; nothing printed (exit 4)

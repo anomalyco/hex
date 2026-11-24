@@ -95,6 +95,9 @@ mod tray {
         Idle,
         Starting,
         Recording,
+        /// Stop was requested; the recorder finishes this meeting before it
+        /// takes another, so Record stays disabled.
+        Stopping,
         Transcribing,
     }
 
@@ -187,6 +190,9 @@ mod tray {
                     }
                     MeetingTray::Recording => {
                         TrayItem::action("meeting-stop", tr("Stop & transcribe"))
+                    }
+                    MeetingTray::Stopping => {
+                        TrayItem::action("meeting-stopping", tr("Stopping…")).enabled(false)
                     }
                     MeetingTray::Transcribing => {
                         TrayItem::action("meeting-transcribing", tr("Transcribing…")).enabled(false)
@@ -385,7 +391,11 @@ mod tests {
             meeting_id(MeetingTray::Idle),
             meeting_id(MeetingTray::Recording),
         ];
-        for disabled in [MeetingTray::Starting, MeetingTray::Transcribing] {
+        for disabled in [
+            MeetingTray::Starting,
+            MeetingTray::Stopping,
+            MeetingTray::Transcribing,
+        ] {
             assert!(!enabled.contains(&meeting_id(disabled)));
         }
         // Restart to update is dimmed under its own id while a meeting

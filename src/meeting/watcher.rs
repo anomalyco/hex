@@ -200,6 +200,10 @@ pub enum MeetingMenuState {
         /// The microphone is digitally silent, as a call app holding it with
         /// voice processing leaves it (#1518).
         warning: Option<TrackWarning>,
+        /// Stop was requested and the capture worker is still closing its
+        /// sources. The recorder holds this recording until it finishes
+        /// transcribing, so nothing new can start yet.
+        stopping: bool,
     },
     Transcribing,
 }
