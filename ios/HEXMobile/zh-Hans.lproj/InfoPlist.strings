@@ -3,3 +3,6 @@
 
 /* The speech recognition permission prompt. */
 "NSSpeechRecognitionUsageDescription" = "Hex 使用 Apple 的设备端语音识别将你说的话转换为文字。你说的任何内容都不会发送到服务器。";
+
+/* The kind of file Hex opens: a Hex words file (.hexwords). */
+"Hex words file" = "Hex 词语文件";

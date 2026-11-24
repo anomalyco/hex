@@ -240,6 +240,12 @@ struct DictationSettingsPage: View {
                         .padding(.horizontal, 16)
                         .padding(.top, 2)
                         .padding(.bottom, 14)
+
+                    SettingsDivider()
+
+                    WordReplacementsEditor()
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
                 }
             }
 

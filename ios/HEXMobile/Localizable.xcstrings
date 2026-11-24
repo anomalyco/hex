@@ -5220,6 +5220,742 @@
           }
         }
       }
+    },
+    "Your lists are back as they were" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的列表已恢复原样"
+          }
+        }
+      }
+    },
+    "Words from a file" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来自文件的词语"
+          }
+        }
+      }
+    },
+    "Undo" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "撤销"
+          }
+        }
+      }
+    },
+    "Turn on Custom vocabulary" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开自定义词汇"
+          }
+        }
+      }
+    },
+    "Words from this file go into Custom vocabulary and Word replacements" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此文件中的词语会加入“自定义词汇”和“词语替换”"
+          }
+        }
+      }
+    },
+    "Replacements" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "替换"
+          }
+        }
+      }
+    },
+    "Replaced differently here" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此处已有不同的替换"
+          }
+        }
+      }
+    },
+    "Not usable on this iPhone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法在此 iPhone 上使用"
+          }
+        }
+      }
+    },
+    "Skipped in the file" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件中被跳过的内容"
+          }
+        }
+      }
+    },
+    "Turn on Custom vocabulary to add these words" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开自定义词汇以添加这些词语"
+          }
+        }
+      }
+    },
+    "The file says it's from %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件显示它来自 %@"
+          }
+        }
+      }
+    },
+    "Made by a newer Hex. Parts this version doesn't know are left out." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "由较新版本的 Hex 创建。此版本无法识别的部分已略过。"
+          }
+        }
+      }
+    },
+    "and %lld more" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还有 %lld 个"
+          }
+        }
+      }
+    },
+    "Yours" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的"
+          }
+        }
+      }
+    },
+    "This file" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此文件"
+          }
+        }
+      }
+    },
+    "%lld new · %lld already there" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新增 %lld 个 · 已有 %lld 个"
+          }
+        }
+      }
+    },
+    "No new words in that file" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "该文件中没有新词语"
+          }
+        }
+      }
+    },
+    "%lld already there" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已有 %lld 个"
+          }
+        }
+      }
+    },
+    "kept yours for %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 处保留了你的"
+          }
+        }
+      }
+    },
+    "used this file's for %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 处采用了此文件的"
+          }
+        }
+      }
+    },
+    "This file is larger than 8 MB, so Hex didn't open it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此文件大于 8 MB，Hex 没有打开它。"
+          }
+        }
+      }
+    },
+    "Hex can't read this file because it isn't UTF-8 text." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此文件不是 UTF-8 文本，Hex 无法读取。"
+          }
+        }
+      }
+    },
+    "This file is empty." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此文件是空的。"
+          }
+        }
+      }
+    },
+    "Hex can't read this file because it's nested too deeply." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此文件嵌套过深，Hex 无法读取。"
+          }
+        }
+      }
+    },
+    "Hex can't read this file because a name in it appears twice." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此文件中有名称重复出现，Hex 无法读取。"
+          }
+        }
+      }
+    },
+    "Hex can't read this file because it isn't valid JSON." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此文件不是有效的 JSON，Hex 无法读取。"
+          }
+        }
+      }
+    },
+    "This isn't a Hex words file." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这不是 Hex 词语文件。"
+          }
+        }
+      }
+    },
+    "Hex can't read this file because its version is missing or wrong." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此文件的版本缺失或有误，Hex 无法读取。"
+          }
+        }
+      }
+    },
+    "Terms need two or more letters or digits here" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在这里，术语需要至少两个字母或数字"
+          }
+        }
+      }
+    },
+    "This iPhone can't delete words yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 iPhone 暂时还不能删除词语"
+          }
+        }
+      }
+    },
+    "Your list is full" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的列表已满"
+          }
+        }
+      }
+    },
+    "The file already replaces these words" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此文件已经替换了这些词语"
+          }
+        }
+      }
+    },
+    "A list in the wrong shape" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "格式错误的列表"
+          }
+        }
+      }
+    },
+    "Entries in the wrong shape" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "格式错误的条目"
+          }
+        }
+      }
+    },
+    "Fields in the wrong shape" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "格式错误的字段"
+          }
+        }
+      }
+    },
+    "Fields this version of Hex doesn't know" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此版本 Hex 无法识别的字段"
+          }
+        }
+      }
+    },
+    "Hidden characters" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "含有隐藏字符"
+          }
+        }
+      }
+    },
+    "No letters or digits" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有字母或数字"
+          }
+        }
+      }
+    },
+    "More than 8 words" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "超过 8 个词"
+          }
+        }
+      }
+    },
+    "Repeated in the file" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在文件中重复"
+          }
+        }
+      }
+    },
+    "A spelling the same as its term" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "与其术语相同的拼写"
+          }
+        }
+      }
+    },
+    "Past the file format's limits" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "超出文件格式的上限"
+          }
+        }
+      }
+    },
+    "Use this one" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用此项"
+          }
+        }
+      }
+    },
+    "Keep mine" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保留我的"
+          }
+        }
+      }
+    },
+    "Word replacements" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "词语替换"
+          }
+        }
+      }
+    },
+    "Write something else when Hex hears certain words" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 听到特定词语时改写成别的内容"
+          }
+        }
+      }
+    },
+    "When Hex hears" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 听到"
+          }
+        }
+      }
+    },
+    "Write" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写成"
+          }
+        }
+      }
+    },
+    "Export words" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出词语"
+          }
+        }
+      }
+    },
+    "Share them as a Hex words file" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以 Hex 词语文件分享"
+          }
+        }
+      }
+    },
+    "Undo last import" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "撤销上次导入"
+          }
+        }
+      }
+    },
+    "Puts both lists back as they were" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将两个列表恢复原样"
+          }
+        }
+      }
+    },
+    "Needs at least one letter or digit" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "至少需要一个字母或数字"
+          }
+        }
+      }
+    },
+    "Has a hidden character" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "含有隐藏字符"
+          }
+        }
+      }
+    },
+    "Up to 8 words" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最多 8 个词"
+          }
+        }
+      }
+    },
+    "Write something to replace it with" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请填写要替换成的内容"
+          }
+        }
+      }
+    },
+    "Up to 1,000 replacements" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最多 1,000 个替换"
+          }
+        }
+      }
+    },
+    "Include fixes Hex learned" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "包括 Hex 学到的修正"
+          }
+        }
+      }
+    },
+    "Only the ones in use" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅包括正在使用的"
+          }
+        }
+      }
+    },
+    "Left out" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未导出"
+          }
+        }
+      }
+    },
+    "Share" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分享"
+          }
+        }
+      }
+    },
+    "Repeats an earlier entry" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "与前面的条目重复"
+          }
+        }
+      }
+    },
+    "Added %lld terms and %lld replacements" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Added %#@terms@ and %#@replacements@"
+          },
+          "substitutions" : {
+            "terms" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg term"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg terms"
+                    }
+                  }
+                }
+              }
+            },
+            "replacements" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg replacement"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg replacements"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已添加 %lld 个术语和 %lld 个替换"
+          }
+        }
+      }
+    },
+    "%lld terms and %lld replacements" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@terms@ and %#@replacements@"
+          },
+          "substitutions" : {
+            "terms" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg term"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg terms"
+                    }
+                  }
+                }
+              }
+            },
+            "replacements" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg replacement"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg replacements"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个术语和 %lld 个替换"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

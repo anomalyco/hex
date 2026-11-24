@@ -255,3 +255,118 @@ final class CustomVocabularySettingsTests: XCTestCase {
         XCTAssertEqual(saved.last, "Term 97")
     }
 }
+
+
+final class WordReplacementsTests: XCTestCase {
+    private func withDefaults(_ body: (UserDefaults) throws -> Void) rethrows {
+        let suite = "WordReplacementsTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        try body(defaults)
+    }
+
+    @MainActor
+    func testReplacementsApplyBeforeLearnedFixesAndWinOverOneWithTheSameWords() async {
+        let pipeline = DictationPipeline(
+            style: .verbatim,
+            language: "en-US",
+            corrections: [
+                DictationCorrection(heard: "jet hub", meant: "JetHub"),
+                DictationCorrection(heard: "cloud code", meant: "Claude Code"),
+            ],
+            replacements: [
+                DictationCorrection(heard: "jet hub", meant: "GitHub"),
+                DictationCorrection(heard: "one two three four five six seven eight", meant: "eight words"),
+            ]
+        )
+        let stages = await pipeline.run("Push to jet hub with cloud code, one two three four five six seven eight.")
+        XCTAssertEqual(stages.fixed, "Push to GitHub with Claude Code, eight words.")
+    }
+
+    /// Never a translated dictation: the translator gets the words as heard, and a dictation
+    /// that goes in as spoken still gets its replacements.
+    @MainActor
+    func testReplacementsNeverTouchATranslatedDictation() async {
+        let translation = DictationTranslationSettings()
+        let wasEnabled = translation.isEnabled, wasTarget = translation.targetLanguage, wasFailure = translation.lastFailure
+        defer {
+            translation.isEnabled = wasEnabled
+            translation.targetLanguage = wasTarget
+            translation.lastFailure = wasFailure
+        }
+        translation.isEnabled = true
+        translation.targetLanguage = "en"
+        let stub = StubTranslator()
+        stub.replies = [.success("Push it to jet hub")]
+        var pipeline = DictationPipeline(
+            style: .verbatim,
+            language: "es-ES",
+            replacements: [DictationCorrection(heard: "jet hub", meant: "GitHub")]
+        )
+        pipeline.translationEngine = stub.engine
+        var stages = await pipeline.run("Súbelo a jet hub")
+        XCTAssertEqual(stub.inputs, ["Súbelo a jet hub"])
+        XCTAssertEqual(stages.formatted, "Push it to jet hub")
+
+        stub.status = .supported
+        stages = await pipeline.run("Súbelo a jet hub")
+        XCTAssertEqual(stages.formatted, "Súbelo a GitHub", "went in as spoken")
+    }
+
+    func testReplacementsApplyOnlyWhileCustomVocabularyIsOn() {
+        withDefaults { defaults in
+            let settings = WordReplacementsSettings(defaults: defaults)
+            settings.entries = [
+                WordReplacement(heard: "  jet   hub ", write: "GitHub"),
+                WordReplacement(heard: "Jet Hub", write: "Twice"),
+                WordReplacement(heard: "um", write: " "),
+            ]
+            XCTAssertEqual(settings.entries, [WordReplacement(heard: "jet hub", write: "GitHub")])
+            XCTAssertEqual(settings.activeCorrections, [])
+            CustomVocabularySettings(defaults: defaults).isEnabled = true
+            XCTAssertEqual(settings.activeCorrections, [DictationCorrection(heard: "jet hub", meant: "GitHub")])
+            XCTAssertEqual(WordReplacementsSettings.problem(heard: "JET HUB", write: "x", existing: settings.entries), .duplicate)
+            XCTAssertEqual(WordReplacementsSettings.problem(heard: "um", write: "  ", existing: []), .emptyWrite)
+            XCTAssertEqual(WordReplacementsSettings.problem(heard: "a b c d e f g h i", write: "x", existing: []), .tooManyWords)
+        }
+    }
+
+    func testAnImportThatTurnsCustomVocabularyOnIsUndoneWithItsSwitch() {
+        withDefaults { defaults in
+            let store = HexWordsImport(defaults: defaults)
+            let file = HexWordsFile(
+                vocabulary: [HexWordsTerm(term: "OpenCode", soundsLike: ["open code"])],
+                replacements: [HexWordsReplacement(heard: "jet hub", write: "GitHub")]
+            )
+            store.add(file, turnOnCustomVocabulary: true)
+            XCTAssertTrue(CustomVocabularySettings(defaults: defaults).isEnabled)
+            XCTAssertEqual(store.lists.vocabulary, ["OpenCode"])
+            XCTAssertNotNil(store.availableUndo)
+            XCTAssertTrue(store.undo())
+            XCTAssertFalse(CustomVocabularySettings(defaults: defaults).isEnabled)
+            XCTAssertEqual(store.lists, HexWordsLists())
+            XCTAssertNil(store.availableUndo)
+        }
+    }
+
+    func testEditingEitherListEndsUndo() {
+        withDefaults { defaults in
+            let store = HexWordsImport(defaults: defaults)
+            store.add(HexWordsFile(vocabulary: [HexWordsTerm(term: "Rune")]))
+            XCTAssertNotNil(store.availableUndo)
+            WordReplacementsSettings(defaults: defaults).entries = [WordReplacement(heard: "jet hub", write: "GitHub")]
+            XCTAssertNil(store.availableUndo)
+            XCTAssertFalse(store.undo())
+            XCTAssertEqual(store.lists.vocabulary, ["Rune"])
+        }
+    }
+
+    /// Keys that differ only in normalization are two keys to JSON; bridging them into one Swift
+    /// dictionary would trap, so the reader never does.
+    func testKeysThatDifferOnlyInNormalizationAreTwoUnknownFields() {
+        let text = "{\"format\": \"hex.words\", \"version\": 1, \"\u{E9}\": 1, \"e\u{301}\": 2}"
+        guard case .read(let file) = HexWordsReader.read(Data(text.utf8)) else { return XCTFail("refused") }
+        XCTAssertEqual(file.skipped.count, 2)
+        XCTAssertTrue(file.skipped.allSatisfy { $0.reason == .unknownField })
+    }
+}

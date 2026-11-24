@@ -551,6 +551,56 @@ in-keyboard dictation (through build 130 the keyboard sent only Learn how I
 type's words: #2103 added the list's rewrite there but not its hint);
 Parakeet's batch path gets no hint.
 
+## Word replacements and Hex words files (Settings › Dictation › Custom vocabulary)
+
+Both live behind Custom vocabulary's switch: off, nothing here shows or applies.
+
+**Word replacements** (`WordReplacementsSettings`, App Group key `wordReplacements.entries`)
+is a list of up to 1,000 heard words → what to write, under the vocabulary list. Each entry
+keeps the words file's limits (heard: letters or digits, at most 128 characters and 8
+words; write: at most 1,000 characters), and an empty or blank output isn't allowed on the
+iPhone yet. They apply wherever Hex dictates (`DictationPipeline`, so the app and in-keyboard
+dictation alike) right before the learned dictation fixes, with `DictationCorrections.apply`'s
+whole-word, case-following matching, allowing up to 8 words. A replacement wins over a learned
+fix with the same heard words; learned fixes themselves never change. They never touch a
+translated dictation: while Translate what I say would translate one they wait, and apply
+only if it goes in as spoken (a failed or skipped translation).
+
+**Hex words files** (`.hexwords`, `docs/specs/hex-words.md`, code in `HEXShared/HexWords/`)
+carry vocabulary and replacements between every Hex. Hex declares `anomaly.hex.words`
+(conforming to `public.json`, extension `hexwords`, MIME type
+`application/vnd.anomaly.hex-words+json`) and owns it as a document type that is copied in
+(`LSSupportsOpeningDocumentsInPlace` NO), so AirDrop, Files and Open in Hex all arrive in
+`onOpenURL` as a copy in `Documents/Inbox`. `HexInbox` copies it to a private temporary
+folder under a name Hex picks, reads it there (the spec's check pass, then
+`JSONSerialization`), shows the review sheet over whatever is on screen and deletes both copies
+when the sheet closes: after Add, Cancel or a refusal (a launch also clears copies a sheet
+never got to delete; Inbox copies only once an hour old). It logs counts and reasons only. A
+refused file shows one sentence. Otherwise the sheet (`HexWordsReviewSheet`) lists what it
+adds, what's already there, each clash (Keep mine by default, or Use this one), what can't be
+used on this iPhone grouped by reason (a term with fewer than two letters or digits, a
+deletion, a full list, a spelling the file already replaces), what the file skipped, and a
+switch for Vocabulary and Replacements. Every string from the file is shown verbatim
+(`Text(verbatim:)`), each in its own direction-isolated run, and cut at 64 characters. While
+Custom vocabulary is off the sheet offers to turn it on, and Add waits for that. Add merges
+by the spec's phone column (`HexWordsMerge`): new terms are added without spellings, each
+spelling becomes a replacement to its term after the file's own replacements, `learned` is
+dropped, nothing is removed. The confirmation says what happened in one line with Undo.
+
+**Undo** (`HexWordsImport`, App Group key `hexWords.undo`) keeps both lists from before the
+import and whether the sheet turned Custom vocabulary on. It is offered after Add and as
+**Undo last import** under Word replacements while both lists are still exactly as the import
+left them, so editing either list (here, on Keyboard › Vocabulary, or the keyboard's Add to
+vocabulary) or importing again ends it. It survives a restart and never holds the file.
+
+**Export words** opens a small sheet: **Include fixes Hex learned** (off by default), what
+goes in and what's left out and why, then the share sheet with `hex-words.hexwords`
+(`HexWordsWriter`), written atomically to a temporary folder that is deleted once sharing
+ends. It writes Custom vocabulary's terms, Word replacements and, with the switch on, the
+learned dictation fixes in use (applied and not switched off in Typing insights) marked
+`learned`; a learned fix for words a replacement already covers is left out.
+`HexWordsSharedCasesTests` runs the spec's shared cases from `tests/fixtures/hex-words/`.
+
 ## Dictation language (Settings › Dictation › Dictation language, iOS 26+)
 
 Automatic by
