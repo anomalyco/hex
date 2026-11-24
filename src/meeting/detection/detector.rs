@@ -11,20 +11,13 @@ use super::{
 static NEXT_OFFER_SEQ: AtomicU64 = AtomicU64::new(1);
 
 /// Opaque identity of one Ask offer presentation. A monotonic sequence ensures
-/// two offers minted within the same `Instant` remain distinct.
+/// two offers remain distinct.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct OfferId {
-    seq: u64,
-    #[allow(dead_code)]
-    at: Instant,
-}
+pub struct OfferId(u64);
 
 impl OfferId {
-    pub fn at(now: Instant) -> Self {
-        Self {
-            seq: NEXT_OFFER_SEQ.fetch_add(1, Ordering::Relaxed),
-            at: now,
-        }
+    pub fn next() -> Self {
+        Self(NEXT_OFFER_SEQ.fetch_add(1, Ordering::Relaxed))
     }
 }
 
@@ -484,7 +477,7 @@ impl MeetingDetector {
             if let Snooze::Kept(call) = std::mem::take(&mut self.snooze) {
                 self.snooze = Snooze::Offered {
                     call,
-                    id: OfferId::at(now),
+                    id: OfferId::next(),
                 };
             }
             Detection::Offer(candidate)

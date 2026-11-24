@@ -1028,7 +1028,6 @@ impl MeetingCapsules {
         // The saved corner, and a finished meeting its recording's corner.
         let corner = panel::show_corner(
             &kind,
-            true,
             self.pill.lock().last_anchor.as_ref(),
             crate::app_settings::meeting_indicator_corner,
         );
@@ -1437,7 +1436,7 @@ fn reminder(
     (p.accent(), meeting.display_title(), subtitle, actions)
 }
 
-/// The panel capsule (reminder, offer, call ended): status dot, two
+/// The panel capsule (reminder, auto-started): status dot, two
 /// truncated lines, and its actions, in a rounded rectangle. It drags to
 /// another corner like the recording capsule.
 fn pill(
@@ -1566,7 +1565,7 @@ mod tests {
     }
 
     fn offer(candidate: MeetingCandidate) -> Kind {
-        Kind::Offer(OfferId::at(Instant::now()), candidate)
+        Kind::Offer(OfferId::next(), candidate)
     }
 
     fn bare_browser() -> MeetingCandidate {
@@ -2327,10 +2326,10 @@ mod tests {
         use MeetingIndicatorCorner::{BottomLeft, TopRight};
         let anchor = ("ready-snap".to_owned(), BottomLeft);
         let kind = ready_summarized();
-        let corner = panel::show_corner(&kind, false, Some(&anchor), || TopRight);
+        let corner = panel::show_corner(&kind, Some(&anchor), || TopRight);
         assert_eq!(corner, BottomLeft);
         assert_eq!(
-            panel::show_corner(&call_ended(), false, Some(&anchor), || BottomLeft),
+            panel::show_corner(&call_ended(), Some(&anchor), || TopRight),
             TopRight
         );
         let (mut live, _, _) = runtime(live_recording("ready-snap"), false, false, RECORDING);
@@ -2591,7 +2590,7 @@ mod tests {
             start,
         );
         model.apply(
-            &ControllerEvent::Offer(OfferId::at(start), slack_huddle()),
+            &ControllerEvent::Offer(OfferId::next(), slack_huddle()),
             start,
         );
         assert!(model.pill(true).is_some());

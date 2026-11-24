@@ -337,7 +337,7 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
             if top_corner { 0.0 } else { h - height },
         )
     };
-    let (_, title, sub, actions) = offer::actions(p, id, candidate, rules);
+    let (title, sub, actions) = offer::actions(p, id, candidate, rules);
     let lines = col()
         .w(a.lines[i])
         .items_start()

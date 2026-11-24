@@ -97,9 +97,7 @@ enum State {
     ToolbarLoading {
         id: u64,
     },
-    ToolbarShown {
-        id: u64,
-    },
+    ToolbarShown,
 }
 
 /// The single owner of whether the picker or recording toolbar is open.
@@ -123,7 +121,7 @@ impl Front {
             State::PickerAsking { .. } => Open::PickerAsking,
             State::PickerReady { .. } => Open::Picker,
             State::ToolbarLoading { .. } => Open::ToolbarLoading,
-            State::ToolbarShown { .. } => {
+            State::ToolbarShown => {
                 if menu_open() {
                     Open::ToolbarMenu
                 } else {
@@ -221,7 +219,7 @@ impl Front {
     /// `false` if this open was cancelled while loading.
     pub(super) fn toolbar_show(&mut self, id: u64) -> bool {
         if matches!(self.state, State::ToolbarLoading { id: current } if current == id) {
-            self.state = State::ToolbarShown { id };
+            self.state = State::ToolbarShown;
             true
         } else {
             false
@@ -231,7 +229,7 @@ impl Front {
     /// True only once the toolbar has passed permission, been populated, and
     /// is shown on screen.
     pub(super) fn toolbar_shown(&self) -> bool {
-        matches!(self.state, State::ToolbarShown { .. })
+        matches!(self.state, State::ToolbarShown)
     }
 
     pub(super) fn close_toolbar(&mut self) -> ToolbarClose {
@@ -240,7 +238,7 @@ impl Front {
                 self.state = State::Closed;
                 ToolbarClose::CancelledLoading
             }
-            State::ToolbarShown { .. } => {
+            State::ToolbarShown => {
                 self.state = State::Closed;
                 ToolbarClose::ClosedShown
             }

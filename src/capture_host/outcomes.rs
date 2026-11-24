@@ -171,8 +171,8 @@ pub struct CaptureWatch {
 impl CaptureWatch {
     /// The snapshot if it changed since the last call (the first call always
     /// returns it), without blocking.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the capsule waits instead"))]
-    pub fn changed(&self) -> Option<CaptureSnapshot> {
+    #[cfg(test)]
+    pub(super) fn changed(&self) -> Option<CaptureSnapshot> {
         let mut woke = false;
         while self.woken.try_recv().is_ok() {
             woke = true;
@@ -194,7 +194,6 @@ pub(super) struct Outcomes {
     /// Every capture from its start until its outcome is settled: starting,
     /// recording, waiting to be written, writing, or cancelling. Each is
     /// settled exactly once, by its collector or by the finisher.
-    #[cfg_attr(test, allow(dead_code))]
     pub(super) unfinished: Vec<Unfinished>,
     pub(super) last: Option<SettledCapture>,
     phone: Option<String>,
@@ -273,11 +272,6 @@ impl Outcomes {
             })
             .map(|unfinished| unfinished.bundle.clone())
             .collect()
-    }
-
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    pub(super) fn started(&mut self, bundle: PathBuf, since: CaptureInstant, target: TargetKind) {
-        self.start(bundle, since, target, false);
     }
 
     pub(super) fn start(

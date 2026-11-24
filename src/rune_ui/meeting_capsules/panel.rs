@@ -251,7 +251,6 @@ fn replace(c: &Capsule) -> Transition {
 /// The finished meeting stays where its pill was; other panels take the saved corner.
 pub(super) fn show_corner(
     kind: &Kind,
-    movable: bool,
     last: Option<&(String, MeetingIndicatorCorner)>,
     saved: impl FnOnce() -> MeetingIndicatorCorner,
 ) -> MeetingIndicatorCorner {
@@ -261,11 +260,7 @@ pub(super) fn show_corner(
             .map(|(_, corner)| *corner)
             .unwrap_or_else(saved);
     }
-    if movable {
-        saved()
-    } else {
-        MeetingIndicatorCorner::TopRight
-    }
+    saved()
 }
 
 /// Places a capsule's body in its window's corner.

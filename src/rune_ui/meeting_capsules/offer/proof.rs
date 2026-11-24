@@ -393,8 +393,8 @@ fn a_record_click_keeps_its_corner_until_the_worker_is_live() {
 #[test]
 fn pending_offers_never_mask_a_failure_or_adopt_another_start() {
     use offer::{Host, Route};
-    let id = OfferId::at(Instant::now());
-    let other = OfferId::at(Instant::now() + Duration::from_secs(1));
+    let id = OfferId::next();
+    let other = OfferId::next();
     let failed = ControllerEvent::Failed {
         title: "Fixture".into(),
         error: "Permission denied".into(),

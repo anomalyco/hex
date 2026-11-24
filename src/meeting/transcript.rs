@@ -1890,10 +1890,6 @@ impl LocalTime {
     }
 }
 
-pub(super) fn render_markdown(manifest: &MeetingManifest, entries: &[TranscriptEntry]) -> String {
-    super::markdown::render_document(manifest, entries)
-}
-
 /// Writes the user-facing Markdown copy without replacing an existing file.
 /// `separate_notes` is Separate notes file: the transcript becomes
 /// `<stem>.transcript.md` and its stem stays free for the notes file.
@@ -1912,7 +1908,7 @@ pub(super) fn export_markdown(
         .ok_or_else(|| eyre!("{} has no name", path.display()))?;
     let temporary = folder.join(format!(".{}.tmp", name.to_string_lossy()));
     let mut file = File::create(&temporary)?;
-    file.write_all(render_markdown(manifest, entries).as_bytes())?;
+    file.write_all(super::markdown::render_document(manifest, entries).as_bytes())?;
     file.sync_all()?;
     fs::rename(&temporary, &path)?;
     sync_directory(folder)?;
@@ -3369,7 +3365,7 @@ mod tests {
     fn imported_meetings_label_their_one_track_speaker() {
         let mut manifest = manifest();
         manifest.imported = true;
-        let markdown = render_markdown(
+        let markdown = super::super::markdown::render_document(
             &manifest,
             &[entry(MeetingSource::System, 1_000, 2_000, "Hi.")],
         );
@@ -3382,7 +3378,7 @@ mod tests {
 
     #[test]
     fn markdown_lists_metadata_and_labeled_turns() {
-        let markdown = render_markdown(
+        let markdown = super::super::markdown::render_document(
             &manifest(),
             &[
                 entry(MeetingSource::Microphone, 1_000, 2_000, "Hi."),
@@ -3405,7 +3401,7 @@ mod tests {
             title: "Q4 launch sync".into(),
             attendees: vec!["Ana Ruiz".into(), "Ben Ito".into()],
         });
-        let markdown = render_markdown(&manifest, &[]);
+        let markdown = super::super::markdown::render_document(&manifest, &[]);
         assert!(markdown.contains("- **App:** Zoom\n- **Attendees:** Ana Ruiz, Ben Ito\n"));
         assert!(!markdown.contains("**Calendar:**"));
     }

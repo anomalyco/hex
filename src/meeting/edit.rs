@@ -425,7 +425,7 @@ mod tests {
         let entries = lines(&directory);
         fs::write(
             &export,
-            super::super::transcript::render_markdown(&manifest, &entries),
+            super::super::markdown::render_document(&manifest, &entries),
         )
         .unwrap();
         manifest.export_path = Some(export.clone());

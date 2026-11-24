@@ -1135,10 +1135,6 @@ struct TabProbe {
     /// The browser this watch began for, and when: its first 30 s ask every
     /// second, then every 30 s.
     burst: Option<(String, Instant)>,
-    /// A recording watches this page (Stop when the call ends): ask
-    /// every [`TAB_QUERY_WATCH`], however long the browser has held the
-    /// microphone.
-    watching: bool,
     latest: Option<(String, ContextSnapshot, Instant)>,
 }
 
@@ -1150,13 +1146,14 @@ impl TabProbe {
             generation: 0,
             started: None,
             burst: None,
-            watching: false,
             latest: None,
         }
     }
 
-    /// The browser's newest answered page, or nothing yet.
-    fn page(&mut self, bundle_id: &str, now: Instant) -> ContextSnapshot {
+    /// The browser's newest answered page, or nothing yet. When `watching` is
+    /// true (a recording watches its page for another call under Stop when the
+    /// call ends), queries run every [`TAB_QUERY_WATCH`] instead of backing off.
+    fn page(&mut self, bundle_id: &str, now: Instant, watching: bool) -> ContextSnapshot {
         let received = self
             .running
             .as_ref()
@@ -1173,7 +1170,7 @@ impl TabProbe {
             Some((_, Err(mpsc::TryRecvError::Disconnected))) => self.running = None,
             Some((_, Err(mpsc::TryRecvError::Empty))) | None => {}
         }
-        let interval = self.interval(bundle_id, now);
+        let interval = self.interval(bundle_id, now, watching);
         if self.running.is_none()
             && self
                 .started
@@ -1226,8 +1223,8 @@ impl TabProbe {
     /// How far apart this browser's tab queries are: every two seconds while
     /// a recording watches its page for another call, else one second through
     /// the first 30 s it holds the microphone, then every 30 s.
-    fn interval(&mut self, bundle_id: &str, now: Instant) -> Duration {
-        if self.watching {
+    fn interval(&mut self, bundle_id: &str, now: Instant, watching: bool) -> Duration {
+        if watching {
             return TAB_QUERY_WATCH;
         }
         let bursting = match &self.burst {
@@ -1289,7 +1286,7 @@ impl BrowserWatch {
             return ContextSnapshot::default();
         }
         let now = Instant::now();
-        let page = self.probe.page(bundle_id, now);
+        let page = self.probe.page(bundle_id, now, false);
         self.memory.recall(application, page, now)
     }
 
@@ -1305,10 +1302,7 @@ impl BrowserWatch {
         let Some(bundle_id) = application.canonical_bundle_id() else {
             return ContextSnapshot::default();
         };
-        self.probe.watching = true;
-        let page = self.probe.page(bundle_id, Instant::now());
-        self.probe.watching = false;
-        page
+        self.probe.page(bundle_id, Instant::now(), true)
     }
 }
 
@@ -2048,13 +2042,13 @@ mod tests {
         let mut probe = TabProbe::new(slow);
         let started = Instant::now();
         assert_eq!(
-            probe.page("com.brave.Browser", started),
+            probe.page("com.brave.Browser", started, false),
             ContextSnapshot::default()
         );
         assert!(started.elapsed() < Duration::from_millis(200));
         // The answer is picked up on a later pass.
         let deadline = Instant::now() + Duration::from_secs(10);
-        while probe.page("com.brave.Browser", Instant::now()) == ContextSnapshot::default() {
+        while probe.page("com.brave.Browser", Instant::now(), false) == ContextSnapshot::default() {
             assert!(Instant::now() < deadline, "the tab query never answered");
             thread::sleep(Duration::from_millis(20));
         }
@@ -2104,16 +2098,16 @@ mod tests {
             Ok(banshee_tab())
         }
         let mut probe = TabProbe::new(slow);
-        probe.page("com.brave.Browser", Instant::now());
+        probe.page("com.brave.Browser", Instant::now(), false);
         probe.reset();
         // The first query is still running: no second one starts beside it.
         thread::sleep(Duration::from_millis(100));
-        probe.page("com.brave.Browser", Instant::now());
+        probe.page("com.brave.Browser", Instant::now(), false);
         assert_eq!(QUERIES.load(Ordering::SeqCst), 1);
         // Once it finishes, its answer belongs to the earlier call.
         thread::sleep(Duration::from_millis(500));
         assert_eq!(
-            probe.page("com.brave.Browser", Instant::now()),
+            probe.page("com.brave.Browser", Instant::now(), false),
             ContextSnapshot::default()
         );
         assert!(probe.latest.is_none());
@@ -2126,12 +2120,12 @@ mod tests {
         }
         let mut probe = TabProbe::new(quick);
         let started = Instant::now();
-        probe.page("com.brave.Browser", started);
+        probe.page("com.brave.Browser", started, false);
         thread::sleep(Duration::from_millis(300));
         // Polled well after the query finished: the answer is already old.
         let polled = started + TAB_QUERY_MAX_AGE + Duration::from_secs(1);
         assert_eq!(
-            probe.page("com.brave.Browser", polled),
+            probe.page("com.brave.Browser", polled, false),
             ContextSnapshot::default()
         );
     }
@@ -2151,7 +2145,7 @@ mod tests {
             let deadline = Instant::now() + Duration::from_secs(5);
             while QUERIES.load(Ordering::SeqCst) < expected || probe.running.is_some() {
                 assert!(Instant::now() < deadline, "the tab query never finished");
-                probe.page("com.brave.Browser", at);
+                probe.page("com.brave.Browser", at, false);
                 thread::sleep(Duration::from_millis(2));
             }
             assert_eq!(QUERIES.load(Ordering::SeqCst), expected);
@@ -2160,34 +2154,38 @@ mod tests {
         let started = Instant::now();
         // The first 30 s ask every second; `started` records the query
         // synchronously, so a backed-off call is proven by it not moving.
-        probe.page("com.brave.Browser", started);
+        probe.page("com.brave.Browser", started, false);
         assert_eq!(probe.started, Some(started));
         settle(&mut probe, started, 1);
         let at_1 = started + Duration::from_secs(1);
-        probe.page("com.brave.Browser", at_1);
+        probe.page("com.brave.Browser", at_1, false);
         assert_eq!(probe.started, Some(at_1));
         settle(&mut probe, at_1, 2);
 
         // From then on they are 30 s apart; an answer waits that long.
         let at_29 = started + Duration::from_secs(29);
-        probe.page("com.brave.Browser", at_29);
+        probe.page("com.brave.Browser", at_29, false);
         assert_eq!(probe.started, Some(at_29));
         settle(&mut probe, at_29, 3);
-        probe.page("com.brave.Browser", started + Duration::from_secs(31));
+        probe.page(
+            "com.brave.Browser",
+            started + Duration::from_secs(31),
+            false,
+        );
         assert_eq!(
             probe.started,
             Some(at_29),
             "a backed-off query started early"
         );
         let at_59 = started + Duration::from_secs(59);
-        probe.page("com.brave.Browser", at_59);
+        probe.page("com.brave.Browser", at_59, false);
         assert_eq!(probe.started, Some(at_59));
         settle(&mut probe, at_59, 4);
 
         // A reset starts a fresh burst at once.
         probe.reset();
         let at_61 = started + Duration::from_secs(61);
-        probe.page("com.brave.Browser", at_61);
+        probe.page("com.brave.Browser", at_61, false);
         assert_eq!(probe.started, Some(at_61));
         settle(&mut probe, at_61, 5);
     }
@@ -2201,28 +2199,38 @@ mod tests {
         let started = Instant::now();
         // A recording watches its page: two seconds, however long the browser
         // has held the microphone.
-        probe.watching = true;
         assert_eq!(
-            probe.interval("com.brave.Browser", started),
+            probe.interval("com.brave.Browser", started, true),
             TAB_QUERY_WATCH
         );
         assert_eq!(
-            probe.interval("com.brave.Browser", started + Duration::from_secs(31)),
+            probe.interval("com.brave.Browser", started + Duration::from_secs(31), true),
             TAB_QUERY_WATCH
         );
         assert_eq!(
-            probe.interval("com.brave.Browser", started + Duration::from_secs(120)),
+            probe.interval(
+                "com.brave.Browser",
+                started + Duration::from_secs(120),
+                true
+            ),
             TAB_QUERY_WATCH
         );
         // Once nothing watches, detection resumes with a fresh burst, then
         // backs off as before.
-        probe.watching = false;
         assert_eq!(
-            probe.interval("com.brave.Browser", started + Duration::from_secs(120)),
+            probe.interval(
+                "com.brave.Browser",
+                started + Duration::from_secs(120),
+                false
+            ),
             TAB_QUERY_INTERVAL
         );
         assert_eq!(
-            probe.interval("com.brave.Browser", started + Duration::from_secs(150)),
+            probe.interval(
+                "com.brave.Browser",
+                started + Duration::from_secs(150),
+                false
+            ),
             TAB_QUERY_BACKOFF
         );
     }

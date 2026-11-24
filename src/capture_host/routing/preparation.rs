@@ -93,10 +93,6 @@ fn rule_live(router: &Router, loaded: &ScrawlBundle, live: &look::Live) -> look:
     }
 }
 
-fn evidence(loaded: &ScrawlBundle, bundle: &Path, live: look::Live) -> smart::Evidence {
-    look::evidence_for(loaded, bundle, live)
-}
-
 impl Worker {
     pub(super) fn written(&mut self, bundle: PathBuf, look: Look) {
         let started = Instant::now();
@@ -223,7 +219,7 @@ impl Worker {
                             sessions_error: live.error.clone(),
                         }
                     } else {
-                        evidence(&loaded, &bundle, live.clone())
+                        look::evidence_for(&loaded, &bundle, live.clone())
                     };
                     let policy = if look.router.config().smart_routing {
                         smart::Policy::Weigh
