@@ -14,6 +14,8 @@ import Foundation
 /// (є after ж, ї on a held і, ґ on a held г, ʼ on the 123 page), never ы, э, ъ or ё; Serbian (Latin) is Apple's QWERTZ option for it, which on iPhone has no keys of
 /// its own for č ć đ š ž: they are held on c, d, s and z, as on Apple's. Polish types on the
 /// English letters (the standard Polish layout is QWERTY) with ą ć ę ł ń ó ś ź ż on held keys.
+/// Swedish is Apple's "QWERTY-Swedish-Finnish", Norwegian's rows with ö ä for ø æ (å ending row
+/// 1, ö ä row 2), and Apple's Swedish long-press options.
 /// Romanian is QWERTY too, its own ă â î ș ț held on a, i, s and t (the comma-below ș and ț, not
 /// the cedilla ş ţ), as on Apple's iPhone keyboard; Apple's Romanian layout with keys of its own
 /// for them is the iPad's. Greek matches the standard Greek layout and the system keyboard's
@@ -32,6 +34,7 @@ import Foundation
 nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     case english = "en"
     case norwegian = "nb"
+    case swedish = "sv"
     case spanish = "es"
     case german = "de"
     case italian = "it"
@@ -55,6 +58,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         switch self {
         case .english: "English"
         case .norwegian: "Norsk"
+        case .swedish: "Svenska"
         case .spanish: "Español"
         case .german: "Deutsch"
         case .italian: "Italiano"
@@ -97,6 +101,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         switch self {
         case .english: "en-US"
         case .norwegian: "nb-NO"
+        case .swedish: "sv-SE"
         case .spanish: "es-ES"
         case .german: "de-DE"
         case .italian: "it-IT"
@@ -234,7 +239,8 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         // Apple lists QWERTY first for Serbian (Latin) and adds it as QWERTY; Hex keeps the
         // QWERTZ it always typed on as the default.
         case .serbianLatin: [.qwertz, .qwerty, .azerty]
-        case .norwegian, .russian, .ukrainian, .greek, .korean: [.own]
+        // Apple's one Swedish layout, "QWERTY-Swedish-Finnish" (InputMode_sv, iOS 27.2 runtime).
+        case .norwegian, .swedish, .russian, .ukrainian, .greek, .korean: [.own]
         }
     }
 
@@ -259,7 +265,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .own:
             switch self {
             case .german, .czech, .hungarian: "QWERTZ – \(displayName)"
-            case .spanish, .norwegian: "QWERTY – \(displayName)"
+            case .spanish, .norwegian, .swedish: "QWERTY – \(displayName)"
             default: displayName
             }
         }
@@ -279,6 +285,9 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .frenchCanadian: ["qwertyuiop", "asdfghjkl" + FrenchTyping.key, "zxcvbnm"]
         case .frenchSwiss: ["qwertzuiop", "asdfghjkl" + FrenchTyping.key, "yxcvbnm"]
         case .norwegian: ["qwertyuiopå", "asdfghjkløæ", "zxcvbnm"]
+        // Apple's "QWERTY-Swedish-Finnish" (iOS 26.5 and 27.2 simulators): Norwegian's rows with ö
+        // and ä where ø and æ are.
+        case .swedish: ["qwertyuiopå", "asdfghjklöä", "zxcvbnm"]
         case .spanish: ["qwertyuiop", "asdfghjklñ", "zxcvbnm"]
         case .german: ["qwertzuiopü", "asdfghjklöä", "yxcvbnm"]
         case .russian: ["йцукенгшщзх", "фывапролджэ", "ячсмитьбю"]
@@ -356,6 +365,29 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
                 "æ": ["æ", "ä"],
                 "z": ["z", "ž", "ʒ", "ǯ"],
                 "c": ["c", "č", "ç", "ĉ"],
+                "n": ["n", "ñ", "ň", "ṋ", "ṉ", "ŋ"],
+            ]
+        case .swedish:
+            // Apple's Swedish options (iOS 27.2 simulator), read away from the base where it ends
+            // the callout, left to right where it sits inside it (`AccentCatalog`'s swedishOrder
+            // is the callout itself). Ö holds Ø and Ä holds Æ; å, ö and ä have keys of their own.
+            [
+                "e": ["e", "ê", "ë", "é", "è", "ē", "ẽ", "ė", "ę", "ǝ", "ẹ"],
+                "t": ["t", "ŧ", "ț", "ṱ", "ṯ", "þ"],
+                "y": ["y", "ẏ", "ȳ", "ŷ", "ý", "ÿ", "ỳ", "ỹ", "ẙ", "ɏ"],
+                "u": ["u", "ụ", "ū", "û", "ú", "ü", "ù", "ũ", "ů"],
+                "i": ["i", "ï", "í", "ì", "î", "ĩ", "ī", "ị"],
+                "o": ["o", "ő", "ọ", "ȯ", "ø", "ō", "ô", "ó", "œ", "ò", "õ"],
+                "a": ["a", "á", "à", "â", "ã", "ā", "ạ", "æ"],
+                "s": ["s", "ß", "ś", "š", "ŝ", "ṣ", "ș"],
+                "d": ["d", "đ", "ð", "ḓ", "ď"],
+                "g": ["g", "ǥ", "ǧ", "ģ"],
+                "k": ["k", "ǩ", "ḵ", "ķ"],
+                "l": ["l", "ł"],
+                "ö": ["ö", "ø"],
+                "ä": ["ä", "æ"],
+                "z": ["z", "ž", "ʒ", "ǯ"],
+                "c": ["c", "ç", "č", "ĉ"],
                 "n": ["n", "ñ", "ň", "ṋ", "ṉ", "ŋ"],
             ]
         case .spanish:
@@ -606,6 +638,12 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
                 "\"": ["\"", "«", "»", "“", "”", "„"],
                 "•": ["•", "°"],
             ]
+        // Apple's Swedish 123 page (iOS 26.5 and 27.2 simulators) holds kr second on $; its other
+        // held symbols are English's.
+        case .swedish:
+            [
+                "$": ["$", "kr", "¢", "€", "£", "¥", "₩", "₽"],
+            ]
         case .spanish, .italian:
             [
                 "1": ["1", "1º", "1ª"],
@@ -684,6 +722,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         switch self {
         case .english: ["en_US", "en"]
         case .norwegian: ["nb", "nb_NO", "no", "no_NO"]
+        case .swedish: ["sv", "sv_SE"]
         case .spanish: ["es", "es_ES", "es_MX"]
         case .german: ["de", "de_DE"]
         case .italian: ["it", "it_IT"]
@@ -745,7 +784,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
              "ti", "se", "ne", "no", "io", "tu", "su", "al"]
         case .hungarian:
             ["az", "és", "is", "de", "ha", "ez", "el", "ki", "be", "rá", "én", "te", "mi", "ne", "se"]
-        case .norwegian, .german, .french, .frenchCanadian, .frenchSwiss, .portuguese, .polish,
+        case .norwegian, .swedish, .german, .french, .frenchCanadian, .frenchSwiss, .portuguese, .polish,
              .czech, .dutch, .romanian, .russian, .ukrainian, .greek, .serbianLatin, .korean:
             []
         }
@@ -774,7 +813,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
                 "lunedi": "lunedì", "martedi": "martedì", "mercoledi": "mercoledì",
                 "giovedi": "giovedì", "venerdi": "venerdì",
             ]
-        case .english, .norwegian, .spanish, .german, .french, .frenchCanadian, .frenchSwiss,
+        case .english, .norwegian, .swedish, .spanish, .german, .french, .frenchCanadian, .frenchSwiss,
              .portuguese, .polish, .czech, .hungarian, .dutch, .romanian, .russian, .ukrainian,
              .greek, .serbianLatin, .korean:
             [:]
@@ -787,7 +826,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     var accentSuggestions: [String: String] {
         switch self {
         case .italian: ["e": "è", "ce": "c'è"]
-        case .english, .norwegian, .spanish, .german, .french, .frenchCanadian, .frenchSwiss,
+        case .english, .norwegian, .swedish, .spanish, .german, .french, .frenchCanadian, .frenchSwiss,
              .portuguese, .polish, .czech, .hungarian, .dutch, .romanian, .russian, .ukrainian,
              .greek, .serbianLatin, .korean:
             [:]
@@ -838,6 +877,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         let code = parts.first ?? ""
         switch code {
         case "nb", "no", "nn": return .norwegian
+        case "sv": return .swedish
         case "en": return .english
         case "es": return .spanish
         case "de": return .german

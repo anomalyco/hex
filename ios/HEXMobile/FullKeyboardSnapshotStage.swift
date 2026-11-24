@@ -5,7 +5,7 @@ import UIKit
 /// `--snap-state full-keyboard-<state>[-dark|-dark-field]` is passed on Simulator.
 /// `-dark` is a dark app; `-dark-field` is a light app whose field asks for a dark keyboard.
 /// The layout follows `--dictation-language` (Automatic, English, without it), or
-/// `--keyboard-layout nb|es|de|it|fr|fr-CA|fr-CH|pt|pl|cs|hu|nl|ro|ru|uk|el|sr-Latn|ko|en` pins it; drafts are in the layout's language.
+/// `--keyboard-layout nb|sv|es|de|it|fr|fr-CA|fr-CH|pt|pl|cs|hu|nl|ro|ru|uk|el|sr-Latn|ko|en` pins it; drafts are in the layout's language.
 /// `--keyboard-letters qwerty|qwertz|azerty|dvorak|own` arranges its letters (its own without it).
 /// `--accent-key ø` (or Cyrillic `е`, `ь`, `ʼ`, Greek `α`, `σ`, `t` on Romanian, `o` on Hungarian, or `j` on Dutch) picks the key the `accents` state holds; `--emoji-query kiss` what `emoji-search` types.
 /// Emoji states (`emoji`, `emoji-search`, `emoji-tones`, `emoji-food`, `emoji-strip`) turn
@@ -67,6 +67,15 @@ struct FullKeyboardSnapshotStage: View {
 
     private var draft: String {
         switch Self.layout {
+        case .swedish:
+            return switch state {
+            case "inserted": "Kommer tio min sent, är hemma 19.30. Börja utan mig."
+            case "numbers": "Kommer tio min sent, hemma 19.3"
+            case "shift": "Kommer tio min sent. "
+            case "typing": "Kommer tio min se"
+            case "accents": Self.accentKey == "e" ? "Kaf" : "Bl"
+            default: "Kommer tio min sent, "
+            }
         case .norwegian:
             return switch state {
             case "inserted": "Kommer ti min for sent, er hjemme 19.30. Begynn uten meg."
@@ -355,6 +364,7 @@ private struct FullKeyboardFixture: UIViewRepresentable {
                 let key = FullKeyboardSnapshotStage.accentKey
                 let serbian = FullKeyboardSnapshotStage.layout == .serbianLatin
                 let ownLetters: [String: String] = switch FullKeyboardSnapshotStage.layout {
+                case .swedish: ["e": "é", "ö": "ø", "ä": "æ"]
                 case .polish: ["e": "ę", "a": "ą", "c": "ć", "l": "ł", "n": "ń", "o": "ó", "s": "ś", "z": "ż"]
                 case .romanian: ["a": "ă", "i": "î", "s": "ș", "t": "ț"]
                 case .czech: ["e": "ě", "r": "ř", "u": "ů", "a": "á", "c": "č", "s": "š", "z": "ž", "y": "ý", "n": "ň"]

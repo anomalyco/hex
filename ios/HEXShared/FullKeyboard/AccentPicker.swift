@@ -140,12 +140,22 @@ nonisolated enum AccentCatalog {
         "d": "d ď", "l": "ĺ ľ ł l", "y": "y ý ÿ", "c": "c č ç ć", "n": "ń ñ ň n", "\u{02C7}": "\u{02C7} \u{02DA}",
     ]) { _, czech in czech }
 
+    /// The Swedish keyboard's (iOS 27.2 simulator), one row each; its held $ offers kr second,
+    /// and every other symbol's is English's.
+    private static let swedishOrder: [String: String] = englishOrder.filter { $0.key.first?.isLetter != true }.merging([
+        "e": "ê ë e é è ē ẽ ė ę ǝ ẹ", "t": "t ŧ ț ṱ ṯ þ", "y": "ẏ ȳ ŷ ý y ÿ ỳ ỹ ẙ ɏ", "u": "ụ ū û ú u ü ù ũ ů",
+        "i": "i ï í ì î ĩ ī ị", "o": "ő ọ ȯ ø ō ô ó œ o ò õ", "a": "a á à â ã ā ạ æ", "s": "s ß ś š ŝ ṣ ș",
+        "d": "d đ ð ḓ ď", "g": "g ǥ ǧ ģ", "k": "k ǩ ḵ ķ", "l": "l ł", "ö": "ø ö", "ä": "ä æ", "z": "z ž ʒ ǯ",
+        "c": "c ç č ĉ", "n": "ŋ ṉ ṋ ň ñ n", "$": "$ kr ¢ € £ ¥ ₩ ₽",
+    ]) { _, swedish in swedish }
+
     private static func displayOrder(for language: KeyboardLanguage) -> [String: String] {
         switch language {
         case .english: englishOrder
         case .spanish: spanishOrder
         case .greek: greekOrder
         case .czech: czechOrder
+        case .swedish: swedishOrder
         default: [:]
         }
     }
