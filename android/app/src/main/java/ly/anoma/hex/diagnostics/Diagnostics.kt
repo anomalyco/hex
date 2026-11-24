@@ -29,7 +29,6 @@ import ly.anoma.hex.keyboard.StripNotice
 import ly.anoma.hex.keyboard.Tap
 import ly.anoma.hex.keyboard.TapCounts
 import ly.anoma.hex.keyboard.TapPlay
-import ly.anoma.hex.keyboard.keyboardVibrationAllows
 import ly.anoma.hex.keyboard.tap
 import ly.anoma.hex.keyboard.vibrates
 import ly.anoma.hex.speech.ModelStore
@@ -113,11 +112,11 @@ internal object Diagnostics {
         }
     }
 
-    /** What a key press plays, through KeyHaptics with its gates (Hex's Haptics switch, the phone's Keyboard vibration). */
+    /** What a key press plays, through KeyHaptics with its gate (Hex's Haptics switch). */
     fun testTick(context: Context) = tap(context, TypingPreferences(context).haptics, Tap.Press)
 
     /** A plainly stronger pulse on the same touch channel, without Hex's gates: felt here but not with Test tick means the
-     * tick arrives too weak, or a gate stops it; felt with neither means the phone stops touch vibration itself. */
+     * tick arrives too weak, or Hex's switch stops it; felt with neither means the phone stops touch vibration itself. */
     fun strongPulse(context: Context) {
         val vibrator = context.getSystemService(VibratorManager::class.java)?.defaultVibrator ?: return
         val effect = VibrationEffect.createOneShot(80, if (vibrator.hasAmplitudeControl()) 255 else VibrationEffect.DEFAULT_AMPLITUDE)
@@ -308,7 +307,7 @@ internal fun fastCores(capacities: List<Int?>): Int {
     return if (top <= 0) 0 else capacities.count { it!! * 2 >= top }
 }
 
-/** What the report says about haptics: Hex's switch and gate, Android's settings and what the vibrator says it plays. */
+/** What the report says about haptics: Hex's switch, Android's settings and what the vibrator says it plays. */
 internal class HapticsFacts(val hex: Boolean, val keyboardSettingHere: Boolean, val keyboardValue: String,
                             val touchFeedback: String, val touchStrength: String, val soundMode: String, val vibrator: Boolean,
                             val click: String, val tick: String, val strength: Boolean)
@@ -316,16 +315,12 @@ internal class HapticsFacts(val hex: Boolean, val keyboardSettingHere: Boolean, 
 internal fun hapticsLines(h: HapticsFacts): List<String> {
     fun yes(value: Boolean) = if (value) "yes" else "no"
     fun onOff(stored: String) = when (stored) { "1" -> "on"; "0" -> "off"; else -> stored }
-    val keyboard = if (h.keyboardSettingHere) onOff(h.keyboardValue)
-        else "this phone has none (stored value ${h.keyboardValue}" + if (h.keyboardValue == "not set") ")" else ", ignored)"
+    // Shown for information: Hex doesn't follow Android's Keyboard vibration value (KeyHaptics' vibrates()).
+    val keyboard = if (h.keyboardSettingHere) "${onOff(h.keyboardValue)} (Hex doesn't follow it)"
+        else "this phone has none (stored value ${h.keyboardValue})"
     val ringer = when (h.soundMode) { "sound" -> "sound on"; "vibrate" -> "vibrate only"; else -> h.soundMode }
-    // The same rule as KeyHaptics' vibrates(): Hex's switch, then the keyboard switch where the phone has one (an
-    // unset value counts as on, as Settings.System.getInt's default there).
-    val stopper = when {
-        !h.hex -> "Hex's Haptics switch is off"
-        !keyboardVibrationAllows(h.keyboardSettingHere, h.keyboardValue.toIntOrNull() ?: 1) -> "the keyboard vibration switch is off"
-        else -> null
-    }
+    // The same rule as KeyHaptics' vibrates(): Hex's own switch alone.
+    val stopper = if (h.hex) null else "Hex's Haptics switch is off"
     return listOf(
         "Hex's Haptics switch: ${if (h.hex) "on" else "off"}",
         "Keyboard vibration switch: $keyboard",
