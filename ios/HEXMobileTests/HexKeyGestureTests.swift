@@ -239,6 +239,11 @@ final class TranslationPasteSwitchTests: XCTestCase {
             "zh-CN",
             "before the keyboard's first dictation: the iPhone's first language Hex dictates, as the keyboard's Automatic picks"
         )
+        XCTAssertEqual(
+            settings.keyboardSpokenLanguage(languages: languages, iPhoneLanguages: ["ga-IE"]),
+            "en-US",
+            "an iPhone in a language Hex doesn't dictate: US English, the keyboard's last resort"
+        )
 
         settings.noteKeyboardDictation(in: "zh-TW", languages: languages, at: Date(timeIntervalSince1970: 100))
         XCTAssertEqual(settings.keyboardSpokenLanguage(languages: languages, iPhoneLanguages: chineseIPhone), "zh-TW")

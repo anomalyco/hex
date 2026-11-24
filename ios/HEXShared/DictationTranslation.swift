@@ -73,8 +73,10 @@ struct DictationTranslationSettings {
 
     /// The language the keyboard dictates in, for the pair Settings checks and downloads:
     /// Settings › Dictation language, else the keyboard's language Automatic follows, else what
-    /// the keyboard last dictated in on Automatic, else the first of the iPhone's languages Hex
-    /// dictates, which is what Automatic picks in the keyboard. Nil until one is known. Never
+    /// the keyboard last dictated in on Automatic, else what the keyboard's Automatic picks: the
+    /// first of the iPhone's languages Hex dictates, then US English
+    /// (`SpeechLanguagePicker.automaticCandidates`). Nil until Hex has listed Apple's languages
+    /// and the keyboard hasn't dictated. Never
     /// Hex's own Automatic pick: Hex can be set to another language than the iPhone in iOS
     /// Settings, and the keyboard follows the iPhone.
     func keyboardSpokenLanguage(languages: LanguageSettings, iPhoneLanguages: [String]) -> String? {
@@ -83,18 +85,18 @@ struct DictationTranslationSettings {
         if let spoken = keyboardAutomaticLanguage?.language { return spoken }
         let supported = languages.supportedDictationLanguages
         guard !supported.isEmpty else { return nil }
-        return iPhoneLanguages.lazy.compactMap { DictationLanguageSwitch.supportedMatch(for: $0, in: supported) }.first
+        let candidates = SpeechLanguagePicker.automaticCandidates(
+            preferred: iPhoneLanguages,
+            current: iPhoneLanguages.first ?? "en-US"
+        )
+        return candidates.lazy.compactMap { DictationLanguageSwitch.supportedMatch(for: $0, in: supported) }.first
     }
 
-    /// The iPhone's languages, as the keyboard sees them. `Locale.preferredLanguages` in Hex puts
-    /// Hex's own language first when it is set in iOS Settings › Apps › Hex.
+    /// The iPhone's languages, as the keyboard sees them. With a language set for Hex in iOS
+    /// Settings › Apps › Hex, `Locale.preferredLanguages` in Hex is that language alone (iOS 27.2
+    /// simulator: `["en"]` on a Chinese iPhone), while the global domain keeps the iPhone's.
     static var iPhoneLanguages: [String] {
-        let global = CFPreferencesCopyValue(
-            "AppleLanguages" as CFString,
-            kCFPreferencesAnyApplication,
-            kCFPreferencesCurrentUser,
-            kCFPreferencesAnyHost
-        ) as? [String]
+        let global = CFPreferencesCopyAppValue("AppleLanguages" as CFString, kCFPreferencesAnyApplication) as? [String]
         return global ?? Locale.preferredLanguages
     }
 
