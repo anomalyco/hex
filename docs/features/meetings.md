@@ -1548,15 +1548,33 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │          // not verified on a live device or call app
 └── System audio -> Core Audio process tap (global, excluding Hex) on a private
     aggregate device; no display dependency
+    -> the aggregate names no output device, so the tap hears the one that was
+       default when it was created; the source remembers that UID
+    -> every 2 s it re-reads the default output's UID
+       -> a different, readable UID -> warn with from/to and reopen, which
+          rebuilds the tap and its aggregate (a failed read never reopens)
+    -> a system track that carried sound then delivers only exact zeros for
+       15 s -> warn and reopen; the reopened stream starts unarmed, so it
+       takes new sound plus another 15 s of zeros to fire again
+       // checks: a_system_source_reopens_only_for_a_different_readable_output,
+       // system_silence_never_fires_before_the_track_carried_sound,
+       // system_silence_fires_after_fifteen_seconds_of_exact_zeros,
+       // an_audible_sample_restarts_the_system_zero_count,
+       // a_reopened_system_source_starts_unarmed, and
+       // only_the_system_sink_watches_digital_silence (meeting/capture.rs)
     └── Tap not authorized + Screen Recording granted -> ScreenCaptureKit fallback
 
-A source fails (display sleep ends SCStream, device unplugged, tap stalls 3 s)
+A source fails (display sleep ends SCStream, device unplugged, the default
+output changed, tap stalls 3 s without a buffer, or the system track went
+digitally silent after carrying sound)
   -> Only that source stops; the other keeps recording
   -> Retried every 0.5-5 s until it reopens or the meeting stops
   -> Resumes into the same track; silence fills the gap (>= 1 s) on the
      shared capture clock, recorded in the manifest as track `gaps`
   -> Rolling transcription restarts that source after the gap; the padded WAV
      keeps the final pass on the same timeline
+  -> The digital-silence check runs on every OS through the shared source
+     supervisor, so Linux's and Windows' system tracks get it too
 ``````
 
 Starting a recording no longer opens the Settings window; failures still do.

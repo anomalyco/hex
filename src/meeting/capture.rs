@@ -27,8 +27,15 @@ pub(super) const RETRY_MAX: Duration = Duration::from_secs(5);
 const STARTED_AFTER: Duration = Duration::from_secs(1);
 pub(super) const POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// Core Audio delivers silence continuously; this long without a buffer
-/// means the device or tap stopped.
+/// means the device or tap stopped. A source that keeps delivering buffers
+/// of exact zeros is a different failure, [`SYSTEM_SILENCE_TIMEOUT`].
 pub(super) const STALL_TIMEOUT: Duration = Duration::from_secs(3);
+/// A system source that carried sound and then delivers only exact zeros
+/// this long is treated as stalled: a tap whose default output device
+/// changed keeps its IO callbacks coming, so the callbacks alone never show
+/// the loss. Longer than the microphone's silence because an idle output is
+/// legitimately silent.
+pub(super) const SYSTEM_SILENCE_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Delivers one source's 16 kHz audio to the track writer, stamped on the
 /// meeting's shared capture clock.
@@ -38,12 +45,23 @@ pub(super) struct PacketSink {
     pub(super) sender: SyncSender<AudioPacket>,
     pub(super) drops: Arc<AtomicU64>,
     pub(super) clock: Instant,
+    /// The system track's digital silence, shared with its supervisor and
+    /// every stream it reopens; `None` for the microphone. `send` is also
+    /// called from another thread (ScreenCaptureKit's handler), so the state
+    /// sits behind a mutex.
+    pub(super) system_silence: Option<Arc<Mutex<SystemSilence>>>,
 }
 
 impl PacketSink {
     pub(super) fn send(&self, sample_rate: u32, samples: Vec<f32>, pts_us: Option<i64>) {
         if samples.is_empty() {
             return;
+        }
+        if let Some(silence) = &self.system_silence {
+            silence
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .observe(sample_rate, &samples);
         }
         record_level(self.source, &samples);
         let packet = AudioPacket {
@@ -155,7 +173,10 @@ impl SourceSupervisor {
 
     /// Records the system audio of the call app `application` (a canonical
     /// bundle identifier), or of every output for a manual recording.
-    pub(super) fn system(sink: PacketSink, application: Option<String>) -> Self {
+    pub(super) fn system(mut sink: PacketSink, application: Option<String>) -> Self {
+        // Shared with every stream this supervisor reopens, so a reconnect
+        // starts unarmed after a digital-silence restart.
+        sink.system_silence = Some(Arc::new(Mutex::new(SystemSilence::default())));
         let source_sink = sink.clone();
         Self::spawn(sink, move || {
             super::os::open_system_audio(&source_sink, application.as_deref())
@@ -209,12 +230,24 @@ fn supervise(
                     "meeting capture source started"
                 );
                 last_open_error = None;
+                // Every stream starts with a fresh watch: it must carry
+                // sound before its exact zeros can mean a stall, whatever
+                // ended the last one.
+                reset_system_silence(sink);
                 let started = Instant::now();
                 let failure = loop {
                     if stop.load(Ordering::Relaxed) {
                         break None;
                     }
                     if let Err(error) = live.poll(sink) {
+                        break Some(error);
+                    }
+                    if let Some(error) = system_silence_stalled(sink) {
+                        tracing::warn!(
+                            ?source,
+                            %error,
+                            "meeting capture source went digitally silent; reopening it"
+                        );
                         break Some(error);
                     }
                 };
@@ -258,6 +291,77 @@ pub(super) fn retry_delay(delay: Duration, ran: Duration) -> Duration {
         RETRY_INITIAL
     } else {
         delay
+    }
+}
+
+/// Whether a system source opened on the default output `created` must
+/// reopen for `current`: only a change to a different, readable output
+/// counts, so an unreadable one never restarts the source.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(super) fn output_changed(created: Option<&str>, current: Option<&str>) -> bool {
+    matches!((created, current), (Some(created), Some(current)) if created != current)
+}
+
+/// Consecutive exact zeros from the system track, counted only once it
+/// carried sound so an idle output, or a manual recording of nothing, is not
+/// mistaken for a stalled stream.
+#[derive(Debug, Default)]
+pub(super) struct SystemSilence {
+    /// The sample rate of the last packet, for the threshold.
+    rate: u32,
+    /// The track carried sound at some point since the stream opened.
+    armed: bool,
+    /// Consecutive exact-zero samples since the last audible one.
+    zeros: u64,
+}
+
+impl SystemSilence {
+    /// Counts one packet's samples, delivered at `rate`.
+    pub(super) fn observe(&mut self, rate: u32, samples: &[f32]) {
+        self.rate = rate;
+        for &sample in samples {
+            if sample == 0.0 {
+                self.zeros += 1;
+            } else {
+                self.zeros = 0;
+                self.armed = true;
+            }
+        }
+    }
+
+    /// Whether the track carried sound and has since been exactly zero for
+    /// [`SYSTEM_SILENCE_TIMEOUT`].
+    pub(super) fn stalled(&self) -> bool {
+        self.armed
+            && self.rate > 0
+            && self.zeros >= u64::from(self.rate).saturating_mul(SYSTEM_SILENCE_TIMEOUT.as_secs())
+    }
+
+    /// Starts a freshly opened stream unarmed, so its silence can only mean
+    /// a stall again once it carries sound.
+    pub(super) fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
+/// Ends a system source that carried sound and then went digitally silent:
+/// `Some` with the reason. The stream the supervisor reopens starts unarmed
+/// ([reset_system_silence]), so the same silence cannot reopen it again.
+fn system_silence_stalled(sink: &PacketSink) -> Option<String> {
+    let silence = sink.system_silence.as_ref()?;
+    let silence = silence.lock().unwrap_or_else(|error| error.into_inner());
+    silence
+        .stalled()
+        .then(|| "system audio went digitally silent after carrying sound".into())
+}
+
+/// Starts a freshly opened system stream unarmed.
+fn reset_system_silence(sink: &PacketSink) {
+    if let Some(silence) = &sink.system_silence {
+        silence
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .reset();
     }
 }
 
@@ -950,5 +1054,92 @@ mod tests {
         let mut left = vec![0.5; 1_000];
         let mut right = Vec::new();
         assert_eq!(mix(&mut [&mut left, &mut right], MIX_HOLD), vec![0.5; 200]);
+    }
+
+    #[test]
+    fn a_system_source_reopens_only_for_a_different_readable_output() {
+        let speakers = Some("BuiltInSpeakerDevice");
+        assert!(!output_changed(speakers, speakers));
+        // Bluetooth headphones went away and the speakers took over.
+        assert!(output_changed(Some("AirPods Pro"), speakers));
+        // An output Hex could not read says nothing about a change.
+        assert!(!output_changed(Some("AirPods Pro"), None));
+        assert!(!output_changed(None, speakers));
+        assert!(!output_changed(None, None));
+    }
+
+    #[test]
+    fn system_silence_never_fires_before_the_track_carried_sound() {
+        // A manual recording with nothing playing, or a call before its
+        // first sound, is exactly zero and is not a stall.
+        let mut silence = SystemSilence::default();
+        silence.observe(1_000, &[0.0; 20_000]);
+        assert!(!silence.stalled());
+    }
+
+    #[test]
+    fn system_silence_fires_after_fifteen_seconds_of_exact_zeros() {
+        // Counted in samples at the packet's rate, so nothing sleeps.
+        let mut silence = SystemSilence::default();
+        silence.observe(1_000, &[0.25; 1_000]);
+        silence.observe(1_000, &[0.0; 14_999]);
+        assert!(!silence.stalled(), "14.999 s of zeros is not a stall");
+        silence.observe(1_000, &[0.0]);
+        assert!(silence.stalled());
+    }
+
+    #[test]
+    fn an_audible_sample_restarts_the_system_zero_count() {
+        let mut silence = SystemSilence::default();
+        silence.observe(1_000, &[0.25]);
+        silence.observe(1_000, &[0.0; 14_000]);
+        silence.observe(1_000, &[0.25]);
+        silence.observe(1_000, &[0.0; 14_000]);
+        assert!(!silence.stalled());
+        silence.observe(1_000, &[0.0; 1_000]);
+        assert!(silence.stalled());
+    }
+
+    #[test]
+    fn a_reopened_system_source_starts_unarmed() {
+        let mut silence = SystemSilence::default();
+        silence.observe(1_000, &[0.25]);
+        silence.observe(1_000, &[0.0; 15_000]);
+        assert!(silence.stalled());
+        // The supervisor resets the shared watch before it reopens.
+        silence.reset();
+        silence.observe(1_000, &[0.0; 20_000]);
+        assert!(!silence.stalled(), "the new stream must carry sound again");
+    }
+
+    #[test]
+    fn only_the_system_sink_watches_digital_silence() {
+        let (sender, _receiver) = std::sync::mpsc::sync_channel(8);
+        let sink = |source, system_silence| PacketSink {
+            source,
+            sender: sender.clone(),
+            drops: Arc::new(AtomicU64::new(0)),
+            clock: Instant::now(),
+            system_silence,
+        };
+        let system = sink(
+            MeetingSource::System,
+            Some(Arc::new(Mutex::new(SystemSilence::default()))),
+        );
+        system.send(1_000, vec![0.25], None);
+        system.send(1_000, vec![0.0; 15_000], None);
+        assert_eq!(
+            system_silence_stalled(&system).as_deref(),
+            Some("system audio went digitally silent after carrying sound")
+        );
+        // The supervisor resets the watch before it polls the reopened stream.
+        reset_system_silence(&system);
+        assert_eq!(system_silence_stalled(&system), None);
+
+        // The microphone keeps its own SilencePolicy and has no system watch.
+        let microphone = sink(MeetingSource::Microphone, None);
+        microphone.send(1_000, vec![0.0; 20_000], None);
+        assert_eq!(system_silence_stalled(&microphone), None);
+        reset_system_silence(&microphone);
     }
 }

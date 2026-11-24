@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use block2::RcBlock;
 use color_eyre::eyre::{Result, WrapErr, eyre};
@@ -38,9 +38,12 @@ use screencapturekit::prelude::*;
 use screencapturekit::stream::delegate_trait::ErrorHandler;
 
 use super::SAMPLE_RATE;
-use super::capture::{LiveSource, POLL_INTERVAL, PacketSink, STALL_TIMEOUT, To16k};
+use super::capture::{LiveSource, POLL_INTERVAL, PacketSink, STALL_TIMEOUT, To16k, output_changed};
 
 const TAP_QUEUE_CAPACITY: usize = 512;
+/// How often the tap re-reads the default output device. The private
+/// aggregate names no output, so it keeps the one the tap was created on.
+const ROUTE_CHECK: Duration = Duration::from_secs(2);
 
 unsafe extern "C" {
     fn CGPreflightScreenCaptureAccess() -> bool;
@@ -166,6 +169,10 @@ struct ProcessTapSource {
     format_error: Arc<AtomicBool>,
     seen_callbacks: u64,
     last_callback: Instant,
+    /// The UID of the default output the aggregate was created on; a
+    /// different one means the tap must be rebuilt.
+    output_uid: Option<String>,
+    route_checked: Instant,
     resample: To16k,
 }
 
@@ -206,6 +213,8 @@ impl ProcessTapSource {
             format_error: Arc::new(AtomicBool::new(false)),
             seen_callbacks: 0,
             last_callback: Instant::now(),
+            output_uid: None,
+            route_checked: Instant::now(),
             resample: To16k::new(SAMPLE_RATE)?,
         };
         let format = tap_format(tap)?;
@@ -265,14 +274,34 @@ impl ProcessTapSource {
             unsafe { AudioDeviceStart(source.aggregate, source.io_proc) },
             "could not start the system audio tap",
         )?;
+        // Read once the aggregate runs, so the baseline is the output this
+        // open settled on; a different one later is what rebuilds the tap.
+        source.output_uid = default_output_uid();
         source.last_callback = Instant::now();
-        tracing::info!(rate, channels, "system audio tap started");
+        tracing::info!(
+            rate,
+            channels,
+            output = ?source.output_uid,
+            "system audio tap started"
+        );
         Ok(source)
     }
 }
 
 impl LiveSource for ProcessTapSource {
     fn poll(&mut self, sink: &PacketSink) -> std::result::Result<(), String> {
+        if self.route_checked.elapsed() >= ROUTE_CHECK {
+            self.route_checked = Instant::now();
+            let current = default_output_uid();
+            if output_changed(self.output_uid.as_deref(), current.as_deref()) {
+                tracing::warn!(
+                    from = ?self.output_uid,
+                    to = ?current,
+                    "the default output changed; rebuilding the system audio tap"
+                );
+                return Err("the default output changed".into());
+            }
+        }
         let mut samples = Vec::new();
         match self.buffers.recv_timeout(POLL_INTERVAL) {
             Ok(first) => {
@@ -355,6 +384,67 @@ fn own_process_object() -> Option<AudioObjectID> {
         )
     };
     (status == 0 && object != 0).then_some(object)
+}
+
+/// The default output device's UID, the output a global tap hears. The tap,
+/// its private aggregate, and its format are fixed when it is created, so a
+/// different UID is the one thing that says the system track is stale.
+fn default_output_uid() -> Option<String> {
+    use objc2_core_audio::{
+        kAudioDevicePropertyDeviceUID, kAudioHardwarePropertyDefaultOutputDevice,
+    };
+    use objc2_core_foundation::CFRetained;
+
+    fn default_device() -> Option<AudioObjectID> {
+        let address = AudioObjectPropertyAddress {
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain,
+        };
+        let mut device: AudioObjectID = 0;
+        let mut size = size_of::<AudioObjectID>() as u32;
+        // SAFETY: The output is one AudioObjectID, sized by `size`.
+        let status = unsafe {
+            AudioObjectGetPropertyData(
+                kAudioObjectSystemObject as AudioObjectID,
+                NonNull::from(&address),
+                0,
+                std::ptr::null(),
+                NonNull::from(&mut size),
+                NonNull::from(&mut device).cast(),
+            )
+        };
+        (status == 0 && size as usize == size_of::<AudioObjectID>() && device != 0)
+            .then_some(device)
+    }
+
+    let device = default_device()?;
+    let address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyDeviceUID,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let mut raw: *const CFString = std::ptr::null();
+    let mut size = size_of::<*const CFString>() as u32;
+    // SAFETY: `raw` and `size` are a correctly sized stack slot for the
+    // property's CFString, which CoreAudio retains for us.
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            device,
+            NonNull::from(&address),
+            0,
+            std::ptr::null(),
+            NonNull::from(&mut size),
+            NonNull::from(&mut raw).cast(),
+        )
+    };
+    if status != 0 || size as usize != size_of::<*const CFString>() {
+        return None;
+    }
+    // SAFETY: CoreAudio returned a retained CFString in `raw`; taking it
+    // once into a CFRetained releases it when this string drops.
+    let string = unsafe { CFRetained::from_raw(NonNull::new(raw.cast_mut())?) };
+    Some(string.to_string())
 }
 
 fn tap_format(tap: AudioObjectID) -> Result<AudioStreamBasicDescription> {
