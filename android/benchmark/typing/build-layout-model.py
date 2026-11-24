@@ -231,6 +231,14 @@ PT_MARKERS = {
 # éi or ói before a final syllable ("idéia", "heróico"), ô in "ôo" ("vôo"), ê in "êem" ("vêem"), and
 # the accents that only told words apart ("pára", "pêlo"). Each is left out where the new spelling
 # is counted too.
+# The words ContextWords.kt's Portuguese groups choose between by the words around them: a verb the
+# plain-twin rule would leave out ("duvida" beside "dúvida") stays, so the context can pick it.
+PT_CONTEXT_WORDS = set("""e é esta está estas estás nos nós a à as às la lá da dá de dê va vá ai aí pais país por pôr
+    pode pôde tem têm vem vêm mas más que quê sabia sábia secretaria secretária duvida dúvida duvidas dúvidas ira irá
+    publica pública publico público pratica prática praticas práticas pratico prático critica crítica criticas críticas
+    analise análise divida dívida calculo cálculo media média formula fórmula anuncio anúncio noticia notícia
+    fabrica fábrica valida válida numero número inicio início estimulo estímulo peca peça copia cópia magoa mágoa
+    negocio negócio""".split())
 PT_RETIRED = re.compile(r".*[éó]i(?:as?|os?|cas?|cos?)|.*ôos?|.*êem|pára|pêlos?|pólos?|pêras?")
 
 
@@ -521,8 +529,8 @@ def pt_pairs(folder, region, vocab):
 def pt_words(folder, region):
     """A country's words with their counts, less the spellings Brazil's spelling retired and plain
     spellings at least 20 times rarer than a marked twin ("nao" beside "não", "voce" beside "você"),
-    the rule Polish's model keeps (ios/scripts/build-typing-model.py, TWIN_RATIO); and the corpus's
-    size."""
+    the rule Polish's model keeps (ios/scripts/build-typing-model.py, TWIN_RATIO), except
+    PT_CONTEXT_WORDS; and the corpus's size."""
     counts, total = {}, 0
     for k, (n, _, _) in pt_uni(folder, region).items():
         total += n
@@ -536,8 +544,8 @@ def pt_words(folder, region):
     retired = {w for w in counts if PT_RETIRED.fullmatch(w) and any(
         o in counts and o != w and pt_fold(o) == pt_fold(w) and pt_marks(o) < pt_marks(w)
         for o in (best[pt_fold(w)][1], pt_fold(w)))}
-    twins = {w for w, c in counts.items()
-             if best[pt_fold(w)][0] >= 20 * c and pt_marks(w) < pt_marks(best[pt_fold(w)][1])}
+    twins = {w for w, c in counts.items() if w not in PT_CONTEXT_WORDS
+             and best[pt_fold(w)][0] >= 20 * c and pt_marks(w) < pt_marks(best[pt_fold(w)][1])}
     return {w: c for w, c in counts.items() if w not in retired and w not in twins}, total, retired, twins
 
 

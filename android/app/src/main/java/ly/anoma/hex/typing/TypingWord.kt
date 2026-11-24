@@ -401,8 +401,10 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
             val fix = replacement()
             val now = fix ?: token
             // A word typed or corrected with an apostrophe is left as it is, whether that apostrophe
-            // is straight or the smart ’ (Labs › Keyboard › Smart quotes).
-            val revised = if (word != null && '\'' !in lookup(word.typed)) revision(word.text, now) else null
+            // is straight or the smart ’ (Labs › Keyboard › Smart quotes), and so is a Portuguese word
+            // typed with an accent held for it.
+            val revised = if (word != null && '\'' !in lookup(word.typed) &&
+                !ContextWords.keepsTypedAccent(model.language, word.typed)) revision(word.text, now) else null
             if (fix != null || revised != null)
                 result = Correction((if (revised != null) word!!.text + " " else "") + token, (revised?.let { "$it " } ?: "") + now)
         }
