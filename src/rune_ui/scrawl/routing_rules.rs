@@ -17,13 +17,11 @@ use crate::capture_host::routing::rule_match::{display_site, shorten_home, site_
 use crate::capture_host::{RouteDest, jev_available, recent_sessions};
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::rune_ui::controls::{
-    ButtonKind, CardRow, Choice, METRICS, Paint, button, card, folder_label, icon_row, modal_sheet,
-    note, section_with, segmented, select, setting_row, toggle_row, value_button, value_font,
+    ButtonKind, CardRow, Choice, METRICS, ModalWidth, Paint, button, card, folder_label, icon_row,
+    modal_panel, modal_sheet, note, section_with, segmented, select, setting_row, toggle_row,
+    value_button, value_font,
 };
 use crate::rune_ui::{Menu, Modal, Pane, Ui, icons};
-
-const MODAL_WIDTH: f32 = 560.0;
-const PADDING: f32 = 18.0;
 const ICON: f32 = 20.0;
 const STACKED: usize = 4;
 const STACK_ICON: f32 = 18.0;
@@ -589,7 +587,7 @@ fn rule_row(ui: &Ui, p: Paint, index: usize, entry: &RuleEntry, menus: &mut Vec<
         .focusable(true)
         .h(26.0)
         .pl(8.0)
-        .pr(5.0)
+        .pr(4.0)
         .gap(6.0)
         .center_y()
         .radius(p.k.radius.sm)
@@ -1051,7 +1049,6 @@ fn editor_view(ui: &Ui, p: Paint, menus: &mut Vec<El>) -> Vec<El> {
 
 /// The sheet's scrim and panel via `modal_sheet`, plus any open dropdown menu.
 pub(crate) fn modal(ui: &Ui, p: Paint) -> Vec<El> {
-    let c = &p.k.c;
     let mut menus = Vec::new();
     let adding = ui.routing.adding;
     let (title, body) = if adding {
@@ -1060,11 +1057,8 @@ pub(crate) fn modal(ui: &Ui, p: Paint) -> Vec<El> {
         (tr("Auto-send rules"), rules_view(ui, p, &mut menus))
     };
     let footer = if adding {
-        row()
-            .key("footer")
-            .justify_end()
-            .gap(8.0)
-            .child(button(
+        vec![
+            button(
                 p,
                 "cancel-rule",
                 tr("Cancel"),
@@ -1074,19 +1068,18 @@ pub(crate) fn modal(ui: &Ui, p: Paint) -> Vec<El> {
                     ui.routing.error = None;
                     ui.open = None;
                 },
-            ))
-            .child(
-                button(
-                    p,
-                    "save-rule",
-                    tr("Save rule"),
-                    ButtonKind::Primary,
-                    |ui: &mut Ui, _| save_new_rule(ui),
-                )
-                .default_button(),
+            ),
+            button(
+                p,
+                "save-rule",
+                tr("Save rule"),
+                ButtonKind::Primary,
+                |ui: &mut Ui, _| save_new_rule(ui),
             )
+            .default_button(),
+        ]
     } else {
-        row().key("footer").justify_end().child(
+        vec![
             button(
                 p,
                 "close-routing",
@@ -1095,29 +1088,9 @@ pub(crate) fn modal(ui: &Ui, p: Paint) -> Vec<El> {
                 |ui: &mut Ui, _| close(ui),
             )
             .default_button(),
-        )
+        ]
     };
-    let panel = col()
-        .key("routing-sheet")
-        .role("dialog")
-        .label(title)
-        .w(MODAL_WIDTH)
-        .pt(PADDING)
-        .px(PADDING)
-        .pb(14.0)
-        .gap(16.0)
-        .radius(p.k.radius.xl)
-        .fill(c.bg_base)
-        .border(p.hair, c.border_weak)
-        .on_press(|_: &mut Ui| {})
-        .child(
-            text(title)
-                .key("title")
-                .font(p.k.ty.body_medium)
-                .color(p.text()),
-        )
-        .children(body)
-        .child(footer);
+    let panel = modal_panel(p, "routing-sheet", title, ModalWidth::Medium, body, footer);
     let mut layers = Vec::from(modal_sheet(p, "routing", panel, close));
     layers.extend(menus);
     layers
