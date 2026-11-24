@@ -85,6 +85,11 @@ impl<F: FnMut(&str, PasteMode) -> Result<String>> OutputAdapter for MacOutputAda
                 standalone: false,
             } => (PasteMode::Continue, false),
         };
+        // A posting refusal means no keystroke can land, so say so before
+        // another app is brought forward (macOS 27.3's keystroke grant).
+        if !matches!(mode, PasteMode::CopyOnly) {
+            crate::paste::ensure_keystroke_access().map_err(|error| error.to_string())?;
+        }
         // Labs › Return to app: the app the capture started in comes back
         // first. When it can't, nothing is pasted; the shared delivery policy
         // keeps the text for Paste last dictation and skips History.

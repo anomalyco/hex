@@ -16,6 +16,7 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("macOS isn't letting Hex paste. Add Hex in System Settings > Privacy & Security > System & App Protection Override, then restart Hex.", "A macOS nem engedi, hogy a Hex beillesszen. Add hozzá a Hexet a Rendszerbeállítások > Adatvédelem és biztonság > Rendszer- és alkalmazásvédelem felülbírálása alatt, majd indítsd újra a Hexet."),
     ("Sent to", "Elküldve ide"),
     ("Nothing here yet", "Itt még nincs semmi"),
     ("Dictations, annotations, and captures show here.", "A diktálások, jegyzetek és felvételek itt jelennek meg."),
@@ -130,7 +131,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("The mic opens only while you dictate; the first moment can be clipped", "A mikrofon csak diktálás közben nyílik meg; az első pillanat lemaradhat"),
     ("The mic stays ready so dictation starts instantly; your system shows it in use", "A mikrofon készen áll, így a diktálás azonnal indul; a rendszer használatban lévőként jelzi"),
     ("Hex can't listen until the speech model has downloaded", "A Hex nem tud figyelni, amíg a beszédmodell le nem töltődik"),
-    ("Don't switch", "Ne váltson"),
     ("Your desktop assigns this key itself, so Hex can't confirm it", "Ezt a billentyűt az asztali környezet maga rendeli hozzá, ezért a Hex nem tudja megerősíteni"),
     ("Not installed", "Nincs telepítve"),
     ("Switch model with keyboard language", "Modellváltás a billentyűzet nyelvével"),
@@ -802,6 +802,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Context", "Környezet"),
     ("Current context", "Jelenlegi környezet"),
     ("None", "Nincs"),
+    ("Don't switch", "Ne váltson"),
     ("Keyboard", "Billentyűzet"),
     ("Browser navigation", "Böngészőnavigáció"),
     ("Application navigation", "Alkalmazásnavigáció"),
@@ -1480,6 +1481,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Stop every call recording when the call ends", "Minden hívásfelvétel leállítása a hívás végén"),
     ("Also stop an offered, calendar, or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off", "A felajánlott, naptárból indított vagy kézzel indított hívásfelvételt is leállítja 30 s-mal azután, hogy a hívóalkalmazás elengedi a mikrofont, akkor is, ha a „Leállítás a hívás végén” ki van kapcsolva"),
     ("Also stop an offered or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off", "A felajánlott vagy kézzel indított hívásfelvételt is leállítja 30 s-mal azután, hogy a hívóalkalmazás elengedi a mikrofont, akkor is, ha a „Leállítás a hívás végén” ki van kapcsolva"),
+    ("Indicator on any display", "Jelző bármelyik kijelzőn"),
+    ("Drag the meeting recording indicator to another display and it stays there", "Húzza a megbeszélés-felvétel jelzőjét egy másik kijelzőre, és ott is marad"),
 ];
 
 #[cfg(test)]

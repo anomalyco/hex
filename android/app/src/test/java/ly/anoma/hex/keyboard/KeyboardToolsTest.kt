@@ -1,6 +1,7 @@
 package ly.anoma.hex.keyboard
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -59,5 +60,22 @@ class KeyboardToolsTest {
         assertEquals(1, asked)
         KeyboardTools.tools(enabled = true, busy = false, secure = secure, emoji = emoji, canUndo = canUndo, clipboard = clipboard)
         assertEquals(5, asked)
+    }
+
+    @Test fun anEmptyFieldKeepsItsLineForTheTools() {
+        assertTrue(KeyboardTools.showsInEmptyField(enabled = true, before = "") { "" })
+        assertTrue(KeyboardTools.showsInEmptyField(enabled = true, before = "") { null })
+        assertFalse(KeyboardTools.showsInEmptyField(enabled = false, before = "") { "" })
+        assertFalse(KeyboardTools.showsInEmptyField(enabled = true, before = "I") { "" })
+        assertFalse(KeyboardTools.showsInEmptyField(enabled = true, before = "") { "rest" })
+    }
+
+    @Test fun theTextAfterTheCursorIsReadOnlyForAnEmptyField() {
+        var asked = 0
+        KeyboardTools.showsInEmptyField(enabled = false, before = "") { asked++; "" }
+        KeyboardTools.showsInEmptyField(enabled = true, before = "word") { asked++; "" }
+        assertEquals(0, asked)
+        KeyboardTools.showsInEmptyField(enabled = true, before = "") { asked++; "" }
+        assertEquals(1, asked)
     }
 }

@@ -19,4 +19,10 @@ internal object KeyboardTools {
             (it != StripTool.Emoji || letters) && (it != StripTool.Paste || clip) && (it != StripTool.Undo || undo)
         }
     }
+
+    /** Whether an empty field's line goes to the tools instead of the sentence starters it would
+     * otherwise offer: the lab is on and the field has no text before the cursor or after it. The
+     * text after the cursor is read only once the lab is on and nothing comes before. */
+    fun showsInEmptyField(enabled: Boolean, before: String, after: () -> String?): Boolean =
+        enabled && before.isEmpty() && after().isNullOrEmpty()
 }

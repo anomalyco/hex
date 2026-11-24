@@ -262,28 +262,32 @@ fn prompt(p: Paint, from: &str, to: &str, wave: Wave) -> El {
         line_height: DESCRIPTION.line_height,
         ..p.k.ty.mono
     };
-    row()
-        .key("example-request")
-        .self_start()
-        .fill(p.k.c.bg_deep)
-        .border(p.hair, p.k.c.border_weak)
-        .radius(p.k.radius.md)
-        .px(8.0)
-        .py(4.0)
-        .gap(font.size * 0.6)
-        .child(text("›").key("example-prompt").font(font).color(p.accent()))
-        .child(line(
-            "example-request-line",
-            LineStyle {
-                font,
-                ink: p.text(),
-                accent: p.accent(),
-                space: font.size * 0.6,
-            },
-            from,
-            to,
-            wave,
-        ))
+    // Hugs a short request and shrinks into the copy column when a translation
+    // is longer, so its words wrap instead of running under the actions.
+    row().key("example-request-wrap").w_full().child(
+        row()
+            .key("example-request")
+            .shrink()
+            .fill(p.k.c.bg_deep)
+            .border(p.hair, p.k.c.border_weak)
+            .radius(p.k.radius.md)
+            .px(8.0)
+            .py(4.0)
+            .gap(font.size * 0.6)
+            .child(text("›").key("example-prompt").font(font).color(p.accent()))
+            .child(line(
+                "example-request-line",
+                LineStyle {
+                    font,
+                    ink: p.text(),
+                    accent: p.accent(),
+                    space: font.size * 0.6,
+                },
+                from,
+                to,
+                wave,
+            )),
+    )
 }
 
 #[derive(Clone, Copy)]
@@ -345,7 +349,8 @@ pub(super) fn copied(p: Paint) -> El {
             text(title())
                 .key("title")
                 .font(p.k.ty.ui_medium)
-                .color(p.text()),
+                .color(p.text())
+                .wrap(),
         )
         .child(
             text(tr("Copied. Paste it into your agent and say what you want"))

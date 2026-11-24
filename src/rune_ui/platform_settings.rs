@@ -117,12 +117,21 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
             }
             let stale =
                 warning.kind == PermissionKind::Accessibility && ui.platform.stale(warning.kind);
-            let description = if stale {
+            // macOS 27.3's post-event preflight reads stale until Hex restarts,
+            // so a TCC reset there would drop a grant that is already on: only
+            // a restart can settle the row.
+            let restart =
+                stale && ui.platform.accessibility_split && !ui.platform.accessibility_restart_done;
+            let description = if restart {
+                tr("Turns on when Hex restarts")
+            } else if stale {
                 tr("An older Hex entry can keep this off")
             } else {
                 description
             };
-            let action = if stale {
+            let action = if restart {
+                PermissionAction::Restart
+            } else if stale {
                 PermissionAction::ResetAndPrompt(warning.kind)
             } else {
                 warning.action
@@ -132,7 +141,15 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
                 &format!("{key}-allow"),
                 ui.platform.control_for(warning.kind, false),
                 ButtonKind::Secondary,
-                move |ui: &mut Ui| ui.ask(PlatformRequest::Permission(action)),
+                move |ui: &mut Ui| {
+                    if restart {
+                        // Only the stale Accessibility row's restart spends
+                        // the one 27.3 keystroke restart; another permission's
+                        // restart (Screen Recording, a microphone) does not.
+                        crate::desktop::onboarding::record_post_event_restart();
+                    }
+                    ui.ask(PlatformRequest::Permission(action));
+                },
             );
             setting_row(p, key, name, Some(description), control)
         })

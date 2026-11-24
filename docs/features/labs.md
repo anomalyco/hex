@@ -76,6 +76,9 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Rewrite reads nearby text no labs.cursor_context (macOS) the mode's OpenCode rewrite reads the focused text element's text around the caret as context for names, terms, and where the result lands; password fields skipped
 ├── Switch model with keyboard language  no  keyboard_model_switching.enabled  (macOS, Windows, X11)
 │                                        the input source picks its mapped model (#216); General shows the mappings while on
+├── Model switch shortcut no labs.model_switch_shortcut + model_switch_hotkey + model_switch_other
+│                                        one key swaps the dictation model and language with a saved other one, and back
+│                                        (installed only); General shows its recorder and Other model row while on
 ├── Mouse shortcuts no    labs.mouse_shortcuts         (macOS)   mouse buttons record as shortcuts (#209)
 ├── Also pause the browser no pause_browser_media      (macOS)   pause a playing tab too, with Pause media (#301); General shows its permission row
 ├── Share dictation shortcut no share_dictation_shortcut (Windows) apps such as Discord see the shortcut too (#176)
@@ -305,6 +308,12 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        stay put. Unmute microphone puts it back, and turning the lab off restores it
 │                                        at once without stopping, clearing the switch so turning it back on does not
 │                                        re-mute (see meetings.md)
+├── Indicator on any display no labs.meeting_indicator_display (macOS, Windows) dragging the meeting recording
+│                                        capsule (or a panel capsule) and letting go over another display lands it in
+│                                        that display's nearest corner, and every capsule shows there from then on,
+│                                        with `meetings.recording_indicator_display` keeping the OS's own name for it;
+│                                        a display that is gone falls back to the primary one, and off, every capsule
+│                                        stays on the primary display in the saved corner (see meetings.md)
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
 ├── Transform typed text no labs.typed_text + typed_text_hotkey (Linux) Settings › Output shows a Typed text section whose shortcut is unbound by
@@ -1846,6 +1855,68 @@ checked for it, and Hex is unchanged. Checks:
 real Mac with an external keyboard, a real Linux X11 or Wayland shortcut press,
 or the recorder row's rendering; the Labs page goldens show the new row counted
 on Linux, macOS, and Windows.
+
+Model switch shortcut (`model-switch-shortcut`, every OS): one key that
+swaps the dictation model and language with a saved other one, and back, for
+dictating in two languages or with two models without opening Settings. While
+on, General shows a "Model switch shortcut" recorder and an "Other model" row
+under Shortcut, the same installed-model picker the keyboard-language rows use
+(`model_switch_other`). The recorder is clearable and refused when it shares a
+key with another Hex shortcut; every OS needs a key in it, because every OS
+matches it as a key press. `AppSettings::active_model_switch_hotkey` is the
+gate: the toggle on, an other model saved, a binding, and no overlap, so off
+saves nothing and matches nothing.
+
+A press while idle asks the app that owns model preparation for a swap
+(`transcription::other_model::request`); a press while a capture records or a
+dictation transcribes is ignored, and on macOS and Windows the capture keeps
+recording and still finishes. The owner plans the swap
+(`other_model::planned`): the saved choice must pass
+`KeyboardModelChoice::validate` (so Apple Speech and an unsupported language
+are refused), it must differ from the selection already running (the same
+choice is a no-op, with no reload), the model that runs now must be the one
+Hex would switch back to (a missing import refuses the switch instead of
+falling back to another model), and that model must itself be one the switch
+can save as the other (Apple Speech refuses, so swapping away from it can't be
+one-way). It then checks the target is installed and starts the same
+installed-only preparation the picker, the menu bar, and `hex model use` use.
+Only when that preparation loads are `transcription` and `model_switch_other`
+saved together, in one write; a failed preparation keeps the active model and
+the saved selection. A newer choice cancels an uncommitted swap and waits for
+its model load to exit before starting its own, so two models never load at
+once. A switch never cancels another preparation (a download or Enable's
+check): it is refused and that work continues. A refused or missing Other model changes nothing, logs why,
+and shows the reason in Settings, and beside the HUD when Labs › Failure
+notices is on (through the interface's translations), with no sound. Hex never
+downloads for it. A successful swap only logs the model: the HUD's one-line
+notice is the failure path, and Hex has no success notice to reuse.
+
+On macOS the bound key reaches `HotkeyAction::ModelSwitch` beside Paste Last's
+(`suppression::model_switch_action`) and the runtime's preparation; with
+secure input on, the same chord is a Carbon hotkey
+(`suppression::secure_input`). Windows registers it as its own hook trigger,
+swallows it while a capture records, and its host prepares and commits the
+swap. Linux adds `Shortcut::ModelSwitch` to the one reducer, with the portal
+id `model-switch`, an X11 grab, and a GNOME custom shortcut running `hex model
+switch` where there is no portal. `hex model switch` runs the same owner path
+from a terminal, in the running Hex, and is refused with `busy` while Hex
+records. Checks: `a_plan_moves_to_the_other_model_and_back`,
+`the_same_model_is_a_no_op`, `an_invalid_choice_and_a_lab_that_is_off_are_refused`,
+`a_current_model_that_cannot_run_refuses_the_switch`,
+`a_current_model_that_could_not_be_the_other_choice_refuses_the_switch`, and
+`the_shortcut_needs_its_lab_an_other_model_and_its_own_keys` in
+[transcription/other_model.rs](../../src/transcription/other_model.rs);
+`a_newer_choice_waits_for_the_swap_it_supersedes` and
+`a_switch_never_cancels_another_preparation` in
+[linux/app.rs](../../src/linux/app.rs);
+`a_model_switch_swap_saves_both_selections` in
+[app_settings/persistence/tests.rs](../../src/app_settings/persistence/tests.rs);
+`a_switch_press_never_strands_a_capture` in
+[suppression/tests.rs](../../src/suppression/tests.rs) (macOS);
+`the_model_switch_key_never_ends_a_modifier_only_capture` in
+[windows/input.rs](../../src/windows/input.rs) (cross-compiled only).
+Not yet observed: a real shortcut press on any OS, a real portal grant or X11
+grab, or a switch while a Windows hook runs.
 
 More dictation shortcuts (`more-dictation-shortcuts`, macOS): up to four
 more shortcuts that each dictate like the main one, each with its own
@@ -4281,6 +4352,57 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   ([capture.rs](../../src/meeting/capture.rs)); not observed on a real Mac call,
   and the menu bar, capsule, and pane controls are macOS-only code this Linux
   build never compiled.
+- Indicator on any display (macOS and Windows, with Meetings on): letting go
+  of a dragged meeting capsule over another display lands it in that
+  display's corner nearest where the throw would come to rest, and every
+  capsule shows there from then on. A capsule's release already measured
+  the primary display only (`primary_screen_size` in
+  [screen.rs](../../src/rune_ui/meeting_capsules/screen.rs)); on, the release
+  measures the display under the pointer instead (`screen::release`), pins
+  the window to it with Rune's `DisplayTarget::Native`
+  (`placement::place_on`), and the drag's corner is measured on that
+  display's own size, so the pill's side and the panel's edges stay right
+  there. Landing on another display jumps rather than gliding, since a glide
+  is measured within one display; landing on the same display glides as
+  before, and a pointer that is on no display at all (a failed read, or a gap
+  between two displays) keeps the display it was dragged on. An accepted
+  offer hands its own corner and display to the recording pill rather than the
+  saved anchor, so a drag that has not reached settings yet still lands the
+  pill where its window is. `meetings.recording_indicator_display` keeps the
+  landed display as the OS names it (`\\.\DISPLAY2` from the monitor's own
+  device name on Windows, the `CGDirectDisplayID` on macOS), next to
+  `meetings.recording_indicator_corner`, and is left out of `settings.json`
+  while it is the primary display. A saved display that is no longer
+  connected places the capsule on the primary display without clearing the
+  setting, which is also what Rune does with a native display id it cannot
+  find. Off, the capsules are put back on the primary display explicitly
+  (`screen::placed_target`), so turning the lab off mid-session brings a
+  pinned capsule back instead of leaving it there while every release
+  measures the primary display, and the saved display has no effect on where
+  a capsule shows or lands; every release and every show then takes exactly
+  the primary-display path it took before. Checks:
+  `the_meeting_indicator_display_lab_is_a_desktop_meetings_lab_off_by_default`
+  ([labs.rs](../../src/labs.rs)),
+  `a_saved_file_without_the_indicator_display_stays_on_the_primary`
+  ([meetings.rs](../../src/app_settings/meetings.rs)), and the tests in
+  [screen.rs](../../src/rune_ui/meeting_capsules/screen.rs):
+  `a_release_on_the_display_it_was_dragged_on_keeps_its_corner`,
+  `a_release_over_another_display_jumps_to_its_nearest_corner`,
+  `a_pointer_on_no_display_lands_where_it_was_dragged`,
+  `a_saved_display_that_is_gone_measures_the_primary_one`,
+  `a_saved_display_that_is_gone_is_the_primary_target` (a saved but
+  disconnected id resolves to the primary display),
+  `the_display_lab_off_puts_a_capsule_back_on_the_primary_display`, and
+  `a_display_holds_the_pointer_by_its_whole_frame`; plus
+  `the_display_lab_lands_a_release_on_the_pointer_s_display` and
+  `without_the_display_lab_a_release_keeps_the_primary_display`
+  ([meeting_capsules.rs](../../src/rune_ui/meeting_capsules.rs)). **Not
+  verified on real multi-monitor hardware on either OS, and the macOS and
+  Windows halves were not compiled**: this Linux host has no macOS SDK, and
+  Hex's C dependencies need `ml64.exe` for `x86_64-pc-windows-msvc`, though
+  `cargo check --target x86_64-pc-windows-msvc -p scrawl-capture` did check
+  the monitor helper's new device name. A native Wayland capsule still has no
+  display to measure, which is why Linux does not list the card.
 - Import audio (macOS): Meetings offers **Import audio…** beside Start
   recording. A local WAV, M4A, MP3, AIFF, or CAF file is decoded to 16 kHz
   mono float WAV by the AVFoundation bridge, then transcribed with the

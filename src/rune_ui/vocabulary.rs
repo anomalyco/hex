@@ -9,16 +9,15 @@ use rune::tok::motion::{SETTLE, SETTLE_EXIT};
 use rune::{El, SpringPair, TextEdit, Transition, Tx, col, edit_access, el, row, text};
 use rune_kit::{ControlSize, TextInput};
 
-use super::controls::{ButtonKind, DESCRIPTION, METRICS, Paint, button, modal_sheet, note};
+use super::controls::{
+    ButtonKind, METRICS, MODAL, ModalWidth, Paint, button, modal_panel, modal_sheet, note,
+};
 use super::lists::remove_button;
 use super::{Modal, Ui};
 use crate::desktop::file_dialog::{Dialog, Filter, Pending, Target};
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::dictation::vocabulary::csv::{self, MergeSummary};
 use crate::dictation::vocabulary::{self, VocabularyEntry};
-
-const MODAL_WIDTH: f32 = 620.0;
-const PADDING: f32 = 18.0;
 /// One term row: a regular text field and its padding.
 const ROW_HEIGHT: f32 = 36.0;
 /// The term list's fades; the bottom one is the gap before the footer at
@@ -574,7 +573,6 @@ fn term_row(p: Paint, entry: &TermRow, added: bool) -> El {
 }
 
 pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
-    let c = &p.k.c;
     let rows = col().key("terms").px(SIDE_ROOM).children(
         ui.vocabulary
             .rows
@@ -585,36 +583,35 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
     let terms = col()
         .key("term-column")
         .h(height.min(ROWS_HEIGHT))
-        .mx(-SIDE_ROOM)
+        .px(METRICS.row_px - SIDE_ROOM)
         .child(super::faded_body(p.k, "term-scroll", rows, FADES));
-    let add = button(
+    let mut footer = vec![button(
         p,
         "add-term",
         tr("Add term"),
         ButtonKind::Secondary,
         add_term,
-    );
-    let mut footer = row().key("footer").gap(12.0).center_y().child(add);
+    )];
     // Labs › Vocabulary files: two more ways to fill the list, never main
     // actions, so both stay Secondary.
     if on(ui) {
-        footer = footer
-            .child(button(
-                p,
-                "import-vocabulary",
-                tr("Import…"),
-                ButtonKind::Secondary,
-                |ui: &mut Ui, _| choose_import(ui),
-            ))
-            .child(button(
-                p,
-                "export-vocabulary",
-                tr("Export…"),
-                ButtonKind::Secondary,
-                |ui: &mut Ui, _| choose_export(ui),
-            ));
+        footer.push(button(
+            p,
+            "import-vocabulary",
+            tr("Import…"),
+            ButtonKind::Secondary,
+            |ui: &mut Ui, _| choose_import(ui),
+        ));
+        footer.push(button(
+            p,
+            "export-vocabulary",
+            tr("Export…"),
+            ButtonKind::Secondary,
+            |ui: &mut Ui, _| choose_export(ui),
+        ));
     }
-    let footer = footer.child(el().key("spacer").grow(1.0)).child(
+    footer.push(el().key("spacer").grow(1.0));
+    footer.push(
         button(
             p,
             "close-vocabulary",
@@ -626,26 +623,22 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
     );
     let mut heading = col()
         .key("heading")
+        .px(METRICS.row_px)
+        .mt(4.0 - MODAL.gap)
         .gap(4.0)
-        .child(
-            text(tr("Vocabulary"))
-                .key("title")
-                .font(p.k.ty.body_medium)
-                .color(p.text()),
-        )
         .child(
             text(tr(
                 "Transcription and rewriting spell them right, and search finds them when misheard",
             ))
             .key("description")
-            .font(DESCRIPTION)
+            .font(p.description())
             .color(p.muted())
             .wrap(),
         )
         .child(
             text(tr("Terms with spaces match only when said in full"))
                 .key("phrases")
-                .font(DESCRIPTION)
+                .font(p.description())
                 .color(p.muted())
                 .wrap(),
         );
@@ -654,50 +647,37 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
         heading = heading.child(
             text(unused)
                 .key("unused")
-                .font(DESCRIPTION)
+                .font(p.description())
                 .color(p.muted())
                 .wrap(),
         );
     }
-    let mut panel = col()
-        .key("vocabulary")
-        .role("dialog")
-        .label(tr("Vocabulary"))
-        .w(MODAL_WIDTH)
-        .pt(PADDING)
-        .px(PADDING)
-        .pb(14.0)
-        .gap(12.0)
-        .radius(p.k.radius.xl)
-        .fill(c.bg_base)
-        .border(p.hair, c.border_weak)
-        // Presses inside the panel stay inside.
-        .on_press(|_: &mut Ui| {})
-        .child(heading)
-        .child(terms);
+    let mut body = vec![heading, terms];
     if ui.vocabulary.clamped() {
-        panel = panel.child(
-            note(
-                "limits",
-                tr("Up to 16 spellings per term are saved, and 64 characters per term or spelling."),
-                p.danger(),
-            )
-            .mx(-METRICS.row_px),
-        );
+        body.push(note(
+            "limits",
+            tr("Up to 16 spellings per term are saved, and 64 characters per term or spelling."),
+            p.danger(),
+        ));
     }
     if on(ui)
         && let Some(status) = &ui.vocabulary.status
     {
-        panel = panel.child(
-            note(
-                "file-status",
-                &status.message,
-                if status.failed { p.danger() } else { p.muted() },
-            )
-            .mx(-METRICS.row_px),
-        );
+        body.push(note(
+            "file-status",
+            &status.message,
+            if status.failed { p.danger() } else { p.muted() },
+        ));
     }
-    modal_sheet(p, "vocabulary", panel.child(footer), close)
+    let panel = modal_panel(
+        p,
+        "vocabulary",
+        tr("Vocabulary"),
+        ModalWidth::Wide,
+        body,
+        footer,
+    );
+    modal_sheet(p, "vocabulary", panel, close)
 }
 
 /// A few terms, one with spellings, with the sheet open.

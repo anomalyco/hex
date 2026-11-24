@@ -7,7 +7,7 @@
     <string name="setup_step">第 %1$d 步，共 %2$d 步</string>
     <string name="setup_on_device" formatted="false">100% 设备端处理</string>
     <string name="setup_welcome_title">在任何应用中，\n用说话代替打字。</string>
-    <string name="setup_welcome_detail">Hex 只在下载语音模型（190 MB）和你点按“发送”提交反馈时使用网络。你的声音和文字都保留在这台设备上。</string>
+    <string name="setup_welcome_detail">Hex 只在下载语音模型（190 MB，以及你在实验室中添加的模型）和你点按“发送”提交反馈时使用网络。你的声音和文字都保留在这台设备上。</string>
     <string name="setup_get_started">开始使用</string>
     <string name="setup_title">设置 Hex</string>
     <string name="setup_detail">允许使用麦克风，然后选择 Hex 作为键盘。</string>
@@ -103,6 +103,25 @@
     <string name="settings_privacy_policy">隐私政策</string>
     <string name="settings_licences">开源许可</string>
     <string name="settings_labs">实验室</string>
+    <string name="labs_dictation">听写</string>
+    <string name="fast_english">更快的英语听写</string>
+    <string name="fast_english_detail">一次性下载 %1$d MB 后，英语听写快数倍。数字暂时以文字写出，其他语言不受影响。</string>
+    <string name="fast_english_download">下载 %1$d MB</string>
+    <string name="fast_english_loading">正在下载 %1$d MB · %2$d%%</string>
+    <string name="fast_english_ready">已就绪 · %1$d MB</string>
+    <string name="fast_english_delete">删除下载内容</string>
+    <string name="fast_english_stopped">下载已停止</string>
+    <string name="fast_english_no_connection">没有网络连接</string>
+    <string name="fast_english_no_space">存储空间不足</string>
+    <string name="fast_english_in_use">英语使用更快的听写（实验室）。</string>
+    <string name="learn_fixes">从我的修改中学习</string>
+    <string name="learn_fixes_detail">学习你听写后随即改正的词。内容只留在这台手机上，且仅记录词对、次数和每条修正最近一次的时间。</string>
+    <string name="learn_fixes_count">已改正 %1$d 次</string>
+    <string name="learn_fixes_empty">还没有学到内容。同一处改正两次后，Hex 就会记住。</string>
+    <string name="learn_fixes_delete">删除 Hex 学到的内容</string>
+    <string name="learn_fixes_delete_confirm">删除 Hex 学到的全部内容？</string>
+    <string name="learn_fixes_delete_action">删除</string>
+    <string name="learn_fixes_cancel">取消</string>
     <string name="labs_output">输出</string>
     <string name="labs_keyboard">键盘</string>
     <string name="emoji_suggestions">表情符号建议</string>
@@ -112,15 +131,19 @@
     <string name="signature_one_line">请使用一行</string>
     <string name="signature_too_long">请使用不超过 200 个字符</string>
     <string name="letter_symbols">字母键上的符号</string>
-    <string name="letter_symbols_detail">长按字母输入符号，例如长按 m 输入 /</string>
+    <string name="letter_symbols_detail">长按字母输入符号，例如长按 m 输入 ?</string>
     <string name="number_row">数字行</string>
     <string name="number_row_detail">在字母上方显示 1–0</string>
     <string name="local_currency">本地货币</string>
-    <string name="local_currency_detail">在 ?123 页面上用你所在地区的货币符号代替 $</string>
+    <string name="local_currency_detail">在 ?123 页面和长按 d 的符号中用你所在地区的货币符号代替 $</string>
     <string name="keyboard_tools">键盘工具</string>
     <string name="keyboard_tools_detail">在建议栏中显示表情、粘贴、设置和撤销</string>
     <string name="smart_quotes">智能引号</string>
     <string name="smart_quotes_detail">用 ’ ‘ “ ” 代替 \' 和 \"</string>
+    <string name="swipe_delete_letters">逐个字母删除滑行输入的单词</string>
+    <string name="swipe_delete_letters_detail">滑行输入后按删除键只删除一个字母，而不是整个单词</string>
+    <string name="password_manager_suggestions">密码管理器建议</string>
+    <string name="password_manager_suggestions_detail">在建议栏中显示自动填充服务提供的登录信息、验证码和卡片</string>
     <string name="voice_only_mode">仅语音模式</string>
     <string name="voice_only_detail">让你从其他键盘切换到 Hex 只做听写，说完再切换回去</string>
 </resources>

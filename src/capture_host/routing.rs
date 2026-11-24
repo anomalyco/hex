@@ -1148,11 +1148,6 @@ fn forget_rule(saved: &SavedRule) {
     }
 }
 
-/// Whether `config` authorizes Jev's confident picks to auto-send.
-fn auto_send_jev(config: &RouterConfig) -> bool {
-    config.auto_send == policy::AutoSend::Confident && config.jev_enabled()
-}
-
 /// The answer to show, and the destination of a rule's send.
 fn answer_for(
     decided: Decided,
@@ -3010,6 +3005,47 @@ mod tests {
                     "{auto_send:?}: {answer:?}"
                 );
                 assert_eq!(sent, None, "nothing is sent until it's picked");
+            }
+        }
+
+        /// The hosted Jev lookup runs only while `Auto-send with Jev` is on, so a
+        /// settings file left with `jevRouting` on and `autoSend` back at
+        /// `rules` never reaches Jev.
+        #[test]
+        fn only_an_on_auto_send_with_jev_asks_jev() {
+            static ASKED: AtomicU64 = AtomicU64::new(0);
+            fn ask(_: &[u8], _: Duration) -> anyhow::Result<Vec<u8>> {
+                ASKED.fetch_add(1, Ordering::Relaxed);
+                anyhow::bail!("test Jev")
+            }
+            for (auto_send, asks) in [
+                (policy::AutoSend::Rules, 0),
+                (policy::AutoSend::Confident, 1),
+            ] {
+                ASKED.store(0, Ordering::Relaxed);
+                let router = router_with(|c| {
+                    c.smart_routing = true;
+                    c.jev_routing = true;
+                    c.auto_send = auto_send;
+                });
+                let live = look::Live {
+                    candidates: vec![
+                        candidate("ses_board", "BOARD", 30),
+                        candidate("ses_home", "HOME", 20),
+                    ],
+                    ..look::Live::default()
+                };
+                let (mut look, found) = held_look(router, live.clone());
+                look.model.ask = ask;
+                let outcomes = SharedOutcomes::default();
+                let mut worker = worker(outcomes.clone());
+                let bundle = written("com.example.board");
+                lock(&outcomes).fail(bundle.clone(), "test".into());
+                worker.written(bundle.clone(), look);
+                found.send(Some(live)).unwrap();
+                settle(&mut worker);
+                assert_eq!(ASKED.load(Ordering::Relaxed), asks, "{auto_send:?}");
+                std::fs::remove_dir_all(bundle.parent().unwrap()).unwrap();
             }
         }
 

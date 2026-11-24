@@ -1996,6 +1996,53 @@ mod tests {
         );
     }
 
+    /// A refused Paste Last explains itself in the HUD, as a refused
+    /// dictation paste does; another Paste Last failure only keeps its tone.
+    #[test]
+    fn a_refused_paste_last_reaches_the_hud_notice() {
+        let caps_lock = crate::caps_lock_dictation::CapsLockDictation::for_test();
+        let (hud, notices) = crate::dictation::indicator::channel();
+        let path = std::env::temp_dir().join(format!(
+            "hex-paste-last-refusal-{}-{}.ndjson",
+            std::process::id(),
+            now_ms()
+        ));
+        let mut events = EventLog::create(&path).unwrap();
+        let refused = crate::paste::POST_EVENT_REFUSED.to_owned();
+        handle_dictation_event(
+            crate::parakeet::WorkerEvent::Pasted {
+                kind: crate::parakeet::PasteKind::LastTranscript,
+                result: Err(refused.clone()),
+            },
+            &mut events,
+            DictationSink {
+                hud: Some(&hud),
+                caps_lock: &caps_lock,
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            notices.try_recv(),
+            Ok(DictationIndicatorEvent::Failed { message: Some(message) }) if message == refused
+        ));
+        handle_dictation_event(
+            crate::parakeet::WorkerEvent::Pasted {
+                kind: crate::parakeet::PasteKind::LastTranscript,
+                result: Err("nothing to paste".into()),
+            },
+            &mut events,
+            DictationSink {
+                hud: Some(&hud),
+                caps_lock: &caps_lock,
+            },
+        )
+        .unwrap();
+        assert!(
+            notices.try_recv().is_err(),
+            "another Paste Last failure keeps the tone only"
+        );
+    }
+
     /// With Release microphone while idle, a lost microphone lets the next
     /// press start at once, so a release and that press can both be queued
     /// before the listener reads the loss. The release's finish claims the

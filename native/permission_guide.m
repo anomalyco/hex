@@ -68,6 +68,14 @@ static BOOL accessibilityProtected(void) {
     return [NSProcessInfo.processInfo isOperatingSystemAtLeastVersion:version];
 }
 
+/// Whether macOS 27.3 split the old Accessibility grant in two. The new
+/// Accessibility list holds assistive technologies; apps that control other
+/// apps (posting ⌘V included) need System & App Protection Override instead,
+/// and the Accessibility grant no longer stands in for that.
+bool hex_permission_split_accessibility(void) {
+    return accessibilityProtected();
+}
+
 /// The name of the Privacy & Security list each permission lives in.
 const char *hex_permission_list_name(int permission) {
     switch ((HexPermission)permission) {

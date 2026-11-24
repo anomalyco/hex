@@ -86,6 +86,23 @@ pub(super) fn handle_hotkey_action(
                 indicator,
             )
         }
+        // Labs › Model switch shortcut. It records nothing, and the chord's
+        // modifier press may have started a provisional capture, which is
+        // withdrawn as Paste Last's is. A capture already under way keeps its
+        // model: the shortcut is ignored until it ends.
+        HotkeyAction::ModelSwitch => {
+            if crate::audio::recording_environment::intentional_recording_active() {
+                tracing::info!("the model switch shortcut was ignored while a capture records");
+            } else {
+                context.cancel();
+                feedback::retract_start();
+                dictation.cancel()?;
+                // The runtime owns model preparation, so the press only asks
+                // it for the swap.
+                crate::transcription::other_model::request();
+            }
+            emit_engine_state(events, false, worker, device)
+        }
         HotkeyAction::PasteLast => {
             // The paste chord's modifier press started a provisional capture.
             context.cancel();

@@ -60,6 +60,7 @@ mod offer;
 #[path = "meeting_capsules/offer/surface.rs"]
 mod offer_surface;
 mod panel;
+mod placement;
 mod presence;
 mod screen;
 mod stage;
@@ -71,7 +72,8 @@ use panel::{
     agent_prompt, finalizing_window_size, hex_command, ready, ready_window_size, recording,
     recording_window_size,
 };
-use screen::primary_screen_size;
+use placement::{place_capsule, place_on};
+use screen::{Anchor, primary_screen_size};
 use state::{OfferChoices, ReadyHover, State};
 
 /// The offer, call ended, and ready capsules.
@@ -205,8 +207,9 @@ struct PillModel {
     call_ended: bool,
     /// The recording the pill shows now.
     shown: Option<String>,
-    /// Where this recording was last shown, kept through transcription for its summary.
-    last_anchor: Option<(String, MeetingIndicatorCorner)>,
+    /// Where this recording was last shown, kept through transcription for its
+    /// summary.
+    last_anchor: Option<(String, Anchor)>,
 }
 
 impl PillModel {
@@ -313,11 +316,21 @@ struct Capsule {
     /// back.
     keep_recording: Option<Arc<dyn Fn() + Send + Sync>>,
     resize: Option<Resize>,
+    /// Windows: the size the recording window was last given, which follows
+    /// what it draws (see [`panel::WindowFit`]).
+    #[cfg(target_os = "windows")]
+    recording_window: panel::WindowFit,
     choose: Choose,
     /// Where the capsule rests.
     corner: MeetingIndicatorCorner,
+    /// The display it rests on (`meetings.recording_indicator_display`),
+    /// while Labs › Indicator on any display is on; `None` is the primary
+    /// display, where Rune opens every capsule.
+    display: Option<String>,
     /// Moves the capsule's window by a drag's travel from `corner`.
     shift: Option<Shift>,
+    /// Moves the capsule's window onto another display at its next placement.
+    retarget: Option<Retarget>,
     /// The drag in progress and the glide into a corner after it.
     throw: throw::Throw,
     /// Reduce Motion, as the view last read it: a release jumps to its
@@ -328,16 +341,25 @@ struct Capsule {
     /// The primary screen in points, for a release's corner; a type that
     /// tests can replace with no screen at all.
     screen: ScreenFn,
-    save_corner: SaveCorner,
+    /// Every display in points, with the pointer's first, for a release
+    /// while Labs › Indicator on any display is on; a type that tests replace
+    /// with no display.
+    displays: DisplaysFn,
+    save_anchor: SaveAnchor,
 }
 
 type Choose = Arc<dyn Fn(MeetingProviderChoice) + Send + Sync>;
 /// Sets the capsule window's size in points.
 type Resize = Arc<dyn Fn((f32, f32)) + Send + Sync>;
 type Shift = Arc<dyn Fn(MeetingIndicatorCorner, f32, f32) + Send + Sync>;
-type SaveCorner = Arc<dyn Fn(MeetingIndicatorCorner) + Send + Sync>;
+/// Moves the capsule's window onto the display `None` names the primary for.
+type Retarget = Arc<dyn Fn(Option<&str>) + Send + Sync>;
+/// Saves where the capsule rests: its corner, and its display.
+type SaveAnchor = Arc<dyn Fn(MeetingIndicatorCorner, Option<&str>) + Send + Sync>;
 /// The primary screen in points, given the window's pixels-per-point scale.
 type ScreenFn = fn(f32) -> Option<(f32, f32)>;
+/// Every display in points, the pointer's first, given that same scale.
+type DisplaysFn = fn(f32) -> Option<screen::Displays>;
 
 impl Capsule {
     fn send(&self, command: ControllerCommand) -> bool {
@@ -373,27 +395,6 @@ impl Capsule {
                     stopping: false,
                 };
             }
-        }
-    }
-
-    /// Windows sizes the recording capsule's window to the pill it draws.
-    /// Elsewhere the window stays at its largest and only the `.hit()` pill
-    /// takes the pointer.
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    fn fit_recording_window(&self) {
-        if self.presentation.inherits_offer_window() {
-            return;
-        }
-        if let (
-            Some(resize),
-            State::Recording {
-                recording: shown,
-                hovered,
-                stopping,
-            },
-        ) = (&self.resize, &self.state)
-        {
-            resize(recording_window_size(*hovered || *stopping, Some(shown)));
         }
     }
 
@@ -469,10 +470,10 @@ impl Capsule {
             && ready.id == manifest.id
         {
             *ready = manifest;
+            // A longer summary grows the window here; one that goes shrinks
+            // it only once the surface has landed.
             #[cfg(target_os = "windows")]
-            if let Some(resize) = &self.resize {
-                resize(ready_window_size(ready));
-            }
+            self.fit_recording_window();
         }
     }
 
@@ -530,6 +531,16 @@ impl Capsule {
 
     /// The capsule's window size, for snapping a drag.
     fn window_size(&self) -> (f32, f32) {
+        // On Windows the recording window follows what it draws: snap by the
+        // size it was last given, not the one the surface is heading to.
+        #[cfg(target_os = "windows")]
+        if matches!(
+            self.state,
+            State::Recording { .. } | State::Finalizing { .. } | State::Ready { .. }
+        ) && let Some(size) = self.recording_window.size()
+        {
+            return size;
+        }
         if self.presentation.inherits_offer_window() {
             return self.presentation.window();
         }
@@ -547,93 +558,6 @@ impl Capsule {
             State::AutoStarted { .. } | State::Empty => (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
         }
     }
-
-    /// The capsule follows the pointer one to one. On release it glides
-    /// from where it was let go, at the throw's speed, into the corner the
-    /// throw heads for (under Reduce Motion it jumps there). A cancelled
-    /// drag (Escape, window blur) returns to the corner it started from and
-    /// saves nothing.
-    fn drag(&mut self, drag: &Drag, tx: &mut Tx) {
-        let Some(shift) = self.shift.clone() else {
-            return;
-        };
-        let now = tx.clock();
-        match drag.phase {
-            Phase::Down => self.throw.press(now),
-            Phase::Move => {
-                let (x, y) = self.throw.track(now, drag.dx, drag.dy);
-                shift(self.corner, x, y);
-            }
-            Phase::Up if drag.cancelled() => {
-                self.throw.stop();
-                shift(self.corner, 0.0, 0.0);
-            }
-            Phase::Up => {
-                let offset = self.throw.track(now, drag.dx, drag.dy);
-                let velocity = self.throw.velocity(now);
-                let Some(screen) = (self.screen)(self.scale.get()) else {
-                    self.throw.stop();
-                    shift(self.corner, 0.0, 0.0);
-                    return;
-                };
-                let landing =
-                    throw::land(self.corner, offset, velocity, screen, self.window_size());
-                let corner = landing.corner;
-                let glide = if self.reduced.get() {
-                    self.throw.stop();
-                    None
-                } else {
-                    self.throw.glide(landing, now)
-                };
-                match glide {
-                    Some((x, y)) => {
-                        shift(corner, x, y);
-                        tx.wake_after(Duration::ZERO);
-                    }
-                    None => shift(corner, 0.0, 0.0),
-                }
-                if corner != self.corner {
-                    tracing::info!(?corner, "meeting capsule moved");
-                    self.corner = corner;
-                    (self.save_corner)(corner);
-                    // The pill changes sides with the window; it must not
-                    // slide across it.
-                    tx.instant();
-                }
-            }
-        }
-    }
-}
-
-/// Where a corner's capsule window sits: its edge and margin, and its
-/// alignment and inset along that edge, after a drag of (dx, dy) points.
-fn corner_placement(
-    corner: MeetingIndicatorCorner,
-    dx: f32,
-    dy: f32,
-) -> (ScreenEdge, f32, Align, f32) {
-    let (edge, margin) = if corner.is_top() {
-        (ScreenEdge::Top, WINDOW_MARGIN + MENU_BAR + dy)
-    } else {
-        (ScreenEdge::Bottom, WINDOW_MARGIN + DOCK - dy)
-    };
-    let (align, inset) = if corner.is_right() {
-        (Align::End, WINDOW_MARGIN - dx)
-    } else {
-        (Align::Start, WINDOW_MARGIN + dx)
-    };
-    (edge, margin, align, inset)
-}
-
-fn place_capsule(
-    handle: &OverlayHandle<Capsule>,
-    corner: MeetingIndicatorCorner,
-    dx: f32,
-    dy: f32,
-) {
-    let (edge, margin, align, inset) = corner_placement(corner, dx, dy);
-    handle.place(edge, margin);
-    handle.set_align(align, inset);
 }
 
 /// Linux: lets the capsule's next show float on XWayland where Wayland has
@@ -707,12 +631,26 @@ impl Pill {
         }
         model.shown = Some(id.clone());
         let corner = crate::app_settings::meeting_indicator_corner();
-        model.last_anchor = Some((id.clone(), corner));
+        let anchor = Anchor {
+            corner,
+            display: crate::app_settings::saved_meeting_indicator_display(),
+        };
+        model.last_anchor = Some((id.clone(), anchor.clone()));
         if inherit {
-            self.handle
-                .update(move |c, tx| c.start_recording(recording, tx));
+            // The accepted offer's window is this capsule's, so it already
+            // rests in the corner and display the offer was dragged to: the
+            // pill keeps exactly that, not the saved one, in case the offer's
+            // drag has not reached settings yet.
+            self.handle.update(move |c, tx| {
+                let anchor = Anchor {
+                    corner: c.corner,
+                    display: c.display.clone(),
+                };
+                c.start_recording(recording, anchor, tx);
+            });
             return Some(id);
         }
+        place_on(&self.handle, anchor.display.as_deref());
         place_capsule(&self.handle, corner, 0.0, 0.0);
         // Windows: a shown pill starts at rest.
         self.handle
@@ -722,8 +660,7 @@ impl Pill {
         self.handle.update(move |capsule, tx| {
             capsule.presentation = Default::default();
             capsule.stage = Default::default();
-            capsule.corner = corner;
-            capsule.start_recording(recording, tx);
+            capsule.start_recording(recording, anchor, tx);
         });
         float_on_xwayland(&self.handle);
         self.handle.show();
@@ -776,10 +713,10 @@ impl MeetingCapsules {
         app: &mut rune::App<S>,
         commands: SyncSender<ControllerCommand>,
         choose: impl Fn(MeetingProviderChoice) + Send + Sync + 'static,
-        save_corner: impl Fn(MeetingIndicatorCorner) + Send + Sync + 'static,
+        save_anchor: impl Fn(MeetingIndicatorCorner, Option<&str>) + Send + Sync + 'static,
     ) -> Self {
         let choose: Choose = Arc::new(choose);
-        let save_corner: SaveCorner = Arc::new(save_corner);
+        let save_anchor: SaveAnchor = Arc::new(save_anchor);
         let overlay = |app: &mut rune::App<S>, name, size: (f32, f32), recording: bool| {
             let spec = OverlaySpec {
                 name,
@@ -811,14 +748,19 @@ impl MeetingCapsules {
                     show: None,
                     keep_recording: None,
                     resize: None,
+                    #[cfg(target_os = "windows")]
+                    recording_window: Default::default(),
                     choose: choose.clone(),
                     corner: MeetingIndicatorCorner::default(),
+                    display: None,
                     shift: None,
+                    retarget: None,
                     throw: throw::Throw::default(),
                     reduced: Cell::new(false),
                     scale: Cell::new(1.0),
                     screen: primary_screen_size,
-                    save_corner: save_corner.clone(),
+                    displays: screen::displays,
+                    save_anchor: save_anchor.clone(),
                 },
             );
             // Only the drawn capsule (its `.hit()` body) takes clicks; the
@@ -830,13 +772,16 @@ impl MeetingCapsules {
             #[cfg(not(target_os = "windows"))]
             handle.set_input(OverlayInput::Regions);
             let (hide, resize, shift) = (handle.clone(), handle.clone(), handle.clone());
-            let show = handle.clone();
+            let (show, retarget) = (handle.clone(), handle.clone());
             handle.update(move |capsule, _| {
                 capsule.hide = Some(Arc::new(move || hide.hide()));
                 capsule.show = Some(Arc::new(move || show.show()));
                 capsule.resize = Some(Arc::new(move |size| resize.resize(size)));
                 capsule.shift = Some(Arc::new(move |corner, dx, dy| {
                     place_capsule(&shift, corner, dx, dy);
+                }));
+                capsule.retarget = Some(Arc::new(move |display| {
+                    place_on(&retarget, display);
                 }));
             });
             handle
@@ -859,15 +804,16 @@ impl MeetingCapsules {
         let kept = pill.clone();
         let anchors = pill.model.clone();
         pill.handle.update(move |capsule, _| {
-            capsule.save_corner = Arc::new(move |corner| {
-                if let Some((_, at)) = &mut anchors
+            capsule.save_anchor = Arc::new(move |corner, display| {
+                if let Some((_, anchor)) = &mut anchors
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .last_anchor
                 {
-                    *at = corner;
+                    anchor.corner = corner;
+                    anchor.display = display.map(str::to_owned);
                 }
-                save_corner(corner);
+                save_anchor(corner, display);
             });
         });
         panel.update(move |capsule, _| {
@@ -1025,13 +971,14 @@ impl MeetingCapsules {
             } => (stops.as_ref().map(|(at, _)| *at), application.clone()),
             _ => (None, None),
         };
-        // The saved corner, and a finished meeting its recording's corner.
-        let corner = panel::show_corner(
-            &kind,
-            self.pill.lock().last_anchor.as_ref(),
-            crate::app_settings::meeting_indicator_corner,
-        );
-        place_capsule(&panel, corner, 0.0, 0.0);
+        // The saved corner and display, and a finished meeting its
+        // recording's own.
+        let anchor = panel::show_anchor(&kind, self.pill.lock().last_anchor.as_ref(), || Anchor {
+            corner: crate::app_settings::meeting_indicator_corner(),
+            display: crate::app_settings::saved_meeting_indicator_display(),
+        });
+        place_on(&panel, anchor.display.as_deref());
+        place_capsule(&panel, anchor.corner, 0.0, 0.0);
         let presentation = offer_surface::Presentation::for_kind(&kind, false);
         // Only the detected offer reserves space for its wider page. The
         // other Windows panels retain their original, window-sized input.
@@ -1053,7 +1000,7 @@ impl MeetingCapsules {
         let rearm = offer_id
             .is_some()
             .then(|| offer::timer(panel.clone(), self.generation.clone(), generation));
-        panel.update(move |capsule, tx| capsule.show(kind, presentation, corner, rearm, tx));
+        panel.update(move |capsule, tx| capsule.show(kind, presentation, anchor, rearm, tx));
         float_on_xwayland(&panel);
         panel.show();
         if let Some(id) = offer_id {
@@ -1224,8 +1171,16 @@ fn dismiss_button(p: Paint) -> El {
 fn poll(capsule: &mut Capsule, now: f64, tx: &mut Tx) -> bool {
     // The surface first: the field is drawn once a frame, at the width the
     // wall has just reached.
-    let mut changed = capsule.step_stage(now, tx);
+    let staged = capsule.step_stage(now, tx);
+    let mut changed = staged;
     changed |= waveform::poll(capsule, now, tx);
+    // Windows: once the surface has landed, a window kept large for a
+    // closing panel can shrink to the pill it now draws. The waveform may
+    // still be moving, so this reads the surface alone.
+    #[cfg(target_os = "windows")]
+    if !staged {
+        capsule.settle_recording_window();
+    }
     if !capsule.throw.gliding() {
         return changed;
     }
@@ -1516,6 +1471,7 @@ mod tests {
     use rune::{Env, Runtime};
 
     use super::panel::shell_word;
+    use super::placement::corner_placement;
     use super::throw::nearest_corner;
     use super::*;
     use crate::meeting::detection::MeetingSource;
@@ -1609,15 +1565,20 @@ mod tests {
             show: None,
             keep_recording: None,
             resize: None,
+            #[cfg(target_os = "windows")]
+            recording_window: Default::default(),
             choose: Arc::new(move |choice| saved.lock().unwrap().push(choice)),
             corner: MeetingIndicatorCorner::TopRight,
+            display: None,
             shift: None,
+            retarget: None,
             throw: throw::Throw::default(),
             reduced: Cell::new(false),
             scale: Cell::new(1.0),
             // No screen: a release lands back in the corner it started in.
             screen: |_| None,
-            save_corner: Arc::new(|_| {}),
+            displays: |_| None,
+            save_anchor: Arc::new(|_, _| {}),
         };
         let env = Env {
             system_dark: dark,
@@ -2066,7 +2027,7 @@ mod tests {
             capsule.shift = Some(Arc::new(move |corner, dx, dy| {
                 record.lock().unwrap().push((corner, dx, dy));
             }));
-            capsule.save_corner = Arc::new(move |corner| save.lock().unwrap().push(corner));
+            capsule.save_anchor = Arc::new(move |corner, _| save.lock().unwrap().push(corner));
         });
         rt.frame(0.0);
         let (x, y) = rt.find("pill").unwrap();
@@ -2089,6 +2050,125 @@ mod tests {
         assert!(saved.lock().unwrap().is_empty());
     }
 
+    /// Two displays in one point space: the 1512 × 982 primary laptop, and
+    /// the 1920 × 1080 monitor to its right, the pointer's (so listed first).
+    fn two_displays() -> Vec<screen::Display> {
+        let display = |id: &str, x: f32, size: (f32, f32), primary: bool| screen::Display {
+            target: if primary {
+                rune::DisplayTarget::Primary
+            } else {
+                rune::DisplayTarget::Native(rune::NativeDisplayId::Windows(7))
+            },
+            id: id.to_owned(),
+            frame: (x, 0.0, size.0, size.1),
+            origin: (x, 0.0),
+            size,
+            scale: 1.0,
+            primary,
+        };
+        vec![
+            display("monitor", 1512.0, (1920.0, 1080.0), false),
+            display("laptop", 0.0, (1512.0, 982.0), true),
+        ]
+    }
+
+    #[test]
+    fn the_display_lab_lands_a_release_on_the_pointer_s_display() {
+        type Moves = Arc<Mutex<Vec<(MeetingIndicatorCorner, f32, f32)>>>;
+        type Anchors = Arc<Mutex<Vec<(MeetingIndicatorCorner, Option<String>)>>>;
+        type Targets = Arc<Mutex<Vec<Option<String>>>>;
+        let (mut rt, _, _) = runtime(live_recording("capsule-displays"), false, true, RECORDING);
+        let (moves, anchors, targets): (Moves, Anchors, Targets) = Default::default();
+        let (record, save, target) = (moves.clone(), anchors.clone(), targets.clone());
+        rt.update(move |capsule, _| {
+            capsule.shift = Some(Arc::new(move |corner, dx, dy| {
+                record.lock().unwrap().push((corner, dx, dy));
+            }));
+            capsule.retarget = Some(Arc::new(move |display| {
+                target.lock().unwrap().push(display.map(str::to_owned));
+            }));
+            capsule.save_anchor = Arc::new(move |corner, display| {
+                save.lock()
+                    .unwrap()
+                    .push((corner, display.map(str::to_owned)));
+            });
+            capsule.screen = |_| Some((1512.0, 982.0));
+            capsule.displays = |_| {
+                Some(screen::Displays {
+                    all: two_displays(),
+                    pointer: true,
+                })
+            };
+        });
+        placement::force_anywhere(Some(true));
+        rt.frame(0.0);
+        let (x, y) = rt.find("pill").unwrap();
+        rt.pointer_move(x, y);
+        rt.pointer_down(x, y);
+        rt.pointer_move(x + 500.0, y);
+        rt.frame(0.0);
+        rt.pointer_up(x + 500.0, y);
+        rt.frame(0.0);
+        placement::force_anywhere(None);
+        // It jumped onto the monitor, into that display's nearest corner,
+        // and saved both.
+        assert_eq!(
+            targets.lock().unwrap().last(),
+            Some(&Some("monitor".to_owned()))
+        );
+        assert_eq!(
+            moves.lock().unwrap().last(),
+            Some(&(MeetingIndicatorCorner::TopLeft, 0.0, 0.0))
+        );
+        assert_eq!(
+            anchors.lock().unwrap().last(),
+            Some(&(MeetingIndicatorCorner::TopLeft, Some("monitor".to_owned())))
+        );
+    }
+
+    #[test]
+    fn without_the_display_lab_a_release_keeps_the_primary_display() {
+        type Anchors = Arc<Mutex<Vec<(MeetingIndicatorCorner, Option<String>)>>>;
+        let (mut rt, _, _) = runtime(live_recording("capsule-primary"), false, true, RECORDING);
+        let anchors: Anchors = Default::default();
+        let save = anchors.clone();
+        let targets: Arc<Mutex<Vec<Option<String>>>> = Default::default();
+        let target = targets.clone();
+        rt.update(move |capsule, _| {
+            capsule.shift = Some(Arc::new(|_, _, _| {}));
+            capsule.retarget = Some(Arc::new(move |display| {
+                target.lock().unwrap().push(display.map(str::to_owned));
+            }));
+            capsule.save_anchor = Arc::new(move |corner, display| {
+                save.lock()
+                    .unwrap()
+                    .push((corner, display.map(str::to_owned)));
+            });
+            capsule.screen = |_| Some((1512.0, 982.0));
+            capsule.displays = |_| {
+                Some(screen::Displays {
+                    all: two_displays(),
+                    pointer: true,
+                })
+            };
+        });
+        rt.frame(0.0);
+        let (x, y) = rt.find("pill").unwrap();
+        rt.pointer_move(x, y);
+        rt.pointer_down(x, y);
+        rt.pointer_move(x - 700.0, y);
+        rt.frame(0.0);
+        rt.pointer_up(x - 700.0, y);
+        rt.frame(0.0);
+        // The primary display measured it, as before, and no display was
+        // written.
+        assert!(targets.lock().unwrap().is_empty());
+        assert_eq!(
+            anchors.lock().unwrap().last(),
+            Some(&(MeetingIndicatorCorner::TopLeft, None))
+        );
+    }
+
     #[test]
     fn a_cancelled_capsule_drag_returns_to_its_corner_without_saving() {
         type Moves = Arc<Mutex<Vec<(MeetingIndicatorCorner, f32, f32)>>>;
@@ -2099,7 +2179,7 @@ mod tests {
             capsule.shift = Some(Arc::new(move |corner, dx, dy| {
                 record.lock().unwrap().push((corner, dx, dy));
             }));
-            capsule.save_corner = Arc::new(move |corner| save.lock().unwrap().push(corner));
+            capsule.save_anchor = Arc::new(move |corner, _| save.lock().unwrap().push(corner));
         });
         rt.frame(0.0);
         let (x, y) = rt.find("pill").unwrap();
@@ -2324,12 +2404,24 @@ mod tests {
     #[test]
     fn summary_inherits_the_recordings_outer_anchor_without_the_drag_lab() {
         use MeetingIndicatorCorner::{BottomLeft, TopRight};
-        let anchor = ("ready-snap".to_owned(), BottomLeft);
+        let anchor = (
+            "ready-snap".to_owned(),
+            Anchor {
+                corner: BottomLeft,
+                display: None,
+            },
+        );
         let kind = ready_summarized();
-        let corner = panel::show_corner(&kind, Some(&anchor), || TopRight);
-        assert_eq!(corner, BottomLeft);
+        let saved = || Anchor {
+            corner: TopRight,
+            display: None,
+        };
         assert_eq!(
-            panel::show_corner(&call_ended(), Some(&anchor), || TopRight),
+            panel::show_anchor(&kind, Some(&anchor), saved).corner,
+            BottomLeft
+        );
+        assert_eq!(
+            panel::show_anchor(&call_ended(), Some(&anchor), saved).corner,
             TopRight
         );
         let (mut live, _, _) = runtime(live_recording("ready-snap"), false, false, RECORDING);
@@ -2351,7 +2443,7 @@ mod tests {
         let size = ready_size_of(&kind);
         let (mut ready, commands, _) = runtime(kind, false, false, size);
         ready.update(move |c, tx| {
-            c.corner = corner;
+            c.corner = BottomLeft;
             c.live.entries = call();
             tx.instant();
         });

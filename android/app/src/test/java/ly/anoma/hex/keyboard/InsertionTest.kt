@@ -432,6 +432,17 @@ class InsertionTest {
         assertEquals(false, SpaceRules.separates("\nfox"))
         assertEquals(false, SpaceRules.separates("fox"))
         assertEquals(false, SpaceRules.separates(null))
+        // A picked word's space (Gboard adds one in Chrome's address bar too): a clause mark takes it anywhere, and in
+        // a URL field so do . / and the other joiners ("github." and "github/", never "github /").
+        for (mark in ",.!?;:)") {
+            assertEquals("$mark", true, SpaceRules.takesPickedSpace(mark, url = false))
+            assertEquals("$mark", true, SpaceRules.takesPickedSpace(mark, url = true))
+        }
+        assertEquals(false, SpaceRules.takesPickedSpace('/', url = false))
+        assertEquals(true, SpaceRules.takesPickedSpace('/', url = true))
+        assertEquals(true, SpaceRules.takesPickedSpace('-', url = true))
+        assertEquals(false, SpaceRules.takesPickedSpace('(', url = true))
+        assertEquals(false, SpaceRules.takesPickedSpace('w', url = true))
     }
     // iOS CleanupTaggerTests' English examples and its hand-written set, met with rules (no tagger).
     @Test fun englishCleanupRulesMeetTheTaggersExamples() {
@@ -607,7 +618,7 @@ class InsertionTest {
         val a = LetterFeedback.holds('a', "en", null, symbolsOnLetters = true)
         assertEquals("@", a.first())
         assertEquals(LetterFeedback.options('a', "en"), a.drop(1))
-        assertEquals(listOf("/"), LetterFeedback.holds('m', "en", null, symbolsOnLetters = true))
+        assertEquals(listOf("?"), LetterFeedback.holds('m', "en", null, symbolsOnLetters = true))
         assertEquals(LetterFeedback.options('e', "en"), LetterFeedback.holds('e', "en", null, symbolsOnLetters = true))
         // On the top row, with the number row hiding its digit, a letter offers Gboard's symbol first.
         assertEquals(listOf("%"), LetterFeedback.holds('q', "en", null, symbolsOnLetters = true, topRow = true))
@@ -803,5 +814,15 @@ class InsertionTest {
         retries.tookBack("there", "Hello world ")
         retries.forget()
         assertEquals(readings, retries.typing(readings, "Hello world "))
+    }
+
+    // Labs › Keyboard › Delete swiped words letter by letter: on, delete after a swipe is an ordinary one.
+    @Test fun deleteTakesASwipedWordBackOnlyWhereTheSwipeLeftItAndOnlyWithTheLabOff() {
+        assertTrue(SwipeText.takesBack("Hello world", "Hello world", "world", letterByLetter = false))
+        assertFalse(SwipeText.takesBack("Hello world", "Hello world", "world", letterByLetter = true))
+        // The text changed or the cursor moved since the swipe: the word is ordinary text by then.
+        assertFalse(SwipeText.takesBack("Hello worl", "Hello world", "world", letterByLetter = false))
+        assertFalse(SwipeText.takesBack("Hello world", null, "world", letterByLetter = false))
+        assertFalse(SwipeText.takesBack("Hello world!", "Hello world!", "world", letterByLetter = false))
     }
 }

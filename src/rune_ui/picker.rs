@@ -382,6 +382,7 @@ pub(super) fn cancel(ui: &mut Ui) {
 /// its default language, which Settings then names.
 pub(super) fn choose(ui: &mut Ui, model: &ModelDefinition) {
     ui.picker.clear_deletion();
+    ui.found.error = None;
     let current = &ui.settings.transcription;
     // A file that is here but not checked is not active yet: choosing it
     // sends it through the model preparation, which verifies and adopts it.

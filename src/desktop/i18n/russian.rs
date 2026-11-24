@@ -15,6 +15,7 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("macOS isn't letting Hex paste. Add Hex in System Settings > Privacy & Security > System & App Protection Override, then restart Hex.", "macOS не разрешает Hex вставлять текст. Добавьте Hex в «Системные настройки» > «Конфиденциальность и безопасность» > «Переопределение защиты системы и приложений», затем перезапустите Hex."),
     ("Sent to", "Отправлено в"),
     ("Nothing here yet", "Здесь пока ничего нет"),
     ("Dictations, annotations, and captures show here.", "Здесь появляются диктовки, аннотации и снимки."),
@@ -135,7 +136,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("The mic opens only while you dictate; the first moment can be clipped", "Микрофон открывается только во время диктовки; самое начало может обрезаться"),
     ("The mic stays ready so dictation starts instantly; your system shows it in use", "Микрофон остаётся наготове, и диктовка начинается мгновенно; система показывает, что он используется"),
     ("Hex can't listen until the speech model has downloaded", "Hex не может слушать, пока модель речи не загрузится"),
-    ("Don't switch", "Не переключать"),
     ("Your desktop assigns this key itself, so Hex can't confirm it", "Ваше окружение рабочего стола само назначает эту клавишу, поэтому Hex не может это подтвердить"),
     ("Not installed", "Не установлено"),
     ("Switch model with keyboard language", "Переключать модель вместе с языком клавиатуры"),
@@ -813,6 +813,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Context", "Контекст"),
     ("Current context", "Текущий контекст"),
     ("None", "Нет"),
+    ("Don't switch", "Не переключать"),
     ("Keyboard", "Клавиатура"),
     ("Browser navigation", "Навигация в браузере"),
     ("Application navigation", "Навигация в приложении"),
@@ -1491,6 +1492,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Stop every call recording when the call ends", "Останавливать любую запись звонка при завершении звонка"),
     ("Also stop an offered, calendar, or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off", "Также останавливает запись, начатую по предложению, из календаря или вручную, через 30 с после того, как её приложение звонка отпускает микрофон, даже если «Останавливать по окончании звонка» выключено"),
     ("Also stop an offered or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off", "Также останавливает запись, начатую по предложению или вручную, через 30 с после того, как её приложение звонка отпускает микрофон, даже если «Останавливать по окончании звонка» выключено"),
+    ("Indicator on any display", "Индикатор на любом экране"),
+    ("Drag the meeting recording indicator to another display and it stays there", "Перетащите индикатор записи встречи на другой экран, и он останется там"),
 ];
 
 #[cfg(test)]

@@ -282,6 +282,22 @@ class NeverSuggestTest {
         assertEquals("es ill ", word("es", spatial = false).typed(layout("es"), "es ill "))
     }
 
+    // A mark from the ?123 page ends the word typed on the letters as the letters page's own marks do: the
+    // engine keeps the word across the switch and asks the same TypingWord.endsWord (iPhone Hex's wordEnders, plus
+    // the smart ”), so "teh" then ?123 "?" is "the?" (Gboard too). A digit or a mark that carries the token on (an
+    // apostrophe, @, _, -, / or #) never ends it, so it corrects nothing on either page.
+    @Test fun aClosingMarkFromTheSymbolPageCorrectsAsOnTheLetters() {
+        val g = layout("en")
+        for (mark in ",.!?;:)\"\u201D") {
+            val w = word(spatial = false)
+            w.reset("")
+            for (c in "teh") w.tap(g, c)
+            assertTrue("$mark ends a word", TypingWord.endsWord(mark))
+            assertEquals("teh$mark", "the", w.finish(mark)?.replacement)
+        }
+        for (mark in "0123456789'\u2019@_-/#") assertFalse("$mark carries the token on", TypingWord.endsWord(mark))
+    }
+
     // Labs › Keyboard › Smart quotes: a word autocorrected to a curly apostrophe is still revised by
     // the word after it, because revision looks the word up by its straight spelling.
     @Test fun aCurledContractionIsStillRevisedByTheNextWord() {

@@ -164,6 +164,9 @@ struct ActiveRecording {
     stop: Arc<AtomicBool>,
     updates: Receiver<meeting::RecordingUpdate>,
     reported_started: bool,
+    /// A browser's playback stopped counting while the Mac was locked, and
+    /// that was logged once for this recording (#2685); cleared on unlock.
+    playback_locked_noted: bool,
     worker: JoinHandle<Result<meeting::MeetingManifest>>,
 }
 
@@ -187,7 +190,11 @@ fn flush_withdrawn_offers(detector: &mut MeetingDetector, events: &SyncSender<Co
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MeetingMenuState {
     Idle,
-    Starting,
+    Starting {
+        /// Stop was requested while the recorder was still starting: it
+        /// finishes that meeting before it takes another.
+        stopping: bool,
+    },
     Recording {
         started: Instant,
         id: String,
@@ -197,6 +204,10 @@ pub enum MeetingMenuState {
         /// The microphone is digitally silent, as a call app holding it with
         /// voice processing leaves it (#1518).
         warning: Option<TrackWarning>,
+        /// Stop was requested and the capture worker is still closing its
+        /// sources. The recorder holds this recording until it finishes
+        /// transcribing, so nothing new can start yet.
+        stopping: bool,
     },
     Transcribing,
 }
@@ -206,6 +217,17 @@ impl MeetingMenuState {
     pub(crate) fn source_warning(&mut self, warning: Option<TrackWarning>) {
         if let Self::Recording { warning: shown, .. } = self {
             *shown = warning;
+        }
+    }
+
+    /// A stop was requested for what the recorder is doing now. It finishes
+    /// that meeting before it takes another, so nothing new starts until the
+    /// mirror reads `transcribing` or `idle`. Idle has nothing to stop, and
+    /// a transcribing meeting is already past capture.
+    pub(crate) fn stopping_requested(&mut self) {
+        match self {
+            Self::Starting { stopping } | Self::Recording { stopping, .. } => *stopping = true,
+            Self::Idle | Self::Transcribing => {}
         }
     }
 }
@@ -877,6 +899,7 @@ fn start_recording(
         stop,
         updates,
         reported_started: false,
+        playback_locked_noted: false,
         worker,
     });
 }
@@ -973,8 +996,31 @@ fn poll_recording(
             crate::app_settings::meeting_stop_when_call_ends(),
             crate::labs::stop_any_call_recording(),
         );
+        // A browser seems to keep its output open after its call while the
+        // Mac is locked (#2685): playback stops counting there, and one note
+        // per recording says so, so the next report shows whether that is
+        // what happened.
+        let locked = crate::audio::system_idle::session_locked();
+        if !locked {
+            active.playback_locked_noted = false;
+        } else if auto_stop
+            && !active.playback_locked_noted
+            && crate::microphone_activity::is_browser_id(Some(application))
+        {
+            active.playback_locked_noted = true;
+            tracing::info!(
+                application,
+                "the Mac is locked; the browser's playback no longer keeps its call present"
+            );
+        }
         let applications = active_microphone_applications();
-        let pass = call_end::watched_pass(application, auto_stop, &applications, call_app_playing);
+        let pass = call_end::watched_pass(
+            application,
+            locked,
+            auto_stop,
+            &applications,
+            call_app_playing,
+        );
         if pass.present {
             detector.keep_snooze_alive();
         }
@@ -1553,6 +1599,7 @@ mod tests {
             stop: Arc::new(AtomicBool::new(false)),
             updates,
             reported_started: true,
+            playback_locked_noted: false,
             worker: thread::spawn(|| Err(eyre!("not recording"))),
         });
         if let Some(active) = recording.as_mut() {
@@ -1593,6 +1640,7 @@ mod tests {
             stop: Arc::new(AtomicBool::new(false)),
             updates,
             reported_started: true,
+            playback_locked_noted: false,
             worker: thread::spawn(|| Err(eyre!("not recording"))),
         }
     }
@@ -1995,6 +2043,7 @@ mod tests {
             stop: Arc::new(AtomicBool::new(false)),
             updates,
             reported_started: true,
+            playback_locked_noted: false,
             worker: thread::spawn(|| Err(eyre!("not recording"))),
         });
         start_import(

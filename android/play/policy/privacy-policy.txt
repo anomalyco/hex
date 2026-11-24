@@ -1,5 +1,5 @@
 Hex for Android
-Last updated November 23, 2026
+Last updated November 24, 2026
 
 Anomaly Innovations, Inc. makes Hex and Hex Keyboard for Android. We do not collect or share your personal data, except feedback you choose to send. Hex has no accounts, ads, tracking or analytics.
 
@@ -9,8 +9,8 @@ In ordinary text fields, Hex uses nearby text and your taps to suggest words and
 Dictation
 Hex uses the microphone only when you start dictating. It processes the audio in memory, without saving a recording, and turns speech into text on your device. Translation and cleanup also run on your device. Hex keeps no transcript history. The app where you insert text may save or send it according to its own policy.
 
-The model download
-During setup, Hex asks Hugging Face and its delivery network for one public speech model (190 MB) over HTTPS. The host sees the IP address needed to deliver the file. Hex does not send your words, audio, account information or device identifier with the request. After the download, no connection is needed to use the model. If it is interrupted, you can retry or use the smaller model included in Hex.
+Model downloads
+During setup, Hex asks Hugging Face and its delivery network for one public speech model (190 MB) over HTTPS. If you turn on Faster English dictation in Labs and tap Download, Hex asks them the same way for a second public model (135 MB) that it uses for English. The host sees the IP address needed to deliver each file. Hex does not send your words, audio, account information or device identifier with either request. After a download, no connection is needed to use the model. If the first is interrupted, you can retry or use the smaller model included in Hex.
 
 Feedback you send
 Hex's Send feedback form, on Home, sends nothing until you tap Send. Then Hex sends, over HTTPS, to Anomaly's feedback inbox (Bellhop, run by Anomaly): your message, and a subject and kind if you chose them; the pictures shown in the form, which start with a picture of Hex's own screen taken when you opened the form (never the rest of your phone's screen, and with any dictation shown on Home painted over) and any photos you add, each removable before you send; Hex's version, your phone's model, its Android version and language, the screen you opened the form from, and the language and speech model Hex dictates with; and your email, only if you type one, so Anomaly can reply.
@@ -18,7 +18,7 @@ Hex's Send feedback form, on Home, sends nothing until you tap Send. Then Hex se
 Nothing is emailed when you send. If Anomaly replies, you get an email and confirm your address once. With an email, Hex also sends a random install ID it makes the first time, so your reports stay together; it is not tied to your phone or Google account, and uninstalling Hex removes it. Without an email, feedback is anonymous: no email and no install ID, and it can't be answered. Feedback never includes your dictations, transcripts, recordings, vocabulary, corrections or anything you type in other apps, and the Hex keyboard never sends it. Anomaly uses feedback only to answer you and improve Hex. Like any request, the server sees your IP address.
 
 What stays on your phone
-Hex saves your settings, setup progress and downloaded model in private app storage. If you undo an autocorrection, Hex keeps a count against a hash of that word pair so it can avoid repeating the correction. It does not store the original words. Clearing Hex's app storage or uninstalling Hex removes this data. Microphone access can be revoked in Android settings.
+Hex saves your settings, setup progress and downloaded models in private app storage; Delete download in Labs removes the second one. If you undo an autocorrection, Hex keeps a count against a hash of that word pair so it can avoid repeating the correction. It does not store the original words. If you turn on Learn from my fixes in Labs, Hex keeps the word pairs you corrected right after dictating, how often and when you last corrected each, on this phone only; it never sends them, and it learns nothing from password fields. Turning it off stops the learning but keeps the pairs until you tap Delete what Hex learned, which removes them. Clearing Hex's app storage or uninstalling Hex removes this data. Microphone access can be revoked in Android settings.
 
 Contact
 For privacy questions, use https://github.com/anomalyco/hex/issues. To report a security problem privately, use https://github.com/anomalyco/hex/security/advisories/new.

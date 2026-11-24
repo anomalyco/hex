@@ -6,19 +6,35 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.database.ContentObserver
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.UserDictionary
 import java.util.concurrent.Executors
 import android.inputmethodservice.InputMethodService
+import android.util.Size
+import android.util.TypedValue
 import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InlineSuggestionsRequest
+import android.view.inputmethod.InlineSuggestionsResponse
 import android.view.inputmethod.InputMethodManager
 import android.view.inputmethod.InputMethodSubtype
+import android.widget.inline.InlinePresentationSpec
+import androidx.autofill.inline.UiVersions
+import androidx.autofill.inline.common.TextViewStyle
+import androidx.autofill.inline.v1.InlineSuggestionUi
+import kotlin.math.roundToInt
 import ly.anoma.hex.MainActivity
 import ly.anoma.hex.R
+import ly.anoma.hex.diagnostics.Diagnostics
+import ly.anoma.hex.speech.LOW_MEMORY_NOTE
 import ly.anoma.hex.speech.LocalSpeech
+import ly.anoma.hex.speech.DictationFixStore
+import ly.anoma.hex.speech.DictationPlace
 import ly.anoma.hex.speech.MicCapture
 import ly.anoma.hex.speech.Signature
 import ly.anoma.hex.speech.SpeechPhase
@@ -26,6 +42,7 @@ import ly.anoma.hex.speech.SpeechOptions
 import ly.anoma.hex.speech.SpeechModel
 import ly.anoma.hex.speech.SpeechPreferences
 import ly.anoma.hex.speech.Spoken
+import ly.anoma.hex.speech.keepAwake
 import ly.anoma.hex.speech.typingLayout
 import ly.anoma.hex.typing.PersonalWords
 import ly.anoma.hex.typing.SpatialDecoder
@@ -43,6 +60,7 @@ internal fun Context.speechNote(note: String?) = when (note) {
     "No speech heard" -> getString(R.string.keyboard_note_no_speech)
     "Speech model unavailable" -> getString(R.string.keyboard_note_model)
     "Stopped at 1 minute" -> getString(R.string.keyboard_note_minute)
+    LOW_MEMORY_NOTE -> getString(R.string.keyboard_note_low_memory)
     else -> note
 }
 
@@ -67,6 +85,9 @@ class HexKeyboard : InputMethodService() {
         feedback.voiceOnly && VoiceOnly.shows(true, subtype?.mode ?: subtypeMode())
     private lateinit var capture: MicCapture
     internal val preferences by lazy { SpeechPreferences(this) }
+    /** Labs › Learn from my fixes: the word pairs, their counts and when each was last made, and the
+     * tracker's reports. */
+    private val fixes by lazy { DictationFixStore(this) }
     internal var nextEnglish: Boolean? = null
     /** The options the dictation in flight started with: its language decides mid-sentence case. */
     internal val feedback by lazy { TypingPreferences(this) }
@@ -83,7 +104,8 @@ class HexKeyboard : InputMethodService() {
         KeyboardEngine(InputConnectionTarget(this), feedback, { layoutLanguage }, { typingLanguage },
             { SpatialDecoder(TypingModel.asset(assets, it)) },
             readPersonal = { PersonalWords.read(contentResolver, it) }, background = words,
-            emoji = EmojiWords(assets, words))
+            emoji = EmojiWords(assets, words),
+            learned = { if (preferences.learnFixes) fixes.record(it) })
     }
     private val typingChanged = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == TypingPreferences.SUGGEST_SWEAR_WORDS) engine.swearWordsChanged()
@@ -92,6 +114,7 @@ class HexKeyboard : InputMethodService() {
         if (key == TypingPreferences.EMOJI_SUGGESTIONS) engine.emojiSuggestionsChanged()
         if (key == TypingPreferences.KEYBOARD_TOOLS) { engine.keyboardToolsChanged(); watchClipboard() }
         if (key == TypingPreferences.VOICE_ONLY) modeChanged()
+        if (key == TypingPreferences.PASSWORD_MANAGER_SUGGESTIONS) clearInline()
     }
     // The strip's Paste tool comes and goes with the clipboard (Labs › Keyboard › Keyboard tools): the
     // listener exists only while the lab is on and the input view is shown.
@@ -113,7 +136,7 @@ class HexKeyboard : InputMethodService() {
         super.onCreate()
         getSharedPreferences("typing", MODE_PRIVATE).registerOnSharedPreferenceChangeListener(typingChanged)
         contentResolver.registerContentObserver(UserDictionary.Words.CONTENT_URI, true, dictionaryChanged)
-        capture = MicCapture(LocalSpeech(applicationContext), update = ::showStatus, meter = ::showLevel,
+        capture = MicCapture(LocalSpeech(applicationContext), DictationPlace.Keyboard, update = ::showStatus, meter = ::showLevel,
             insert = ::commitSpeech)
         // The lab off is the keyboard it always was: never touch the system's subtype list for it.
         if (feedback.voiceOnly) VoiceOnly.setEnabled(this, true)
@@ -191,6 +214,7 @@ class HexKeyboard : InputMethodService() {
         view?.status(capture.phase, idleHint())
         // Hex Preview's update line (Play builds have none); never in a password field.
         Updates.keyboardShown(this, engine.secure) { view?.notice(it) }
+        Diagnostics.keyboardShown(this, info.packageName, engine.secure) { view?.notice(it) }
         viewing = true
         watchClipboard()
     }
@@ -198,6 +222,67 @@ class HexKeyboard : InputMethodService() {
                                    candidatesStart: Int, candidatesEnd: Int) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         engine.updateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd)
+    }
+
+    // Android 11's inline autofill suggestions (Labs › Keyboard › Password manager suggestions): the
+    // service builds the chips and fills the field when one is tapped; Hex asks for them and lays
+    // them out, and never reads one. Off, no request is made, so the system's own autofill dropdown
+    // is exactly as before.
+    /** A response's inflation still running when the strip moves on is dropped, not shown late. */
+    private var inlineGeneration = 0
+    /** The strip's inline chips go: a new field, the keyboard hiding, or the lab turning off. */
+    private fun clearInline() {
+        inlineGeneration++
+        view?.inlineSuggestions(emptyList(), emptyList())
+    }
+    override fun onCreateInlineSuggestionsRequest(uiExtras: Bundle): InlineSuggestionsRequest? {
+        // The voice-only bar has no strip to show chips in: asking would put Android in inline mode
+        // where nothing shows them, so the system's own autofill UI would never appear either.
+        if (!feedback.passwordManagerSuggestions || voiceOnly()) return null
+        val density = resources.displayMetrics.density
+        val strip = (if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
+            KeyboardMetrics.STRIP_LANDSCAPE else KeyboardMetrics.STRIP) * density
+        val height = InlineAutofill.chipHeight(strip.roundToInt(), density)
+        val widths = InlineAutofill.chipWidths(density)
+        // Password managers draw their own chip only when the style bundle carries the androidx
+        // UiVersions they know; its text follows the strip's.
+        val style = InlineSuggestionUi.newStyleBuilder()
+            .setTitleStyle(TextViewStyle.Builder().setTextColor(getColor(R.color.ink))
+                .setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f).build())
+            .setSubtitleStyle(TextViewStyle.Builder().setTextColor(getColor(R.color.quiet))
+                .setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f).build())
+            .build()
+        val spec = InlinePresentationSpec.Builder(Size(widths.first, height), Size(widths.last, height))
+            .setStyle(UiVersions.newStylesBuilder().addStyle(style).build())
+            .build()
+        return InlineSuggestionsRequest.Builder(listOf(spec))
+            .setMaxSuggestionCount(InlineAutofill.MAX)
+            .build()
+    }
+    /** The service's answer. A tap lets Android fill the field; Hex never reads a login, a code or
+     * a card. The unpinned chips fill the scrolling row and the pinned ones sit at its edge. */
+    override fun onInlineSuggestionsResponse(response: InlineSuggestionsResponse): Boolean {
+        if (!feedback.passwordManagerSuggestions || voiceOnly()) return false
+        val strip = view ?: return false
+        val suggestions = response.inlineSuggestions
+        val split = InlineAutofill.split(suggestions.map { it.info.isPinned })
+        // A new answer replaces the old row at once, then each chip appears as its inflation
+        // lands: one that never does cannot keep stale chips up or hold back the rest.
+        val generation = ++inlineGeneration
+        strip.inlineSuggestions(emptyList(), emptyList())
+        if (suggestions.isEmpty()) return true
+        val views = arrayOfNulls<View>(suggestions.size)
+        for (index in suggestions.indices) {
+            val suggestion = suggestions[index]
+            suggestion.inflate(this, Size(ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT), mainExecutor) { content ->
+                if (generation != inlineGeneration || view !== strip) return@inflate
+                views[index] = content
+                strip.inlineSuggestions(
+                    split.unpinned.mapNotNull { views[it] }, split.pinned.mapNotNull { views[it] })
+            }
+        }
+        return true
     }
 
     /** The strip's Paste tool: the editor's own paste, so Hex never reads the clipboard itself. */
@@ -281,6 +366,8 @@ class HexKeyboard : InputMethodService() {
         if (!switchToPreviousInputMethod()) getSystemService(InputMethodManager::class.java).showInputMethodPicker()
     }
     private fun showStatus(phase: SpeechPhase, note: String?) {
+        // Hands-free dictation can outlast the display timeout; a hidden IME would cancel it.
+        window?.window.keepAwake(phase)
         val spoken = speechNote(note)
         val voice = bar
         if (voice != null) {
@@ -302,19 +389,20 @@ class HexKeyboard : InputMethodService() {
     private fun showLevel(level: Float) {
         bar?.setLevel(level); view?.setLevel(level)
     }
-    private fun commitSpeech(text: String, options: SpeechOptions) {
+    private fun commitSpeech(text: String, heard: String, options: SpeechOptions) {
         if (currentInputConnection == null || engine.secure || !isInputViewShown) { leaveVoiceOnly(); return }
         // Read now, so a toggle or text changed while it transcribed applies to this dictation. Hex's own
         // fields, such as Settings' practice box, never get the signature.
         val own = currentInputEditorInfo?.packageName == packageName
         val signed = if (own) null else Signature.append(text, preferences.signatureText, preferences.signature)
-        engine.insertDictation(signed ?: text, if (options.translate) "en" else options.spoken.code, signed != null)
+        engine.insertDictation(signed ?: text, if (options.translate) "en" else options.spoken.code, signed != null,
+            heard, options.learnFixes && preferences.learnFixes && !options.translate)
         leaveVoiceOnly()
     }
     private fun leaveEditor() {
         bar?.removeCallbacks(pendingLeave)
         viewing = false; watchClipboard()
-        view?.reset(); view?.cancelGestures(); engine.leave(); nextEnglish = null; capture.cancel()
+        clearInline(); view?.reset(); view?.cancelGestures(); engine.leave(); nextEnglish = null; capture.cancel()
     }
     override fun onFinishInputView(finishingInput: Boolean) { leaveEditor(); super.onFinishInputView(finishingInput) }
     override fun onFinishInput() { leaveEditor(); super.onFinishInput() }

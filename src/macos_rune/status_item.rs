@@ -893,9 +893,34 @@ fn meeting_menu(state: &crate::meeting::watcher::MeetingMenuState, enabled: bool
             mute: None,
             sections: Vec::new(),
         },
-        MeetingMenuState::Starting => MeetingMenu {
-            status: Some(tr("Starting meeting recording…").into()),
+        // A stop asked while the recorder starts keeps Record disabled and
+        // says so, exactly as the tray's Stopping item does.
+        MeetingMenuState::Starting { stopping } => MeetingMenu {
+            status: Some(if *stopping {
+                tr("Stopping…").into()
+            } else {
+                tr("Starting meeting recording…").into()
+            }),
             button_title: String::new(),
+            recording: true,
+            can_start: false,
+            can_stop: false,
+            mute: None,
+            sections: Vec::new(),
+        },
+        // A stop already went to the recorder: Stop hides, Record stays
+        // disabled, and the elapsed time holds until the transcription row
+        // takes over (as the tray's Stopping item does).
+        MeetingMenuState::Recording {
+            started,
+            stopping: true,
+            ..
+        } => MeetingMenu {
+            status: Some(tr("Stopping…").into()),
+            button_title: format!(
+                " {}",
+                crate::meeting::format_duration(started.elapsed().as_millis() as u64)
+            ),
             recording: true,
             can_start: false,
             can_stop: false,
@@ -1393,15 +1418,17 @@ mod tests {
         assert!(idle.can_start && !idle.can_stop && idle.status.is_none());
         assert!(!meeting_menu(&MeetingMenuState::Idle, false).can_start);
         let started = std::time::Instant::now() - std::time::Duration::from_secs(754);
-        let recording_state = |title: &str, chapters, warning| MeetingMenuState::Recording {
-            started,
-            id: "1".into(),
-            title: title.into(),
-            chapters,
-            warning,
-        };
+        let recording_state =
+            |title: &str, chapters, warning, stopping| MeetingMenuState::Recording {
+                started,
+                id: "1".into(),
+                title: title.into(),
+                chapters,
+                warning,
+                stopping,
+            };
         let recording = meeting_menu(
-            &recording_state("Zoom call — 2:30 PM", Vec::new(), None),
+            &recording_state("Zoom call — 2:30 PM", Vec::new(), None, false),
             false,
         );
         assert_eq!(
@@ -1413,6 +1440,7 @@ mod tests {
                 "A very long provisional title that keeps going past the limit",
                 Vec::new(),
                 None,
+                false,
             ),
             false,
         );
@@ -1428,6 +1456,7 @@ mod tests {
                 "Team sync",
                 Vec::new(),
                 Some(crate::meeting::TrackWarning::DigitalSilence),
+                false,
             ),
             false,
         );
@@ -1445,6 +1474,7 @@ mod tests {
                 "Team sync",
                 vec![chapter("Image storage", 0), chapter("Motion lint", 190_000)],
                 None,
+                false,
             ),
             false,
         );
@@ -1458,6 +1488,12 @@ mod tests {
             transcribing.status.as_deref(),
             Some("Transcribing meeting…")
         );
+        // A stop under way keeps the recording visible with no Record and no
+        // Stop until the transcription row takes over.
+        let stopping = meeting_menu(&recording_state("Team sync", Vec::new(), None, true), true);
+        assert!(!stopping.can_start && !stopping.can_stop);
+        assert!(stopping.recording);
+        assert_eq!(stopping.status.as_deref(), Some("Stopping…"));
     }
 
     #[test]
@@ -1555,6 +1591,7 @@ mod tests {
             title: "Team sync".into(),
             chapters: Vec::new(),
             warning: None,
+            stopping: false,
         };
 
         i18n::apply(Some("en"));

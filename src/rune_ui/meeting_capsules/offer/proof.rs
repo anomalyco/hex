@@ -335,7 +335,13 @@ fn a_record_click_keeps_its_corner_until_the_worker_is_live() {
                         let mut model = PillModel::default();
                         model.apply(&event, Instant::now());
                         let r = model.pill(true).unwrap().clone();
-                        rt.update(move |c, tx| c.start_recording(r, tx));
+                        rt.update(move |c, tx| {
+                            let anchor = Anchor {
+                                corner: c.corner,
+                                display: c.display.clone(),
+                            };
+                            c.start_recording(r, anchor, tx);
+                        });
                     }
                     if [1, started_frame + 50].contains(&frame) {
                         rt.pointer_down(x, y);

@@ -15,7 +15,6 @@ import android.text.style.MetricAffectingSpan
 import android.text.style.RelativeSizeSpan
 import android.view.ContextThemeWrapper
 import android.view.Gravity
-import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -274,6 +273,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         bottom.visibility = VISIBLE
         val language = page.language
         val symbols = page.symbols
+        val currency = page.currency
         val letterHolds = !symbols && letterSymbols
         val lines = page.lines
         val columns = KeyboardMetrics.columns(lines).toFloat()
@@ -325,13 +325,14 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                 if (!symbols) { letters[c] = k; caseKeys.add(c to k) }
                 val digit = if (symbols) null else page.hint(index, position)
                 // Gboard's top-row set is only a fallback for a row-1 letter with no home- or bottom-row
-                // symbol of its own (AZERTY a/z keep @/_, QWERTZ z keeps _); rows 2 and 3 always keep
-                // SwiftKey's, wherever a layout draws their letters.
-                val symbol = if (letterHolds) LetterFeedback.letterSymbol(c, topRow = index == 0) else null
+                // symbol of its own (AZERTY a and z keep @ and *); rows 2 and 3 always keep Gboard's,
+                // wherever a layout draws their letters. A local currency takes $'s place on d.
+                val symbol = if (letterHolds) LetterFeedback.letterSymbol(c, topRow = index == 0,
+                    currency = currency) else null
                 k.hint(digit?.toString() ?: symbol?.toString())
-                fun holds() = if (symbols) LetterFeedback.symbolHolds(c, page.currency)
+                fun holds() = if (symbols) LetterFeedback.symbolHolds(c, currency)
                     else LetterFeedback.holds(cased(c).single(), language.layoutCode, digit, letterHolds,
-                        topRow = index == 0)
+                        topRow = index == 0, currency = currency)
                 if (holds().isNotEmpty()) {
                     k.setOnLongClickListener { host.openAccents(holds(), it); true }
                     k.longClickLabel = context.getString(R.string.keyboard_more_characters)
@@ -572,7 +573,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
             p.setRecentEmojiProvider(recents)
             p.setOnEmojiPickedListener { item ->
                 // Gboard's tap as an emoji is chosen; the picker's own view plays the click.
-                if (vibrates(context, ime.feedback.haptics)) p.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                tap(context, ime.feedback.haptics, Tap.Press)
                 ime.engine.type(item.emoji)
             }
             picker = p; addView(p, 0, LayoutParams(LayoutParams.MATCH_PARENT, height))

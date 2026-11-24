@@ -381,6 +381,13 @@ pub fn apply(
                     .map_err(|error| invalid(name, &error.to_string()))?;
             }
         }
+        "model_switch_other" => {
+            if let Some(choice) = &candidate.model_switch_other {
+                choice
+                    .validate()
+                    .map_err(|error| invalid(name, &error.to_string()))?;
+            }
+        }
         "dictation_processing.default_mode" => {
             candidate.dictation_processing.default_mode.name = "Global".into();
             validate_mode_speech(name, &candidate.dictation_processing.default_mode)?;
@@ -793,6 +800,7 @@ mod tests {
                 retention: Some(crate::app_settings::MeetingRetention::Day),
                 audio_retention: Some(crate::app_settings::MeetingRetention::Day),
                 opencode_model: Some("anthropic/claude-haiku".into()),
+                recording_indicator_display: Some(r"\\.\DISPLAY2".into()),
                 ..Default::default()
             },
             ..Default::default()

@@ -10,21 +10,19 @@ use std::time::Duration;
 use rune::{El, Tx, col, el, row, text};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
-use super::controls::{ButtonKind, Paint, button, modal_sheet};
+use super::controls::{ButtonKind, METRICS, ModalWidth, Paint, button, modal_panel, modal_sheet};
 use super::lists::{inline_slider, list_row, source_list};
 use super::settings::sound_volume;
 use super::{Modal, Ui};
 use crate::desktop::i18n::tr;
 use crate::feedback::{self, Audition, SoundSet};
 
-const MODAL_WIDTH: f32 = 460.0;
-const PADDING: f32 = 18.0;
-/// A set row's text inset, bled into the panel's padding so the check and
+/// A set row's text inset, offset from the text rail so the check and
 /// the volume's label share the title's edge.
 const ROW_BLEED: f32 = 10.0;
 const SLIDER_WIDTH: f32 = 200.0;
 /// The column the chosen set's check sits in.
-const CHECK_WIDTH: f32 = 16.0;
+const CHECK_WIDTH: f32 = METRICS.icon;
 
 #[derive(Default)]
 pub(super) struct SoundSets {
@@ -150,19 +148,19 @@ fn set_key(set: SoundSet) -> String {
 }
 
 pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
-    let c = &p.k.c;
     let volume = ui
         .sound_sets
         .volume_drag
         .unwrap_or_else(|| sound_volume(&ui.settings));
     let volume_row = row()
         .key("volume")
+        .px(METRICS.row_px)
         .gap(12.0)
         .center_y()
         .child(
             text(tr("Sound volume"))
                 .key("label")
-                .font(p.k.ty.ui_medium)
+                .font(p.strong())
                 .color(p.text())
                 .grow(1.0)
                 .shrink()
@@ -198,39 +196,23 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
                 move |ui: &mut Ui| choose(ui, set),
             )
         }));
-    let footer = row().key("footer").justify_end().child(
-        button(
-            p,
-            "close-sound-sets",
-            tr("Done"),
-            ButtonKind::Secondary,
-            |ui: &mut Ui, _| close(ui),
-        )
-        .default_button(),
+    let panel = modal_panel(
+        p,
+        "sound-sets",
+        tr("Sounds"),
+        ModalWidth::Narrow,
+        vec![volume_row, sets.mx(METRICS.row_px - ROW_BLEED)],
+        vec![
+            button(
+                p,
+                "close-sound-sets",
+                tr("Done"),
+                ButtonKind::Secondary,
+                |ui: &mut Ui, _| close(ui),
+            )
+            .default_button(),
+        ],
     );
-    let panel = col()
-        .key("sound-sets")
-        .role("dialog")
-        .label(tr("Sounds"))
-        .w(MODAL_WIDTH)
-        .pt(PADDING)
-        .px(PADDING)
-        .pb(14.0)
-        .gap(14.0)
-        .radius(p.k.radius.xl)
-        .fill(c.bg_base)
-        .border(p.hair, c.border_weak)
-        // Presses inside the panel stay inside.
-        .on_press(|_: &mut Ui| {})
-        .child(
-            text(tr("Sounds"))
-                .key("title")
-                .font(p.k.ty.body_medium)
-                .color(p.text()),
-        )
-        .child(volume_row)
-        .child(sets.mx(-ROW_BLEED))
-        .child(footer);
     modal_sheet(p, "sound-sets", panel, close)
 }
 

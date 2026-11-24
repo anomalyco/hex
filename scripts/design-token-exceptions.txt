@@ -1,0 +1,31 @@
+# <path> <ceiling>: existing design-token violations in src/rune_ui/ (see scripts/code-shape.py). Ceilings only go down.
+# Refresh with python3 scripts/code-shape.py --update-exceptions.
+src/rune_ui/activity.rs 1
+src/rune_ui/calls.rs 4
+src/rune_ui/capture_capsule/always_view.rs 3
+src/rune_ui/capture_capsule/picker.rs 5
+src/rune_ui/capture_capsule/toolbar.rs 4
+src/rune_ui/capture_capsule/view.rs 1
+src/rune_ui/controls.rs 4
+src/rune_ui/find_popover.rs 4
+src/rune_ui/fun.rs 5
+src/rune_ui/general.rs 2
+src/rune_ui/history.rs 1
+src/rune_ui/history/unified.rs 1
+src/rune_ui/labs/store.rs 2
+src/rune_ui/list_detail.rs 4
+src/rune_ui/lists.rs 4
+src/rune_ui/live_notes/notes.rs 4
+src/rune_ui/live_notes/views.rs 6
+src/rune_ui/live_text.rs 1
+src/rune_ui/meeting_capsules/panel.rs 3
+src/rune_ui/meetings.rs 4
+src/rune_ui/meetings/selection.rs 3
+src/rune_ui/models.rs 1
+src/rune_ui/modes.rs 1
+src/rune_ui/modes/transformations.rs 2
+src/rune_ui/output.rs 4
+src/rune_ui/output/examples.rs 1
+src/rune_ui/picker/facts.rs 1
+src/rune_ui/settings.rs 2
+src/rune_ui/sidebar.rs 2

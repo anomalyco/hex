@@ -20,6 +20,7 @@ impl Feature {
             Self::LearnFromCorrections => "Learn from corrections",
             Self::TerminalPaste => "Terminal paste",
             Self::KeyboardModelSwitching => "Switch model with keyboard language",
+            Self::ModelSwitchShortcut => "Model switch shortcut",
             Self::MouseShortcuts => "Mouse shortcuts",
             Self::PauseBrowser => "Also pause the browser",
             Self::ShareShortcut => "Share dictation shortcut with other apps",
@@ -97,6 +98,7 @@ impl Feature {
             Self::StopAnyCallRecording => "Stop every call recording when the call ends",
             Self::ClipboardPhrase => "Clipboard phrase",
             Self::MeetingMicrophoneMute => "Mute the microphone while recording",
+            Self::MeetingIndicatorDisplay => "Indicator on any display",
         }
     }
 
@@ -128,6 +130,9 @@ impl Feature {
             Self::TerminalPaste => "Paste with Ctrl+Shift+V so terminals accept it",
             Self::KeyboardModelSwitching => {
                 "When you switch keyboard language, Hex switches to the speech model you picked for it"
+            }
+            Self::ModelSwitchShortcut => {
+                "One shortcut swaps dictation to another model and language, and pressing it again swaps back"
             }
             Self::MouseShortcuts => "Use a mouse button, such as a side button, as a shortcut",
             Self::PauseBrowser => {
@@ -358,6 +363,9 @@ impl Feature {
             }
             Self::MeetingMicrophoneMute => {
                 "Adds a mute button to meeting recordings. Hex keeps recording the call's audio but leaves out your microphone until you unmute."
+            }
+            Self::MeetingIndicatorDisplay => {
+                "Drag the meeting recording indicator to another display and it stays there"
             }
         }
     }

@@ -89,7 +89,11 @@ Off by default. After the
 style and custom vocabulary's spellings, everything is lowercased, custom
 vocabulary included, as desktop's Lowercase step (`str::to_lowercase` on the
 final text) does, on every path (`DictationLowercaseSettings`, App Group key
-`settings.dictationLowercase`).
+`settings.dictationLowercase`). Off doesn't add capitals back: Casual still starts
+sentences lowercase and writes "i", so while Casual is the style the row says "Casual starts
+sentences lowercase anyway. Pick Polished for capitals." (TestFlight build 149 read the
+switch as broken; the style can change from the Hex key's style menu without a visit to
+Settings).
 
 ## French spacing (every style but Verbatim)
 

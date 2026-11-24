@@ -164,9 +164,12 @@ Requires the selected local dictation model, Microphone, and System Audio
 Recording (the "System Audio Recording Only" list under Privacy & Security ›
 Screen & System Audio Recording; `NSAudioCaptureUsageDescription`). Screen
 Recording alone still works through the ScreenCaptureKit fallback. The opt-in is `meetings.enabled` in `settings.json`, alongside
-`meetings.show_recording_indicator` (default `true`) and
-`meetings.recording_indicator_corner` (default `top_right`)
-([app_settings.rs](../../src/app_settings.rs) `MeetingSettings`). Recording
+`meetings.show_recording_indicator` (default `true`),
+`meetings.recording_indicator_corner` (default `top_right`), and
+`meetings.recording_indicator_display` (only chosen while Labs › Indicator on
+any display is on; left out of the file while the indicator rests on the
+primary display) ([app_settings.rs](../../src/app_settings.rs)
+`MeetingSettings`). Recording
 refuses to start without either grant and asks macOS for System Audio Recording.
 
 ## Linux and Windows
@@ -386,6 +389,10 @@ that has been tried by hand on a real Windows PC or X11 desktop; only a native
 Wayland capsule returns to the corner it started in
 (`primary_screen_size` in
 [rune_ui/meeting_capsules/screen.rs](../../src/rune_ui/meeting_capsules/screen.rs)).
+Every capsule otherwise stays on the primary display, on every OS; Labs ›
+Indicator on any display is the opt-in that lets a release land on the display
+under the pointer (macOS and Windows, `labs.meeting_indicator_display`; see
+[the floating indicator](#record)).
 Verified: Linux and Windows x64 build and lint
 (`cargo clippy`, `cargo xwin clippy`); the single default-output PipeWire
 monitor capture and the pw-dump parsing were checked by hand on Arch/niri
@@ -1019,6 +1026,14 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      ├── "Recording · <title> · 12:34" -> Meetings pane
      │   └── title follows the provisional title (see Titles And Summary)
      ├── Stop & Transcribe
+     │   └── asked -> the tray, the menu bar, and `hex status` read
+     │      "stopping" until capture ends and "transcribing" takes over
+     │      (a stop asked while it is still starting reads so too);
+     │      the tray's Record and the menu bar's Record Meeting stay
+     │      disabled, and `hex meetings record` answers busy (exit 1), never
+     │      "Already recording": the recorder finishes this meeting before
+     │      it takes another (checks: meeting::runtime::tests,
+     │      control::meetings::tests)
      └── Mute Microphone / Unmute Microphone (Labs › Mute the microphone
          while recording; see Mute Microphone (Labs))
      (Idle menu bar: "Record Meeting"; "Copy Last Meeting Transcript" sits
@@ -1030,13 +1045,23 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   pill `.hit()`); the window is as wide as the open pill, and clicks
      │   in its transparent rest reach the app beneath (#1305; not observed
      │   on a real Mac)
-     ├── Windows: each capsule's window is only as wide as the drawn pill,
-     │   so the area around it stays clickable (not verified on a real
-     │   Windows machine)
+     ├── Windows: each capsule's window is only as large as what it draws,
+     │   so the area around it stays clickable. The drawn pill opens the
+     │   recording and grows its window to the open panel; the whole window
+     │   then keeps it open while the panel springs out and shrinking it
+     │   waits for the closing surface to land, back to the pill. A pointer
+     │   that outran the opening pill used to collapse it and pull the
+     │   window out from under itself, and a window that shrank first cut
+     │   the closing panel. Entering the window where a closed panel was
+     │   opens nothing; only the pill does
+     │   // checks: the WindowFit tests in meeting_capsules/panel.rs; NOT
+     │   // verified on a real Windows machine
      ├── Windows: Rune waits for a swap-chain slot before each frame (Rune
      │   #985), so the pill's and panel's frames in flight stay bounded
      │   through a long recording (#1833; not measured on Windows)
-     ├── In the saved recording_indicator_corner
+     ├── In the saved recording_indicator_corner, on the primary display, or
+     │   on the display it was dragged to with Labs › Indicator on any
+     │   display (macOS and Windows; `screen::target` pins the window there)
      ├── Follows the setting mid-recording: turning it off hides the pill and
      │   on shows it, keeping the recording's start time, within a second
      │   (the_recording_capsule_follows_the_indicator_setting_mid_recording;
@@ -1166,6 +1191,26 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   macOS, Windows, Linux X11, and XWayland when GNOME floats it there,
      │   though Windows and X11 have not been tried on a real machine; only a
      │   native Wayland capsule returns to the corner it started in)
+     ├── Labs › Indicator on any display (off by default; macOS and Windows;
+     │   labs.meeting_indicator_display) -> a release lands in the nearest
+     │   corner of the display under the pointer, measured by that display's
+     │   own size, and saves that display with the corner
+     │   (meetings.recording_indicator_display): a capsule dragged onto a
+     │   second display jumps there instead of gliding, and every capsule
+     │   shows on the saved display from then on. A display that is no longer
+     │   connected places the capsule on the primary display and keeps the
+     │   saved name, and a pointer on no display at all keeps the one it was
+     │   dragged on. Off, every show is put back on the primary display
+     │   explicitly (a pinned capsule returns when the lab goes off), and the
+     │   saved display has no effect
+     │   // checks: the tests in meeting_capsules/screen.rs (a release on its
+     │   // own display, a throw onto another, a pointer on no display, a saved
+     │   // display that is gone, which display holds a pointer, a saved id's
+     │   // target, and the lab off putting a capsule back on the primary);
+     │   // the_display_lab_lands_a_release_on_the_pointer_s_display and
+     │   // without_the_display_lab_a_release_keeps_the_primary_display
+     │   // (meeting_capsules.rs); NOT verified on real multi-monitor hardware
+     │   // on either OS (see Labs)
      ├── Copy agent prompt (first, filled) -> a prompt telling a coding agent
      │   to read this meeting with `hex meetings show <id> --md`, catch up with
      │   `--from <mm:ss>` from the last turn copied into it, and search with
@@ -1192,7 +1237,9 @@ Detected app leaves the microphone for about 3 s     // meetings.call-ended
 Panel capsules move like the recording capsule (#1093, graduated from Labs; only a native Wayland capsule still returns to its corner) // meetings.panel-drag
   The panel capsules: offer, reminder, left the call, the finished meeting,
   Recording automatically
-  -> Each opens in the saved recording_indicator_corner (read as it shows)
+  -> Each opens in the saved recording_indicator_corner (read as it shows),
+     on the saved display with Labs › Indicator on any display (or the
+     primary display when that display is gone)
      ├── Drag its body (or the recording pill) -> follows the pointer one to one
      ├── Release -> the corner nearest where the throw would coast to rest
      │   (release velocity over the last 80 ms, capped at 6000 pt/s, coasting
@@ -1202,7 +1249,9 @@ Panel capsules move like the recording capsule (#1093, graduated from Labs; only
      │   recording capsule moves there too. A press mid-glide catches it
      │   where it is. Reduce Motion -> it jumps into the new corner; with no
      │   screen to measure (a native Wayland capsule) -> it returns to the
-     │   corner it started in
+     │   corner it started in. Labs › Indicator on any display: the corner is
+     │   measured on the display under the pointer, and a release over
+     │   another display jumps there, saving that display for the corner
      ├── Press on a button -> the button, as before
      └── Escape mid-drag -> back where it was, nothing saved
   -> The finished meeting opens in the corner its recording ended in
@@ -1231,6 +1280,16 @@ meetings.stop_when_call_ends) // meetings.auto-stop
      processes on macOS, an active render session on any output in
      IAudioSessionManager2 on Windows, and a running Stream/Output/Audio
      node in PipeWire's graph on Linux
+     ├── A browser seems to keep its output open after its call while the
+     │   Mac is locked (#2685), so only a browser's playback stops counting
+     │   then: it counts for nothing while the session is locked or the Mac
+     │   is asleep (audio/system_idle.rs), never for a dimmed display, while
+     │   the microphone still counts. A native call app keeps its playback
+     │   (#835), and a muted browser call that drops the microphone while
+     │   locked ends after the 3 s absence and grace like any other call.
+     │   Each locked browser recording logs "the Mac is locked; the
+     │   browser's playback no longer keeps its call present" once. Check:
+     │   `a_locked_mac_stops_only_a_browser_s_playback_counting`
      └── A failed read counts as playing, so it never stops a recording.
          Windows and macOS skip an individual output, session, or process
          that can't be read. On Linux the graph is briefly empty right after
@@ -1241,6 +1300,10 @@ meetings.stop_when_call_ends) // meetings.auto-stop
      the app icon that drains smoothly on the frame clock and fades over its
      last 0.18 s (under Reduce Motion it steps once a second with no head;
      ControllerEvent::CallEnded carries the stop's Instant)
+     ├── CallPresence (meeting/detection.rs) counts the absence from the
+     │   first pass that saw it: a gap between passes (a stalled loop or
+     │   sleep) never restarts its 3 s. Check:
+     │   `a_gap_between_observations_never_restarts_a_call_ended_absence`
      ├── App back on the microphone or output within 30 s -> its stop is
      │   dropped; once no other automatic stop counts the notice is withdrawn
      │   and the recording capsule returns (CallEndedWithdrawn)
@@ -1758,6 +1821,9 @@ While recording                                      // meetings.rolling
      provisional titles (TranscriptReader)
 
 Stop & Transcribe
+  -> The recording reads "stopping" (tray, menu bar, hex status); another
+     recording waits for it: hex meetings record answers busy until the
+     meeting is fully done (idle)
   -> Flush tails -> finish pending chunks           // usually seconds
   -> Any track that fell behind or failed -> stream its WAV in 1 s blocks
   -> Join on one timeline -> Echo suppression -> Final publication

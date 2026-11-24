@@ -5192,3 +5192,112 @@ fn tap_policy_claims_nothing_during_programmatic_and_combines_escape_with_cancel
     assert!(!toggle_cancel.takes_escape());
     assert_eq!(toggle_cancel.cancel(), Some(cancel));
 }
+
+/// Labs › Model switch shortcut's key is swallowed while a capture records,
+/// so the press cannot strand it: a held capture still finishes on release,
+/// and a locked one still finishes on the next press.
+#[test]
+fn a_switch_press_never_strands_a_capture() {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    struct Guard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            crate::app_settings::install_test_hotkeys(RuntimeHotkeys::default());
+        }
+    }
+    let _guard = Guard {
+        _lock: LOCK.lock().unwrap_or_else(|error| error.into_inner()),
+    };
+    let code = 46;
+    crate::app_settings::install_test_hotkeys(RuntimeHotkeys {
+        model_switch: Some(RuntimeHotkey {
+            modifiers: crate::app_settings::modifiers_from_flags(
+                OPTION_KEY_MASK | CONTROL_KEY_MASK,
+            ),
+            key_code: Some(code),
+        }),
+        ..RuntimeHotkeys::default()
+    });
+    let now = capture_time();
+    let switch_down = InputEvent::Key {
+        code,
+        down: true,
+        flags: OPTION_KEY_MASK | CONTROL_KEY_MASK,
+    };
+    let switch_up = InputEvent::Key {
+        code,
+        down: false,
+        flags: OPTION_KEY_MASK | CONTROL_KEY_MASK,
+    };
+
+    // Hold: the switch press is swallowed and the release still finishes.
+    let mut held = test_hotkey(false, now);
+    assert_eq!(
+        held.process(InputEvent::Flags(OPTION_KEY_MASK), now),
+        Some(HotkeyAction::Start)
+    );
+    let held_at = now + Duration::from_millis(600);
+    assert_eq!(held.process(switch_down, held_at), None);
+    assert!(held.is_recording());
+    assert_eq!(
+        held.process(switch_up, held_at + Duration::from_millis(20)),
+        None
+    );
+    assert_eq!(
+        held.process(
+            InputEvent::Flags(NO_FLAGS),
+            held_at + Duration::from_millis(100)
+        ),
+        Some(HotkeyAction::Finish)
+    );
+
+    // A locked capture holds no modifier, so its switch chord needn't name
+    // the dictation one.
+    crate::app_settings::install_test_hotkeys(RuntimeHotkeys {
+        model_switch: Some(RuntimeHotkey {
+            modifiers: crate::app_settings::modifiers_from_flags(CONTROL_KEY_MASK),
+            key_code: Some(code),
+        }),
+        ..RuntimeHotkeys::default()
+    });
+    let switch_down = InputEvent::Key {
+        code,
+        down: true,
+        flags: CONTROL_KEY_MASK,
+    };
+    let switch_up = InputEvent::Key {
+        code,
+        down: false,
+        flags: CONTROL_KEY_MASK,
+    };
+
+    // Locked: the switch press leaves it locked, and the next press finishes.
+    let mut locked = toggle_hotkey(now, false);
+    assert_eq!(
+        locked.process(InputEvent::Flags(OPTION_KEY_MASK), now),
+        Some(HotkeyAction::Start)
+    );
+    assert_eq!(
+        locked.process(InputEvent::Flags(NO_FLAGS), now + Duration::from_millis(80)),
+        None
+    );
+    assert!(locked.is_locked());
+    assert_eq!(
+        locked.process(switch_down, now + Duration::from_millis(200)),
+        None
+    );
+    assert_eq!(
+        locked.process(switch_up, now + Duration::from_millis(220)),
+        None
+    );
+    assert!(locked.is_locked());
+    assert_eq!(
+        locked.process(
+            InputEvent::Flags(OPTION_KEY_MASK),
+            now + Duration::from_millis(400)
+        ),
+        Some(HotkeyAction::Finish)
+    );
+}

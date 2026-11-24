@@ -269,11 +269,23 @@ pub struct Flow {
     microphone_guide: bool,
     practice: Practice,
     download_requested: bool,
+    /// A pick whose model doesn't run here: nothing is downloading, so the
+    /// page says failed until another pick or a real download replaces it.
+    pick_failed: bool,
     /// The recommended model waits for the person: a scan for models already
     /// on this computer is running, or found one and they choose.
     download_held: bool,
     advance_due: bool,
     relaunch: RelaunchState,
+    /// macOS 27.3 split Accessibility from System & App Protection Override,
+    /// where posting key events (pasting) lives. The post-event preflight can
+    /// stay false after a grant until Hex restarts, so a stale row offers a
+    /// restart there rather than a TCC reset that would drop the grant.
+    post_event_split: bool,
+    /// The one restart for that grant was already used (a marker survives the
+    /// relaunch). A row that stays untrusted after it takes the reset flow,
+    /// so one bad grant cannot restart forever.
+    post_event_restart_done: bool,
 }
 
 impl Flow {
@@ -291,9 +303,12 @@ impl Flow {
             microphone_guide: false,
             practice: Practice::Waiting,
             download_requested: false,
+            pick_failed: false,
             download_held: false,
             advance_due: false,
             relaunch: RelaunchState::Idle,
+            post_event_split: false,
+            post_event_restart_done: false,
         };
         // `status` is read fresh at launch, so a tour resumed after macOS's
         // Quit & Reopen passes a setup whose grants are now real, and one
@@ -312,6 +327,26 @@ impl Flow {
         self.download_held = held;
     }
 
+    /// The model the person picked can't run here, so no download will start
+    /// for it: stop waiting and show the row failed. A later pick clears it.
+    pub fn model_failed(&mut self) {
+        self.download_requested = false;
+        self.pick_failed = true;
+    }
+
+    /// Whether that pick is still the one the page should explain: another
+    /// attempt clears it, so its reason never hides that attempt's failure.
+    pub fn pick_failed(&self) -> bool {
+        self.pick_failed
+    }
+
+    /// A model file the person chose is being prepared: the refused pick is
+    /// over, and no download of ours starts behind the import.
+    pub fn pick_replaced(&mut self) {
+        self.pick_failed = false;
+        self.download_requested = true;
+    }
+
     pub fn step(&self) -> Step {
         self.step
     }
@@ -320,6 +355,24 @@ impl Flow {
     /// or lose focus without a grant.
     pub fn set_accessibility_stale(&mut self, stale: bool) {
         self.accessibility_stale = stale && self.asked[1] && grantable(self.status.accessibility);
+    }
+
+    /// Whether macOS 27.3 split Accessibility from System & App Protection
+    /// Override, so a grant there reads as untrusted until Hex restarts.
+    pub fn set_post_event_split(&mut self, split: bool) {
+        self.post_event_split = split;
+    }
+
+    /// Whether Restart Hex was already used for that grant: then a row that
+    /// still reads untrusted takes the reset flow instead of restarting again.
+    pub fn set_post_event_restart_done(&mut self, done: bool) {
+        self.post_event_restart_done = done;
+    }
+
+    /// Whether the Restart Hex the tour offers now is the one for macOS 27.3's
+    /// keystroke grant, rather than another permission's restart.
+    pub fn restarts_for_post_event(&self) -> bool {
+        self.stale_after_grant()
     }
 
     pub fn on(&mut self, input: Input) -> Effect {
@@ -379,7 +432,24 @@ impl Flow {
         }
     }
 
+    /// A macOS 27.3 grant the post-event preflight cannot see yet: the
+    /// preflight keeps its launch-time answer, so only a fresh launch can read
+    /// it. A TCC reset here would drop the grant the person just made, so the
+    /// tour offers Restart Hex once; after that restart a row still untrusted
+    /// takes the reset flow (see `record_post_event_restart`).
+    fn stale_after_grant(&self) -> bool {
+        self.post_event_split
+            && !self.post_event_restart_done
+            && self.accessibility_stale
+            && self.status.microphone == PermissionState::Ready
+            && grantable(self.status.accessibility)
+            && !matches!(self.relaunch, RelaunchState::InFlight { .. })
+    }
+
     fn restart_needed(&self) -> bool {
+        if self.stale_after_grant() {
+            return true;
+        }
         let states = [self.status.microphone, self.status.accessibility];
         !matches!(self.relaunch, RelaunchState::InFlight { .. })
             && states.contains(&PermissionState::NeedsRestart)
@@ -411,7 +481,7 @@ impl Flow {
             ItemStatus::Ready
         } else if let Some(progress) = self.model.downloading {
             ItemStatus::Downloading(progress)
-        } else if self.model.failed {
+        } else if self.model.failed || self.pick_failed {
             ItemStatus::Failed
         } else if self.download_requested {
             ItemStatus::Downloading(0.0)
@@ -436,6 +506,11 @@ impl Flow {
             self.accessibility_stale = false;
         }
         self.model = model;
+        // Only a model on its way or ready replaces a pick that couldn't
+        // start; the host's status carries no error for one it never saw.
+        if status.transcription_model || model.downloading.is_some() {
+            self.pick_failed = false;
+        }
         if self.step == Step::Setup && !was_ready && self.setup_ready() {
             self.advance_due = true;
         }
@@ -446,6 +521,7 @@ impl Flow {
             && !model.failed
             && !self.download_requested
             && !self.download_held
+            && !self.pick_failed
         {
             self.download_requested = true;
             return Effect::DownloadModel;
@@ -474,6 +550,7 @@ impl Flow {
         match self.status.accessibility {
             PermissionState::Ready => ItemStatus::Ready,
             PermissionState::NeedsRestart => ItemStatus::Restart,
+            _ if self.stale_after_grant() => ItemStatus::Restart,
             _ if self.asked[1] && self.accessibility_stale => ItemStatus::Stale,
             _ if self.asked[1] => ItemStatus::Waiting,
             _ => ItemStatus::Todo,
@@ -521,6 +598,7 @@ impl Flow {
                 if !self.status.transcription_model && self.model.downloading.is_none() =>
             {
                 self.model.failed = false;
+                self.pick_failed = false;
                 self.download_requested = true;
                 Effect::DownloadModel
             }
@@ -538,9 +616,15 @@ impl Flow {
             }
             SetupItem::Accessibility if grantable(self.status.accessibility) => {
                 self.asked[1] = true;
-                if std::mem::take(&mut self.accessibility_stale) {
+                if std::mem::take(&mut self.accessibility_stale)
+                    && !(self.post_event_split && !self.post_event_restart_done)
+                {
                     Effect::ResetPermission(PermissionKind::Accessibility)
                 } else {
+                    // macOS 27.3's preflight can't see a fresh grant until Hex
+                    // restarts, so its first stale row offers Restart Hex
+                    // instead of dropping the grant. Once that restart is
+                    // spent, the reset flow comes back.
                     Effect::ShowGuide(PermissionKind::Accessibility)
                 }
             }
@@ -859,6 +943,64 @@ fn relaunched_at_consumed(marker: &Path) -> Option<u64> {
     fs::read_to_string(marker).ok()?.trim().parse().ok()
 }
 
+/// The marker for a Restart Hex already spent on macOS 27.3's missing
+/// keystroke grant. The post-event preflight re-reads only on launch, so one
+/// restart is offered per pending grant; after it, a row that stays untrusted
+/// falls back to the TCC reset flow. Cleared once Accessibility reads Ready.
+const POST_EVENT_RESTART: &str = "onboarding-accessibility-restart";
+
+/// Records that Restart Hex was used while macOS 27.3's keystroke grant was
+/// missing, so the next stale Accessibility row offers the reset flow instead
+/// of another restart. Nothing is recorded below 27.3 or off macOS.
+pub fn record_post_event_restart() {
+    #[cfg(target_os = "macos")]
+    {
+        if !crate::desktop::permission_guide::split_accessibility()
+            || crate::desktop::permission_guide::post_event_access()
+        {
+            return;
+        }
+        let result = crate::app_paths::support_dir()
+            .and_then(|directory| record_post_event_restart_at(&directory));
+        if let Err(error) = result {
+            tracing::warn!(%error, "could not record the macOS 27.3 permission restart");
+        }
+    }
+}
+
+/// Whether the one restart for macOS 27.3's keystroke grant was already used.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn post_event_restart_recorded() -> bool {
+    crate::app_paths::support_dir()
+        .is_ok_and(|directory| post_event_restart_recorded_at(&directory))
+}
+
+/// Clears the one-restart marker once Accessibility reads Ready, so a later
+/// revocation and grant can restart once again.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn clear_post_event_restart() {
+    let Ok(directory) = crate::app_paths::support_dir() else {
+        return;
+    };
+    match fs::remove_file(directory.join(POST_EVENT_RESTART)) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            tracing::warn!(%error, "could not clear the macOS 27.3 permission restart");
+        }
+        _ => {}
+    }
+}
+
+pub(crate) fn record_post_event_restart_at(directory: &Path) -> color_eyre::Result<()> {
+    fs::create_dir_all(directory)?;
+    write_owner_only_marker(&directory.join(POST_EVENT_RESTART), false)?;
+    crate::durable::sync_directory(directory)?;
+    Ok(())
+}
+
+pub(crate) fn post_event_restart_recorded_at(directory: &Path) -> bool {
+    directory.join(POST_EVENT_RESTART).is_file()
+}
+
 /// Remembers the tour's step, so a tour quit part-way (macOS's own "Quit &
 /// Reopen" after a grant, or ⌘Q) resumes there. The step is the one record
 /// of an unfinished tour: [`record_completion`] replaces it.
@@ -960,7 +1102,7 @@ pub(crate) fn recheck_after_identity_change_at(
     let reopen = !setup_ready;
     if reopen {
         record_pending_at(directory)?;
-        for marker in ["onboarding-complete", "onboarding-step"] {
+        for marker in ["onboarding-complete", "onboarding-step", POST_EVENT_RESTART] {
             match fs::remove_file(directory.join(marker)) {
                 Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
                     return Err(error.into());
@@ -986,6 +1128,7 @@ pub(crate) fn reset_at(directory: &Path) -> color_eyre::Result<()> {
         "onboarding-complete",
         "onboarding-step",
         "onboarding-relaunch",
+        POST_EVENT_RESTART,
     ] {
         match fs::remove_file(directory.join(marker)) {
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
@@ -1079,8 +1222,14 @@ pub fn status_with_transcription_model(transcription_model: bool) -> SetupStatus
     SetupStatus {
         microphone: microphone_state(),
         // Accessibility also grants the listen-event access Hex's shortcut
-        // taps need, so Input Monitoring is never asked for.
-        accessibility: accessibility_state(CGPreflightPostEventAccess(), AXIsProcessTrusted()),
+        // taps need, so Input Monitoring is never asked for. macOS 27.3
+        // moved posting key events (the paste) to System & App Protection
+        // Override, where AX trust alone proves nothing.
+        accessibility: accessibility_state(
+            crate::desktop::permission_guide::post_event_access(),
+            AXIsProcessTrusted(),
+            crate::desktop::permission_guide::split_accessibility(),
+        ),
         transcription_model,
     }
 }
@@ -1249,12 +1398,23 @@ unsafe extern "C" {
 /// Accessibility reaches a running Hex: `AXIsProcessTrusted` follows the
 /// switch, and the listener's event taps, created only once setup is ready,
 /// are allowed (macOS offers no "Quit & Reopen" for it, as it does for Input
-/// Monitoring). Only `CGPreflightPostEventAccess` keeps its launch-time answer,
+/// Monitoring). Only the post-event preflight keeps its launch-time answer,
 /// so it must not hold setup at a restart. If macOS still refuses the taps,
 /// the listener-failure relaunch takes over.
+///
+/// macOS 27.3 split the old grant: the Accessibility list now holds assistive
+/// technologies, and posting key events (pasting) needs System & App
+/// Protection Override. There AX trust no longer proves Hex can paste, so only
+/// the post-event preflight counts. That preflight can stay false after a
+/// grant until Hex restarts, so the tour offers a restart instead of a TCC
+/// reset there (see `Flow::stale_after_grant`).
 #[cfg(any(target_os = "macos", test))]
-const fn accessibility_state(post_event_preflight: bool, trusted: bool) -> PermissionState {
-    if post_event_preflight || trusted {
+const fn accessibility_state(
+    post_event_preflight: bool,
+    trusted: bool,
+    split: bool,
+) -> PermissionState {
+    if post_event_preflight || (trusted && !split) {
         PermissionState::Ready
     } else {
         PermissionState::NeedsSettings
@@ -1279,12 +1439,6 @@ const fn microphone_authorization_state(status: isize, preflight: i32) -> Permis
 #[link(name = "AVFoundation", kind = "framework")]
 unsafe extern "C" {
     static AVMediaTypeAudio: *const NSString;
-}
-
-#[cfg(target_os = "macos")]
-#[link(name = "CoreGraphics", kind = "framework")]
-unsafe extern "C" {
-    safe fn CGPreflightPostEventAccess() -> bool;
 }
 
 #[cfg(target_os = "macos")]
@@ -1795,6 +1949,49 @@ mod tests {
     }
 
     #[test]
+    fn a_pick_that_cannot_start_stays_failed_until_another_pick() {
+        let mut flow = Flow::new(Step::Welcome, fresh_status(), true, true);
+        assert_eq!(
+            flow.on(Input::Status(fresh_status(), ModelProgress::default())),
+            Effect::DownloadModel,
+            "the tour starts its own download"
+        );
+        assert_eq!(flow.view().model, ItemStatus::Downloading(0.0));
+        // The pick's model doesn't run here, so the window never asks the
+        // host for it: nothing will ever report progress or an error.
+        flow.model_failed();
+        assert_eq!(flow.view().model, ItemStatus::Failed);
+        assert_eq!(
+            flow.on(Input::Status(fresh_status(), ModelProgress::default())),
+            Effect::None,
+            "no retry is started behind the person's back"
+        );
+        assert_eq!(flow.view().model, ItemStatus::Failed, "the failure stays");
+        // Picking again clears it; a download that starts replaces it.
+        assert_eq!(
+            flow.on(Input::Grant(SetupItem::Model)),
+            Effect::DownloadModel
+        );
+        flow.on(Input::Status(fresh_status(), downloading(0.1)));
+        assert_eq!(flow.view().model, ItemStatus::Downloading(0.1));
+    }
+
+    #[test]
+    fn a_chosen_file_ends_the_refused_pick_without_a_new_download() {
+        let mut flow = Flow::new(Step::Welcome, fresh_status(), true, true);
+        flow.on(Input::Status(fresh_status(), ModelProgress::default()));
+        flow.model_failed();
+        assert_eq!(flow.view().model, ItemStatus::Failed);
+        flow.pick_replaced();
+        assert!(!flow.pick_failed());
+        assert_eq!(
+            flow.on(Input::Status(fresh_status(), ModelProgress::default())),
+            Effect::None,
+            "the import is already being prepared"
+        );
+    }
+
+    #[test]
     fn a_permission_switched_off_after_its_grant_is_asked_for_afresh() {
         let mut flow = Flow::new(Step::Setup, fresh_status(), true, true);
         let denied = SetupStatus {
@@ -2123,15 +2320,21 @@ mod tests {
 
     #[test]
     fn an_accessibility_grant_applies_without_a_restart() {
-        assert_eq!(accessibility_state(true, true), PermissionState::Ready);
-        assert_eq!(accessibility_state(true, false), PermissionState::Ready);
         assert_eq!(
-            accessibility_state(false, true),
+            accessibility_state(true, true, false),
+            PermissionState::Ready
+        );
+        assert_eq!(
+            accessibility_state(true, false, false),
+            PermissionState::Ready
+        );
+        assert_eq!(
+            accessibility_state(false, true, false),
             PermissionState::Ready,
             "the launch-time preflight is stale; trust is live"
         );
         assert_eq!(
-            accessibility_state(false, false),
+            accessibility_state(false, false, false),
             PermissionState::NeedsSettings
         );
 
@@ -2150,7 +2353,7 @@ mod tests {
         assert_eq!(
             flow.on(Input::Status(
                 SetupStatus {
-                    accessibility: accessibility_state(false, true),
+                    accessibility: accessibility_state(false, true, false),
                     ..ready_status()
                 },
                 downloading(0.5),
@@ -2159,6 +2362,99 @@ mod tests {
         );
         assert!(!flow.view().restart);
         assert!(flow.setup_ready());
+    }
+
+    #[test]
+    fn macos_27_3_needs_the_post_event_preflight_not_ax_trust() {
+        assert_eq!(
+            accessibility_state(false, true, true),
+            PermissionState::NeedsSettings,
+            "27.3: AX trust no longer proves Hex may post ⌘V"
+        );
+        assert_eq!(
+            accessibility_state(true, false, true),
+            PermissionState::Ready,
+            "the post-event preflight alone is the grant"
+        );
+        assert_eq!(
+            accessibility_state(false, false, true),
+            PermissionState::NeedsSettings
+        );
+    }
+
+    #[test]
+    fn a_stale_split_grant_offers_a_restart_only_once() {
+        let mut flow = Flow::new(Step::Setup, fresh_status(), true, true);
+        flow.set_post_event_split(true);
+        flow.on(Input::Status(
+            SetupStatus {
+                accessibility: PermissionState::NeedsSettings,
+                ..ready_status()
+            },
+            downloading(0.5),
+        ));
+        assert_eq!(
+            flow.on(Input::Grant(SetupItem::Accessibility)),
+            Effect::ShowGuide(PermissionKind::Accessibility)
+        );
+        // Back from System Settings, still untrusted: on 27.3 the preflight
+        // keeps its launch-time answer, so only a restart can read the grant.
+        flow.set_accessibility_stale(true);
+        assert_eq!(flow.view().accessibility, ItemStatus::Restart);
+        assert!(flow.view().restart, "Restart Hex is the way forward");
+        assert_eq!(
+            flow.on(Input::Grant(SetupItem::Accessibility)),
+            Effect::ShowGuide(PermissionKind::Accessibility),
+            "no TCC reset that would drop the grant"
+        );
+        flow.set_accessibility_stale(true);
+        assert_eq!(flow.on(Input::Restart), Effect::Relaunch);
+        assert!(!flow.view().restart, "one restart per pending grant");
+
+        // The restart happened (its marker survives it). A row that still
+        // reads untrusted now takes the existing reset flow, so the tour
+        // cannot restart forever and its Fix it path stays reachable.
+        let mut after = Flow::new(Step::Setup, fresh_status(), true, true);
+        after.set_post_event_split(true);
+        after.set_post_event_restart_done(true);
+        after.on(Input::Status(
+            SetupStatus {
+                accessibility: PermissionState::NeedsSettings,
+                ..ready_status()
+            },
+            downloading(0.5),
+        ));
+        assert_eq!(
+            after.on(Input::Grant(SetupItem::Accessibility)),
+            Effect::ShowGuide(PermissionKind::Accessibility)
+        );
+        after.set_accessibility_stale(true);
+        assert_eq!(after.view().accessibility, ItemStatus::Stale);
+        assert!(!after.view().restart, "no second restart");
+        assert_eq!(
+            after.on(Input::Grant(SetupItem::Accessibility)),
+            Effect::ResetPermission(PermissionKind::Accessibility)
+        );
+
+        // The reset clears the one-restart marker (the host clears it when the
+        // reset-and-prompt runs), so the next grant may restart once again.
+        after.set_post_event_restart_done(false);
+        after.set_accessibility_stale(true);
+        assert_eq!(after.view().accessibility, ItemStatus::Restart);
+        assert!(after.view().restart, "a new cycle offers Restart Hex again");
+    }
+
+    #[test]
+    fn the_one_restart_marker_clears_with_a_setup_reset() {
+        let directory =
+            std::env::temp_dir().join(format!("hex-post-event-restart-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        assert!(!post_event_restart_recorded_at(&directory));
+        record_post_event_restart_at(&directory).unwrap();
+        assert!(post_event_restart_recorded_at(&directory));
+        reset_at(&directory).unwrap();
+        assert!(!post_event_restart_recorded_at(&directory));
+        let _ = fs::remove_dir_all(&directory);
     }
 
     #[test]

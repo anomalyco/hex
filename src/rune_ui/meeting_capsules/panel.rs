@@ -257,16 +257,17 @@ fn replace(c: &Capsule) -> Transition {
     look.springs(SpringPair::new(enter, exit))
 }
 
-/// The finished meeting stays where its pill was; other panels take the saved corner.
-pub(super) fn show_corner(
+/// The finished meeting stays where its pill was, on that display too; other
+/// panels take the saved corner.
+pub(super) fn show_anchor(
     kind: &Kind,
-    last: Option<&(String, MeetingIndicatorCorner)>,
-    saved: impl FnOnce() -> MeetingIndicatorCorner,
-) -> MeetingIndicatorCorner {
+    last: Option<&(String, screen::Anchor)>,
+    saved: impl FnOnce() -> screen::Anchor,
+) -> screen::Anchor {
     if let Kind::Ready(manifest) = kind {
         return last
             .filter(|(id, _)| *id == manifest.id)
-            .map(|(_, corner)| *corner)
+            .map(|(_, anchor)| anchor.clone())
             .unwrap_or_else(saved);
     }
     saved()
@@ -953,14 +954,22 @@ pub(super) fn recording(
         .clip_rounded(radius)
         // The stage steps every frame; nothing here eases a second time.
         .motion(Spring::NONE)
-        .on_hover_change(|c: &mut Capsule, inside, tx| {
-            c.set_hovered(inside);
-            c.stir(tx);
-        })
         // Only the drawn pill takes the pointer; the rest of the window,
         // as large as the open panel, lets clicks through. On Windows the
-        // window is only as large as the pill it draws instead.
+        // window is only as large as what it draws, so the pointer is
+        // tracked on the window instead (see below).
         .hit();
+    // A recording in its offer's window is larger than the pill it draws, so
+    // Windows tracks that window as it always has; one the recording owns is
+    // opened by the pill and kept open by the window.
+    #[cfg(target_os = "windows")]
+    let body = if capsule.presentation.inherits_offer_window() {
+        recording_pointer(body)
+    } else {
+        recording_opener(body)
+    };
+    #[cfg(not(target_os = "windows"))]
+    let body = recording_pointer(body);
     let body = if capsule.presentation.hold_hover {
         body.on_pointer_move(|c: &mut Capsule, point| {
             if c.presentation
@@ -976,7 +985,54 @@ pub(super) fn recording(
     } else {
         body
     };
-    in_corner(capsule, presence::anchored(capsule, body))
+    let surface = in_corner(capsule, presence::anchored(capsule, body));
+    // Windows sizes this window to what it draws, so it is only as large as
+    // the pill at rest: the drawn pill opens the recording, and the whole
+    // window keeps it open. A pointer that outruns the opening pill, or
+    // rests in the window's margin, neither closes it nor shrinks the
+    // window out from under itself, and a click where a closed panel was
+    // stays a click on what is beneath.
+    #[cfg(target_os = "windows")]
+    let surface = if capsule.presentation.inherits_offer_window() {
+        surface
+    } else {
+        recording_window_pointer(surface).hit()
+    };
+    surface
+}
+
+/// Opens the recording while the pointer is on it, and closes it when the
+/// pointer leaves: where the pointer's whole is the pill it draws.
+fn recording_pointer(target: El) -> El {
+    target.on_hover_change(|c: &mut Capsule, inside, tx| {
+        c.set_hovered(inside);
+        c.stir(tx);
+    })
+}
+
+/// Windows: the drawn pill opens the recording. Leaving the pill is not a
+/// leave while the window still holds the pointer, so this never closes it.
+#[cfg(target_os = "windows")]
+fn recording_opener(target: El) -> El {
+    target.on_hover_change(|c: &mut Capsule, inside, tx| {
+        if inside {
+            c.set_hovered(true);
+            c.stir(tx);
+        }
+    })
+}
+
+/// Windows: the window keeps the recording open and lets it close only when
+/// the pointer leaves the whole window. Entering the window where the pill
+/// isn't (the area a closed panel covered) opens nothing.
+#[cfg(target_os = "windows")]
+fn recording_window_pointer(target: El) -> El {
+    target.on_hover_change(|c: &mut Capsule, inside, tx| {
+        if !inside {
+            c.set_hovered(false);
+            c.stir(tx);
+        }
+    })
 }
 
 /// `path` as one shell word.
@@ -1027,21 +1083,33 @@ pub(super) fn agent_prompt(hex: &str, id: &str, title: &str, recording: Option<u
 /// draws: the resting pill (as wide as the open panel while it says
 /// `noticed`), then the open panel. Elsewhere it stays at its largest, and
 /// only the `.hit()` pill takes the pointer.
-#[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
 pub(super) fn recording_window_size(open: bool, shown: Option<&Recording>) -> (f32, f32) {
-    #[cfg(target_os = "windows")]
-    {
-        if !open {
-            let width = shown.map_or(REST_WIDTH, rest_width) + 2. * CAPSULE_INSET;
-            return (width, REST_HEIGHT + 2.0 * CAPSULE_INSET);
+    if cfg!(target_os = "windows") {
+        if open {
+            open_window(shown)
+        } else {
+            rest_window(shown)
         }
-        (
-            RECORDING_WINDOW.0,
-            open_height_without_notice() + 2. * CAPSULE_INSET + shown.map_or(0., notice_height),
-        )
+    } else {
+        RECORDING_WINDOW
     }
-    #[cfg(not(target_os = "windows"))]
-    RECORDING_WINDOW
+}
+
+/// The window a resting recording draws: the pill and the inset around it.
+fn rest_window(shown: Option<&Recording>) -> (f32, f32) {
+    (
+        shown.map_or(REST_WIDTH, rest_width) + 2. * CAPSULE_INSET,
+        REST_HEIGHT + 2. * CAPSULE_INSET,
+    )
+}
+
+/// The window an open recording draws: the open panel, its inset, and room
+/// for the notice when it says anything.
+fn open_window(shown: Option<&Recording>) -> (f32, f32) {
+    (
+        RECORDING_WINDOW.0,
+        open_height_without_notice() + 2. * CAPSULE_INSET + shown.map_or(0., notice_height),
+    )
 }
 
 /// The finished meeting's window while it transcribes: the panel it grew
@@ -1081,4 +1149,182 @@ pub(super) fn ready_window_size(manifest: &MeetingManifest) -> (f32, f32) {
         PANEL_WIDTH + 2.0 * CAPSULE_INSET,
         RESULT_HEADER_MAX + summary + ROW_GAP + COPIES_HEIGHT + PANEL_PAD + 2.0 * CAPSULE_INSET,
     )
+}
+
+/// The recording window's size on Windows, where it follows what the capsule
+/// draws. Growth is taken the frame it is asked for; a shrink waits for the
+/// surface to land, because a window that shrinks first cuts the panel it is
+/// still drawing.
+#[cfg(any(target_os = "windows", test))]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) struct WindowFit {
+    size: Option<(f32, f32)>,
+}
+
+#[cfg(any(target_os = "windows", test))]
+impl WindowFit {
+    /// The size to ask the host for now: `want` when the window has to grow
+    /// or it has no size yet, only at rest when it shrinks, and nothing while
+    /// it already has that size.
+    pub(super) fn next(&mut self, want: (f32, f32), at_rest: bool) -> Option<(f32, f32)> {
+        if self.size == Some(want) {
+            return None;
+        }
+        if !at_rest
+            && self
+                .size
+                .is_some_and(|size| want.0 < size.0 || want.1 < size.1)
+        {
+            return None;
+        }
+        self.size = Some(want);
+        Some(want)
+    }
+
+    /// The size the host was last given, once this fit has asked for one.
+    pub(super) fn size(&self) -> Option<(f32, f32)> {
+        self.size
+    }
+
+    /// A different window, whose size this fit did not ask for.
+    pub(super) fn reset(&mut self) {
+        self.size = None;
+    }
+}
+
+/// Windows: the recording capsule's window is only as large as what it
+/// draws, so it follows the capsule: the open panel while the pointer or Stop
+/// holds it, and the resting pill once the closing surface has landed.
+#[cfg(target_os = "windows")]
+impl Capsule {
+    /// Asks for the window what the capsule shows now needs. A shrink waits
+    /// for the surface; growth is taken at once.
+    pub(super) fn fit_recording_window(&mut self) {
+        self.ask_recording_window(false);
+    }
+
+    /// The surface has landed: a window still larger than what is drawn can
+    /// shrink to it now.
+    pub(super) fn settle_recording_window(&mut self) {
+        self.ask_recording_window(true);
+    }
+
+    fn ask_recording_window(&mut self, at_rest: bool) {
+        // A recording an offer opened keeps that window while it records;
+        // once capture ends the finished panel sizes its own.
+        if matches!(self.state, State::Recording { .. })
+            && self.presentation.inherits_offer_window()
+        {
+            return;
+        }
+        let Some(want) = self.recording_window_want() else {
+            return;
+        };
+        let Some(resize) = &self.resize else {
+            return;
+        };
+        if let Some(size) = self.recording_window.next(want, at_rest) {
+            resize(size);
+        }
+    }
+
+    /// The window this capsule's surface needs: the pill, the open panel,
+    /// the finalizing panel, or the ready panel.
+    fn recording_window_want(&self) -> Option<(f32, f32)> {
+        match &self.state {
+            State::Recording {
+                recording: shown,
+                hovered,
+                stopping,
+            } => Some(recording_window_size(*hovered || *stopping, Some(shown))),
+            State::Finalizing { .. } => Some(finalizing_window_size()),
+            State::Ready { manifest, .. } => Some(ready_window_size(manifest)),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rest() -> (f32, f32) {
+        rest_window(None)
+    }
+
+    fn open() -> (f32, f32) {
+        open_window(None)
+    }
+
+    fn noticed() -> Recording {
+        Recording {
+            id: "noticed".into(),
+            title: "Design sync".into(),
+            started: Instant::now(),
+            automatic: true,
+            warning: None,
+        }
+    }
+
+    #[test]
+    fn the_resting_window_is_the_pill_and_the_open_one_the_panel() {
+        assert_eq!(rest(), (159., 44.));
+        assert_eq!(open(), (260., 185.));
+        // A notice widens the resting pill to the panel, and adds its line
+        // to the open one.
+        let noticed = noticed();
+        assert_eq!(rest_window(Some(&noticed)), (260., 44.));
+        assert_eq!(open_window(Some(&noticed)), (260., 205.));
+    }
+
+    #[test]
+    fn a_growing_window_is_taken_at_once_and_a_shrinking_one_at_rest() {
+        let mut fit = WindowFit::default();
+        // Nothing asked yet: the first size is taken whatever it is.
+        assert_eq!(fit.next(rest(), false), Some(rest()));
+        assert_eq!(fit.next(open(), false), Some(open()));
+        // The pointer left: the close is still drawn at the open size.
+        assert_eq!(fit.next(rest(), false), None);
+        assert_eq!(fit.size(), Some(open()));
+        // The surface landed.
+        assert_eq!(fit.next(rest(), true), Some(rest()));
+        assert_eq!(fit.next(rest(), true), None);
+        assert_eq!(fit.size(), Some(rest()));
+    }
+
+    #[test]
+    fn a_pointer_that_returns_before_the_close_lands_keeps_the_open_window() {
+        let mut fit = WindowFit::default();
+        fit.next(open(), false);
+        // The pointer left, but the window may not shrink yet.
+        assert_eq!(fit.next(rest(), false), None);
+        // Back inside: the window never shrank, so nothing is asked.
+        assert_eq!(fit.next(open(), false), None);
+        assert_eq!(fit.size(), Some(open()));
+        // It leaves again and the close lands.
+        assert_eq!(fit.next(rest(), false), None);
+        assert_eq!(fit.next(rest(), true), Some(rest()));
+    }
+
+    #[test]
+    fn a_window_that_grows_one_axis_and_shrinks_the_other_waits_for_rest() {
+        let mut fit = WindowFit::default();
+        let noticed = noticed();
+        let open_noticed = open_window(Some(&noticed));
+        fit.next(open_noticed, false);
+        // The notice line goes: narrower in height, the same width.
+        assert_eq!(fit.next(open(), false), None);
+        assert_eq!(fit.size(), Some(open_noticed));
+        assert_eq!(fit.next(open(), true), Some(open()));
+    }
+
+    #[test]
+    fn a_new_window_forgets_the_size_the_last_one_had() {
+        let mut fit = WindowFit::default();
+        fit.next(open(), false);
+        fit.reset();
+        assert_eq!(fit.size(), None);
+        // Its first ask may be smaller than the window it replaced.
+        assert_eq!(fit.next(rest(), false), Some(rest()));
+    }
 }
