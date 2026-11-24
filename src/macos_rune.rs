@@ -639,7 +639,22 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     // so take the error here and stop the way Quit does, with the reason in
     // the process log and a failed launch's exit status. The Linux window
     // keeps running instead (`rune_ui::run_app`).
-    let started = app.try_run();
+    //
+    // A panic in a frame, pump, or host callback comes back out of
+    // `EventLoop::run_app` too: winit catches it at the AppKit boundary and
+    // resumes it once the loop returns. Letting it leave `main` ends the
+    // process through libc `exit`, which runs C++ static destructors under
+    // live threads (ggml's Metal device aborts in `ggml_metal_rsets_free`),
+    // so catch it here and stop the way Quit does.
+    let started = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.try_run()))
+        .unwrap_or_else(|panic| {
+            let reason = panic
+                .downcast_ref::<&'static str>()
+                .copied()
+                .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+                .unwrap_or("a panic without a message");
+            Err(format!("the Hex window panicked: {reason}"))
+        });
     if let Err(error) = &started {
         tracing::error!(%error, "the Hex window failed; Hex stops");
     }
