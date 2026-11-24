@@ -56,7 +56,8 @@ list starts at the top. The pages, one file each in `HEXMobile/Settings/`
 - **Experiments**, in four groups: **Dictation**: Multilingual model (Parakeet),
   Two-language dictation, Voice isolation and Clean up with Apple Intelligence;
   **Languages**: Hinglish (Hindi in Latin letters), Greeklish (Greek in Latin letters),
-  Korean keyboard (두벌식), Swipe typing in more languages and German spatial autocorrect
+  Korean keyboard (두벌식), Arabic keyboard (العربية), Swipe typing in more languages and
+  German spatial autocorrect
   (greyed, its value kept, unless Autocorrect and Spatial autocorrect are on); **Keyboard
   layout**: Comma and period keys, Dvorak punctuation keys, Quick accents, ABC under the
   emoji key, Keyboard themes (its Theme menu below the switch while it's on) and Join the

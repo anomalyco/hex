@@ -99,6 +99,7 @@ What the simulator proves and what only a physical iPhone can.
   space-bar label, pairing, migration, the dictation pick, English & Spanish's keys,
   dictation following the keyboard, Spanish's Americas variants and the iPhone's Region),
   `HangulComposerTests` the two-set composer and the keyboard typing through it,
+  `ArabicKeyboardTests` العربية's rows, holds, punctuation and experiment gating,
   `FullKeyboardEngineTests` the swipe against the
   hold-then-slide trackpad and switching in a `FullKeyboardView` (English & Spanish too,
   and a picked Spanish variant surviving the swipe away and back), and

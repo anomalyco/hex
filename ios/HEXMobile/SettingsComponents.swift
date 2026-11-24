@@ -291,6 +291,7 @@ enum SettingsSnapshotFixture {
         keyboard.spatialAutocorrect = true
         keyboard.germanSpatialAutocorrect = on
         keyboard.koreanKeyboard = on
+        keyboard.arabicKeyboard = on
         keyboard.dvorakPunctuation = on
         keyboard.commaPeriodKeys = on
         keyboard.quickAccents = on

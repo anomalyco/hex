@@ -12,11 +12,28 @@ import CoreGraphics
 /// shift taking what's left.
 extension KeyboardLayout {
     /// Apple's row 3 two-symbol keys: the lower one types, the upper one with shift.
-    static func padPairs(letters rowThree: [String], layer: KeyboardLayer) -> [(String, String?)] {
+    static func padPairs(
+        letters rowThree: [String],
+        layer: KeyboardLayer,
+        language: KeyboardLanguage = .english
+    ) -> [(String, String?)] {
+        let arabic = language == .arabic
         switch layer {
         case .numbers:
+            if arabic {
+                return [
+                    (".", "%"), ("|", "•"), ("/", "\\"), ("=", "’"), ("+", "’"), ("…", "”"),
+                    (":", ":"), ("؛", nil), ("،", nil),
+                ]
+            }
             return ["%", "-", "+", "=", "/", ";", ":"].map { ($0, nil) } + [(",", "!"), (".", "?")]
         case .symbols:
+            if arabic {
+                return [
+                    ("%", "["), ("•", "]"), ("\\", "€"), (",", "£"), ("’", "~"), ("’", "_"),
+                    ("”", "{"), (";", "}"), (",", "<"),
+                ]
+            }
             return ["§", "|", "~", "…", "\\", "<", ">", "!", "?"].map { ($0, nil) }
         case .letters:
             switch rowThree.count {
@@ -24,22 +41,39 @@ extension KeyboardLayout {
             case 7: return rowThree.map { ($0, nil) } + [(",", "!"), (".", "?")]
             // AZERTY: , and ? then . and ! then ' and : (typed with shift: : , iPadOS 27.2).
             case 6: return rowThree.map { ($0, nil) } + [(",", "?"), (".", "!"), ("'", ":")]
+            // Arabic's nine-letter row 3 ends in the Arabic comma before return.
+            case 9 where arabic: return rowThree.map { ($0, nil) } + [("،", nil)]
             default: return rowThree.map { ($0, nil) }
             }
         }
     }
 
     static func padRows(layer: KeyboardLayer, language: KeyboardLanguage, letters: KeyboardLetterLayout) -> (top: [String], middle: [String], bottom: [(String, String?)]) {
-        let digits = "1234567890".map(String.init)
+        let digits = language.digits.map(String.init)
+        let arabic = language == .arabic
         switch layer {
         case .letters:
             // The iPhone's French apostrophe key is the iPad's ' and : pair key (`padPairs`).
             let rows = language.letterRows(letters).map { language.isFrench ? $0.filter { $0 != FrenchTyping.key } : $0 }
-            return (rows[0], rows[1], padPairs(letters: rows[2], layer: .letters))
+            return (rows[0], rows[1], padPairs(letters: rows[2], layer: .letters, language: language))
         case .numbers:
-            return (digits, ["@", "#", "$", "&", "*", "(", ")", "'", "\""], padPairs(letters: [], layer: .numbers))
+            if arabic {
+                return (
+                    digits + ["-"],
+                    ["!", "@", "#", "$", "%", "^", "&", "*", "(", ")", "؟"],
+                    padPairs(letters: [], layer: .numbers, language: language)
+                )
+            }
+            return (digits, ["@", "#", "$", "&", "*", "(", ")", "'", "\""], padPairs(letters: [], layer: .numbers, language: language))
         case .symbols:
-            return (digits, ["€", "£", "¥", "_", "^", "[", "]", "{", "}"], padPairs(letters: [], layer: .symbols))
+            if arabic {
+                return (
+                    digits + ["-"],
+                    ["[", "]", "€", "£", "~", "_", "{", "}", "<", ">", "?"],
+                    padPairs(letters: [], layer: .symbols, language: language)
+                )
+            }
+            return (digits, ["€", "£", "¥", "_", "^", "[", "]", "{", "}"], padPairs(letters: [], layer: .symbols, language: language))
         }
     }
 
@@ -100,18 +134,32 @@ extension KeyboardLayout {
         // Row 2: set in, then return to the edge.
         x = left + (rows.middle.count < rows.top.count ? 0.4 : 0.2) * pitch
         for ch in rows.middle { add(.character(ch), 1, x, lw, ch); x += pitch }
-        add(.returnKey, 1, x, right - x, "return")
+        if layer == .letters || language != .arabic {
+            add(.returnKey, 1, x, right - x, "return")
+        }
         // Row 3: shift (or the page switch), the letters and two-symbol keys, the other shift.
+        // Arabic has no shift key: its nine letters and comma run edge to edge.
         let shiftW = padShiftRatio(language: language, letters: letters, layer: layer) * lw
         let page: (KeyKind, String) = switch layer {
         case .letters: (.shift, "shift")
         case .numbers: (.layerSwitch(.symbols), "#+=")
-        case .symbols: (.layerSwitch(.numbers), "123")
+        case .symbols: (.layerSwitch(.numbers), language.numbersKeyLabel)
         }
-        add(page.0, 2, left, shiftW, page.1)
-        x = left + shiftW + g
-        for (ch, upper) in rows.bottom { add(.character(ch), 2, x, lw, ch, shifted: upper); x += pitch }
-        add(page.0, 2, x, right - x, page.1)
+        if layer == .letters, !language.showsShift {
+            let count = CGFloat(rows.bottom.count)
+            let width = count > 0 ? (right - left - (count - 1) * g) / count : lw
+            x = left
+            for (ch, upper) in rows.bottom { add(.character(ch), 2, x, width, ch, shifted: upper); x += width + g }
+        } else {
+            add(page.0, 2, left, shiftW, page.1)
+            x = left + shiftW + g
+            for (ch, upper) in rows.bottom { add(.character(ch), 2, x, lw, ch, shifted: upper); x += pitch }
+            if layer != .letters, language == .arabic {
+                add(.returnKey, 2, x, right - x, "return")
+            } else {
+                add(page.0, 2, x, right - x, page.1)
+            }
+        }
 
         // Row 4: globe, 123 or ABC, the Hex key (Apple's dictation key), space, the field's
         // extras, 123/ABC or emoji, and hide. Apple's small keys are 1.046 letters wide upright
@@ -121,13 +169,18 @@ extension KeyboardLayout {
         let landscape = orientation == .landscape
         let small = (landscape ? 1.02 : 1.046) * reference
         let wide = (landscape ? 1.61 : 1.679) * reference
-        let pageKey: (KeyKind, String) = layer == .letters ? (.layerSwitch(.numbers), "123") : (.layerSwitch(.letters), "ABC")
+        let pageKey: (KeyKind, String) = layer == .letters || (layer == .symbols && language == .arabic)
+            ? (.layerSwitch(.numbers), language.numbersKeyLabel)
+            : (.layerSwitch(.letters), language.lettersKeyLabel)
         var lead: [(KeyKind, CGFloat, String)] = []
         if showsGlobe { lead.append((.globe, small, "globe")) }
         lead.append((pageKey.0, small, pageKey.1))
         lead.append((.hex, small, "hex"))
         // Apple's docked web search row is its text row, `.` staying on row 3 (iPad mini, iOS 27.2).
         var trail = field == .webSearch ? [] : field.keysRightOfSpace(width: lw)
+        if language == .arabic, layer == .letters, field == .text {
+            trail.append((.character("ً"), lw, "◌ً"))
+        }
         trail.append(showsEmoji && layer == .letters ? (.emoji, wide, "emoji") : (pageKey.0, wide, pageKey.1))
         trail.append((.dismiss, wide, "dismiss"))
         x = left
