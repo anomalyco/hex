@@ -1,0 +1,29 @@
+--- a/include/whisper.h
++++ b/include/whisper.h
+@@ -445,6 +445,9 @@
+     WHISPER_API struct whisper_timings * whisper_get_timings(struct whisper_context * ctx);
+     WHISPER_API void whisper_print_timings(struct whisper_context * ctx);
+     WHISPER_API void whisper_reset_timings(struct whisper_context * ctx);
++    // Hex: the total time a decode on [state] spent in each part, in ms. whisper_get_timings reads only the context's own
++    // state, not one from whisper_init_state.
++    WHISPER_API void hex_whisper_state_timings(struct whisper_state * state, struct whisper_timings * timings);
+ 
+     // Print system information
+     WHISPER_API const char * whisper_print_system_info(void);
+--- a/src/whisper.cpp
++++ b/src/whisper.cpp
+@@ -4405,6 +4405,14 @@
+     return timings;
+ }
+ 
++void hex_whisper_state_timings(struct whisper_state * state, struct whisper_timings * timings) {
++    timings->sample_ms = 1e-3f * state->t_sample_us;
++    timings->encode_ms = 1e-3f * state->t_encode_us;
++    timings->decode_ms = 1e-3f * state->t_decode_us;
++    timings->batchd_ms = 1e-3f * state->t_batchd_us;
++    timings->prompt_ms = 1e-3f * state->t_prompt_us;
++}
++
+ void whisper_print_timings(struct whisper_context * ctx) {
+     const int64_t t_end_us = ggml_time_us();
+ 

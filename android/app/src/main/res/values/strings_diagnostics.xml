@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <!-- Labs › Diagnostics (src/main/java/ly/anoma/hex/diagnostics), in Hex Preview and debug builds. English and Simplified
+         Chinese (values-zh-rCN) only. The report itself stays in English for whoever reads it. -->
+    <string name="labs_troubleshooting">Troubleshooting</string>
+    <string name="diagnostics">Diagnostics</string>
+    <string name="diagnostics_detail">A report on how Hex runs on this phone</string>
+    <string name="diagnostics_contents">The report has this phone’s model, Android version, memory, processor and vibration support, and Hex’s version, settings and test times. Nothing you typed or said, and nothing is sent.</string>
+    <string name="diagnostics_check">Check this phone</string>
+    <string name="diagnostics_none">Tap Check this phone or a test to make the report.</string>
+    <string name="diagnostics_copy">Copy report</string>
+    <string name="diagnostics_speed">Speed test</string>
+    <string name="diagnostics_speed_detail">Transcribes a bundled 11-second English clip twice each way Hex can run it. It can take a few minutes.</string>
+    <string name="diagnostics_run_app">Run in the app</string>
+    <string name="diagnostics_run_keyboard">Run in the keyboard</string>
+    <string name="diagnostics_run_keyboard_detail">Then open a text field in another app</string>
+    <string name="diagnostics_waiting">Open a text field in another app to start it</string>
+    <string name="diagnostics_running">Running %1$d of %2$d</string>
+    <string name="diagnostics_done">Done. The times are in the report.</string>
+    <string name="diagnostics_failed">The speech model didn’t load</string>
+    <string name="diagnostics_haptics">Haptics</string>
+    <string name="diagnostics_haptics_detail">Type a few letters in another app, like Messages, then come back here.</string>
+    <string name="diagnostics_tick">Tap through the vibrator</string>
+    <string name="diagnostics_tick_detail">What a key press plays, with Hex’s switches</string>
+    <string name="diagnostics_android_tap">Tap the way Android does for keyboards</string>
+    <string name="diagnostics_android_tap_detail">Android’s own keyboard tap, which its settings control</string>
+    <!-- What each of Hex's taps plays on this phone, e.g. "Key press: a 12 ms pulse at 31% strength, because this phone
+         doesn’t offer Android’s tick". Filled in by Diagnostics.tapLines. -->
+    <string name="diagnostics_tap_press">Key press</string>
+    <string name="diagnostics_tap_release">Held key lifting</string>
+    <string name="diagnostics_tap_start">Dictation start</string>
+    <string name="diagnostics_tap_end">Dictation end</string>
+    <string name="diagnostics_tap_click">click</string>
+    <string name="diagnostics_tap_tick">tick</string>
+    <string name="diagnostics_tap_predefined" formatted="false">%1$s: Android’s %2$s</string>
+    <string name="diagnostics_tap_pulse" formatted="false">%1$s: a %2$d ms pulse %3$s, because this phone doesn’t offer Android’s %4$s</string>
+    <string name="diagnostics_tap_default_strength">at the phone’s default strength</string>
+    <string name="diagnostics_tap_strength" formatted="false">at %1$d%% strength</string>
+    <string name="diagnostics_pulse">Stronger pulse</string>
+    <string name="diagnostics_pulse_detail">A long, full-strength pulse, whatever the switches say</string>
+    <string name="diagnostics_strip_running">Running Hex’s speed test…</string>
+    <string name="diagnostics_strip_done">Speed test done. Tap to see it</string>
+    <string name="diagnostics_dismiss">Dismiss</string>
+</resources>

@@ -37,7 +37,7 @@ internal object SpeechModel {
     /** One thread per fast core, at most four: the work is split evenly, so a slow core holds up the
      * rest. A core is fast with at least half the strongest core's capacity as the kernel rates it
      * (cpu_capacity: 2 of 8 on a Snapdragon 695, all 8 on an 8 Elite); unrated cores all count. */
-    private val threads: Int by lazy {
+    internal val threads: Int by lazy {
         val cores = Runtime.getRuntime().availableProcessors()
         val capacity = (0 until cores).mapNotNull {
             runCatching { File("/sys/devices/system/cpu/cpu$it/cpu_capacity").readText().trim().toInt() }.getOrNull()
@@ -62,6 +62,27 @@ internal object SpeechModel {
         keep()
         return bytes?.decodeToString()?.trim()
     }
+
+    /** Labs › Diagnostics' speed test: decodes [pcm] as English on [threads] threads, as a dictation does, the model
+     * already loaded, and returns the text and whisper.cpp's timings, or null when it failed. [pool] threads are kept
+     * ready with the model for this decode (0: new threads for every graph, as dictation does); the pool is freed
+     * afterwards, so dictation is unchanged. */
+    @Synchronized fun measure(app: Context, pcm: ShortArray, threads: Int, pool: Int, job: Long): Measured? {
+        val small = load(app)
+        if (handle == 0L || !Whisper.threadPool(handle, pool)) return null
+        val cpu = android.os.Process.getElapsedCpuTime()
+        val started = System.nanoTime()
+        val bytes = Whisper.decode(handle, small, pcm, pcm.size, threads, "en", false, null, job)
+        val wall = (System.nanoTime() - started) / 1_000_000
+        val processor = android.os.Process.getElapsedCpuTime() - cpu
+        val timings = Whisper.timings()
+        Whisper.threadPool(handle, 0)
+        keep()
+        return if (bytes == null || timings == null) null
+            else Measured(small, wall, processor, timings, bytes.decodeToString().trim())
+    }
+    /** [wallMs] and [cpuMs] (the whole process's processor time) cover the decode alone. */
+    class Measured(val downloaded: Boolean, val wallMs: Long, val cpuMs: Long, val timings: LongArray, val text: String)
 
     /** Ends [job]'s decode at whisper.cpp's next check (after an encoder pass or a token). Not under the lock,
      * which that decode holds. */
@@ -103,4 +124,11 @@ internal object Whisper {
     external fun decode(handle: Long, small: Boolean, pcm: ShortArray, count: Int, threads: Int,
                         language: String, translate: Boolean, prompt: String?, job: Long): ByteArray?
     external fun abort(job: Long)
+    /** The last decode's timings, for Labs › Diagnostics (hexspeech.cpp says what each is). */
+    external fun timings(): LongArray?
+    /** Keeps [threads] worker threads ready with the model [handle] for its decodes, or none (0, ggml's default: new
+     * threads for every graph). The pool is freed with the model. Only Labs › Diagnostics asks for one today. */
+    external fun threadPool(handle: Long, threads: Int): Boolean
+    /** The file this library loaded from, for Labs › Diagnostics. */
+    external fun library(): String?
 }
