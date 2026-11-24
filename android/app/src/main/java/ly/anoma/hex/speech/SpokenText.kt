@@ -11,7 +11,8 @@ internal object SpokenText {
      * Translation already happened in Whisper, so a translated dictation is English. */
     fun format(raw: String, options: SpeechOptions): String {
         val language = if (options.translate) "en" else options.spoken.code
-        val fixed = DictationFixes.apply(options.fixes, raw)
+        // A translated dictation is the model's English: none of this phone's learned fixes touch it.
+        val fixed = if (options.translate) raw else DictationFixes.apply(options.fixes, raw)
         val spelled = VocabularySpelling.apply(options.vocabulary, fixed)
         if (options.style == Style.Verbatim || raw.isBlank()) return finished(style(spelled, options.style, language), options)
         val spoken = SpokenCleanup.counts(SpokenCleanup.symbols(spelled.trim(), language), language)

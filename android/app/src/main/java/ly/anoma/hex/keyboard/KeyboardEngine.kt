@@ -694,7 +694,8 @@ internal class KeyboardEngine(
             continuation.record(if (signature) result else null)
             if (!secure) offerUndo(Dictated(result, target.after(16).orEmpty()))
             val words = DictationText.words(result).size
-            if (learn && heard != null && !secure && wordField && !keyEventEditor && learnsTyping &&
+            // A signed dictation carries a line Hex added, not just what was said: it is never tracked.
+            if (learn && !signature && heard != null && !secure && wordField && !keyEventEditor && learnsTyping &&
                 words in 1..DictationEdits.maxWords) tracker.inserted(heard, result, before, after)
             scheduleDictationCheck()
         }

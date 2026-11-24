@@ -119,8 +119,9 @@ internal object SpeechModel {
         val before = opened
         decodeAt = 0L; decodeCpu = -1L; whisperRan = false
         val decoded = transcribe(engineFor(options), pcm, count, { abandoned == job },
-            english = { audio, n -> openEnglish(app) ?: decodeEnglish(app, audio, n, options.vocabulary, job) },
-            standard = { audio, n -> decodeStandard(app, audio, n, options.spoken.code, options.translate, whisperPrompt(options.vocabulary), job) })
+            english = { audio, n -> openEnglish(app) ?: decodeEnglish(app, audio, n, options.recognitionHints, job) },
+            standard = { audio, n -> decodeStandard(app, audio, n, options.spoken.code, options.translate,
+                whisperPrompt(options.recognitionHints), job) })
         val ended = System.nanoTime()
         val started = if (decodeAt != 0L) decodeAt else ended
         val processor = cpuMs().let { if (it < 0 || decodeCpu < 0) -1L else it - decodeCpu }

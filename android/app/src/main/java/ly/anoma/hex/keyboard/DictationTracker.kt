@@ -99,11 +99,18 @@ internal class DictationTracker(
     /** Updates the dictation's place from the text around the cursor; false when it can no longer be followed
      * and had been seen before. Until it is first seen the host may simply be behind, so it keeps waiting. */
     private fun update(current: Tracked): Boolean {
-        val before = target.before(current.inserted.length + anchorLength + 1)
-        val after = target.after(anchorLength)
+        // The whole dictation may sit on either side of the cursor, edited a little; read far enough on both
+        // sides for its text and anchors, so a cursor inside it never cuts a word at the window's edge.
+        val reach = current.inserted.length + anchorLength + 200
+        val before = target.before(reach)
+        val after = target.after(reach)
         if (before == null && after == null) return !current.located
         val currentBefore = before.orEmpty()
         val currentAfter = after.orEmpty()
+        // A short read is the field's edge. A full one only says the window stopped there, so an empty anchor
+        // must not be read as the start or end of the field.
+        val startEdge = before != null && currentBefore.length < reach
+        val endEdge = after != null && currentAfter.length < reach
         if (currentBefore.isEmpty() && currentAfter.isEmpty()) {
             if (!current.located) return true
             current.latest = ""
@@ -111,10 +118,16 @@ internal class DictationTracker(
             return true
         }
         val text = currentBefore + currentAfter
-        val starts = if (current.anchorBefore.isEmpty()) listOf(0)
-            else occurrences(text, current.anchorBefore).map { it + current.anchorBefore.length }.take(16)
-        val ends = if (current.anchorAfter.isEmpty()) listOf(text.length)
-            else occurrences(text, current.anchorAfter).take(16)
+        val starts = when {
+            current.anchorBefore.isNotEmpty() -> occurrences(text, current.anchorBefore).map { it + current.anchorBefore.length }
+            startEdge -> listOf(0)
+            else -> emptyList()
+        }.take(16)
+        val ends = when {
+            current.anchorAfter.isNotEmpty() -> occurrences(text, current.anchorAfter)
+            endEdge -> listOf(text.length)
+            else -> emptyList()
+        }.take(16)
         var bestStart = -1
         var bestEnd = -1
         var bestMiss = Int.MAX_VALUE

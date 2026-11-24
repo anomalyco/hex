@@ -96,6 +96,53 @@ class DictationTrackerTest {
         assertEquals(listOf(DictationOutcome.Edited, DictationOutcome.Kept), outcomes())
     }
 
+    private val longDictation = " one two three four five six seven eight nine ten eleven twelve thirteen fourteen."
+
+    @Test fun anEditInsideTheDictationIsFoundWithTextAfterIt() {
+        field.text = "Hi. "
+        field.cursor = 4
+        dictate(longDictation)
+        field.insert(" Thanks.")
+        field.replace(field.text.indexOf("thirteen"), field.text.indexOf("thirteen") + 8, "thirteenth")
+        field.setCursor(field.text.indexOf("five"))
+        tracker.observe()
+        now += 61_000
+        tracker.observe()
+        assertEquals(listOf(DictationOutcome.Edited), outcomes())
+        assertEquals(listOf("thirteenth"), results.single().pairs.map { it.meant })
+    }
+
+    @Test fun anEditInsideTheDictationIsFoundWithoutTextAfterIt() {
+        dictate(longDictation)
+        field.replace(field.text.indexOf("thirteen"), field.text.indexOf("thirteen") + 8, "thirteenth")
+        field.setCursor(field.text.indexOf("five"))
+        tracker.observe()
+        now += 61_000
+        tracker.observe()
+        assertEquals(listOf(DictationOutcome.Edited), outcomes())
+        assertEquals(listOf("thirteenth"), results.single().pairs.map { it.meant })
+    }
+
+    @Test fun typingAfterADictationAtTheFieldStartIsNotAnEdit() {
+        dictate("Meet at cloud nine.")
+        field.insert(" and then we can talk about the rest of the plan tomorrow.")
+        tracker.observe()
+        now += 61_000
+        tracker.observe()
+        assertEquals(listOf(DictationOutcome.Kept), outcomes())
+        assertTrue(results.single().pairs.isEmpty())
+    }
+
+    @Test fun aCursorInsideALongDictationDoesNotCutItsEnd() {
+        dictate("one two three four five six seven eight nine ten eleven twelve thirteen fourteen.")
+        field.setCursor(field.text.indexOf("nine"))
+        tracker.observe()
+        now += 61_000
+        tracker.observe()
+        assertEquals(listOf(DictationOutcome.Kept), outcomes())
+        assertTrue(results.single().pairs.isEmpty())
+    }
+
     @Test fun deletingAndDictatingAgainIsARedictation() {
         dictate("Meet at cloud nine.")
         tracker.observe()

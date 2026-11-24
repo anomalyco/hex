@@ -14,7 +14,9 @@ internal object DictationText {
         while (i < text.length) {
             val c = text[i]
             val join = c == '\'' || c == '’'
-            val word = c.isLetterOrDigit() || (join && wordStart >= 0 && i + 1 < text.length && text[i + 1].isLetter())
+            // A combining mark belongs to the letter before it ("cafe" + U+0301 is one word, not "cafe" and a mark).
+            val word = c.isLetterOrDigit() || (join && wordStart >= 0 && i + 1 < text.length && text[i + 1].isLetter()) ||
+                (isMark(c) && wordStart >= 0)
             if (word) { if (wordStart < 0) wordStart = i }
             else if (wordStart >= 0) { words += DictationWord(text.substring(wordStart, i), wordStart, i); wordStart = -1 }
             i++
@@ -31,6 +33,12 @@ internal object DictationText {
 
     /** Letters and digits only, lowercased, so spacing and punctuation don't count. */
     fun letters(text: String) = text.lowercase(Locale.ROOT).filter(Char::isLetterOrDigit)
+
+    /** A combining mark that continues the word before it, never a word on its own. */
+    fun isMark(c: Char) = when (Character.getType(c)) {
+        Character.NON_SPACING_MARK.toInt(), Character.COMBINING_SPACING_MARK.toInt(), Character.ENCLOSING_MARK.toInt() -> true
+        else -> false
+    }
 
     fun distance(a: String, b: String): Int {
         if (a.isEmpty()) return b.length
@@ -139,6 +147,9 @@ internal object DictationEdits {
             val insertedText = insertedWords.subList(hunk.old.first, hunk.old.last + 1).joinToString(" ")
             var meantText = finalWords.subList(hunk.new.first, hunk.new.last + 1).joinToString(" ") { it.text }
             val heardText = alignment.heard(hunk.old) ?: insertedText
+            // Alignment can fold a long spoken number ("one hundred and twenty five") onto one word ("125"):
+            // a fix never carries more than three words a side.
+            if (DictationText.words(heardText).size > maxPairWords || DictationText.words(meantText).size > maxPairWords) continue
             if (!plausible(insertedText, meantText) && !plausible(heardText, meantText)) continue
             val sentenceStart = if (hunk.new.first == 0) startsSentence
                 else startsSentence(finalWords[hunk.new.first], final)
@@ -172,6 +183,7 @@ internal object DictationEdits {
             val insertedText = oldWords.subList(hunk.old.first, hunk.old.last + 1).joinToString(" ")
             val heardText = alignment.heard(hunk.old) ?: insertedText
             var meantText = next.subList(hunk.new.first, hunk.new.last + 1).joinToString(" ") { it.text }
+            if (DictationText.words(heardText).size > maxPairWords || DictationText.words(meantText).size > maxPairWords) continue
             if (!plausible(insertedText, meantText) && !plausible(heardText, meantText)) continue
             val sentenceStart = if (hunk.new.first == 0) startsSentence
                 else startsSentence(next[hunk.new.first], nextInserted)

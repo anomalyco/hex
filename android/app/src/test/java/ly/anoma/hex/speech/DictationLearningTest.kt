@@ -82,6 +82,15 @@ class DictationLearningTest {
         assertNull(DictationEdits.classify(null, (1..401).joinToString(" ") { "word" + it }, "word"))
     }
 
+    @Test fun aFoldedSpokenNumberIsNoPair() {
+        val result = DictationEdits.classify("call one hundred and twenty five today", "Call 125 today", "Call 126 today")
+        assertEquals(DictationOutcome.Edited, result?.outcome)
+        assertTrue("the heard side folded onto 125 is five words", result!!.pairs.isEmpty())
+        val again = DictationEdits.redictation("call one hundred and twenty five today", "Call 125 today", "Call 126 today")
+        assertEquals(DictationOutcome.Redictated, again?.outcome)
+        assertTrue(again!!.pairs.isEmpty())
+    }
+
     // The rules: applied only after two sightings, never after a contradiction, and only one meaning.
     private fun record(heard: String, meant: String, count: Int = 1, contradictions: Int = 0, at: Long = 0) =
         DictationFix(heard, meant, count, contradictions, at)
@@ -99,6 +108,23 @@ class DictationLearningTest {
     @Test fun aCapitalYouUsedIsKeptAsTheSpelling() {
         val learned = DictationFixes.learned(listOf(record("cloud", "claude"), record("cloud", "Claude")))
         assertEquals("Claude", learned.single().meant)
+    }
+
+    @Test fun mergingMatchesTheMeantSideRegardlessOfCase() {
+        var records = DictationFixes.merge(emptyList(), edited(pair("cloud", "cloud", "Claude")), 1)
+        records = DictationFixes.merge(records, edited(pair("cloud", "cloud", "claude")), 2)
+        assertEquals(1, records.size)
+        assertEquals(2, records.single().count)
+        assertEquals("the latest spelling wins", "claude", records.single().meant)
+        assertEquals(1, DictationFixes.learned(records).size)
+    }
+
+    @Test fun mergingSkipsPairsLongerThanThreeWords() {
+        assertTrue(DictationFixes.merge(emptyList(),
+            edited(pair("one hundred and twenty five", "125", "126")), 1).isEmpty())
+        assertTrue(DictationFixes.merge(emptyList(),
+            edited(pair("cloud", "cloud", "one two three four")), 1).isEmpty())
+        assertTrue(DictationFixes.learned(listOf(record("one hundred and twenty five", "126", count = 2))).isEmpty())
     }
 
     @Test fun aFixSwitchedOffInSettingsIsNotApplied() {
@@ -153,11 +179,57 @@ class DictationLearningTest {
         assertEquals("I love Claude.", DictationFixes.apply(listOf(cloud), "I love cloud."))
     }
 
+    @Test fun learnedWordsAreHintsNotForcedSpellings() {
+        val fix = DictationFix("their", "there", 2, 0)
+        val hints = recognitionHints(listOf("iPhone"), listOf(fix), learning = true, translated = false)
+        assertEquals(listOf("iPhone", "there"), hints)
+        assertEquals(listOf("iPhone"), forcedSpellings(listOf("iPhone"), listOf(fix), learning = true, translated = false))
+        assertEquals(listOf("iPhone", "Claude"),
+            forcedSpellings(listOf("iPhone"), listOf(DictationFix("cloud", "Claude", 2, 0)), learning = true, translated = false))
+        assertEquals(listOf("iPhone"), forcedSpellings(listOf("iPhone"), listOf(fix), learning = false, translated = false))
+        assertEquals(listOf("iPhone"), forcedSpellings(listOf("iPhone"), listOf(fix), learning = true, translated = true))
+        val options = SpeechOptions(Style.Polished, DictationLanguage.English, false, false,
+            vocabulary = listOf("iPhone"), fixes = listOf(fix), learnFixes = true, hints = hints)
+        assertEquals(listOf("iPhone"), options.vocabulary)
+        assertEquals(hints, options.recognitionHints)
+        assertEquals("There it is. I went there.", SpokenText.format("There it is. I went their.", options))
+    }
+
+    @Test fun hintsFallBackToVocabularyWhenOffAndOnlyTermsWhenTranslated() {
+        val fix = DictationFix("their", "there", 2, 0)
+        assertEquals(listOf("iPhone"), recognitionHints(listOf("iPhone"), listOf(fix), learning = false, translated = false))
+        assertEquals(listOf("iPhone"), recognitionHints(listOf("iPhone"), listOf(fix), learning = true, translated = true))
+        val off = SpeechOptions(Style.Verbatim, DictationLanguage.English, false, false, vocabulary = listOf("iPhone"))
+        assertEquals(listOf("iPhone"), off.recognitionHints)
+        val translated = SpeechOptions(Style.Verbatim, DictationLanguage.English, false, true,
+            vocabulary = listOf("iPhone"), fixes = listOf(fix), hints = listOf("iPhone", "there"))
+        assertEquals(listOf("iPhone"), translated.recognitionHints)
+        assertEquals("cloud", SpokenText.format("cloud", SpeechOptions(Style.Verbatim, DictationLanguage.English,
+            false, true, fixes = listOf(cloud))))
+    }
+
+    @Test fun aLearnedCapitalKeepsItsSpelling() {
+        val fix = DictationFix("cloud", "Claude", 2, 0)
+        val vocabulary = DictationFixes.spellings(listOf(fix))
+        val options = SpeechOptions(Style.Casual, DictationLanguage.English, false, false,
+            vocabulary = vocabulary, fixes = listOf(fix), learnFixes = true, hints = listOf("Claude"))
+        assertEquals(listOf("Claude"), vocabulary)
+        assertEquals("Claude is here", SpokenText.format("cloud is here.", options))
+    }
+
     @Test fun fixesRunBeforeTheCustomVocabularyInFormatting() {
         val fixes = listOf(DictationFix("cloud", "Claude", 2, 0))
         val options = SpeechOptions(Style.Polished, DictationLanguage.English, false, false,
             vocabulary = listOf("OpenCode"), fixes = fixes)
         assertEquals("Claude ships with OpenCode.", SpokenText.format("cloud ships with open code.", options))
+    }
+
+    @Test fun combiningMarksStayInsideWords() {
+        val word = DictationText.words("café")
+        assertEquals(1, word.size)
+        assertEquals("café", word.single().text)
+        assertEquals("café and coffee",
+            DictationFixes.apply(listOf(DictationFix("cafe", "coffee", 2, 0)), "café and cafe"))
     }
 
     @Test fun phraseFixesNeedPlainSpacesBetweenWords() {
@@ -190,6 +262,9 @@ class DictationLearningTest {
         )
         assertEquals(records.map(::fields), DictationFixes.decode(DictationFixes.encode(records)).map(::fields))
         assertTrue(DictationFixes.decode("garbage").isEmpty())
+        assertTrue(DictationFixes.decode("cloud\tClaude\t-1\t0\t1").isEmpty())
+        assertTrue(DictationFixes.decode("cloud\tClaude\t2\t-1\t1").isEmpty())
+        assertEquals(1, DictationFixes.decode("cloud\tClaude\t2\t0\t1").size)
     }
 
     private fun fields(fix: DictationFix) = listOf(fix.heard, fix.meant, fix.count.toString(), fix.contradictions.toString(),

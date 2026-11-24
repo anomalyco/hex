@@ -30,10 +30,15 @@ internal object DictationFixes {
             if (pair.meant == pair.heard) continue
             // A case change is not a fix, unless the capital is part of the spelling.
             if (heardKey == meantKey && pair.meant.none(Char::isUpperCase)) continue
-            val index = out.indexOfFirst { DictationText.phraseKey(it.heard) == heardKey && it.meant == pair.meant }
+            // A folded long phrase (a spoken number) is no fix; the classifier already leaves these out.
+            if (DictationText.words(heardKey).size > DictationEdits.maxPairWords ||
+                DictationText.words(meantKey).size > DictationEdits.maxPairWords) continue
+            // The meant side matches regardless of case, so "claude" and "Claude" stay one record.
+            val index = out.indexOfFirst { DictationText.phraseKey(it.heard) == heardKey && DictationText.phraseKey(it.meant) == meantKey }
             if (index >= 0) {
                 val old = out[index]
-                out[index] = DictationFix(old.heard, old.meant, old.count + 1, old.contradictions, at)
+                // The latest spelling wins, as it is the one the person last typed.
+                out[index] = DictationFix(old.heard, pair.meant.trim(), old.count + 1, old.contradictions, at)
             } else {
                 out += DictationFix(heardKey, pair.meant.trim(), 1, 0, at)
             }
@@ -59,6 +64,8 @@ internal object DictationFixes {
             val heardKey = DictationText.phraseKey(record.heard)
             val meantKey = DictationText.phraseKey(record.meant)
             if (heardKey.isEmpty() || meantKey.isEmpty()) continue
+            if (DictationText.words(heardKey).size > DictationEdits.maxPairWords ||
+                DictationText.words(meantKey).size > DictationEdits.maxPairWords) continue
             val group = groups.getOrPut(heardKey + " → " + meantKey) { Group(heardKey, record.meant) }
             group.count += record.count
             group.contradictions += record.contradictions
@@ -76,6 +83,9 @@ internal object DictationFixes {
     /** The fixes Hex applies, with the ones switched off in Settings left out. */
     fun active(fixes: List<DictationFix>, disabled: Set<String>) = fixes.filter { it.id !in disabled }
 
+    /** Learned spellings with capitals ("Claude", "OpenCode"), which formatting must not undo. */
+    fun spellings(fixes: List<DictationFix>) = fixes.map { it.meant.trim() }.filter { it.any(Char::isUpperCase) }
+
     /** Replaces each heard word or phrase, whole words only and never inside a longer token. The meant spelling
      * is kept when it has capitals; otherwise it follows the original's case. */
     fun apply(fixes: List<DictationFix>, text: String): String {
@@ -85,7 +95,8 @@ internal object DictationFixes {
         for (fix in fixes) {
             val keys = DictationText.words(fix.heard).map { DictationText.key(it.text) }
             val meant = fix.meant.trim()
-            if (keys.isEmpty() || keys.size > DictationEdits.maxPairWords || meant.isEmpty() || table.containsKey(keys)) continue
+            if (keys.isEmpty() || keys.size > DictationEdits.maxPairWords ||
+                DictationText.words(meant).size > DictationEdits.maxPairWords || meant.isEmpty() || table.containsKey(keys)) continue
             table[keys] = meant
             longest = maxOf(longest, keys.size)
         }
@@ -146,7 +157,8 @@ internal object DictationFixes {
         val count = fields[2].toIntOrNull() ?: return@mapNotNull null
         val contradictions = fields[3].toIntOrNull() ?: return@mapNotNull null
         val at = fields[4].toLongOrNull() ?: return@mapNotNull null
-        if (heard.isBlank() || meant.isBlank() || count < 1) null else DictationFix(heard, meant, count, contradictions, at)
+        if (heard.isBlank() || meant.isBlank() || count < 1 || contradictions < 0) null
+        else DictationFix(heard, meant, count, contradictions, at)
     }
 
     private fun contradicts(edit: DictationEdit, fix: DictationFix): Boolean {
@@ -182,10 +194,11 @@ internal object DictationFixes {
     /** Not part of a longer token: no joiner right before, and none right after except a sentence-ending
      * period. */
     private fun bounded(start: Int, end: Int, text: String): Boolean {
-        if (start > 0 && text[start - 1] in joiners) return false
+        if (start > 0 && (text[start - 1] in joiners || DictationText.isMark(text[start - 1]))) return false
         if (end >= text.length) return true
         val next = text[end]
-        if (next !in joiners) return true
+        // A combining mark after the match makes it part of a longer word ("cafe" in "cafe" + U+0301).
+        if (next !in joiners && !DictationText.isMark(next)) return true
         if (next != '.') return false
         if (end + 1 >= text.length) return true
         val following = text[end + 1]
