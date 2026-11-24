@@ -597,7 +597,11 @@ dictate" with **Open Hex** and ✕: Dictate and the Hex key then say that instea
 dictating (from iOS 26 nothing else opens Hex), and Open Hex opens it, which downloads it, until a model
 installs (in either process; Hex checks again each time it comes to the front), a
 language is chosen, or a day passes (`SpeechModelNeedsHex`,
-`settings.dictationLanguage.keyboardNeedsHex`). Only a language Hex itself set aside keeps
+`settings.dictationLanguage.keyboardNeedsHex`). Where Hex itself found Apple has no model for
+the language on this iPhone (`KeyboardSpeechPreparation`: Speech lists nothing, or the
+language isn't on this iPhone with nothing to fall back to), downloading can't help, so the
+line says "Maltese isn't available on this iPhone yet" with only a ✕
+(`settings.dictationLanguage.keyboardNeedsHex.unavailable`). Only a language Hex itself set aside keeps
 its sentence in the keyboard ("Russian isn't available on this iPhone yet. Try English."): the
 keyboard sets nothing aside, and through TestFlight build 147 its own failed install of a
 language picked by hand on an English iPhone (Hebrew, Norwegian, German) said it wasn't
