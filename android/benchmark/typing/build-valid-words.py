@@ -8,6 +8,7 @@ round(8 ln(corpus / count)), as the model stores its words', so a rare word cost
     python3 build-valid-words.py en scowl-2020.12.07.tar.gz en.hextm en.valid
     python3 build-valid-words.py {es|de|fr|it} MODEL.hextm WORKDIR OUTPUT.valid [MIN_COUNT]
     python3 build-valid-words.py nb MODEL.hextm WORKDIR OUTPUT.valid [MIN_COUNT]
+    python3 build-valid-words.py pt MODEL.hextm WORKDIR OUTPUT.valid [MIN_COUNT]
 
 English: SCOWL spellings, sizes through 70. Spanish, German, French and Italian: Google Books Ngram
 v3 1-grams (2020-02-17, CC BY 3.0), 1980-2019, as build-capitals.py counts them into
@@ -19,6 +20,12 @@ language a spelling that is a model word with an accent changed or left out ("vo
 which books misspell as typists do.
 Bokmål: Norsk ordbank's standard full forms (2022 release, CC BY 4.0) that the NB N-gram 2026
 books (language nob, CC0) use at least MIN_COUNT times, 1980-2019.
+Portuguese (Brazil): the spellings build-layout-model.py pt counts (WORKDIR is its SOURCE_CACHE) in
+Brazil's news and parliament at least MIN_COUNT times, less what its model leaves out; then
+Portugal's own spellings, from Portugal's news and parliament (at least PT_PORTUGAL_COUNT times), so
+a Portuguese typist's correct "facto", "acção" or "económico" is a word and stays as typed: one that
+is a model word with other accents only when Portugal writes it that way more than any other, each
+at the cost of its count among Portugal's words.
 """
 import collections, csv, hashlib, importlib, io, math, os, re, sys, tarfile, unicodedata
 from pathlib import Path
@@ -29,7 +36,8 @@ capitals = importlib.import_module("build-capitals")
 SCOWL_SHA256 = "5587667caa20c4891390c2d42dbb4d5c4c3f41bee77af1457ece3ba23fb859cc"
 # The fewest uses that make a spelling a word, chosen per language on the typing benchmark
 # against both the rare words it keeps and the typos it lets stand (README.md).
-MIN_COUNT = {"es": 3000, "de": 10000, "fr": 3000, "it": 3000, "nb": 1000}
+MIN_COUNT = {"es": 3000, "de": 10000, "fr": 3000, "it": 3000, "nb": 1000, "pt": 10}
+PT_PORTUGAL_COUNT = 20
 ELISIONS = {
     "fr": ["c", "d", "j", "l", "m", "n", "s", "t", "qu", "jusqu", "lorsqu", "puisqu", "quoiqu", "presqu"],
     "it": ["c", "d", "l", "m", "n", "s", "t", "v", "un", "all", "dall", "dell", "nell", "sull", "coll",
@@ -115,14 +123,46 @@ def norwegian(model, work, output, least):
     write(output, valid)
 
 
+def portuguese(model, work, output, least):
+    layout = importlib.import_module("build-layout-model")
+    folder = layout.portuguese_counts(work)
+    unigram, pair = capitals.model_words(model)
+    twins = {folded(w) for w in unigram}
+    valid = {}
+    # Only spellings written in lowercase at least half the time: not acronyms ("aaualg") or names.
+    lowercase = {r: {w for w, (n, low, _) in layout.pt_uni(folder, r).items() if 2 * low >= n} for r in ("br", "pt")}
+    brazil, corpus, _, _ = layout.pt_words(folder, "br")
+    for w, n in brazil.items():
+        if n >= least * layout.PT_WEIGHT["leipzig"] and len(w) >= 2 and w in lowercase["br"] and w not in unigram \
+                and folded(w) not in twins \
+                and not capitals.joined(w, n / corpus, unigram, pair):
+            valid[w] = cost(n, corpus)
+    brazilian = len(valid)
+    portugal, corpus, _, _ = layout.pt_words(folder, "pt")
+    best = {}
+    for w, n in portugal.items():
+        if n > portugal.get(best.get(folded(w), ""), 0):
+            best[folded(w)] = w
+    for w, n in portugal.items():
+        if n >= PT_PORTUGAL_COUNT * layout.PT_WEIGHT["leipzig"] and len(w) >= 2 and w in lowercase["pt"] \
+                and w not in unigram and w not in valid \
+                and (folded(w) not in twins or best[folded(w)] == w) \
+                and not capitals.joined(w, n / corpus, unigram, pair):
+            valid[w] = cost(n, corpus)
+    print(f"pt: {brazilian:,} Brazilian and {len(valid) - brazilian:,} Portuguese spellings", flush=True)
+    write(output, valid)
+
+
 if __name__ == "__main__":
     lang = sys.argv[1] if len(sys.argv) > 1 else ""
     if lang == "en" and len(sys.argv) == 5:
         english(*sys.argv[2:5])
-    elif lang in ("es", "de", "fr", "it", "nb") and len(sys.argv) in (5, 6):
+    elif lang in ("es", "de", "fr", "it", "nb", "pt") and len(sys.argv) in (5, 6):
         least = int(sys.argv[5]) if len(sys.argv) == 6 else MIN_COUNT[lang]
         if lang == "nb":
             norwegian(sys.argv[2], sys.argv[3], sys.argv[4], least)
+        elif lang == "pt":
+            portuguese(sys.argv[2], sys.argv[3], sys.argv[4], least)
         else:
             books(lang, sys.argv[2], sys.argv[3], sys.argv[4], least)
     else:
