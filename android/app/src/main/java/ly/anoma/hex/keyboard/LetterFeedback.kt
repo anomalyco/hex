@@ -139,10 +139,12 @@ internal class LetterFeedback(private val host: ViewGroup) {
 
         /** What a held letter offers: on row 1 its digit first, under the finger (Gboard types the digit
          * when a held q to p lifts), then its accents with the letter itself. With [symbolsOnLetters], a
-         * second or third row letter offers its symbol first instead, as SwiftKey does. */
-        fun holds(c: Char, language: String, digit: Char?, symbolsOnLetters: Boolean = false): List<String> {
+         * letter with no digit to show offers its symbol first instead: SwiftKey's on the second and third
+         * rows, Gboard's on the top row while the number row holds its digit. */
+        fun holds(c: Char, language: String, digit: Char?, symbolsOnLetters: Boolean = false,
+                  topRow: Boolean = false): List<String> {
             val accents = options(c, language)
-            val first = digit?.toString() ?: (if (symbolsOnLetters) letterSymbol(c)?.toString() else null)
+            val first = digit?.toString() ?: (if (symbolsOnLetters) letterSymbol(c, topRow)?.toString() else null)
             return if (first == null) accents else listOf(first) + accents
         }
 
@@ -151,7 +153,13 @@ internal class LetterFeedback(private val host: ViewGroup) {
         private val letterSymbols = mapOf('a' to '@', 's' to '#', 'd' to '&', 'f' to '*', 'g' to '-',
             'h' to '+', 'j' to '=', 'k' to '(', 'l' to ')', 'z' to '_', 'x' to '$', 'c' to '"', 'v' to '\'',
             'b' to ':', 'n' to ';', 'm' to '/')
-        fun letterSymbol(c: Char): Char? = letterSymbols[c.lowercaseChar()]
+        // Gboard's top row, which the number row leaves without digits: r's = is the one j already holds.
+        // Keyed by letter too, but offered only while the letter is drawn on row 1, so AZERTY's q/w and
+        // QWERTZ's y keep none where their layouts draw them lower.
+        private val topRowSymbols = mapOf('q' to '%', 'w' to '\\', 'e' to '|', 'r' to '=', 't' to '[',
+            'y' to ']', 'u' to '<', 'i' to '>', 'o' to '{', 'p' to '}')
+        fun letterSymbol(c: Char, topRow: Boolean = false): Char? =
+            letterSymbols[c.lowercaseChar()] ?: (if (topRow) topRowSymbols[c.lowercaseChar()] else null)
 
         // Gboard's held symbols (Pixel 8 emulator, API 36, black box) on the keys Hex's pages share with
         // its: the option Gboard selects first, then the rest left to right. Digits offer themselves first.
