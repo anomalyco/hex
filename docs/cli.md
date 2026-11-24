@@ -328,10 +328,11 @@ A CLI-started meeting is the same recording the menu bar starts: the menu-bar
 state, the recording capsule, and Stop & Transcribe all apply to it.
 `meetings record` replies once the recording has started (or after 8 s), and
 `meetings stop` replies once the recorder is transcribing or has discarded a
-recording with no speech (a failure answers its error); after 8 s it answers
-anyway, and `meeting.state` may still read `stopping`. A stop leaves the
-recorder finishing that meeting before it takes another — including a stop
-asked while it is still starting — so until then `meeting.state` reads
+recording with no speech (macOS answers a failure with its error; Linux and
+Windows answer a stop that ends without transcribing as done); after 8 s it
+answers anyway, and `meeting.state` may still read `stopping`. A stop leaves
+the recorder finishing that meeting before it takes another — including a
+stop asked while it is still starting — so until then `meeting.state` reads
 `stopping` and `record` is refused with `busy` (exit 1), never "Already
 recording" or "already starting". Once `meeting.state` is `transcribing`,
 `record` is refused the same way, naming the transcription; only `idle`

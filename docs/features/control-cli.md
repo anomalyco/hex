@@ -98,9 +98,10 @@ Agent or terminal                                  // control.cli; every OS
 │   │   transcribing answers busy too
 │   ├── stop while it already stops -> unchanged, exit 0; nothing new starts
 │   ├── stop replies once the recorder is transcribing, or discarded a
-│   │   recording with no speech (a failure answers its error), never on the
-│   │   stop request alone; after 8 s it answers anyway, and status may
-│   │   still read stopping
+│   │   recording with no speech (macOS answers a failure with its error;
+│   │   Linux and Windows answer a stop that ends otherwise as done), never
+│   │   on the stop request alone; after 8 s it answers anyway, and status
+│   │   may still read stopping
 │   ├── No meetings cancel: Hex cannot discard a recording
 │   └── delete -> the pane's Delete for the exact `meetings list --json` id:
 │       Markdown, tracked notes file, then recording folder to the Trash,
@@ -189,9 +190,9 @@ the OS lacks
 go to the meeting recorder (`meeting/runtime`) as the tray's items do, and
 `meetings delete` calls the pane's own delete (`meeting/delete`).
 `control::meetings` holds the rules both hosts and `hex status` share: the
-record/stop decision from the mirrored state (a recording whose stop is under
-way answers `record` with `busy` and `stop` with `unchanged`) and the state
-`hex status` reports, including `stopping`;
+record/stop decision from the mirrored state (a recording or a start whose
+stop is under way answers `record` with `busy` and `stop` with `unchanged`)
+and the state `hex status` reports, including `stopping`;
 `window story` answers `unsupported`; Windows sends every `annotate`
 command to the running Hex. `hex history`, `hex meetings list|show|search`, and
 `hex mcp` read files on every OS.
