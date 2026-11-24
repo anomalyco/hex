@@ -1801,6 +1801,16 @@
         }
       }
     },
+    "Casual starts sentences lowercase anyway. Pick Polished for capitals." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“随意”本来就让句首小写。要大写请选“精修”。"
+          }
+        }
+      }
+    },
     "No capital letters" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5077,16 +5087,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "屏幕已锁定，或你离开了该应用"
-          }
-        }
-      }
-    },
-    "Casual starts sentences lowercase anyway. Pick Polished for capitals." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "“随意”本来就让句首小写。要大写请选“精修”。"
           }
         }
       }
