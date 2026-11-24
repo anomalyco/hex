@@ -76,18 +76,34 @@ class SymbolPagesTest {
         }
     }
 
+    /** Every character the two symbol pages draw on a key, the bottom row's , . < > included. */
+    private fun drawnKeys(currency: Char?): Set<Char> {
+        val out = LinkedHashSet<Char>()
+        for (more in listOf(false, true)) {
+            val shown = page(currency = currency, more = more)
+            for (line in shown.lines) out += line.toList()
+            out += shown.commaText[0]
+            out += shown.periodText[0]
+        }
+        return out
+    }
+
     @Test fun aLocalCurrencyKeepsEveryMoneyKeyOnTheTwoPages() {
-        // The =< page's money row always has four keys, and £ ¢ € ¥ $ stay typeable on a page or a hold.
+        // The =< money row always has four keys, and £, ¢, € and $ are always drawn on one of the pages; ¥
+        // is the one a currency with no slot of its own takes, and $ keeps it in its holds.
         for (code in listOf("GBP", "EUR", "JPY", "CNY", "INR", "PHP", "KRW", "RUB", "UAH", "USD", "CHF")) {
             val currency = LocalCurrency.symbol(code)
+            val keys = drawnKeys(currency)
+            val undrawn = "£¢€$".filter { it !in keys }
+            assertTrue("$code draws no $undrawn", undrawn.isEmpty())
             val row = page(currency = currency, more = true).lines[1]
             assertEquals("$code's =< row 2 has $row", 10, row.length)
             val money = row.take(4)
             assertEquals("$code's money row draws $money", 4, money.toSet().size)
             assertTrue("$code's money row is $money", money.all { it in "£¢€¥$" })
             val typed = symbols(page(currency = currency, more = false)) + symbols(page(currency = currency, more = true))
-            val missing = "£¢€¥$".filter { it !in typed }
-            assertTrue("$code cannot type $missing", missing.isEmpty())
+            val untyped = "£¢€¥$".filter { it !in typed }
+            assertTrue("$code cannot type $untyped", untyped.isEmpty())
         }
     }
 

@@ -3260,8 +3260,8 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 │   language. Holding the key offers $ first, then $'s held symbols without a second copy
 │   of the local one, in their order. The =< page's money row (£ ¢ € ¥) shows $ in the slot of a
 │   local £, € or ¥, and gives only ¥'s slot to $ for ₹, ₱, ₩, ₽ and ₴, so £, ¢ and € stay drawn,
-│   no page draws a symbol twice, and $ is always on one of them; $'s holds keep every symbol
-│   except a local ¥, which is the ?123 key.
+│   no page draws a symbol twice, and $ is always on one of them; $'s holds drop the local symbol
+│   itself, whichever it is, so their list never repeats it.
 │   Only the symbol pages read the currency: a number, PIN, phone or date pad, including the
 │   symbols page's own 1234 pad, draws none and reads none. Off, both pages and every hold
 │   are unchanged.
