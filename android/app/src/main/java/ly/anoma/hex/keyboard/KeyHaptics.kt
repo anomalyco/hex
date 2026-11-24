@@ -11,11 +11,12 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.Settings
 
-/** Hex's taps. Each plays the phone's predefined effect where its vibrator says it has one, or a short,
- * light pulse where it doesn't. */
+/** Hex's taps, Android's own keyboard pair (HapticFeedbackVibrationProvider: a key press is EFFECT_CLICK, a
+ * release EFFECT_TICK). Each plays the phone's predefined effect where its vibrator says it has one, or a
+ * short pulse at the phone's default strength where it doesn't. */
 internal enum class Tap(private val predefined: Int, private val millis: Long) {
-    /** A key going down, or an emoji picked: a light tick. */
-    Press(VibrationEffect.EFFECT_TICK, 12),
+    /** A key going down, or an emoji picked: a click. */
+    Press(VibrationEffect.EFFECT_CLICK, 20),
     /** A key held [KeyboardMetrics.RELEASE_TICK_MS] or more lifting: Gboard's second tick. */
     Release(VibrationEffect.EFFECT_TICK, 12),
     /** Dictation starting: a click. */
@@ -25,9 +26,7 @@ internal enum class Tap(private val predefined: Int, private val millis: Long) {
 
     fun effect(vibrator: Vibrator): VibrationEffect =
         if (vibrator.areAllEffectsSupported(predefined) == Vibrator.VIBRATION_EFFECT_SUPPORT_YES) VibrationEffect.createPredefined(predefined)
-        else VibrationEffect.createOneShot(millis, if (vibrator.hasAmplitudeControl()) LIGHT else VibrationEffect.DEFAULT_AMPLITUDE)
-
-    private companion object { const val LIGHT = 80 }
+        else VibrationEffect.createOneShot(millis, VibrationEffect.DEFAULT_AMPLITUDE)
 }
 
 /** Hex's Haptics setting on, and the system's Keyboard vibration switch too where the phone has one. */
