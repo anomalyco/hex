@@ -70,7 +70,7 @@ internal object Updates {
     @Synchronized private fun load(c: Context) {
         if (loaded) return
         loaded = true
-        val saved = prefs(c).getString("release", null)?.let(Release::parse)
+        val saved = prefs(c).getString("release", null)?.let { Release.parse(it, c.getString(R.string.update_channel)) }
         if (saved != null && saved.code > installed(c).longVersionCode) flow.value = State.Available(saved)
         else prefs(c).edit().remove("release").apply()
         // Builds before the browser hand-off downloaded updates into the cache themselves.

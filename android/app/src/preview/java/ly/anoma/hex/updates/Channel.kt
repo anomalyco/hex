@@ -18,8 +18,8 @@ internal data class Release(val code: Long, val name: String, val version: Strin
         .put("minSdk", minSdk).put("published", date).put("notes", JSONArray(notes))
         .put("apk", JSONObject().put("url", url).put("size", size).put("sha256", sha256)).toString()
     companion object {
-        /** Null for anything that isn't a sane Hex Preview release: a GitHub HTTPS address, a SHA-256, a size. */
-        fun parse(text: String): Release? = runCatching {
+        /** Null for anything that isn't a sane release from [channel]: one of its release files, a SHA-256, a size. */
+        fun parse(text: String, channel: String): Release? = runCatching {
             val o = JSONObject(text)
             val apk = o.getJSONObject("apk")
             val notes = o.optJSONArray("notes")
@@ -27,7 +27,7 @@ internal data class Release(val code: Long, val name: String, val version: Strin
                 apk.getString("url"), apk.getLong("size"), apk.getString("sha256").lowercase(), o.optInt("minSdk", 31),
                 o.optString("published"), List(minOf(notes?.length() ?: 0, 8)) { notes!!.getString(it).take(200) })
         }.getOrNull()?.takeIf {
-            it.code > 0 && it.size in 1..400_000_000 && it.sha256.matches(Regex("[0-9a-f]{64}")) && allowed(URL(it.url))
+            it.code > 0 && it.size in 1..400_000_000 && it.sha256.matches(Regex("[0-9a-f]{64}")) && releaseFile(it.url, channel)
         }
     }
 }
@@ -39,10 +39,11 @@ internal object Channel {
     class Failure(val problem: Updates.Problem) : Exception()
 
     fun latest(context: Context): Release {
-        val text = open(URL(context.getString(R.string.update_channel))).use { http ->
+        val channel = context.getString(R.string.update_channel)
+        val text = open(URL(channel)).use { http ->
             http.inputStream.use { it.readLimited(64 * 1024) }
         }
-        return Release.parse(text) ?: throw Failure(Updates.Problem.Server)
+        return Release.parse(text, channel) ?: throw Failure(Updates.Problem.Server)
     }
 
     private fun open(start: URL): HttpsURLConnection {
@@ -82,5 +83,15 @@ internal object Channel {
 
 private val hosts = setOf("github.com", "raw.githubusercontent.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com")
 private fun allowed(url: URL) = url.protocol == "https" && url.userInfo == null && url.port in listOf(-1, 443) && url.host.lowercase() in hosts
+/** Update opens apk.url in the browser and nothing checks the download, so it must be one of the channel's own release
+ * files, https://github.com/<owner>/<repo>/releases/download/<tag>/<name>.apk, <owner>/<repo> as in the channel's
+ * https://raw.githubusercontent.com/<owner>/<repo>/<branch>/latest.json. */
+private fun releaseFile(address: String, channel: String) = runCatching {
+    val url = URL(address); val from = URL(channel)
+    val repo = Regex("/([^/]+/[^/]+)/").find(from.path)!!.groupValues[1]
+    from.host.lowercase() == "raw.githubusercontent.com" && url.protocol == "https" && url.host.lowercase() == "github.com" &&
+        url.port in listOf(-1, 443) && url.userInfo == null && url.query == null && url.ref == null &&
+        Regex("/" + Regex.escape(repo) + "/releases/download/[A-Za-z0-9][\\w.-]*/[A-Za-z0-9][\\w.-]*\\.apk").matches(url.path)
+}.getOrDefault(false)
 
 private inline fun <T : HttpURLConnection, R> T.use(block: (T) -> R): R = try { block(this) } finally { disconnect() }
