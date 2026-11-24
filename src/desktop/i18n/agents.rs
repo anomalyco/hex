@@ -110,9 +110,9 @@ pub(super) const HUNGARIAN: &[(&str, &str)] = &[
     ("Owned by another program", "Egy másik program tulajdona"),
     ("{} isn't on your PATH", "{} nincs benne a PATH-ban"),
     ("Move Hex to Applications first", "Először helyezze át a Hexet az Alkalmazások mappába"),
-    ("The skill's zoom, inspect, and frames commands need Labs › Agent tools for captures on", "A készség zoom, inspect és frames parancsaihoz kapcsolja be a Labs › Ügynökeszközök a rögzítésekhez lehetőséget"),
+    ("The skill's zoom, inspect, and frames commands need Labs › Agent tools for captures on", "A készség zoom, inspect és frames parancsaihoz kapcsolja be a Labor › Ügynökeszközök a rögzítésekhez lehetőséget"),
     ("Couldn't install the skill: {}", "Nem sikerült telepíteni a készséget: {}"),
     ("Couldn't link the command-line tool: {}", "Nem sikerült összekapcsolni a parancssori eszközt: {}"),
-    ("Install agent skill from Annotate", "Ügynökkészség telepítése az Annotate-ből"),
-    ("Adds an Agents section to the Annotate pane that writes the hex-annotate skill into Claude Code, Codex, OpenCode, or Pi, and on macOS links hex onto PATH", "Hozzáad egy Ügynökök szakaszt az Annotate panelhez, amely beírja a hex-annotate készséget a Claude Code-ba, a Codexbe, az OpenCode-ba vagy a Pibe, és macOS-en a hexet a PATH-hoz adja"),
+    ("Install agent skill from Annotate", "Ügynökkészség telepítése az Annotálásból"),
+    ("Adds an Agents section to the Annotate pane that writes the hex-annotate skill into Claude Code, Codex, OpenCode, or Pi, and on macOS links hex onto PATH", "Hozzáad egy Ügynökök szakaszt az Annotálás panelhez, amely beírja a hex-annotate készséget a Claude Code-ba, a Codexbe, az OpenCode-ba vagy a Pibe, és macOS-en a hexet a PATH-hoz adja"),
 ];
