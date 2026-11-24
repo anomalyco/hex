@@ -212,8 +212,8 @@ Onboarding opens -> scan; its own download waits until it answers  // setup.foun
     │   pick clears, so the list returns to the recommended row. The plain
     │   download page, which shows without a list, names the reason with Try
     │   again, Use a model file…, and Continue without a model; Try again
-    │   forgets that reason and retries the saved choice
-    │   (tour.flow.model_failed, Flow::pick_failed)
+    │   forgets that reason and asks again for the choice the language
+    │   capsule last set (live.choice; tour.flow.model_failed, Flow::pick_failed)
     ├── A pick that fails asks again on the list
     ├── Back on the pages after it returns to the list to change the pick,
     │   even with the model ready
@@ -246,9 +246,13 @@ downloaded, the full check refusing a mismatched file),
 `an_in_place_path_change_rebuilds_the_definition`),
 `desktop::onboarding::tests::a_held_download_waits_for_the_person`,
 `a_pick_that_cannot_start_stays_failed_until_another_pick`,
+`a_scan_keeps_only_the_models_this_build_can_run`,
 `a_found_model_moves_on_without_a_download_and_back_returns_to_it`,
 `a_found_model_this_build_cannot_run_is_not_offered`,
 `an_unavailable_pick_fails_the_page_instead_of_downloading_forever`,
+`retrying_after_a_refused_pick_shows_the_next_download_failure`,
+`a_failed_pick_keeps_its_actions_without_a_reason`,
+`try_again_after_a_network_failure_asks_once`,
 `the_onboarding_model_list_starts_the_row_picked_or_the_recommended_one`,
 `linux::app::tests::a_model_this_build_cannot_run_says_why_and_starts_nothing`,
 `labs::tests::graduated_features_answer_by_name`, and the goldens

@@ -3642,6 +3642,26 @@ fn unavailable_model() -> TranscriptionModelId {
     )
 }
 
+/// A pick onboarding refuses: the saved selection can't run, so the tour
+/// marks it failed and the page names it.
+fn refused_pick(rt: &mut Runtime<Ui>) {
+    rt.update(|ui, _| {
+        let selection = TranscriptionSelection {
+            model: unavailable_model(),
+            language: "en".into(),
+        };
+        ui.settings.transcription = selection.clone();
+        ui.found.choice = Some(selection);
+    });
+    rt.update(|ui, _| {
+        onboarding::input(
+            ui,
+            crate::desktop::onboarding::Input::Grant(crate::desktop::onboarding::SetupItem::Model),
+        )
+    });
+    settle(rt);
+}
+
 /// A found file this build can't run is dropped from the scan's answer: it
 /// never fills the model step, and never holds the recommended download.
 #[test]
@@ -3738,21 +3758,7 @@ fn retrying_after_a_refused_pick_shows_the_next_download_failure() {
     let before = sent(&rt).len();
 
     // A pick that can't run: the page names it.
-    rt.update(|ui, _| {
-        let selection = TranscriptionSelection {
-            model: unavailable_model(),
-            language: "en".into(),
-        };
-        ui.settings.transcription = selection.clone();
-        ui.found.choice = Some(selection);
-    });
-    rt.update(|ui, _| {
-        onboarding::input(
-            ui,
-            crate::desktop::onboarding::Input::Grant(crate::desktop::onboarding::SetupItem::Model),
-        )
-    });
-    settle(&mut rt);
+    refused_pick(&mut rt);
     assert!(
         texts(&rt)
             .iter()
@@ -3789,6 +3795,64 @@ fn retrying_after_a_refused_pick_shows_the_next_download_failure() {
         "the old pick's reason must not come back: {shown:?}"
     );
     assert!(shown.contains(&"Try again".to_owned()), "{shown:?}");
+}
+
+/// A pick the tour still reports failed keeps its actions even when the
+/// reason itself is gone (the file chooser that clears nothing, a message
+/// someone dismissed): no page is left with no way forward.
+#[test]
+fn a_failed_pick_keeps_its_actions_without_a_reason() {
+    let mut ui = portal_fixture();
+    onboarding::fixture(&mut ui, crate::desktop::onboarding::Step::Setup, false);
+    onboarding_kit::live::fixture(&mut ui, Page::Download);
+    let mut rt = runtime_for(ui, false, PANE_SIZE);
+    refused_pick(&mut rt);
+    assert!(
+        rt.find("retry-download").is_some(),
+        "the refused pick offers Try again"
+    );
+
+    rt.update(|ui, _| ui.found.error = None);
+    settle(&mut rt);
+    assert!(
+        rt.state.tour.as_ref().unwrap().flow.pick_failed(),
+        "the tour still reports the pick"
+    );
+    assert!(rt.find("retry-download").is_some(), "Try again stays");
+    assert!(rt.find("use-file").is_some(), "Use a model file… stays");
+    assert!(
+        rt.find("continue-without-model").is_some(),
+        "Continue without a model stays"
+    );
+    assert!(
+        !texts(&rt).contains(&"0 of 731 MB".to_owned()),
+        "the page never reads as a download: {:?}",
+        texts(&rt)
+    );
+}
+
+/// Try again after a plain download failure asks for that model once.
+#[test]
+fn try_again_after_a_network_failure_asks_once() {
+    let mut ui = portal_fixture();
+    onboarding::fixture(&mut ui, crate::desktop::onboarding::Step::Setup, false);
+    onboarding_kit::live::fixture(&mut ui, Page::Download);
+    let mut rt = runtime_for(ui, false, PANE_SIZE);
+    let before = sent(&rt).len();
+    rt.update(|ui, _| {
+        if let Some(view) = &mut ui.view {
+            view.transcription.preparing = None;
+            view.transcription.error =
+                Some("Couldn't reach huggingface.co: the connection was reset".into());
+        }
+    });
+    settle(&mut rt);
+    assert!(
+        rt.find("retry-download").is_some(),
+        "the failure offers Try again"
+    );
+    tap(&mut rt, "retry-download");
+    assert_eq!(sent(&rt).len(), before + 1, "{:?}", sent(&rt));
 }
 
 #[test]

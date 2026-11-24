@@ -564,15 +564,15 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
                 t.error.is_some(),
             )
         });
-    // A pick the window refused names its own reason only while the tour
-    // still reports that pick: once another attempt starts, a stale message
-    // must never hide that attempt's failure.
+    // A chosen file's failure names itself first; then a pick the window
+    // refused, while the tour still reports that pick; then the service's.
     let picked_failed = ui.tour.as_ref().is_some_and(|tour| tour.flow.pick_failed());
-    let failure = match picked_failed {
-        true => super::super::model_import::pick_failure(ui),
-        false => None,
-    }
-    .or_else(|| super::super::model_import::download_failure(ui));
+    let failure = super::super::model_import::import_failure(ui)
+        .or_else(|| match picked_failed {
+            true => super::super::model_import::pick_failure(ui),
+            false => None,
+        })
+        .or_else(|| super::super::model_import::download_failure(ui));
     let using_file = super::super::model_import::using_file(ui);
     // The disk and macOS checks run a few times a second, not every frame.
     let checked = ui
@@ -681,8 +681,10 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     }
     live.listening = live.practice == Practice::Listening;
 
-    // The model download.
-    live.failed = !choice_installed && !preparing && (errored || failure.is_some());
+    // The model download. A pick the tour still reports failed fills the
+    // page even when its own reason is gone, so its actions never vanish.
+    live.failed =
+        !choice_installed && !preparing && (errored || failure.is_some() || picked_failed);
     live.progress = (preparing && !choice_installed).then_some(match live.progress {
         Some((bytes, since)) if bytes == downloaded_bytes => (bytes, since),
         _ => (downloaded_bytes, now),

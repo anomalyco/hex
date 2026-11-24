@@ -963,7 +963,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   reads as a download: the tour marks it failed and the pick clears, so the
   list returns to the recommended row, and the plain download page (no list)
   names the reason with Try again, Use a model file…, and Continue without a
-  model; Try again forgets that reason and retries the saved choice
+  model; Try again forgets that reason and asks again for the choice the
+  language capsule last set (`live.choice`). A chosen file's own failure names
+  itself first, and the actions stay even when the pick's reason is gone
   (`rune_ui::found::keep_usable`, `Flow::model_failed`, `Flow::pick_failed`).
 - Hex has one onboarding, on every build and OS, stable and dev alike: the
   first-run story (`rune_ui/onboarding_kit/live.rs`) over the tour state

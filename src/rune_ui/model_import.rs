@@ -119,10 +119,23 @@ pub(super) fn use_file(ui: &mut Ui) {
     if !ui.live() || ui.picker.import.busy() {
         return;
     }
-    // The file replaces the pick this page refused, and its reason with it.
-    ui.found.error = None;
     choose(ui);
     ui.picker.import.use_after = ui.picker.import.chooser.is_some();
+}
+
+/// The first non-empty line of `error`, which is what a page or a row shows.
+fn first_line(error: &str) -> Option<String> {
+    error
+        .lines()
+        .next()
+        .map(str::to_owned)
+        .filter(|line| !line.trim().is_empty())
+}
+
+/// Why a file chosen with [`use_file`] can't be used, in one line. It wins
+/// over a refused pick's reason: the file is the newer attempt.
+pub(super) fn import_failure(ui: &Ui) -> Option<String> {
+    ui.picker.import.error.as_deref().and_then(first_line)
 }
 
 /// Why the model couldn't be prepared, in one line: the first line of the
@@ -131,14 +144,13 @@ pub(super) fn download_failure(ui: &Ui) -> Option<String> {
     ui.picker
         .import
         .error
-        .clone()
+        .as_deref()
         .or_else(|| {
             ui.view
                 .as_ref()
-                .and_then(|view| view.transcription.error.clone())
+                .and_then(|view| view.transcription.error.as_deref())
         })
-        .and_then(|error| error.lines().next().map(str::to_owned))
-        .filter(|line| !line.trim().is_empty())
+        .and_then(first_line)
 }
 
 /// Why the model the person picked can't run here, in one line ("… is
@@ -146,12 +158,7 @@ pub(super) fn download_failure(ui: &Ui) -> Option<String> {
 /// that never started. Read only while the tour still reports that pick
 /// (`Flow::pick_failed`), so it never outlives the attempt.
 pub(super) fn pick_failure(ui: &Ui) -> Option<String> {
-    ui.found
-        .error
-        .as_deref()
-        .and_then(|error| error.lines().next())
-        .map(str::to_owned)
-        .filter(|line| !line.trim().is_empty())
+    ui.found.error.as_deref().and_then(first_line)
 }
 
 /// Whether a file chosen with [`use_file`] is being checked and copied.
