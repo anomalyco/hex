@@ -78,10 +78,12 @@ its page's switches to the App Group: off by default, on with `-on`; switches th
 on by default (Spatial autocorrect, Swipe typing, Emoji key, Emoji suggestions) stay on.
 `-end` starts the page scrolled to the bottom. `settings-privacy-confirm`
 opens Record typing logs' consent dialog. `--experiment-keyboard-themes` turns
-Keyboard themes on, and `--keyboard-theme automatic|black|white|navy|forest|ember`
-picks the theme the full keyboard draws;
-the dictation bar keeps the system look, and iOS draws its own strip above or below
-a third-party keyboard, which a theme can't color.
+Keyboard themes on, and `--keyboard-theme automatic|black|white|navy|forest|ember|burgundy`
+picks the theme. A theme colours the keys only (every keycap, special keys included, their
+pressed and held states, the key pop-ups and the labels), the same in light and dark; the
+background stays iOS's glass, matching the band iOS draws above a third-party keyboard and
+the globe row below it, and the strip, emoji panel, menus and dictation bar keep the system
+look.
 
 ## Send feedback (`HEXMobile/Feedback/`)
 

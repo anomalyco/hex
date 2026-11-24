@@ -325,7 +325,8 @@ final class SwipeTrailView: UIView {
     required init?(coder: NSCoder) { fatalError() }
 
     static func color(_ palette: FullKeyboardPalette) -> UIColor {
-        palette.isDark ? UIColor(white: 1, alpha: 0.5) : palette.actionFill.withAlphaComponent(0.42)
+        // The trail is drawn over the keys, so it follows them, not the glass.
+        palette.keysAreDark ? UIColor(white: 1, alpha: 0.5) : palette.actionFill.withAlphaComponent(0.42)
     }
 
     override func layoutSubviews() {
