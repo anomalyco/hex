@@ -3249,7 +3249,7 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
     type exactly the character they show. Off, keys and picks insert the straight characters
     they did before; a long-pressed ’ or ” now joins the word before it like ' and ", and ”
     ends a word as " does. Checks: `./gradlew :app:compileDebugKotlin :app:testDebugUnitTest` passed with
-    148 tests (including `SmartQuotesTest`'s 12) on 2026-11-24, on Temurin JDK 21 and Android
+    149 tests (including `SmartQuotesTest`'s 12) on 2026-11-24, on Temurin JDK 21 and Android
     SDK 36 (platform 36, build-tools 35/36, NDK 27.2.12479018); the repo has no Android CI, and
     nothing was tried on a device or emulator. `python3 scripts/code-shape.py --check` passes.
 Unmerged Windows / deferred features -> Not part of this map

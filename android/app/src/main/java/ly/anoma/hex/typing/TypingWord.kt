@@ -358,13 +358,16 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
     // (`ContextWords`); a word typed with its own apostrophe never gets here.
     private fun revision(text: String, next: String): String? {
         if (!ContextWords.decides(model.language) || text.isEmpty() || (model.language == "en" && text.length < 2)) return null
+        // ContextWords knows the straight spellings, so a word inserted with a smart apostrophe
+        // ("it’s") is looked up by the straight one ("it's").
+        val key = lookup(text)
         // Typed in capitals, left alone; one capital letter is a sentence's start ("E andato" -> "È andato").
-        if (text.length >= 2 && text == text.uppercase() && text != text.lowercase() && !text.startsWith("I'")) return null
+        if (text.length >= 2 && text == text.uppercase() && text != text.lowercase() && !key.startsWith("I'")) return null
         val rest = before.dropLast(text.length + 1)
         val prev = previousWord(rest).takeIf { it.isNotEmpty() }
-        val choice = ContextWords.choice(model, text, prev, next.substringBefore(' ').lowercase(), startsSentence(rest)) ?: return null
+        val choice = ContextWords.choice(model, key, prev, next.substringBefore(' ').lowercase(), startsSentence(rest)) ?: return null
         if (model.neverSuggest.blocks(choice.lowercase(), suggestSwearWords, model.context(prev.orEmpty()))) return null
-        return if (addsCapitals || text.first().isUpperCase()) choice else choice.lowercase().takeIf { it != text }
+        return if (addsCapitals || text.first().isUpperCase()) choice else choice.lowercase().takeIf { it != key }
     }
 
     private fun knows(spelling: String) = lookup(spelling.lowercase()).let {

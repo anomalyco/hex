@@ -550,7 +550,7 @@ internal class KeyboardEngine(
     fun enter() {
         edited()
         // A text replacement that ends the text goes in before the line break or the editor's action.
-        word?.takeIf { canEndWord() }?.textReplacement(before())?.let { replace(it.original, it.replacement) }
+        word?.takeIf { canEndWord() }?.textReplacement(before())?.let { replace(it.original, smartWord(it.replacement)) }
         resetTyping(); clearSpaces(); surface?.suggestions(emptyList())
         val info = editor
         if (info?.actionLabel != null && (info.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION) == 0 &&
