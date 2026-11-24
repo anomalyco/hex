@@ -176,16 +176,20 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
      * the likeliest completions of a 1–3 letter word after the word before, then, for a
      * word of three letters or more, the decoder's other readings of the taps before completions by
      * frequency (after two letters the word is usually unfinished: completions first). Never what was
-     * typed again. [autocorrect] off: no fix and no readings, completions only. */
-    fun strip(autocorrect: Boolean = true): List<Suggestion> {
+     * typed again. [autocorrect] off: no fix and no readings, completions only, unless [nearWords]: then what
+     * space would put in and the readings are offered too, as plain words space never puts in (Keyboard ›
+     * Autocorrect off, as Gboard keeps its suggestions with auto-correction off). */
+    @JvmOverloads
+    fun strip(autocorrect: Boolean = true, nearWords: Boolean = autocorrect): List<Suggestion> {
         if (token.length !in 1..MAX_LENGTH) return emptyList()
         val typed = Suggestion(token, Suggestion.Kind.Typed)
         // Your shortcut: what you typed and its phrase, which space puts in whatever autocorrect does.
         decoder.personal?.shortcut(lookup(token))?.let { return listOf(typed, Suggestion(it, Suggestion.Kind.Fix)) }
         val fix = if (autocorrect && !standIn) replacement() else null
+        val near = if (!autocorrect && nearWords && !standIn) replacement() else null
         val pool = ArrayList<String>(4)
         val lower = lookup(token.lowercase())
-        val showTyped = standIn || fix != null || blocked(token) || knows(lower)
+        val showTyped = standIn || fix != null || near != null || blocked(token) || knows(lower)
         val size = if (showTyped) 2 else 3
         val lowered = !addsCapitals && token.none { it.isUpperCase() }
         fun add(word: String) {
@@ -194,14 +198,15 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
                 !blocked(s)) pool.add(s)
         }
         fix?.let { pool.add(it) }
-        if (autocorrect && fix == null && !standIn && model.language == "en") suggestOnly[lower]?.let { add(matchCase(token, it)) }
+        near?.let(::add)
+        if (nearWords && fix == null && !standIn && model.language == "en") suggestOnly[lower]?.let { add(matchCase(token, it)) }
         // An elision typed without its apostrophe ("laltro", "dellanno"): Italian and French write the
         // article against the word, so the strip offers the two joined up, as English's contractions are.
         // A whole-word decoder fix already reads the token ("diro" -> "dirò"), so the elision would only
         // be a second guess at it. A fix that splits the token must be the elision's own two words
         // ("l ho" for "l'ho", "lho"); another reading of the letters ("non c'è" for "nonce", "la e" for
         // "lae") is no elision at all.
-        val elision = if (autocorrect && !standIn && '\'' !in lower) elided(lower) else null
+        val elision = if (nearWords && !standIn && '\'' !in lower) elided(lower) else null
         if (elision != null && (fix == null || fix.equals(elision.replace('\'', ' '), ignoreCase = true)))
             add(matchCase(token, elision))
         // Your own word, completed once two letters match, before the dictionary's: a word you added is
@@ -209,7 +214,7 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         if (token.length >= 2) decoder.personal?.completions(lookup(token))?.firstOrNull()?.let { add(yours(it)) }
         val short = if (!standIn && token.length <= 3) model.completionsAfter(lower, previous, suggestSwearWords).map { shown(model.text(it)) } else emptyList()
         if (fix == null) short.firstOrNull { s -> pool.none { it.equals(s, ignoreCase = true) } }?.let(::add)
-        val readings = autocorrect && !standIn && spatial && token.length >= 2 && !protected()
+        val readings = nearWords && !standIn && spatial && token.length >= 2 && !protected()
         fun reading(text: String) = if (decoder.personal?.owns(text) == true) yours(text) else shown(text)
         if (readings && token.length >= 3) for (r in decision().readings) add(reading(r.text))
         for (s in short) add(s)
