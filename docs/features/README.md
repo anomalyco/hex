@@ -3181,9 +3181,11 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 ├── Fields that ask for no suggestions, completions or filtering (a search box; the Google app's
 │   TEXT|MULTI_LINE|NO_SUGGESTIONS is 0xa0001) -> suggestions, next words, emoji suggestions, swipe
 │   typing, tap correction, text replacements and double-space period stay; only an automatic
-│   autocorrection on space or punctuation is off, and its fix is not highlighted in the strip, since
-│   the field asked for none of its own suggestions.
-│   Checks: `FieldTypingTest` (7/7) in android/app/src/test.
+│   autocorrection on space or punctuation is off, and no autocorrection is highlighted in the strip,
+│   since the field asked for none of its own suggestions. Your text replacements still apply there
+│   and still show their highlighted chip.
+│   Checks: `FieldTypingTest` (7/7) in android/app/src/test covers the field's classification;
+│   the strip's chip and the space and punctuation gates are read from `KeyboardEngine` and `TypingWord`.
 ├── Fields marked private or no-learning (a browser's incognito tab) -> normal suggestions,
 │   next words, autocorrection, swipe typing and double-space period, because Android's
 │   `IME_FLAG_NO_PERSONALIZED_LEARNING` only says that nothing typed there is learned. Undoing
@@ -3191,7 +3193,7 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 │   for later sessions, and a picked emoji does not join the picker's recents. Checks:
 │   `FieldTypingTest` in android/app/src/test (7/7) and
 │   `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` passed on 2026-11-24 (169
-│   tests in all, on Temurin JDK 21 and Android SDK 36); the repo has no Android CI, and
+│   tests in all, on OpenJDK 21 and Android SDK 36); the repo has no Android CI, and
 │   nothing was tried on a device or emulator.
 ├── A TYPE_NULL field (a terminal) -> its text stays on the editor's side, so Hex reads and edits
 │   none of it. Delete, and a held Delete, send one KEYCODE_DEL key press per press instead of the
