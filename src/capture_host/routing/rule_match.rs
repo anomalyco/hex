@@ -275,27 +275,45 @@ mod tests {
         );
     }
 
+    /// A terminal's working folder: absolute, and not the home folder or a
+    /// filesystem root, so a rule may key on it.
+    #[cfg(windows)]
+    const TERMINAL_FOLDER: &str = r"C:\acme-web";
+    #[cfg(not(windows))]
+    const TERMINAL_FOLDER: &str = "/tmp/acme-web";
+
+    /// The filesystem root a terminal might open in: a drive's root on Windows.
+    #[cfg(windows)]
+    const ROOT_FOLDER: &str = r"C:\";
+    #[cfg(not(windows))]
+    const ROOT_FOLDER: &str = "/";
+
+    /// What the host calls Ghostty: a bundle ID on macOS, and the executable's
+    /// file name, lowercased, on Windows (`crates/capture/src/win/mod.rs`'s
+    /// `app_identity`). Linux captures no app identity; the policy's list is
+    /// shared, so its bundle IDs still apply there.
+    #[cfg(windows)]
+    const GHOSTTY: &str = "ghostty.exe";
+    #[cfg(not(windows))]
+    const GHOSTTY: &str = "com.mitchellh.ghostty";
+
     #[test]
     fn terminal_offers_working_folder_and_never_general_terminal_app() {
-        let dir = PathBuf::from("/tmp/acme-web");
-        let m = rule_match(
-            None,
-            Some(&dir),
-            Some("com.mitchellh.ghostty"),
-            Some("Ghostty"),
-        );
+        let dir = PathBuf::from(TERMINAL_FOLDER);
+        let m = rule_match(None, Some(&dir), Some(GHOSTTY), Some("Ghostty"));
         assert_eq!(
             m,
             Some(RuleMatch::Terminal {
-                folder: "/tmp/acme-web".into(),
-                display: "/tmp/acme-web".into(),
+                folder: TERMINAL_FOLDER.into(),
+                display: TERMINAL_FOLDER.into(),
             })
         );
-        // Ghostty at home or root yields no rule at all (never "any Ghostty window").
+        // Ghostty at the home folder or a filesystem root yields no rule at all
+        // (never "any Ghostty window").
         let root_term = rule_match(
             None,
-            Some(Path::new("/")),
-            Some("com.mitchellh.ghostty"),
+            Some(Path::new(ROOT_FOLDER)),
+            Some(GHOSTTY),
             Some("Ghostty"),
         );
         assert_eq!(root_term, None);

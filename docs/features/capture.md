@@ -595,12 +595,13 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   │   started with. A suggestion like any other, never sent by itself
 │   │   ├── OpenCode's home screen (`OpenCode`) or a plain shell -> the
 │   │   │   folder and the title's words are clues, as before
-│   │   ├── ⇧ (a folder that isn't home or `/`) -> the rule is
+│   │   ├── ⇧ (a folder that isn't home or a filesystem root) -> the rule is
 │   │   │   `routing.terminals` keyed on the folder's project root ("hex
 │   │   │   terminal" in the header and the footer's app badge), naming the
 │   │   │   session picked; it covers that folder and everything under it (the
 │   │   │   longest key wins) and sends like a site rule. Ghostty itself stays
-│   │   │   a general app, so no rule ever sends all of Ghostty
+│   │   │   a general app, so no rule ever sends all of Ghostty (nor all of
+│   │   │   `ghostty.exe`, Ghostty's name on Windows)
 │   │   └── Checks -> `look::tests` (TUI session first, command-line
 │   │       fallback, home screen, home folder, terminal rule),
 │   │       `look::terminal::tests`, `policy` and `config` rule keys, and
