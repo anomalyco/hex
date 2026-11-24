@@ -281,56 +281,19 @@ fn dictation_message(action: CaptureAction) -> &'static str {
 
 /// What the meeting recorder is doing (`meeting_runtime`).
 fn meeting_report() -> MeetingReport {
-    use crate::meeting::watcher::MeetingMenuState;
-    let state = |state: &str| MeetingReport {
-        state: state.into(),
-        ..Default::default()
-    };
-    match crate::meeting::runtime::state() {
-        MeetingMenuState::Idle => state("idle"),
-        MeetingMenuState::Starting => state("starting"),
-        MeetingMenuState::Recording { started, title, .. } => MeetingReport {
-            state: "recording".into(),
-            title: Some(title),
-            elapsed_seconds: Some(started.elapsed().as_secs()),
-        },
-        MeetingMenuState::Transcribing => state("transcribing"),
-    }
+    super::meetings::report(&crate::meeting::runtime::state())
 }
 
 /// `hex meetings record|stop`, as the tray's items do; waits a moment for
 /// the recorder to confirm.
 fn meeting(stop: bool, title: Option<String>) -> ControlReply {
-    use crate::meeting::MeetingRequest;
     use crate::meeting::watcher::MeetingMenuState;
     if !crate::app_settings::meetings_enabled() {
         return ControlReply::error("feature-off", crate::app_settings::meetings_off_reason());
     }
-    let request = match (crate::meeting::runtime::state(), stop) {
-        (MeetingMenuState::Recording { title, .. }, false) => {
-            return ControlReply::unchanged(format!("Already recording “{title}”"));
-        }
-        (MeetingMenuState::Starting, false) => {
-            return ControlReply::unchanged("A meeting recording is already starting");
-        }
-        (MeetingMenuState::Transcribing, false) => {
-            return ControlReply::error(
-                "busy",
-                "the last meeting is still transcribing; try again when it finishes",
-            );
-        }
-        (MeetingMenuState::Idle, false) => MeetingRequest::Start {
-            title: title.filter(|title| !title.trim().is_empty()),
-        },
-        (MeetingMenuState::Idle, true) => {
-            return ControlReply::unchanged("No meeting is recording");
-        }
-        (MeetingMenuState::Transcribing, true) => {
-            return ControlReply::unchanged("The meeting is already transcribing");
-        }
-        (MeetingMenuState::Starting | MeetingMenuState::Recording { .. }, true) => {
-            MeetingRequest::Stop
-        }
+    let request = match super::meetings::plan(&crate::meeting::runtime::state(), stop, title) {
+        Ok(request) => request,
+        Err(reply) => return reply,
     };
     if let Err(error) = crate::meeting::runtime::request(request) {
         return ControlReply::error("unavailable", error);

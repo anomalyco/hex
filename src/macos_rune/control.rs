@@ -18,7 +18,6 @@ use crate::control::{
 };
 use crate::desktop::host::{DesktopAction, DesktopUpdateStatus};
 use crate::desktop::onboarding::PermissionState;
-use crate::meeting::MeetingRequest;
 use crate::meeting::watcher::{ControllerEvent, MeetingMenuState};
 use crate::recognition::RecognitionControl;
 use crate::rune_ui::story_link::{self, StoryLink};
@@ -350,37 +349,9 @@ impl Pump {
                 crate::app_settings::meetings_off_reason(),
             ));
         }
-        let request = match (&self.meeting_state, stop) {
-            (MeetingMenuState::Recording { title, .. }, false) => {
-                return Some(ControlReply::unchanged(format!(
-                    "Already recording “{title}”"
-                )));
-            }
-            (MeetingMenuState::Starting, false) => {
-                return Some(ControlReply::unchanged(
-                    "A meeting recording is already starting",
-                ));
-            }
-            (MeetingMenuState::Transcribing, false) => {
-                return Some(ControlReply::error(
-                    "busy",
-                    "the last meeting is still transcribing; try again when it finishes",
-                ));
-            }
-            (MeetingMenuState::Idle, false) => MeetingRequest::Start {
-                title: title.filter(|title| !title.trim().is_empty()),
-            },
-            (MeetingMenuState::Idle, true) => {
-                return Some(ControlReply::unchanged("No meeting is recording"));
-            }
-            (MeetingMenuState::Transcribing, true) => {
-                return Some(ControlReply::unchanged(
-                    "The meeting is already transcribing",
-                ));
-            }
-            (MeetingMenuState::Starting | MeetingMenuState::Recording { .. }, true) => {
-                MeetingRequest::Stop
-            }
+        let request = match control::meetings::plan(&self.meeting_state, stop, title) {
+            Ok(request) => request,
+            Err(reply) => return Some(reply),
         };
         if let Err(error) = self.runtime.meeting(request) {
             return Some(ControlReply::error("unavailable", error));
@@ -404,9 +375,10 @@ impl Pump {
                         "Recording “{title}”; `hex meetings stop` stops and transcribes it"
                     ))
                 }
-                (Some(ControllerEvent::Stopping), true) => {
-                    ControlReply::done("Stopping the meeting recording")
-                }
+                // A stop replies once the recorder has begun transcribing,
+                // as `hex meetings stop` documents, or once it discarded a
+                // recording with no speech; Stopping only says it is on its
+                // way there.
                 (Some(ControllerEvent::Discarded(_)), true) => {
                     ControlReply::done("Stopped recording; it had no speech and went to the Trash")
                 }
@@ -855,25 +827,7 @@ fn wait_for_model(
 }
 
 fn meeting_report(state: &MeetingMenuState) -> MeetingReport {
-    match state {
-        MeetingMenuState::Idle => MeetingReport {
-            state: "idle".into(),
-            ..Default::default()
-        },
-        MeetingMenuState::Starting => MeetingReport {
-            state: "starting".into(),
-            ..Default::default()
-        },
-        MeetingMenuState::Recording { started, title, .. } => MeetingReport {
-            state: "recording".into(),
-            title: Some(title.clone()),
-            elapsed_seconds: Some(started.elapsed().as_secs()),
-        },
-        MeetingMenuState::Transcribing => MeetingReport {
-            state: "transcribing".into(),
-            ..Default::default()
-        },
-    }
+    control::meetings::report(state)
 }
 
 /// The pane the window shows, asked on the UI thread.

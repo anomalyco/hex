@@ -1019,6 +1019,14 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      ├── "Recording · <title> · 12:34" -> Meetings pane
      │   └── title follows the provisional title (see Titles And Summary)
      ├── Stop & Transcribe
+     │   └── asked -> the tray, the menu bar, and `hex status` read
+     │      "stopping" until capture ends and "transcribing" takes over
+     │      (a stop asked while it is still starting reads so too);
+     │      the tray's Record and the menu bar's Record Meeting stay
+     │      disabled, and `hex meetings record` answers busy (exit 1), never
+     │      "Already recording": the recorder finishes this meeting before
+     │      it takes another (checks: meeting::runtime::tests,
+     │      control::meetings::tests)
      └── Mute Microphone / Unmute Microphone (Labs › Mute the microphone
          while recording; see Mute Microphone (Labs))
      (Idle menu bar: "Record Meeting"; "Copy Last Meeting Transcript" sits
@@ -1772,6 +1780,9 @@ While recording                                      // meetings.rolling
      provisional titles (TranscriptReader)
 
 Stop & Transcribe
+  -> The recording reads "stopping" (tray, menu bar, hex status); another
+     recording waits for it: hex meetings record answers busy until the
+     meeting is fully done (idle)
   -> Flush tails -> finish pending chunks           // usually seconds
   -> Any track that fell behind or failed -> stream its WAV in 1 s blocks
   -> Join on one timeline -> Echo suppression -> Final publication
