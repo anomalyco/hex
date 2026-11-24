@@ -1,6 +1,6 @@
 # Hex for Android
 
-Hold the Hex key, speak and release to insert text in the current app. A tap starts hands-free dictation; ✓ finishes and ✕ discards. The Hex key sits at the strip’s trailing end, where Gboard has its mic; while dictating it becomes ✓ and the live dot waveform grows out of it, above the keys. While Hex transcribes, a spinner takes the checkmark’s place and ✕ still cancels, which also stops the transcription itself. A recording stops at 1 minute and says so (“Stopped at 1 minute”); its text is still inserted. Dictation’s notes show in the strip even while Hex Preview’s update line is waiting, which returns afterwards. The keys are Gboard’s size and place on a Pixel (measured on an emulator), with ?123, comma, space, period and enter in the bottom row; the system’s own switcher in the navigation bar, or Hex menu › Next keyboard, changes keyboards.
+Hold the Hex key, speak and release to insert text in the current app. A tap starts hands-free dictation; ✓ finishes and ✕ discards. The Hex key sits at the strip’s trailing end, where Gboard has its mic; while dictating it becomes ✓ and the live dot waveform grows out of it, above the keys. While Hex transcribes, a spinner takes the checkmark’s place and ✕ still cancels, which also stops the transcription itself. A recording stops at 1 minute and says so (“Stopped at 1 minute”); its text is still inserted. Dictation’s notes show in the strip even while Hex Preview’s update line is waiting, which returns afterwards. The keys are Gboard’s size and place on a Pixel (measured on an emulator), with ?123, comma, space, period and enter in the bottom row (the second symbols page puts < and > there, as Gboard does); the system’s own switcher in the navigation bar, or Hex menu › Next keyboard, changes keyboards.
 
 ## Speech model and privacy
 
@@ -27,7 +27,7 @@ All four layouts have a bundled, memory-mapped **HXTM v3** word and word-pair mo
 
 Português, Nederlands, Polski and Русский have no typing model of their own: while one of them is dictated and no layout is pinned, English’s word list only gives the keys their geometry. The strip offers what you typed and your own dictionary words as completions; there are no next words, no autocorrection or replacement on space and punctuation, and no tap correction, swipe typing or English emoji keywords. Double-space for a period, your personal-dictionary text shortcuts, capitals and the literal chip keep working. Pin a layout in Keyboard › Keyboard layout to type with its model.
 
-**Keyboard › Keyboard layout** follows dictation by default; an explicit layout can differ from the space bar’s spoken language. Spanish has a dedicated ñ and ¿/¡ on the second symbols page. German is QWERTZ with ü, ö and ä; hold s for ß. Bokmål has å, ø and æ.
+**Keyboard › Keyboard layout** follows dictation by default; an explicit layout can differ from the space bar’s spoken language. Spanish has a dedicated ñ, and holds **¿** and **¡** on **?** and **!**. German is QWERTZ with ü, ö and ä; hold s for ß. Bokmål has å, ø and æ.
 
 **Keyboard › Suggest swear words** is off by default on every layout. Slurs on the
 [curated list](app/src/main/assets/typing/never-suggest.tsv) are never offered, even when

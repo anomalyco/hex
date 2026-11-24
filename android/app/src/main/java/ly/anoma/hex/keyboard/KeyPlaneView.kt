@@ -84,7 +84,6 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private val emojiBottom = KeyRowLayout(context, 10f, side, gap, insetTop, insetBottom + bottomExtra)
     var emojiOpen = false
         private set
-    private var commaText = ","
     private val roll = Rollover()
     // A slide from ?123 or shift types the key it lifts on: the keys it can type, and the one under it.
     private val slides = HashMap<KeyCap, (KeyPoint) -> Unit>()
@@ -145,9 +144,17 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
             }
             true
         }
-        comma = caps.cap(",", context.getString(R.string.keyboard_comma), modifier) { ime.engine.type(commaText) }
-        typesOnLift(comma, preview = { null }, holds = { emptyList() }, type = { comma.performClick() })
-        bottomSlides[comma] = { ime.engine.type(commaText) }
+        comma = caps.cap(",", context.getString(R.string.keyboard_comma), modifier) { ime.engine.type(commaText(current)) }
+        // On the =< page the key is <, which the page's own rows have no room for, so it keeps the holds
+        // the < key had there before.
+        typesOnLift(comma, preview = { null },
+            holds = { if (current?.symbols == true) listOf(LetterFeedback.symbolHolds(commaText(current)[0])) else emptyList() },
+            type = { option -> if (option != null) ime.engine.type(option) else comma.performClick() })
+        comma.setOnLongClickListener {
+            val held = if (current?.symbols == true) LetterFeedback.symbolHolds(commaText(current)[0]) else emptyList()
+            if (held.isEmpty()) false else { host.openAccents(held, it); true }
+        }
+        bottomSlides[comma] = { ime.engine.type(commaText(current)) }
         // Emoji on the letters; on the symbol pages Gboard's 1234 key, which opens its number pad.
         emojiKey = caps.icon(R.drawable.ic_emoji, context.getString(R.string.keyboard_emoji), caps.key,
             { if (current?.symbols == true) ime.engine.pad(Pad.Symbols) else host.openEmoji() })
@@ -193,17 +200,19 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
             }
             true
         }
-        period = caps.cap(".", context.getString(R.string.keyboard_period), modifier) { ime.engine.type(".") }
-        // Held on the letters page, period offers Gboard's punctuation; on the symbol pages an ellipsis.
+        period = caps.cap(".", context.getString(R.string.keyboard_period), modifier) { ime.engine.type(periodText(current)) }
+        // Held on the letters page, period offers Gboard's punctuation; on ?123 an ellipsis, and on =<
+        // what its > holds.
         period.setOnLongClickListener {
-            host.openAccents(if (current?.symbols == false) LetterFeedback.periodHolds.flatten() else LetterFeedback.symbolHolds('.'), it); true
+            host.openAccents(if (current?.symbols == false) LetterFeedback.periodHolds.flatten()
+                else LetterFeedback.symbolHolds(periodText(current)[0]), it); true
         }
         period.longClickLabel = context.getString(R.string.keyboard_more_characters)
         typesOnLift(period, preview = { null },
-            holds = { if (current?.symbols == false) LetterFeedback.periodHolds else listOf(LetterFeedback.symbolHolds('.')) },
+            holds = { if (current?.symbols == false) LetterFeedback.periodHolds else listOf(LetterFeedback.symbolHolds(periodText(current)[0])) },
             default = { if (current?.symbols == false) LetterFeedback.PERIOD_DEFAULT else 0 },
             type = { option -> if (option != null) ime.engine.type(option) else period.performClick() })
-        bottomSlides[period] = { ime.engine.type(".") }
+        bottomSlides[period] = { ime.engine.type(periodText(current)) }
         enterKey = caps.cap("", context.getString(R.string.keyboard_return), modifier, 17f, ime.engine::enter)
         enterKey.sound = AudioManager.FX_KEYPRESS_RETURN
         enterKey.textEntry = false
@@ -230,6 +239,12 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     }
 
     private fun cased(c: Char) = if (current?.let { !it.symbols && it.shifted } == true) c.uppercaseChar().toString() else c.toString()
+
+    /** The bottom row's comma and period keys type the page's own ([KeyboardPage.commaText]), which is the
+     * field's mark and . on the letters, , and . on ?123, and =<'s < and >. */
+    private fun commaText(page: KeyboardPage?) = page?.commaText ?: ","
+
+    private fun periodText(page: KeyboardPage?) = page?.periodText ?: "."
 
     /** Types a page key's own character at [p] (its touch, when the page has one): a quote key asks the
      * engine for its smart form (Labs › Keyboard › Smart quotes), and every other key types as before.
@@ -274,7 +289,8 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
             var at = if (index < 2) (columns - line.length) / 2f else 0f
             val width = if (index < 2) 1f else (columns - 2 * side) / line.length
             if (index == 2) {
-                val switch = if (symbols) caps.cap(context.getString(if (page.more) R.string.keyboard_page_numbers else R.string.keyboard_page_symbols),
+                // Gboard labels the page switch =< going out and ?123 coming back.
+                val switch = if (symbols) caps.cap(context.getString(if (page.more) R.string.keyboard_numbers_label else R.string.keyboard_page_symbols),
                     context.getString(R.string.keyboard_more_symbols), modifier, 15f, ime.engine::shiftUp).also { it.textEntry = false }
                 else caps.icon(shiftIconFor(page), shiftDescription(page), modifier, { ime.engine.shiftDown(); ime.engine.shiftUp() }).also { key ->
                     shiftIcon = key.face.getChildAt(0) as ImageView
@@ -349,10 +365,19 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         emojiKey.contentDescription = context.getString(if (symbols) R.string.keyboard_pad else R.string.keyboard_emoji)
         modeKey.label?.text = context.getString(if (symbols) R.string.keyboard_letters_label else R.string.keyboard_numbers_label)
         modeKey.contentDescription = context.getString(if (symbols) R.string.keyboard_letters else R.string.keyboard_numbers)
-        commaText = if (symbols) "," else page.kind.mark
-        comma.label?.text = commaText
-        comma.label?.textSize = if (commaText == "@") 21f else 26f
-        comma.contentDescription = context.getString(when (commaText) { "@" -> R.string.keyboard_at; "/" -> R.string.keyboard_slash; else -> R.string.keyboard_comma })
+        val commaLabel = page.commaText
+        comma.label?.text = commaLabel
+        comma.label?.textSize = if (commaLabel == "@") 21f else 26f
+        comma.longClickLabel = if (page.more) context.getString(R.string.keyboard_more_characters) else null
+        comma.contentDescription = when (commaLabel) {
+            "@" -> context.getString(R.string.keyboard_at)
+            "/" -> context.getString(R.string.keyboard_slash)
+            "," -> context.getString(R.string.keyboard_comma)
+            else -> commaLabel
+        }
+        val periodLabel = page.periodText
+        period.label?.text = periodLabel
+        period.contentDescription = if (periodLabel == ".") context.getString(R.string.keyboard_period) else periodLabel
         // An app's own label, else Gboard's symbol for the editor's action.
         val label = page.enter.label
         enterKey.label?.text = label.orEmpty()

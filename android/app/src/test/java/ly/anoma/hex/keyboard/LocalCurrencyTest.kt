@@ -12,15 +12,15 @@ class LocalCurrencyTest {
             currency = currency)
     private fun locales(vararg tags: String) = tags.map { Locale.forLanguageTag(it) }
 
-    @Test fun offThePagesAndHoldsAreUnchanged() {
-        assertEquals(listOf("1234567890", "-/:;()$&@\"", ".,?!'"), page().lines)
-        assertEquals(listOf("[]{}#%^*+=", "_\\|~<>€£¥•", ".,?!'"), page(more = true).lines)
+    @Test fun offThePagesDrawGboardsRowsAndTheSameHolds() {
+        assertEquals(listOf("1234567890", "@#\$_&-+()/", "*\"':;!?"), page().lines)
+        assertEquals(listOf("~`|•√π÷×§Δ", "£¢€¥^°={}\\", "%©®™✓[]"), page(more = true).lines)
         assertEquals(listOf("¢", "€", "£", "₹", "¥", "₱"), LetterFeedback.symbolHolds('$'))
     }
 
     @Test fun britainPutsPoundsOnThe123Page() {
         assertEquals('£', LocalCurrency.symbol(locales("en-GB")))
-        assertEquals("-/:;()£&@\"", page('£').lines[1])
+        assertEquals("@#£_&-+()/", page('£').lines[1])
         // Held, the key offers the $ it took the place of first, then $'s own options without a second £.
         val holds = LetterFeedback.symbolHolds('£', '£')
         assertEquals("$", holds.first())
@@ -30,13 +30,13 @@ class LocalCurrencyTest {
 
     @Test fun theSecondSymbolsPagePutsDollarsWhereItCan() {
         val symbols = page('£', more = true).lines[1]
-        assertEquals("_\\|~<>€$¥•", symbols)
+        assertEquals("\$¢€¥^°={}\\", symbols)
         assertEquals(10, symbols.length)
         // The $ it shows there holds the rest too, without another £.
         assertEquals(listOf("¢", "€", "₹", "¥", "₱"), LetterFeedback.symbolHolds('$', '£'))
         // A currency it never drew puts $ where ¥ was, so $ stays on one of the two pages with ten keys.
-        assertEquals("_\\|~<>€£$•", page('₹', more = true).lines[1])
-        assertEquals("_\\|~<>€£$•", page('₩', more = true).lines[1])
+        assertEquals("£¢\$^°={}\\", page('₹', more = true).lines[1])
+        assertEquals("£¢\$^°={}\\", page('₩', more = true).lines[1])
         // That $ keeps ¥ reachable, offers every other symbol, and never a second copy of the local one.
         assertEquals(listOf("¢", "€", "£", "₹", "¥", "₱"), LetterFeedback.symbolHolds('$', '₩'))
     }
@@ -44,8 +44,8 @@ class LocalCurrencyTest {
     @Test fun germanyAndFrancePutEurosOnThe123Page() {
         assertEquals('€', LocalCurrency.symbol(locales("de-DE")))
         assertEquals('€', LocalCurrency.symbol(locales("fr-FR")))
-        assertEquals("-/:;()€&@\"", page('€').lines[1])
-        assertEquals("_\\|~<>$£¥•", page('€', more = true).lines[1])
+        assertEquals("@#€_&-+()/", page('€').lines[1])
+        assertEquals("£¢\$¥^°={}\\", page('€', more = true).lines[1])
         assertEquals(listOf("$", "¢", "£", "₹", "¥", "₱"), LetterFeedback.symbolHolds('€', '€'))
     }
 
@@ -59,7 +59,7 @@ class LocalCurrencyTest {
         assertNull(LocalCurrency.symbol("USD"))
         assertNull(LocalCurrency.symbol("CHF"))
         assertNull(LocalCurrency.symbol("CAD"))
-        assertEquals(listOf("1234567890", "-/:;()$&@\"", ".,?!'"), page().lines)
+        assertEquals(listOf("1234567890", "@#\$_&-+()/", "*\"':;!?"), page().lines)
     }
 
     @Test fun aRegionWithoutACurrencyKeepsDollars() {
@@ -68,6 +68,6 @@ class LocalCurrencyTest {
         // the same way.
         assertNull(LocalCurrency.symbol(listOf(Locale.forLanguageTag("en-AQ"))))
         assertNull(LocalCurrency.symbol(listOf(Locale.forLanguageTag("es-419"))))
-        assertEquals(listOf("1234567890", "-/:;()$&@\"", ".,?!'"), page().lines)
+        assertEquals(listOf("1234567890", "@#\$_&-+()/", "*\"':;!?"), page().lines)
     }
 }
