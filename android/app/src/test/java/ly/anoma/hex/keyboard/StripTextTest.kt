@@ -22,6 +22,11 @@ import ly.anoma.hex.diagnostics.libraryLabel
 import ly.anoma.hex.diagnostics.report
 import ly.anoma.hex.diagnostics.taskStat
 import ly.anoma.hex.diagnostics.wavSamples
+import ly.anoma.hex.diagnostics.lastDictationLines
+import ly.anoma.hex.speech.DictationPlace
+import ly.anoma.hex.speech.DictationTimes
+import ly.anoma.hex.speech.ModelAtTick
+import ly.anoma.hex.speech.modelAtTick
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -161,6 +166,8 @@ class StripTextTest {
             Hex diagnostics
             Build: Hex 0.2.2 (build 5), preview
 
+            Last dictation (durations only, held in memory until Hex's process ends; nothing said or typed): none since Hex started
+
             Speed test in the app: bundled 11.0 s English clip, downloaded model
               same for every run: cgroup 0::/uid_*/pid_*, cpus allowed 0-7, nice 0
               as now, run 1: 5812 ms, processor 19340 ms; encoder 4100 ms, decoder 1500 ms, other 212 ms; 4 threads, encoder window full
@@ -184,5 +191,34 @@ class StripTextTest {
               text: And so, my fellow Americans. (every run)
 
         """.trimIndent(), report(listOf("Build: Hex 0.2.2 (build 5), preview"), done, steady))
+    }
+    @Test fun diagnosticsReportTheLastDictationsSteps() {
+        val timings = longArrayOf(30_000, 6_100_000, 3_300_000, 0, 80_000, 0, 4)
+        assertEquals("""
+            Last dictation (durations only, held in memory until Hex's process ends; nothing said or typed):
+              in the keyboard, 10.4 s recorded, 9.8 s kept; 4 threads, encoder window full; model still loading at ✓, ready 1240 ms after
+              after ✓: recording stopped 31 ms, decode started 52 ms, decode finished 9870 ms, text inserted 9884 ms
+              decode 9818 ms; encoder 6100 ms, decoder 3330 ms, prompt 80 ms, other 308 ms; processor 30436 ms, 3.1× the decode's wall time
+
+        """.trimIndent(), lastDictationLines(DictationTimes(DictationPlace.Keyboard, 10_400, 9_800, ModelAtTick.Loading, 1_240,
+            true, 31, 52, 9_870, 9_884, 30_436, timings)))
+        // Stopped at 1 minute without ✓, the model loaded by the decode, no text, and nothing readable from the decode.
+        assertEquals("""
+            Last dictation (durations only, held in memory until Hex's process ends; nothing said or typed):
+              on Home, 60.0 s recorded, 58.2 s kept; model loaded after the 1-minute stop
+              after the 1-minute stop: recording stopped 0 ms, decode started 1250 ms, decode finished 1300 ms, no text inserted
+              decode 50 ms; processor not readable
+
+        """.trimIndent(), lastDictationLines(DictationTimes(DictationPlace.Home, 60_000, 58_200, ModelAtTick.LoadedAfter, 0,
+            false, 0, 1_250, 1_300, null, -1, null)))
+    }
+    @Test fun diagnosticsSayWhereTheModelWasAtTheTick() {
+        assertEquals(ModelAtTick.Loaded, modelAtTick(tick = 100, prepared = 50, prepareLoaded = false, decodeLoaded = false))
+        assertEquals(ModelAtTick.LoadedWhileSpeaking, modelAtTick(tick = 100, prepared = 50, prepareLoaded = true, decodeLoaded = false))
+        assertEquals(ModelAtTick.Loading, modelAtTick(tick = 100, prepared = 150, prepareLoaded = true, decodeLoaded = false))
+        // Stopped at 1 minute: no tick, so a load that finished is a load while speaking.
+        assertEquals(ModelAtTick.LoadedWhileSpeaking, modelAtTick(tick = 0, prepared = 150, prepareLoaded = true, decodeLoaded = false))
+        assertEquals(ModelAtTick.LoadedAfter, modelAtTick(tick = 100, prepared = 0, prepareLoaded = false, decodeLoaded = true))
+        assertEquals(ModelAtTick.Unknown, modelAtTick(tick = 100, prepared = 0, prepareLoaded = false, decodeLoaded = false))
     }
 }

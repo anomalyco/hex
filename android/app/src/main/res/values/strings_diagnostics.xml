@@ -5,7 +5,7 @@
     <string name="labs_troubleshooting">Troubleshooting</string>
     <string name="diagnostics">Diagnostics</string>
     <string name="diagnostics_detail">A report on how Hex runs on this phone</string>
-    <string name="diagnostics_contents">The report has this phone’s model, Android version, memory, processor and vibration support, and Hex’s version, settings and test times. Nothing you typed or said, and nothing is sent.</string>
+    <string name="diagnostics_contents">The report has this phone’s model, Android version, memory, processor and vibration support, and Hex’s version, settings, test times and how long your last dictation took. Nothing you typed or said, and nothing is sent.</string>
     <string name="diagnostics_check">Check this phone</string>
     <string name="diagnostics_none">Tap Check this phone or a test to make the report.</string>
     <string name="diagnostics_copy">Copy report</string>

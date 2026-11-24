@@ -3,7 +3,7 @@
     <string name="labs_troubleshooting">排查问题</string>
     <string name="diagnostics">诊断</string>
     <string name="diagnostics_detail">关于 Hex 在这台手机上运行情况的报告</string>
-    <string name="diagnostics_contents">报告包含这台手机的型号、Android 版本、内存、处理器和振动支持，以及 Hex 的版本、设置和测试用时。不含你输入或说过的内容，也不会发送。</string>
+    <string name="diagnostics_contents">报告包含这台手机的型号、Android 版本、内存、处理器和振动支持，以及 Hex 的版本、设置、测试用时和上一次听写的用时。不含你输入或说过的内容，也不会发送。</string>
     <string name="diagnostics_check">检查这台手机</string>
     <string name="diagnostics_none">点按“检查这台手机”或运行一项测试来生成报告。</string>
     <string name="diagnostics_copy">复制报告</string>
