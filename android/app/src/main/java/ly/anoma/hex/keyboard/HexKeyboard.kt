@@ -17,6 +17,7 @@ import android.inputmethodservice.InputMethodService
 import android.util.Size
 import android.util.TypedValue
 import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InlineSuggestionsRequest
 import android.view.inputmethod.InlineSuggestionsResponse
@@ -179,8 +180,6 @@ class HexKeyboard : InputMethodService() {
         super.onStartInput(attribute, restarting)
         typeChanged = restarting && fieldType != attribute.inputType to attribute.imeOptions
         fieldType = attribute.inputType to attribute.imeOptions
-        // The new field's own answer has not come yet (one for the old field must not keep its chips).
-        if (!restarting) inlineAnswered = false
         nextEnglish = null
         capture.cancel() // Even a different field in the same app must not receive an old result.
         engine.startInput(attribute)
@@ -199,9 +198,6 @@ class HexKeyboard : InputMethodService() {
             return
         }
         view?.cancelGestures()
-        // A new field starts with no chips: Android asks its service again if it has any for it.
-        // A response for the field may arrive before its view starts, and those chips stay.
-        if (!restarting && !inlineAnswered) clearInline()
         // Another type in the same box: back to its keys, as a new field opens (configureTyping draws them).
         if (typeChanged) view?.closeMenu(configure = false)
         engine.configureTyping()
@@ -226,10 +222,12 @@ class HexKeyboard : InputMethodService() {
     /** The strip's inline chips go: a new field, the keyboard hiding, or the lab turning off. */
     private fun clearInline() {
         inlineGeneration++
-        view?.inlineSuggestions(emptyList())
+        view?.inlineSuggestions(emptyList(), emptyList())
     }
     override fun onCreateInlineSuggestionsRequest(uiExtras: Bundle): InlineSuggestionsRequest? {
-        if (!InlineAutofill.requests(feedback.passwordManagerSuggestions)) return null
+        // The voice-only bar has no strip to show chips in: asking would put Android in inline mode
+        // where nothing shows them, so the system's own autofill UI would never appear either.
+        if (!feedback.passwordManagerSuggestions || voiceOnly()) return null
         val density = resources.displayMetrics.density
         val strip = (if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
             KeyboardMetrics.STRIP_LANDSCAPE else KeyboardMetrics.STRIP) * density
@@ -250,28 +248,27 @@ class HexKeyboard : InputMethodService() {
             .setMaxSuggestionCount(InlineAutofill.MAX)
             .build()
     }
-    /** The field has had Android's answer, so chips seen when its view starts are its own. */
-    private var inlineAnswered = false
-    /** The service's answer, shown in its order with pinned ones last. A tap lets Android fill the
-     * field; Hex never reads a login, a code or a card, and an empty answer clears the row. */
+    /** The service's answer. A tap lets Android fill the field; Hex never reads a login, a code or
+     * a card. The unpinned chips fill the scrolling row and the pinned ones sit at its edge. */
     override fun onInlineSuggestionsResponse(response: InlineSuggestionsResponse): Boolean {
-        if (!InlineAutofill.requests(feedback.passwordManagerSuggestions)) return false
-        inlineAnswered = true
+        if (!feedback.passwordManagerSuggestions || voiceOnly()) return false
         val strip = view ?: return false
         val suggestions = response.inlineSuggestions
-        val ordered = InlineAutofill.ordered(suggestions.map { it.info.isPinned })
-        if (ordered.isEmpty()) { clearInline(); return true }
+        val split = InlineAutofill.split(suggestions.map { it.info.isPinned })
+        // A new answer replaces the old row at once, then each chip appears as its inflation
+        // lands: one that never does cannot keep stale chips up or hold back the rest.
         val generation = ++inlineGeneration
-        // Inflated in Android's order, then placed where the order puts them; a suggestion the
-        // service can't draw arrives as null and is left out.
-        val views = arrayOfNulls<View>(ordered.size)
-        var waiting = ordered.size
-        for ((at, index) in ordered.withIndex()) {
+        strip.inlineSuggestions(emptyList(), emptyList())
+        if (suggestions.isEmpty()) return true
+        val views = arrayOfNulls<View>(suggestions.size)
+        for (index in suggestions.indices) {
             val suggestion = suggestions[index]
-            suggestion.inflate(this, suggestion.info.inlinePresentationSpec.maxSize, mainExecutor) { content ->
+            suggestion.inflate(this, Size(ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT), mainExecutor) { content ->
                 if (generation != inlineGeneration || view !== strip) return@inflate
-                views[at] = content
-                if (--waiting == 0) strip.inlineSuggestions(views.filterNotNull())
+                views[index] = content
+                strip.inlineSuggestions(
+                    split.unpinned.mapNotNull { views[it] }, split.pinned.mapNotNull { views[it] })
             }
         }
         return true

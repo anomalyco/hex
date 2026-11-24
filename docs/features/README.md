@@ -3321,14 +3321,14 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 ├── Labs > Keyboard > Password manager suggestions (off) -> while Android's autofill service —
     Bitwarden, 1Password or Google Password Manager, which must itself support Android 11's inline
     suggestions — offers logins, one-time codes or cards for the focused field, its own chips take
-    the word slots' place in the strip: up to six, in the service's order, pinned ones last. A tap
-    lets Android fill the field; Hex lays the service's views out and never reads a login, a code or a
-    card, and nothing is logged or sent. A new field, the keyboard hiding or the toggle turning off
-    clears them. Off, Hex makes no inline request, so Android's normal autofill dropdown is exactly
-    as before.
+    the word slots' place in the strip: up to six, in the service's order, the pinned ones held at
+    the edge outside the scroll. A tap lets Android fill the field; Hex lays the service's views out
+    and never reads a login, a code or a card, and nothing is logged or sent. A new field, the
+    keyboard hiding or the toggle turning off clears them. Off, Hex makes no inline request, so
+    Android's normal autofill dropdown is exactly as before.
     Checks: `./gradlew --no-daemon :app:testDebugUnitTest :app:compileDebugKotlin -x
-    prepareSpeechModel` passed 179 tests, `InlineAutofillTest`'s 4 among them (asking, the
-    pinned-last order, the chip sizes), on 2026-11-24 on OpenJDK 21 (Arch Linux 21.0.13) and
+    prepareSpeechModel` passed 178 tests, `InlineAutofillTest`'s 3 among them (the pinned split and
+    the chip sizes), on 2026-11-24 on OpenJDK 21 (Arch Linux 21.0.13) and
     Android SDK 36 (platform 36, build-tools 35.0.0, NDK 27.2.12479018) with compileSdk 36 and
     minSdk 31; the repo has no Android CI, and nothing was tried on a device or emulator.
 └── Labs > Keyboard > Voice-only mode (off) -> a "Voice only" subtype of Hex, registered at runtime

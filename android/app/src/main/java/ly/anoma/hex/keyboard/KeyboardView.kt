@@ -57,7 +57,8 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
     override fun toolsChanged() = strip.update()
     fun notice(notice: StripNotice?) = strip.notice(notice)
     /** Android's inline autofill suggestions (the service's own views) in the strip's word slots. */
-    fun inlineSuggestions(views: List<View>) = strip.inlineSuggestions(views)
+    fun inlineSuggestions(unpinned: List<View>, pinned: List<View>) =
+        strip.inlineSuggestions(unpinned, pinned)
 
     /** Emoji in place of the strip and the keys, the window's height unchanged (Gboard's panel
      * replaces its toolbar too); ABC brings both back. */

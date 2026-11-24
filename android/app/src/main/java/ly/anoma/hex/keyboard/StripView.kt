@@ -14,6 +14,7 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
@@ -54,8 +55,11 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
     private val slotRow = LinearLayout(context)
     // Android's inline autofill suggestions (Labs › Keyboard › Password manager suggestions), in the
     // slots' place while the service has any: its own chips, which Hex lays out and never reads.
+    private val inlineArea = LinearLayout(context)
     private val inlineRow = HorizontalScrollView(context)
     private val inlineChips = LinearLayout(context)
+    // Pinned suggestions may not scroll (Android's inline contract), so they sit at the area's edge.
+    private val inlinePinned = LinearLayout(context)
     private val slotViews = List(3) { FrameLayout(context) }
     private val words = List(3) { Word(context) }
     private val measurePaint = TextPaint()
@@ -152,11 +156,16 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
             slotRow.addView(slotViews[i], LinearLayout.LayoutParams(0, -1, 1f))
         }
         idleRow.addView(slotRow, LinearLayout.LayoutParams(0, -1, 1f))
+        inlineArea.orientation = LinearLayout.HORIZONTAL
+        inlineArea.gravity = Gravity.CENTER_VERTICAL
         inlineChips.gravity = Gravity.CENTER_VERTICAL
         inlineRow.isHorizontalScrollBarEnabled = false
         inlineRow.addView(inlineChips, FrameLayout.LayoutParams(LayoutParams.WRAP_CONTENT, -1))
-        inlineRow.visibility = GONE
-        idleRow.addView(inlineRow, LinearLayout.LayoutParams(0, -1, 1f))
+        inlineArea.addView(inlineRow, LinearLayout.LayoutParams(0, -1, 1f))
+        inlinePinned.gravity = Gravity.CENTER_VERTICAL
+        inlineArea.addView(inlinePinned, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, -1))
+        inlineArea.visibility = GONE
+        idleRow.addView(inlineArea, LinearLayout.LayoutParams(0, -1, 1f))
         toolsRow.gravity = Gravity.CENTER_VERTICAL
         listOf(toolEmoji, toolPaste, toolSettings, toolUndo).forEach {
             toolsRow.addView(it, LinearLayout.LayoutParams(dp(40), -1))
@@ -313,13 +322,24 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         update()
     }
     /** Android's inline autofill suggestions in the slots' place: the service's own views, in its
-     * order, which Hex lays out and never reads. An empty list brings the slots and their words
-     * back. A note or notice still has the line to itself, and the chips return after it. */
-    fun inlineSuggestions(views: List<View>) {
-        inlineChips.removeAllViews()
-        for (view in views) inlineChips.addView(view,
-            LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(30)).apply { marginEnd = dp(6) })
+     * order, which Hex lays out and never reads. [unpinned] scroll and [pinned] stay at their edge.
+     * Two empty lists bring the slots and their words back; a note or notice still has the line to
+     * itself, and the chips return after it. */
+    fun inlineSuggestions(unpinned: List<View>, pinned: List<View>) {
+        fillInline(inlineChips, unpinned)
+        fillInline(inlinePinned, pinned)
         update()
+    }
+    /** A chip keeps the size Android inflated it at: InlineContentView has no onMeasure, so its
+     * content would measure nothing if this row wrapped it. */
+    private fun fillInline(row: LinearLayout, views: List<View>) {
+        row.removeAllViews()
+        for (view in views) {
+            val params = LinearLayout.LayoutParams(view.layoutParams
+                ?: ViewGroup.LayoutParams(dp(56), dp(30)))
+            params.marginEnd = dp(6)
+            row.addView(view, params)
+        }
     }
     fun update() {
         // A dictation's note wins over the notice (Hex Preview's update line), which returns with the idle hint:
@@ -329,7 +349,8 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         val undo = idle && !choosing && undoing && !noted
         // The service's own chips take the slots' place while it has any, and the strip shows nothing
         // else beside them.
-        val chips = idle && !choosing && !spoken && !noted && !undo && inlineChips.childCount > 0
+        val chips = idle && !choosing && !spoken && !noted && !undo &&
+            (inlineChips.childCount > 0 || inlinePinned.childCount > 0)
         val show = idle && !choosing && !chips && !undo && !noted && offered.any { it != null }
         val tools = KeyboardTools.tools(enabled = ime.feedback.keyboardTools,
             busy = !idle || choosing || show || chips || undo || noted || hint != holdHint, secure = { ime.engine.secure },
@@ -343,7 +364,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         (undoBox.layoutParams as LinearLayout.LayoutParams).apply {
             if ((weight == 0f) != shared) { width = if (shared) LinearLayout.LayoutParams.WRAP_CONTENT else 0; weight = if (shared) 0f else 1f; undoBox.layoutParams = this }
         }
-        inlineRow.visibility = if (chips) VISIBLE else GONE
+        inlineArea.visibility = if (chips) VISIBLE else GONE
         slotRow.visibility = if (show) VISIBLE else GONE
         toolsRow.visibility = if (tools.isNotEmpty()) VISIBLE else GONE
         toolEmoji.visibility = if (StripTool.Emoji in tools) VISIBLE else GONE
