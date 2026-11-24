@@ -3,16 +3,16 @@ import Foundation
 /// Whether the keyboard dictates by itself, in its own process with Hex closed (iOS 26,
 /// `KeyboardLocalDictation`), so Hex needn't keep the mic warm for it: there Keep mic warm
 /// defaults to Off and its row hides (`KeyboardBridge.warmDuration`). Not before iOS 26, and
-/// not while the keyboard hands its dictations to Hex: it couldn't get its speech model
-/// (`LanguageSettings.keyboardNeedsHex`), Experiments › Multilingual model takes the language
-/// and only Hex loads it, or the keyboard opened Hex for a dictation in the last
+/// not while the keyboard can't dictate by itself: it couldn't get its speech model
+/// (`LanguageSettings.keyboardNeedsHex`), or Hex was opened for a dictation in the last
 /// `recentWindow` (recorded by the keyboard, and by Hex whatever the reason), until the
-/// keyboard next finishes a dictation by itself.
+/// keyboard next finishes a dictation by itself. Which speech model is picked never stops it:
+/// the keyboard dictates the multilingual model's languages too, with Apple's speech
+/// recognition until it has that model loaded.
 nonisolated struct KeyboardSelfDictation {
     enum Reason: String {
         case memory
         case speechModel
-        case multilingual
         /// Hex saw the keyboard open it for a dictation, whatever the keyboard's reason.
         case openedHex
     }
@@ -31,7 +31,8 @@ nonisolated struct KeyboardSelfDictation {
         self.defaults = defaults
     }
 
-    /// Written by the keyboard as Dictate opens Hex because it can't dictate by itself.
+    /// Written by the keyboard as it opens Hex because it can't dictate by itself: Open Hex in
+    /// the line that says why, or before iOS 26 Dictate itself.
     func recordHandedToHex(_ reason: Reason, at now: Date = Date()) {
         defaults?.set(reason.rawValue, forKey: Self.handedToHexKey)
         defaults?.set(now.timeIntervalSince1970, forKey: Self.handedToHexAtKey)
@@ -56,12 +57,12 @@ nonisolated struct KeyboardSelfDictation {
         return (reason, Date(timeIntervalSince1970: at))
     }
 
-    /// Why the keyboard hands dictation to Hex instead of dictating in its own process, or nil
-    /// when the keyboard dictates by itself.
+    /// Why the keyboard can't dictate in its own process, or nil when it dictates by itself.
+    /// From iOS 26, with `includeRecentHandoff` false (the keyboard's own question), only
+    /// `speechModel` or `memory`.
     func handoffReason(
         osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
         now: Date = Date(),
-        hasMultilingualModelInKeyboard: Bool? = nil,
         hasMemoryToStart: Bool = true,
         includeRecentHandoff: Bool = true
     ) -> Reason? {
@@ -71,27 +72,23 @@ nonisolated struct KeyboardSelfDictation {
            now.timeIntervalSince(handed.at) < Self.recentWindow {
             return handed.reason
         }
-        let languages = LanguageSettings(defaults: defaults)
-        // Speech model in keyboard (on unless turned off) dictates the multilingual model's
-        // language in the keyboard only once the keyboard has that model loaded; until then
-        // Dictate opens Hex for it.
-        let multilingual = MultilingualParakeetSettings(defaults: defaults)
-        let language = multilingual.language(
-            set: languages.dictationLanguage,
-            keyboard: languages.keyboardDictationLanguage()
-        )
-        let keyboardHasMultilingual = hasMultilingualModelInKeyboard
-            ?? KeyboardParakeetSettings(defaults: defaults).keyboardHasMultilingualModel
-        if multilingual.keyboardOpensHex(language: language) && !keyboardHasMultilingual {
-            return .multilingual
-        }
-        if languages.keyboardNeedsHex(now: now) {
+        if LanguageSettings(defaults: defaults).keyboardNeedsHex(now: now) {
             return .speechModel
         }
-        if !hasMemoryToStart {
+        if !hasMemoryToStart || Self.simulatesShortMemory(defaults) {
             return .memory
         }
         return nil
+    }
+
+    /// Simulator builds only: the App Group's `simulator.keyboardMemoryShort` stands in for an
+    /// iPhone short of keyboard memory, which a simulator never is, for screenshots and recordings.
+    static func simulatesShortMemory(_ defaults: UserDefaults?) -> Bool {
+        #if targetEnvironment(simulator)
+        defaults?.bool(forKey: "simulator.keyboardMemoryShort") == true
+        #else
+        false
+        #endif
     }
 
     func dictatesItself(

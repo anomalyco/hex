@@ -90,7 +90,7 @@ struct ExperimentsSettingsPage: View {
             SettingsToggleRow(
                 title: String(localized: "Multilingual model (Parakeet)"),
                 detail: multilingualParakeetFits
-                    ? String(localized: "25 languages, even mixed in one sentence. \(ParakeetUltraTranscriber.downloadSize) download. Once ready, keyboard dictation opens Hex.")
+                    ? String(localized: "25 languages, even mixed in one sentence. \(ParakeetUltraTranscriber.downloadSize) download.")
                     : String(localized: "Needs an iPhone with 6 GB of memory or more"),
                 isOn: $multilingualParakeet
             )

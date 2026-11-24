@@ -39,7 +39,9 @@ switches to active recording only once audio is flowing. iOS ends a keyboard tha
 its memory limit (about 60–90 MB depending on the model), so while less is left
 than starting needs (`os_proc_available_memory`: 32 MB for the first
 dictation, 24 MB once the capture web view is loaded) Dictate and the Hex key
-open Hex instead, as before iOS 26. Audio never leaves the iPhone. From iOS 26 Hex
+say "Not enough memory to dictate here" in one line with **Open Hex** and ✕
+instead, and nothing opens unless Open Hex is tapped (`KeyboardDictationBlock`);
+Dictate works again by itself once there is room. Audio never leaves the iPhone. From iOS 26 Hex
 never asks for Speech Recognition access: that permission covers `SFSpeechRecognizer`,
 which Hex uses only before iOS 26, and `SpeechAnalyzer` runs without it in the app and
 the keyboard alike (a TestFlight tester who turned it off dictated, iOS 27.0.1, build 51).
@@ -55,7 +57,7 @@ app switches; picking `Off` or tapping the header timer ends it. Unless
 chosen, it is `Off`, with the row hidden, where the keyboard dictates by
 itself (`KeyboardSelfDictation`: iOS 26, and the keyboard hasn't opened Hex
 for a dictation in the last 7 days, for any reason: the keyboard records its
-own (memory, a missing speech model, the Multilingual model) and Hex records
+own (memory, a missing speech model) and Hex records
 every keyboard launch, since TestFlight build 129 showed keyboards that opened
 Hex for reasons they left no record of; a dictation the keyboard finishes by
 itself clears it), and `15m` elsewhere; worked out on each read, never
@@ -365,12 +367,11 @@ FluidAudio v3 `AsrModels` (its own loader would replace a folder it can't load
 with v3's download). It is chosen only with 1.5 GB left to load it
 (`os_proc_available_memory`), and never again after a load that ended Hex
 (`ParakeetLoadGuard`, its own keys) until Try again beside the status, or the switch
-turned off and on. Unless Settings › Dictation › Speech model in keyboard has it loaded in the
-keyboard (below), the keyboard doesn't use it, so once Hex has it ready
-(`MultilingualParakeetSettings.isModelReady`, set after a load, cleared while it's
-missing, set aside or off) and it takes the dictation language, Dictate and the Hex
-key open Hex, as before iOS 26 (a warm session still dictates without leaving the
-app); until then the keyboard dictates itself. Measured on a Mac (`~/dev/experiments/2026-11-21-hex-multilingual-parakeet`):
+turned off and on. The keyboard dictates its languages itself, as it does English: with
+it once Settings › Dictation › Speech model in keyboard has it loaded there (below), and
+with Apple's speech recognition until then or wherever it can't load. Which model is picked
+never opens Hex (until 2026-11-24, once Hex had it ready, Dictate and the Hex key opened
+Hex for its languages unless the keyboard had it loaded too). Measured on a Mac (`~/dev/experiments/2026-11-21-hex-multilingual-parakeet`):
 mixed Dutch-English test sentences 7.5% WER against Apple Speech nl-NL's 26.9%,
 pure Dutch 0.9% (0.4%), pure English 0% (0%). Load memory, compile time and speed
 on an iPhone are unmeasured.
@@ -401,8 +402,7 @@ keyboard would use it (`SpeechModelHomeCard`: the switch on, an iPhone that fits
 and no other engine); once it's ready in the keyboard the card can be dismissed, for good. The keyboard's own dictation transcribes with Parakeet in
 the keyboard's process (`HEXKeyboard/KeyboardParakeet.swift`), with the app closed:
 V2 for English, and Parakeet Ultra for a language Experiments › Multilingual model
-dictates once its files are there, in which case Dictate and the Hex key stop opening
-Hex for it. Parakeet's files moved from the app's Application Support into the App
+dictates once its files are there. Parakeet's files moved from the app's Application Support into the App
 Group (`SpeechModelStore`), renamed in place at launch (`moveLegacyDownloads`) rather
 than downloaded again; each folder is marked complete (`.hex-complete`) once every file
 is there, and the keyboard loads only a marked one. The keyboard loads it after its
@@ -592,8 +592,9 @@ rather than none, so "Apple's speech recognition can't dictate this language" me
 module lists any of the iPhone's languages. Offline or stalled, it
 says the download failed and tries again next time. In the keyboard, a model it
 can't get itself says "Hex couldn't transcribe that. Try again." the first time, and the
-second time in a row (within 6 h, no model in place since) "Open Hex to download
-English.": Dictate and the Hex key then open Hex, which downloads it, until a model
+second time in a row (within 6 h, no model in place since) "Download English in Hex to
+dictate" with **Open Hex** and ✕: Dictate and the Hex key then say that instead of
+dictating (from iOS 26 nothing else opens Hex), and Open Hex opens it, which downloads it, until a model
 installs (in either process; Hex checks again each time it comes to the front), a
 language is chosen, or a day passes (`SpeechModelNeedsHex`,
 `settings.dictationLanguage.keyboardNeedsHex`). Only a language Hex itself set aside keeps
@@ -722,7 +723,8 @@ can't (no pack, a pair Apple can't translate, or a translation that fails
 twice, each in a new `TranslationSession`, never one kept), the
 transcript goes in as spoken and the keyboard says so for 8 s:
 "Couldn't translate, pasted as spoken" over the fix ("Download Chinese in
-Settings"), whose Open Hex (the dictation bar: a tap) opens Settings ›
+Settings"), with **Open Hex**, the only part that opens anything, and ✕, which
+puts it away, in both keyboards; Open Hex opens Settings ›
 Dictation (`hex-dictation://keyboard/translation`). Settings keeps the
 last failure (`experiments.translateDictation.lastFailure`, with Apple's
 error code, never the text) beside the download until a dictation

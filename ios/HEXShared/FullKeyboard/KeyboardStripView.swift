@@ -1025,6 +1025,8 @@ final class FullAccessHintView: UIView {
             label.lineBreakMode = .byTruncatingTail
             addSubview(label)
         }
+        // A title beside a ✕ (the translation note's) fits whole.
+        titleLabel.minimumScaleFactor = 0.7
         var open = UIButton.Configuration.plain()
         open.title = String(localized: "Open Hex")
         open.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 13, bottom: 0, trailing: 13)
@@ -1055,6 +1057,8 @@ final class FullAccessHintView: UIView {
     /// Shows `notice` in place of the Full Access words.
     func show(_ notice: KeyboardStripNotice) {
         titleLabel.text = notice.title
+        // A notice without a second line may take two for its one.
+        titleLabel.numberOfLines = notice.detail.isEmpty ? 2 : 1
         pathLabel.text = notice.detail
         pathLabel.accessibilityLabel = nil
         var open = openButton.configuration
@@ -1088,6 +1092,12 @@ final class FullAccessHintView: UIView {
         dismissButton.frame = CGRect(x: chipLeads ? bounds.width - dismiss : 0, y: 0, width: dismiss, height: bounds.height)
         let textX = chipLeads ? openButton.frame.maxX + 10 : dismiss
         let textWidth = chipLeads ? max(0, bounds.width - textX - dismiss) : max(0, openButton.frame.minX - 10 - textX)
+        // A notice without a second line (`KeyboardDictationBlock`): its one line on the words' line.
+        if pathLabel.text?.isEmpty ?? true {
+            titleLabel.frame = CGRect(x: textX, y: 0, width: textWidth, height: bounds.height)
+            pathLabel.frame = .zero
+            return
+        }
         // Two lines, even above and below the strip's words' line.
         let lineHeight: CGFloat = min(16, (bounds.height + 1) / 2)
         let top = (bounds.height - 2 * lineHeight) / 2

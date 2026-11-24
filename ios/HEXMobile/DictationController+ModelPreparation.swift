@@ -21,7 +21,6 @@ extension DictationController {
                 return
             }
         } else {
-            settings.isModelReady = false
             let download = multilingualDownload
             Task {
                 // Nothing writes to the folder any more once `stop` returns.

@@ -69,13 +69,6 @@ final class KeyboardParakeet {
         return Choice(multilingual: picked.model.isMultilingual, language: picked.language)
     }
 
-    /// Whether the keyboard dictates the multilingual model's language itself now, so the Hex
-    /// key needn't open Hex for it.
-    var dictatesMultilingualHere: Bool {
-        guard let loaded, loaded.multilingual else { return false }
-        return Self.choice()?.multilingual == true
-    }
-
     /// After the keyboard's first frame and launch work: notes the keyboard's memory limit for
     /// Hex's download, then loads the model it would use, off the main thread, when it fits.
     func warmUp() {

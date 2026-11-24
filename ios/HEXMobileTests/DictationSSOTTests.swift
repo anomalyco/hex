@@ -65,7 +65,7 @@ final class DictationSSOTTests: XCTestCase {
         XCTAssertTrue(localRoute.dictatesInPlace)
 
         // Otherwise opensHex carries the reason (or nil when unsupported).
-        for reason: KeyboardSelfDictation.Reason? in [nil, .memory, .speechModel, .multilingual, .openedHex] {
+        for reason: KeyboardSelfDictation.Reason? in [nil, .memory, .speechModel, .openedHex] {
             let route = DictationRoute.resolve(
                 hasFullAccess: true,
                 isModelInstalled: true,
@@ -76,6 +76,64 @@ final class DictationSSOTTests: XCTestCase {
             XCTAssertEqual(route, .opensHex(reason))
             XCTAssertFalse(route.dictatesInPlace)
         }
+    }
+
+    /// From iOS 26 nothing a dictation tap does opens Hex: where the keyboard can't dictate it
+    /// says why, and only Open Hex in that line opens Hex. Before iOS 26 it opens Hex, as always.
+    func testADictationTapThatCantDictateHereSaysWhyFromiOS26AndOpensHexOnlyBefore() {
+        let routes: [(DictationRoute, KeyboardDictationBlock?)] = [
+            (.needsModel, .setUp),
+            (.opensHex(.speechModel), .speechModel(language: "de-DE")),
+            (.opensHex(.memory), .memory),
+            (.setUp, nil),
+            (.warm, nil),
+            (.inKeyboard, nil),
+        ]
+        for (route, block) in routes {
+            XCTAssertEqual(KeyboardDictationBlock.resolve(route: route, language: "de-DE", osMajorVersion: 26), block, "\(route)")
+            XCTAssertNil(KeyboardDictationBlock.resolve(route: route, language: "de-DE", osMajorVersion: 18), "iOS 18 unchanged: \(route)")
+        }
+        XCTAssertNil(KeyboardDictationBlock.resolve(route: .opensHex(nil), language: nil, osMajorVersion: 18))
+        XCTAssertEqual(KeyboardDictationBlock.resolve(route: .opensHex(.speechModel), language: nil, osMajorVersion: 27), .speechModel(language: "en-US"))
+        XCTAssertEqual(KeyboardDictationBlock.speechModel(language: "en-US").line, "Download English in Hex to dictate")
+        XCTAssertEqual(KeyboardDictationBlock.memory.line, "Not enough memory to dictate here")
+        XCTAssertEqual(KeyboardDictationBlock.setUp.line, "Finish setting up Hex to dictate")
+    }
+
+    @MainActor
+    func testTheDictationBlockOpensHexOnlyFromItsOpenHexAndPutsItselfAway() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.operatingSystemVersion.majorVersion < KeyboardSelfDictation.firstVersion)
+        let model = KeyboardViewModel()
+        var opened: [URL] = []
+        model.onOpenURL = { opened.append($0) }
+        model.configureFixture(snapshot: .offline, now: 50_000)
+        model.automaticLanguage = "en-US"
+        model.opensHexReason = .memory
+        XCTAssertEqual(model.route, .opensHex(.memory))
+        XCTAssertFalse(model.dictationTapOpensHex)
+
+        model.dictateWhereUnavailable()
+        XCTAssertEqual(model.dictationBlock, .memory)
+        XCTAssertEqual(model.statusSlot, .dictationBlock(.memory), "the bar's line")
+        XCTAssertTrue(opened.isEmpty, "a dictation tap opens nothing")
+        model.dismissDictationBlock()
+        XCTAssertNil(model.dictationBlock, "its ✕")
+        XCTAssertTrue(opened.isEmpty)
+
+        model.dictateWhereUnavailable()
+        model.openHexForDictationBlock()
+        XCTAssertEqual(opened, [model.coldStartURL], "Open Hex records in Hex")
+        XCTAssertNil(model.dictationBlock)
+
+        // The second failure to get the speech model says so as a tap would; dictating here again puts it away.
+        model.opensHexReason = .speechModel
+        model.localDictationChanged(available: false, was: true, reason: .speechModel)
+        XCTAssertEqual(model.dictationBlock, .speechModel(language: "en-US"))
+        model.localDictationChanged(available: true, was: false, reason: nil)
+        XCTAssertNil(model.dictationBlock)
+        model.localDictationChanged(available: false, was: nil, reason: .speechModel)
+        XCTAssertNil(model.dictationBlock, "a keyboard that opens without the model says nothing until a tap")
+        XCTAssertEqual(opened.count, 1)
     }
 
     @MainActor
@@ -418,17 +476,17 @@ final class DictationSSOTTests: XCTestCase {
 
         let selfDict = KeyboardSelfDictation(defaults: defaults)
         XCTAssertEqual(selfDict.handoffReason(osMajorVersion: 18), .openedHex)
-        XCTAssertNil(selfDict.handoffReason(osMajorVersion: 26, hasMultilingualModelInKeyboard: false, hasMemoryToStart: true, includeRecentHandoff: false))
-        XCTAssertEqual(selfDict.handoffReason(osMajorVersion: 26, hasMultilingualModelInKeyboard: false, hasMemoryToStart: false, includeRecentHandoff: false), .memory)
+        XCTAssertNil(selfDict.handoffReason(osMajorVersion: 26, hasMemoryToStart: true, includeRecentHandoff: false))
+        XCTAssertEqual(selfDict.handoffReason(osMajorVersion: 26, hasMemoryToStart: false, includeRecentHandoff: false), .memory)
 
         languages.markKeyboardNeedsHex()
-        XCTAssertEqual(selfDict.handoffReason(osMajorVersion: 26, hasMultilingualModelInKeyboard: false, hasMemoryToStart: true, includeRecentHandoff: false), .speechModel)
+        XCTAssertEqual(selfDict.handoffReason(osMajorVersion: 26, hasMemoryToStart: true, includeRecentHandoff: false), .speechModel)
         XCTAssertFalse(selfDict.dictatesItself(osMajorVersion: 26))
         languages.clearKeyboardNeedsHex()
 
         selfDict.recordHandedToHex(.memory)
         XCTAssertEqual(selfDict.handoffReason(osMajorVersion: 26, includeRecentHandoff: true), .memory)
-        XCTAssertNil(selfDict.handoffReason(osMajorVersion: 26, hasMultilingualModelInKeyboard: false, hasMemoryToStart: true, includeRecentHandoff: false))
+        XCTAssertNil(selfDict.handoffReason(osMajorVersion: 26, hasMemoryToStart: true, includeRecentHandoff: false))
     }
 
     // MARK: - DictationPipeline.Preferences

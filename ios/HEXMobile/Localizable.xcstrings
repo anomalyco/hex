@@ -2147,16 +2147,6 @@
         }
       }
     },
-    "Open Hex to download %@." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开 Hex 下载%@语音。"
-          }
-        }
-      }
-    },
     "Open Hex, then try again." : {
       "localizations" : {
         "zh-Hans" : {
@@ -4313,16 +4303,6 @@
         }
       }
     },
-    "25 languages, even mixed in one sentence. %@ download. Once ready, keyboard dictation opens Hex." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "支持 25 种语言，一句话里混着说也行。需下载 %@。就绪后，键盘听写会打开 Hex。"
-          }
-        }
-      }
-    },
     "Until then, Hex uses its usual model." : {
       "localizations" : {
         "zh-Hans" : {
@@ -5077,6 +5057,56 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "屏幕已锁定，或你离开了该应用"
+          }
+        }
+      }
+    },
+    "25 languages, even mixed in one sentence. %@ download." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "支持 25 种语言，一句话里混着说也行。需下载 %@。"
+          }
+        }
+      }
+    },
+    "Download %@ in Hex to dictate" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Hex 中下载%@语音后即可听写"
+          }
+        }
+      }
+    },
+    "Not enough memory to dictate here" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "内存不足，无法在这里听写"
+          }
+        }
+      }
+    },
+    "Finish setting up Hex to dictate" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完成 Hex 设置后即可听写"
+          }
+        }
+      }
+    },
+    "Opens Hex to dictate there" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 Hex，在那里听写"
           }
         }
       }
