@@ -12,12 +12,12 @@
 // default and write only to the App Group. The Android page is checked
 // against android/ the same way (the setup's labels, the 190 MB model,
 // Android 12, and Hex Preview's update check in src/preview).
-import { ANDROID_DOWNLOAD_PATH, withBase } from "./base"
+import { ANDROID_DOWNLOAD_PATH, ANDROID_PATH, withBase } from "./base"
 import { shell } from "./labs"
 
+export { ANDROID_PATH }
 export const IPHONE_PATH = withBase("/iphone")
 export const PRIVACY_PATH = withBase("/privacy")
-export const ANDROID_PATH = withBase("/android")
 // What each page's social card says (scripts/iphone.ts draws them). Bump CARD_VERSION
 // when a card changes, so link previews that cached the old one fetch it again.
 export const CARDS = {
