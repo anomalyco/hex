@@ -79,6 +79,10 @@ val requirePreviewKey by tasks.registering {
 val previewBuild = providers.gradleProperty("hexPreviewBuild").orNull?.toInt() ?: 1
 val previewChannel = providers.gradleProperty("hexPreviewChannel").orNull
     ?: "https://raw.githubusercontent.com/anomalyco/hex/android-preview/latest.json"
+// Send feedback's Bellhop report key (gradle.properties, or -PhexFeedbackKey=…): publishable, it can only send feedback
+// to Hex's inbox, and kept out of the source so it can be rotated. Empty: the build has no Send feedback.
+val feedbackKey = providers.gradleProperty("hexFeedbackKey").orNull?.trim().orEmpty()
+check(feedbackKey.isEmpty() || Regex("bh_pub_[0-9a-f]{64}").matches(feedbackKey)) { "hexFeedbackKey must be a Bellhop report key (bh_pub_…)" }
 
 android {
     namespace = "ly.anoma.hex"
@@ -91,10 +95,13 @@ android {
         targetSdk = 36
         versionCode = 5
         versionName = "0.2.2"
+        buildConfigField("String", "FEEDBACK_KEY", "\"$feedbackKey\"")
+        // Labs › Diagnostics: Hex Preview and debug builds (below), never the Play release.
+        buildConfigField("boolean", "DIAGNOSTICS", "false")
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild.cmake {
             arguments += listOf("-DANDROID_STL=c++_static", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON")
-            targets += "hexspeech"
+            targets += listOf("hexspeech", "hexenglish")
         }
     }
     externalNativeBuild.cmake {
@@ -116,6 +123,7 @@ android {
         }
     }
     buildTypes {
+        debug { buildConfigField("boolean", "DIAGNOSTICS", "true") }
         release {
             isDebuggable = false
             isJniDebuggable = false
@@ -132,12 +140,16 @@ android {
             signingConfig = signingConfigs.getByName("preview")
             matchingFallbacks += "release"
             resValue("string", "update_channel", previewChannel)
+            buildConfigField("boolean", "DIAGNOSTICS", "true")
         }
     }
     sourceSets["debug"].java.srcDir("src/play/java")
     sourceSets["release"].java.srcDir("src/play/java")
+    // Labs › Diagnostics' speed-test clip ships only where the page does.
+    sourceSets["debug"].assets.srcDir("src/diagnostics/assets")
+    sourceSets["preview"].assets.srcDir("src/diagnostics/assets")
     packaging.resources.excludes += "DebugProbesKt.bin"
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     androidResources { noCompress += listOf("bin", "hextm", "valid", "capitals") }
     sourceSets["main"].assets.srcDir(modelAssets)
     // The same plain-text Android policy ships in Settings and in the Play listing drafts.
@@ -186,9 +198,30 @@ val verifyTypingModels by tasks.registering {
     }
 }
 tasks.named("preBuild").configure { dependsOn(prepareSpeechModel, verifyInter, verifyTypingModels) }
+// Every native library the APK ships, Hex's own and AndroidX's prebuilt ones, gets the check Hex's get when they are built
+// (src/main/cpp/check-imports.cmake): no call that starts, replaces or traces a process or loads a shared object, and
+// nothing exported but JNI entry points.
+tasks.matching { it.name.matches(Regex("merge(Debug|Release|Preview)NativeLibs")) }.configureEach {
+    val script = file("src/main/cpp/check-imports.cmake")
+    val cmake = android.sdkDirectory.resolve("cmake/3.22.1/bin/cmake")
+    val nm = android.ndkDirectory.resolve("toolchains/llvm/prebuilt").listFiles().orEmpty().map { it.resolve("bin/llvm-nm") }
+    doLast {
+        val tool = nm.first { it.canExecute() }
+        val libraries = outputs.files.asFileTree.matching { include("**/*.so") }.files
+        check(libraries.isNotEmpty()) { "No native libraries to check" }
+        for (library in libraries) {
+            val process = ProcessBuilder(cmake.path, "-DNM=${tool.path}", "-DLIB=${library.path}", "-P", script.path)
+                .redirectErrorStream(true).start()
+            val output = process.inputStream.bufferedReader().readText()
+            check(process.waitFor() == 0) { output.trim() }
+        }
+    }
+}
 
 dependencies {
     implementation("androidx.activity:activity-compose:1.10.1")
+    // The style bundle Android's password managers require to render inline suggestions in the strip.
+    implementation("androidx.autofill:autofill:1.1.0")
     implementation(platform("androidx.compose:compose-bom:2025.05.01"))
     implementation("androidx.compose.material3:material3")
     // The keyboard's emoji panel (Apache 2.0): categories, recents and skin tones, all kept on the device.

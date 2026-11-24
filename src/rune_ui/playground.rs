@@ -180,6 +180,11 @@ const PATHS: &[(&str, &str)] = &[
     ("meetings-actions", "Window/Meetings/Actions menu"),
     ("meetings-rename", "Window/Meetings/Rename"),
     ("meetings-delete", "Window/Meetings/Delete"),
+    ("meetings-select", "Window/Meetings/Select lines"),
+    (
+        "meetings-select-confirm",
+        "Window/Meetings/Confirm deleting lines",
+    ),
     ("meetings-failed", "Window/Meetings/Failed"),
     ("meetings-empty", "Window/Meetings/Empty"),
     ("meetings-off", "Window/Meetings/Off"),
@@ -240,6 +245,12 @@ const PATHS: &[(&str, &str)] = &[
     ("captures-empty", "Window/Captures/Empty"),
     #[cfg(hex_capture)]
     ("mac-scrawl", "Window/Annotate/On"),
+    #[cfg(hex_capture)]
+    ("mac-routing-rules", "Window/Annotate/Auto-send rules"),
+    #[cfg(hex_capture)]
+    ("mac-routing-add", "Window/Annotate/New rule"),
+    #[cfg(hex_capture)]
+    ("mac-scrawl-open", "Window/Annotate/Folds open"),
     #[cfg(hex_capture)]
     ("mac-scrawl-off", "Window/Annotate/Off"),
     #[cfg(hex_capture)]

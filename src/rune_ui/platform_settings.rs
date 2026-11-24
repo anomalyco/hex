@@ -31,6 +31,7 @@ use crate::labs::Feature;
 fn permission_copy(
     kind: PermissionKind,
     accessibility_renamed: bool,
+    accessibility_drag: bool,
 ) -> (&'static str, &'static str, &'static str) {
     match kind {
         PermissionKind::Microphone => (
@@ -40,13 +41,13 @@ fn permission_copy(
         ),
         PermissionKind::Accessibility => (
             "permission-accessibility",
-            accessibility_name(accessibility_renamed),
+            accessibility_name(accessibility_renamed, accessibility_drag),
             tr("Hex cannot recognize the dictation shortcut or paste into other apps."),
         ),
         PermissionKind::SystemAudio => (
             "permission-system-audio",
             tr("Screen & System Audio Recording"),
-            tr("Required to hear the other participants."),
+            tr("Required to hear the other participants"),
         ),
         PermissionKind::ScreenRecording => (
             "permission-screen-recording",
@@ -56,9 +57,13 @@ fn permission_copy(
     }
 }
 
-/// What System Settings calls the Accessibility list; macOS 27 renamed it.
-pub(super) fn accessibility_name(renamed: bool) -> &'static str {
-    if renamed {
+/// What System Settings calls the Accessibility list: macOS 27 renamed it to
+/// Device Control and Data Access, and 27.3 renamed it and stopped taking a
+/// dragged tile, so the newer name goes with the copy that adds Hex with +.
+pub(super) fn accessibility_name(renamed: bool, drag_supported: bool) -> &'static str {
+    if renamed && !drag_supported {
+        tr("System & App Protection Override")
+    } else if renamed {
         tr("Device Control and Data Access")
     } else {
         tr("Accessibility")
@@ -88,8 +93,11 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
     let rows = warnings
         .into_iter()
         .map(|warning: PermissionWarning| {
-            let (key, name, description) =
-                permission_copy(warning.kind, ui.platform.accessibility_renamed);
+            let (key, name, description) = permission_copy(
+                warning.kind,
+                ui.platform.accessibility_renamed,
+                ui.platform.accessibility_drag_supported,
+            );
             if warning.action == PermissionAction::Restart {
                 return setting_row(
                     p,
@@ -109,12 +117,21 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
             }
             let stale =
                 warning.kind == PermissionKind::Accessibility && ui.platform.stale(warning.kind);
-            let description = if stale {
+            // macOS 27.3's post-event preflight reads stale until Hex restarts,
+            // so a TCC reset there would drop a grant that is already on: only
+            // a restart can settle the row.
+            let restart =
+                stale && ui.platform.accessibility_split && !ui.platform.accessibility_restart_done;
+            let description = if restart {
+                tr("Turns on when Hex restarts")
+            } else if stale {
                 tr("An older Hex entry can keep this off")
             } else {
                 description
             };
-            let action = if stale {
+            let action = if restart {
+                PermissionAction::Restart
+            } else if stale {
                 PermissionAction::ResetAndPrompt(warning.kind)
             } else {
                 warning.action
@@ -124,7 +141,15 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
                 &format!("{key}-allow"),
                 ui.platform.control_for(warning.kind, false),
                 ButtonKind::Secondary,
-                move |ui: &mut Ui| ui.ask(PlatformRequest::Permission(action)),
+                move |ui: &mut Ui| {
+                    if restart {
+                        // Only the stale Accessibility row's restart spends
+                        // the one 27.3 keystroke restart; another permission's
+                        // restart (Screen Recording, a microphone) does not.
+                        crate::desktop::onboarding::record_post_event_restart();
+                    }
+                    ui.ask(PlatformRequest::Permission(action));
+                },
             );
             setting_row(p, key, name, Some(description), control)
         })
@@ -470,7 +495,7 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
             } else if stale {
                 tr("An older Hex entry can keep this off")
             } else {
-                tr("Required to hear the other participants.")
+                tr("Required to hear the other participants")
             }),
             permission_control(
                 p,
@@ -506,13 +531,18 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
             "meeting-indicator",
             &icons::PILL,
             tr("Show recording indicator"),
-            tr("Floating pill to copy live transcript turns or stop recording"),
+            tr("Floating pill while a meeting records"),
             meetings.show_recording_indicator,
             |ui: &mut Ui| {
                 let show = !ui.settings.meetings.show_recording_indicator;
                 ui.update(|settings| settings.meetings.show_recording_indicator = show);
             },
         ));
+        // Labs › Choose meeting audio: which app or output the system track
+        // records. Off, the row isn't there and every output is recorded.
+        if Feature::MeetingAudioSource.on(&ui.settings) {
+            rows.push(meeting_audio_row(ui, p, layer));
+        }
         after.extend(summaries_rows(ui, p, layer));
         after.push(retention_row(ui, p, layer).into());
         after.push(audio_retention_row(ui, p, layer).into());
@@ -557,9 +587,7 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                 "meeting-descriptive-filenames",
                 &icons::PEN,
                 tr("Descriptive meeting file names"),
-                tr(
-                    "Rename exported meeting Markdown to the meeting's title once notes or a rename provide one, keeping the date and time",
-                ),
+                tr("Rename exported Markdown to the meeting's title"),
                 meetings.export.descriptive_filenames,
                 |ui: &mut Ui| {
                     let on = !ui.settings.meetings.export.descriptive_filenames;
@@ -574,9 +602,7 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                 "meeting-notes-file",
                 &icons::BOOK,
                 tr("Separate notes file"),
-                tr(
-                    "Write the meeting's notes to their own file next to the transcript, sharing its name, with a link back to the transcript",
-                ),
+                tr("Save notes in a separate file beside the transcript"),
                 meetings.export.notes_file,
                 |ui: &mut Ui| {
                     let on = !ui.settings.meetings.export.notes_file;
@@ -628,14 +654,65 @@ fn retention_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         tr("Keep meetings"),
         match chosen {
             None => Some(tr(
-                "Audio, transcripts, notes, and Hex's Markdown copy move to the Trash. Meetings from before this setting stay until you choose",
+                "Moves new meetings' audio, transcripts, and notes to the Trash",
             )),
             Some(MeetingRetention::Forever) => None,
-            Some(_) => Some(tr(
-                "Audio, transcripts, notes, and Hex's Markdown copy move to the Trash",
-            )),
+            Some(_) => Some(tr("Moves audio, transcripts, and notes to the Trash")),
         },
         control,
+    )
+}
+
+/// Labs › Choose meeting audio: the app or output a meeting's system track
+/// records. All computer audio first, then every output, then every app
+/// playing now; a saved choice that isn't there stays listed with why.
+fn meeting_audio_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
+    let choice = ui.settings.labs.meeting_audio_source_choice.clone();
+    let options = super::meetings::audio_source::choices(&choice, ui.meeting_audio.sources());
+    // A chosen app that stopped or a device that was unplugged stays in the
+    // list, so the saved selection never silently vanishes.
+    let missing = options
+        .iter()
+        .find(|(option, _, hint)| option.same_source(&choice) && hint.is_some())
+        .and_then(|(_, _, hint)| *hint);
+    let menu = Menu::Pick("meeting-audio-source");
+    let labels: Vec<String> = options.iter().map(|(_, label, _)| label.clone()).collect();
+    let current = options
+        .iter()
+        .find(|(option, ..)| option.same_source(&choice))
+        .map_or_else(|| tr("All computer audio"), |(_, label, _)| label.as_str());
+    let trigger = rune_kit::Select::new("meeting-audio-source-control", &labels)
+        .appearance(rune_kit::SelectAppearance::Inline)
+        .current(Some(current))
+        .open(ui.open == Some(menu))
+        .on_toggle(move |ui: &mut Ui| toggle_menu(ui, menu))
+        .trigger(p.k)
+        .label(tr("Computer audio"))
+        .a11y_value(current);
+    let mut picker = rune_kit::Menu::new("meeting-audio-source-menu")
+        .trigger(trigger)
+        .placement(rune_kit::Placement::BottomEnd)
+        .gutter(4.0)
+        .min_width(360.0)
+        .open(ui.open == Some(menu))
+        .on_close(|ui: &mut Ui| ui.open = None);
+    for (option, label, hint) in options {
+        let mut item = rune_kit::MenuItem::new(label).checked(option.same_source(&choice));
+        if let Some(hint) = hint {
+            item = item.description(tr(hint));
+        }
+        picker = picker.item(item.on_select(move |ui: &mut Ui| {
+            ui.open = None;
+            ui.update(|settings| settings.labs.meeting_audio_source_choice = option.clone());
+        }));
+    }
+    icon_row(
+        p,
+        "meeting-audio-source",
+        &icons::SPEAKER,
+        tr("Computer audio"),
+        missing.map(tr),
+        picker.build(p.k, layer).mr(-8.0),
     )
 }
 
@@ -681,11 +758,11 @@ fn audio_retention_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         tr("Keep audio"),
         match chosen {
             None => Some(tr(
-                "Audio follows Keep meetings. Choose a time to delete only meeting audio first",
+                "Follows Keep meetings unless you choose a shorter window",
             )),
             Some(MeetingRetention::Forever) => None,
             Some(_) => Some(tr(
-                "Finished meetings keep their transcript, notes, summary, and Markdown after their audio moves to the Trash",
+                "Moves audio to the Trash and keeps transcripts and notes",
             )),
         },
         control,
@@ -738,6 +815,11 @@ static WEBEX_ICON: Icon = Icon {
     view: 16.0,
     body: include_str!("../../assets/icons/providers/webex.svg"),
 };
+static CALL_ICON: Icon = Icon {
+    name: "hex-provider-call",
+    view: 16.0,
+    body: include_str!("../../assets/icons/providers/call.svg"),
+};
 
 /// A call service's icon, as the calendar list and the Meetings list show it.
 pub(super) fn provider_icon(provider: CallProvider) -> &'static Icon {
@@ -748,6 +830,12 @@ pub(super) fn provider_icon(provider: CallProvider) -> &'static Icon {
         CallProvider::Slack => &SLACK_ICON,
         CallProvider::Webex => &WEBEX_ICON,
     }
+}
+
+/// The filled generic call icon for apps without a dedicated service mark,
+/// matching the brand icons' filled style.
+pub(super) fn call_icon() -> &'static Icon {
+    &CALL_ICON
 }
 
 /// When a call starts: the Calls row, then, where calendars are read,

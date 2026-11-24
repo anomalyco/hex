@@ -61,9 +61,10 @@ number, negation, or protected number run, link, path, code, or quote that
 does not survive verbatim keeps the corrected transcript.
 General › Advanced › Interface language offers Português (Brasil), and Hex
 uses it for any Portuguese system language (#867); it also offers Français,
-used for any French system language (#892), and Русский, used for any
-Russian system language (#1317). None of these has had a native speaker's
-review yet. It offers 简体中文 (`zh`) and 繁體中文 (`zh-Hant`, #944);
+used for any French system language (#892), Русский, used for any Russian
+system language (#1317), and Magyar, used for any Hungarian system language
+(#2667). None of these has had a native speaker's review yet. It offers
+简体中文 (`zh`) and 繁體中文 (`zh-Hant`, #944);
 Traditional Chinese is drafted from the Simplified strings by a character and
 Taiwan-usage phrase converter (`desktop/i18n/traditional_chinese.rs`), not yet
 reviewed by a native speaker. Meeting times in the Meetings pane, the macOS
@@ -104,6 +105,7 @@ Download Hex                              // setup.download-recovery
 │   ├── Windows x64 / ARM64 (UA-CH) -> hex-setup-<version>-windows-<arch>.exe + SmartScreen note
 │   ├── Linux -> copyable `curl … install-linux.sh | sh` + Arch/glibc requirement
 │   ├── Phone -> Send yourself the link
+│   ├── Scripting off -> every OS and architecture, with no tabs or switches
 │   └── Other platforms -> every build, Homebrew, the GitHub release
 ├── Website, README, installers, apps, feeds, appcast -> anoma.ly/hex/files (Worker hex-production-site):
 │   installers and appcast from the site build, dev notes from the dev-notes branch, frozen feeds and artifacts from R2
@@ -155,7 +157,8 @@ bytes Setup extracts to `%TEMP%`) has a valid, timestamped Authenticode
 signature, and Release runs it that way. No interactive install, Smart App
 Control decision, SmartScreen prompt, or first launch on a real PC has been
 observed. The Linux library diagnosis has no automated check. The site's
-platform states were captured once in headless Chromium with `?platform=`.
+platform states were captured once in headless Chromium with `?platform=`, and
+its scripting-off page with JavaScript disabled.
 
 Sources: [website](../../site/src/Download.tsx), [installer](../../packaging/windows/hex.iss),
 [release publisher](../../.github/release/release-service.sh),
@@ -291,7 +294,23 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   │   │   ├── Returned from System Settings still untrusted (2 s, or 6 s side-by-side) ->
 │   │   │   │   "An older Hex entry can keep this off" + "Still grey? Fix it"
 │   │   │   │   -> resets the running bundle ID + retired IDs, prompts, and reopens the guide
-│   │   │   └── macOS 27 names the list "Device Control and Data Access"; the row follows
+│   │   │   ├── macOS 27 names the list "Device Control and Data Access"; the row follows
+│   │   │   ├── macOS 27.3 renames it "System & App Protection Override" and takes no
+│   │   │   │   dragged tile: a compact bar sits below System Settings (above it when there
+│   │   │   │   is no room) out of the pane's + controls, and says to click the Privacy &
+│   │   │   │   Security notification or add Hex with +; the row and the pane's name follow.
+│   │   │   │   Check: `macos_27_3_names_accessibility_without_a_dragged_tile`
+│   │   │   └── macOS 27.3+ splits Accessibility from posting key events: setup counts
+│   │   │       only the post-event preflight (AX trust no longer proves a paste), and
+│   │   │       Allow asks with `CGRequestPostEventAccess` so macOS can list Hex and post
+│   │   │       its Privacy & Security notification. The preflight keeps its launch-time
+│   │   │       answer, so a row that stays untrusted after a grant reads "Needs a restart"
+│   │   │       and offers Restart Hex once, never the TCC reset that would drop the grant;
+│   │   │       a row still untrusted after that restart falls back to "Still grey? Fix it",
+│   │   │       and a reset starts a new cycle with one restart again.
+│   │   │       Checks: `macos_27_3_needs_the_post_event_preflight_not_ax_trust`,
+│   │   │       `a_stale_split_grant_offers_a_restart_only_once`,
+│   │   │       `macos_27_3_stale_accessibility_restarts_once_then_resets`
 │   │   ├── On in System Settings, unusable until relaunch -> "Needs a restart"
 │   │   │   └── Every permission on -> "Restart Hex" -> relaunch at setup  // setup.restart
 │   │   └── Each grant -> a beat with its check -> the card floats off -> on
@@ -361,6 +380,30 @@ or untrusted in System Settings. Checks:
 [rune_ui/tests/panes.rs](../../src/rune_ui/tests/panes.rs). Scenes:
 `mac-onboarding-stale`, `mac-settings-permissions-stale`.
 
+macOS 27.3's split is known from Apple's 2026-11-16 developer post and from a
+third-party dictation app's diagnostics on the same beta: the Accessibility
+grant reads trusted while posting key events is refused, and `CGEventPost`
+silently does nothing. Nothing here has run on a 27.3 device, so the request's
+Privacy & Security notification, the guide's `Privacy_Accessibility` anchor
+opening System & App Protection Override, a grant reading true only after a
+restart, and the refusal ever being what a person sees are documented but
+unverified.
+
+What the person sees when posting is refused, and what is covered where: every
+paste path (dictation, Paste last dictation, and captures) fails before the
+clipboard changes. Dictation and Paste last show the HUD notice even with
+Labs › Failure notices off (`a_refused_paste_is_shown_with_failure_notices_off`
+in [rune_ui/live_text.rs](../../src/rune_ui/live_text.rs),
+`a_refused_paste_last_reaches_the_hud_notice` in
+[recognition.rs](../../src/recognition.rs)); a refused capture hand-off only
+logs a warning (`hand_off` in [capture_host.rs](../../src/capture_host.rs)).
+The notice text is translated in `failures.rs`. The text staying for Paste last
+dictation and History staying empty are the shared failed-insert policy, covered
+by `failed_insert_remembers_signed_text_for_paste_last_and_skips_history` in
+[dictation/modes/output.rs](../../src/dictation/modes/output.rs), not by a
+paste-path test. The refusal decision itself is
+`a_split_paste_needs_the_post_event_grant` in [paste.rs](../../src/paste.rs).
+
 Apple silicon, macOS 15+. Choices come from the compiled model/language catalog;
 Apple Speech is currently excluded from the desktop picker.
 
@@ -376,6 +419,9 @@ General > Dictation > Speech model, then Language below it   // setup.language-s
 │   └── Choose it -> ChooseModel(model, model's default: English, else its first)
 │       ├── Warmed on silence without the vocabulary prompt; a warm-up that
 │       │   stops at its output limit still counts as warm (same as the menu bar)
+│       ├── On Linux, another choice while a download or load runs -> that
+│       │   work is canceled and the new choice queued; it starts by itself
+│       │   once the old worker exits
 │       └── Saved -> Language row: "<Model> doesn't support Japanese, so the
 │           language changed to English" until the next choice
 ├── Language -> Select of the saved model's languages (alphabetical by name,
@@ -519,8 +565,8 @@ Settings picker > Every model row          // fixed height; scrolls
 │   model); missing or changed -> warning line and no Use (own-models.md)
 └── Found on this computer -> a scan of the Hugging Face cache when the picker  // setup.found-models
     opens: other compatible files at the top (Not tested by Hex, Use); a catalog
-    model already downloaded there says so and offers Use; a found file's
-    Delete is Forget (own-models.md)
+    model already downloaded there says so and offers Use; only models this
+    build offers are listed; a found file's Delete is Forget (own-models.md)
 ```
 
 Parakeet Unified English (chunked attention) and Nemotron 3.5 ASR (cache-aware)
@@ -843,6 +889,15 @@ Dictate without processing (Output pane; unbound)   // dictation.md
   -> records and pastes as heard, skipping Output; History kind Raw
   -> a shortcut on the dictation chord is cleared when settings load or save
 
+Labs > Model switch shortcut (off)      // labs.md; swaps the dictation model with a saved other one, and back
+  -> General shows "Model switch shortcut" and "Other model" (installed model + language)
+  -> macOS: a hotkey action beside Paste Last (suppression::model_switch_action)
+  -> Windows: its own hook trigger and HotkeyAction::ModelSwitch
+  -> Linux: an X11 grab or the shortcuts portal's "Model switch shortcut"
+  -> hex model switch                      // the same swap from a terminal
+  -> the host's installed-only preparation saves both selections on commit
+  -> the same choice again is a no-op; a failed preparation keeps the active model
+
 Labs > Second dictation shortcut (off)   // labs.md; issue 627
   -> General shows "Second dictation shortcut" under Shortcut (unbound, clearable)
   -> it dictates like the shortcut: Hold/Toggle, double-tap lock, release
@@ -1106,7 +1161,7 @@ General                                  // settings
 │       ├── Turning it on without System Audio Recording -> ask now, never while dictating
 │       ├── On -> Screen & System Audio Recording row: Allow / waiting / Allowed
 │       └── Dictation -> browser_media sequence below
-├── Sounds -> one row ("Classic · 50%" or Off) opening a sheet: Sound volume slider in 5% steps, then each set to hear and pick
+├── Sounds -> one row ("Classic keys · 50%" or Off) opening a sheet: Sound volume slider in 5% steps, then each set to hear and pick
 │   ├── Slider release saves and previews start unless Off; only the sheet's previews play while Off
 │   ├── A saved zero displays Off; enabling sounds through the CLI restores the default level
 │   └── Default output changes or disappears (macOS) -> next tone reopens on the current default
@@ -1652,7 +1707,14 @@ or the driver installed; off, the pane is hidden  // fun.hex-microphone; macOS, 
 │   ├── macOS -> select Hex Microphone as the input in the call app / In use (by name only when observed on that input) + Uninstall
 │   │   ├── Version mismatch -> Update + Uninstall
 │   │   ├── Pre-Anomaly com.kitlangton driver at the same path -> Update replaces it in place
-│   │   ├── Not installed -> Install -> macOS admin prompt -> copies bundled HexMicrophone.driver + restarts coreaudiod
+│   │   ├── Not installed -> Install -> stable and dev-channel builds check the bundled driver's code signature first
+│   │   │    (`app/driver-requirement.txt`: anomaly.hex.microphone.driver, Anomaly Developer ID team 5NZ4Q7NXJ4)
+│   │   │    -> macOS admin prompt -> root copies the bundle to a staging folder (no ACLs, root:wheel, no group or
+│   │   │       other write), refuses a symlinked or non-directory source, re-checks that requirement there, then
+│   │   │       replaces HexMicrophone.driver + restarts coreaudiod; a swapped bundle never lands in the HAL folder
+│   │   │    (debug, test, HEX_LOCAL_BUILD, HEX_TEST_BUILD, and unmarked 0.0.0-dev-local checkout builds may
+│   │   │     also install ~/Library/Caches/hex-mic's build output, ad-hoc signed included; a broken or symlinked
+│   │   │     bundled copy fails instead of falling back to it)
 │   │   └── Inline state -> Installing… / Uninstalling… / Cancelled / Failed with reason
 ├── Live microphone capture -> Raw audio to Hex transcription (unmodified)
 │   ├── Source -> Hex's dictation microphone (System default follows the OS default, never Hex Microphone itself), never a meeting's second stream
@@ -1669,6 +1731,7 @@ Sources: [audio/voice_filter.rs](../../src/audio/voice_filter.rs),
 [audio/hex_microphone.rs](../../src/audio/hex_microphone.rs),
 [HexMicrophoneDriver.c](../../macos/HexMicrophoneDriver/HexMicrophoneDriver.c),
 [build-app.sh](../../scripts/build-app.sh),
+[app/driver-requirement.txt](../../app/driver-requirement.txt),
 and [rune_ui/fun.rs](../../src/rune_ui/fun.rs). Checks:
 `default_mode_is_muffled`,
 `all_nine_modes_render_finite_and_expected_levels`,
@@ -1680,7 +1743,11 @@ and [rune_ui/fun.rs](../../src/rune_ui/fun.rs). Checks:
 `only_the_listeners_current_input_feeds_hex_microphone`,
 `driver_plugin_loopback_streams_at_48khz_under_20ms_latency`,
 `driver_plist_version_and_status_mismatch_are_detected`,
-`osascript_failure_classifies_user_cancel_and_errors`,
+`a_shipped_build_installs_only_a_valid_bundle_copy`,
+`a_driver_without_anomalys_signature_is_refused_only_when_verified`,
+`a_symlinked_or_non_directory_driver_candidate_fails_closed`,
+`the_driver_requirement_pins_anomalys_team_and_the_driver_identifier`,
+`the_driver_requirement_compiles`, `osascript_failure_classifies_user_cancel_and_errors`,
 `audio_service_restart_interrupts_stream_and_recovers`,
 `voice_filter_saves_the_mode_and_applies_the_tuning_live`,
 `try_it_records_and_plays_through_the_host`,
@@ -1696,7 +1763,12 @@ and `pw-record --target hex_microphone` records the fed audio at 48 kHz; no
 automated check covers it, and no call app was tried.
 Proof limit: in-process `dlopen` loopback proves the compiled driver's 48 kHz
 `WriteMix`/`ReadInput` path at 5.33 ms (256 frames), not an interactive macOS
-admin authorization prompt or an active Slack/Zoom call. The pass-through
+admin authorization prompt or an active Slack/Zoom call. The candidate
+selection is tested without spawning `codesign`; a test checks the
+requirement names the driver's `anomaly.hex.microphone.driver` identifier and
+the team ID `app/update-requirement.txt` pins, and only `csreq`/an install on
+a signed build exercises the signature check itself (before the admin prompt
+and again as root on the staging copy). The pass-through
 checks simulate callback timing and sizes; clock drift between the microphone
 and the virtual device is not corrected, so a skip or zero-fill click every
 minute or two remains possible.
@@ -2490,7 +2562,14 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │       swallowed a key of that chord (Paste Last's V re-arms the mask)
 ├── Microphone switched off in Settings › Privacy -> Onboarding Microphone row -> Allow opens it
 ├── Microphone -> System default or a saved device
-│   ├── Windows default input changes -> Switch once capture is idle // cpal's default-device report
+│   ├── Windows System default -> The default endpoint's listed cpal device, never
+│   │   cpal's default handle: its monitor leaves thread-pool threads STA, which
+│   │   then fails ActivateAudioInterfaceAsync (RPC_E_CHANGED_MODE)
+│   │   └── No default endpoint resolves -> a listed stand-in microphone (built-in
+│   │       first); the next route change resolves the default; nothing usable -> error
+│   ├── Windows default input changes -> Switch once capture is idle // endpoint
+│   │   notification client bumps the input route; Windows never opens a default
+│   │   handle, so cpal's default-change report never applies
 │   └── Windows default input reports no default format -> Hex's own WASAPI paths
 │       (the endpoint by id, as when picked by name), then other formats it lists;
 │       the read error keeps its cause (#1845, unverified on real Windows)
@@ -2532,7 +2611,8 @@ smoke tests on Windows 10 and on ARM64 hardware have not been run.
 Linux updates                            // maintain.linux-updates
 ├── Direct install (versions/ + install.json receipt) -> release service -> staged -> sidebar footer: Restart to update
 ├── Source install (source-build marker) -> Sidebar footer: Updated from your source checkout
-├── Local build (HEX_LOCAL_BUILD=1) -> Sidebar footer: Local build · updates off; Version 2.3.1 (local <commit>); no checks, no channel row
+├── Local build (HEX_LOCAL_BUILD=1, every OS) -> Sidebar footer: 3.4.0 · Local build
+│   └── Hover or read its accessible description, or run `hex --version` -> full commit and updates off; no checks or channel row
 ├── pacman (AUR hex-bin: /usr/bin, root-owned) or Nix store -> Sidebar footer: Updated by your package manager
 └── Anything else (a downloaded executable) -> Sidebar footer: Download update
 ```
@@ -2704,7 +2784,7 @@ Linux General > Sounds > Sound volume     // dictate.feedback.linux; X11 + Wayla
 ├── Slider at 0 -> No recording tones; the last level is kept
 └── Release above 0 -> Save and apply live; preview the start sound
 Linux General > Sounds > a set            // dictate.sound-theme
-└── Press it -> Save and apply live; play its dictation
+└── Classic keys (default), Kalimba, and five more sets -> Press to save and play; Play only previews
 
 Capture                                  // hex app and hex dictate
 ├── Shortcut starts capture -> Queue start sound immediately, before audio arrives
@@ -2954,7 +3034,11 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   Svenska is a normal language too: Apple's "QWERTY-Swedish-Finnish" (å ending row 1, ö ä
 │   row 2), Apple's Swedish holds (Ø on Ö, Æ on Ä, kr on $), ” and ’ opening and closing
 │   quotes, the iPhone's `sv` dictionary behind autocorrect ("kottbullar" → "köttbullar"),
-│   sv-SE dictation through `DictationTranscriber`, and no typing model
+│   sv-SE dictation through `DictationTranscriber`, and no typing model.
+│   Dutch (Nederlands) is one too: QWERTY on the English letters with Apple's Dutch held
+│   accents (ë ï é ó and the rest, j́ on J, no ĳ), AZERTY and QWERTZ offered, the iPhone's
+│   `nl` dictionary behind its autocorrect, English as its bilingual partner, and no typing
+│   model, so no spatial autocorrect or swipe typing in Dutch
 ├── Korean keyboard (두벌식) (off by default, `experiments.koreanKeyboard`): Settings ›
 │   Experiments adds 한국어 to Settings › Keyboard › Languages, typed on the standard two-set
 │   rows (ㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔ / ㅁㄴㅇㄹㅎㅗㅓㅏㅣ / ㅋㅌㅊㅍㅠㅜㅡ, shift's ㅃㅉㄸㄲㅆ and ㅒㅖ, no
@@ -3156,9 +3240,337 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   Apple documents them only for DictationTranscriber, and Parakeet's batch
 │   path receives none
 └── Proof limits: unit tests only; no CI compiles the iOS targets
-Android keyboard -> English, Spanish, German and Bokmål typing assistance
+Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing assistance
+├── Hands-free dictation keeps the screen on -> the keyboard's window and Home's add Android's
+│   `FLAG_KEEP_SCREEN_ON` (no permission) while a dictation is opening, listening or transcribing,
+│   and clear it once idle, so the display timing out can't hide the IME, whose leave cancels the
+│   recording, or take Home out of sight, which cancels it too. Idle again, the screen sleeps
+│   normally. Checks: it compiles and the existing unit tests pass (`./gradlew :app:compileDebugKotlin
+│   :app:testDebugUnitTest -x prepareSpeechModel` on OpenJDK 21 and Android SDK 36), but no automated
+│   test covers the flag, and nothing was tried on a device or emulator. The repo has no Android CI.
+├── Dictation keeps its threads ready on the fast cores -> the model opens with a pool of its
+│   `threads` (`SpeechModel.open`) instead of ggml starting and joining a new pool for every graph,
+│   each encoder pass and each decoded token, and a decode keeps those workers on the cores the kernel
+│   rates fast (the same cpu_capacity rule, as a bit per core in `fastCoreMask`, through the pool's
+│   cpumask). ggml gives the thread that computes a graph the same mask, so `decode` saves that
+│   thread's affinity first and puts it back when the decode ends: loading a model, Parakeet's own
+│   graphs and the speed test's no-pool run keep their own placement. A mask with fewer usable cores
+│   than the pool has threads is dropped for ggml's default placement, as are a core Hex can't rate
+│   and a phone where every core counts as fast, and so is one the kernel refuses to pin to
+│   (`pool_mask` tries it). Labs › Diagnostics names where the threads were kept: the Speech line
+│   ("dictation threads: 4 kept ready on cpu 4-7", or "on any core"), each speed-test run and
+│   "Last dictation", read back from the decoding thread so a refused pinning reads as any core. The
+│   speed test's rows are named by what they do ("new threads every graph", "threads kept ready, any
+│   core", "threads kept ready, fast cores" where Hex can tell the cores apart, "threads kept ready,
+│   6"), the one dictation uses marked "(what dictation uses)". Each speed-test run makes its own
+│   pool on the test's thread (its workers take that thread's name, which the core sampler reads)
+│   and frees it afterwards, so no worker it made, pinned or not, outlives the run; dictation makes
+│   its pool again on the transcription thread when it next starts (`ensurePool`). Debug builds take
+│   `am start --es cpu_capacity 300,300,1024,1024` (after a force-stop) to stand in for the kernel's
+│   ratings, so the emulator can run the pinned branch; the Processor line then ends "(debug core
+│   ratings: …)".
+│   Checks: `dictationKeepsItsThreadsOnTheFastCores` in StripTextTest.kt (a MediaTek 477×4/871×3/1024
+│   phone's 0xF0, a Snapdragon 695's 0xC0, 0 when every core counts as fast, is unrated, is zero or
+│   there are none), and `./gradlew :app:testDebugUnitTest -x prepareSpeechModel` passed 237 tests and
+│   `:app:assembleDebug` built the arm64 libraries (the native import check included) on 2026-11-24 on
+│   OpenJDK 21 and Android SDK 36 (NDK 27.2.12479018); the repo has no Android CI, and nothing was tried
+│   on a device or emulator.
+├── Symbol pages -> Gboard's ?123 and =< pages (Pixel 8 emulator, API 36), the same on every
+│   layout: ?123 draws 1–0, then @ # $ _ & - + ( ) /, then * " ' : ; ! ? between the page switch
+│   and delete, and =< draws ~ ` | • √ π ÷ × § Δ, then £ ¢ € ¥ ^ ° = { } \, then % © ® ™ ✓ [ ]
+│   the same way, so ` types again, and #, _, +, *, = and every other printable ASCII character
+│   types from the letters, one of the two pages, or a hold. The bottom row is ABC , 1234 space .
+│   enter under ?123 and Gboard's ABC < 1234 space > enter under =<, whose own rows have no < or >;
+│   a held < or > keeps the marks it had there. Spanish's ¿ and ¡ are the holds on ? and ! (the
+│   rows have no keys of their own for them). Checks: `SymbolPagesTest` in android/app/src/test
+│   (both pages' keys, every printable ASCII character for each layout and local currency, no key
+│   drawn twice on a page) and `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` passed
+│   175 tests on 2026-11-24 on OpenJDK 21 and Android SDK 36 (offline, `-x prepareSpeechModel`);
+│   the repo has no Android CI, and nothing was tried on a device or emulator.
+├── Português, Nederlands, Polski or Русский with no pinned layout -> English's keys and
+│   accents (DictationLanguage.layout is null), with English's word list only standing in for
+│   the keys' geometry: the strip keeps what was typed and your own dictionary words as
+│   completions, and text shortcuts, double-space period, capitals and the literal chip stay.
+│   No English completions, next words, autocorrection, tap correction, swipe typing or emoji
+│   keywords. A layout pinned in Keyboard > Keyboard layout brings that layout's model.
+│   Checks: `aDictationLanguageWithoutItsOwnLayoutHasNoTypingModel` in InsertionTest.kt and
+│   `standInOffersYourWordsAndShortcutsButNoEnglishCompletionsOrNextWords` /
+│   `standInTurnsOffAutocorrectButKeepsYourTextReplacements` in StandInTypingTest.kt; not
+│   tried on a device.
 ├── Keyboard > Suggest swear words (off) -> opt in to profanity; listed slurs never offered
-└── Type a listed word in full -> keep its spelling on space or tap its literal chip
+├── Type a listed word in full -> keep its spelling on space or tap its literal chip
+├── An Italian or French elision typed without its apostrophe -> while Autocorrect is on, in a word
+│   field with the it or fr model, and with no whole-word fix already reading the token ("diro" ->
+│   "dirò", so no "d'iro"; a fix that splits the token counts only when it is the elision's own two
+│   words, "l ho" for "l'ho", never "non c'è" for "nonce" or "la e" for "lae"), the strip offers the
+│   article and the word after it joined up: "laltro" -> "l'altro", "dellanno" -> "dell'anno",
+│   "unaltra" -> "un'altra", "lho" -> "l'ho", "lheure" -> "l'heure", "daccord" -> "d'accord". The
+│   longest elision the language has wins ("dell'anno", never "d'ellanno"), and the word after it
+│   must be one of the model's own starting with a vowel (accents and ligatures included) or an h,
+│   with a unigram cost of at most 98 eighths of a nat ("insalata" 98 and "uva" 93 fit; "om" 99,
+│   "ae" 100, "ol" 104 and the rest of the reported junk 114 to 120 do not). Italian elides the h
+│   of ho, hai, ha and hanno alone (l'ho, l'hai, l'ha, l'hanno, never l'hotel); French elides its h
+│   generally (l'homme, l'heure). A word of the model's own list is no elision ("lago", "della",
+│   "dove", "sanno"), and a spelling only the books have as typed ("laltro", "lanno", "larte",
+│   "lheure") is read as one only when the word after it is likelier by at least 8.2 nats (about
+│   1,450 times, since a books cost already includes a 0.92-nat backoff): "allodio" ("all'odio"),
+│   "sensei", "couvres", "terrance", "quantico", "noh" and "dok" are not, while a run-together
+│   spelling the books lack ("lestate", "lospedale") is read as one by the commonness rule alone.
+│   A suggestion only, never a fix of its own: space leaves the word as typed, and a decoder fix of
+│   its own ("dell'anno", "un'altra") is unchanged. With Labs > Keyboard > Smart quotes on, the
+│   strip shows the ’ and a pick inserts it.
+│   Checks: `ElisionSuggestionTest` (10: both languages' elisions, the longest prefix, the model's
+│   own words, the books' words, an accentless word the decoder fixes, junk remainders, a split fix
+│   that is not the elision, the Italian h, English unchanged and a picked elision left as it is)
+│   and `./gradlew :app:testDebugUnitTest -x prepareSpeechModel`: 205 tests pass on 2026-11-24 on
+│   OpenJDK 21 and Android SDK 36 (platform 36, build-tools 35.0.0, NDK 27.2.12479018). A throwaway
+│   scan of the shipped lists reads 63 of the 80,990 Italian and 127 of the 108,519 French
+│   .valid-only words as an elision, where the first cut read 1,809 and 2,869; the rest are mostly
+│   the books' run-together spellings of real elisions ("larte", "l'opera", "d'histoire"). The repo
+│   has no Android CI, and nothing was tried on a device or emulator.
+├── Fields that ask for no suggestions, completions or filtering (a search box; the Google app's
+│   TEXT|MULTI_LINE|NO_SUGGESTIONS is 0xa0001) -> suggestions, next words, emoji suggestions, swipe
+│   typing, tap correction, text replacements and double-space period stay; only an automatic
+│   autocorrection on space or punctuation is off, and no autocorrection is highlighted in the strip,
+│   since the field asked for none of its own suggestions. Your text replacements still apply there
+│   and still show their highlighted chip.
+│   Checks: `FieldTypingTest` (7/7) in android/app/src/test covers the field's classification;
+│   the strip's chip and the space and punctuation gates are read from `KeyboardEngine` and `TypingWord`.
+├── Fields marked private or no-learning (a browser's incognito tab) -> normal suggestions,
+│   next words, autocorrection, swipe typing and double-space period, because Android's
+│   `IME_FLAG_NO_PERSONALIZED_LEARNING` only says that nothing typed there is learned. Undoing
+│   an autocorrection there still restores what was typed, but the rejection is not remembered
+│   for later sessions, and a picked emoji does not join the picker's recents. Checks:
+│   `FieldTypingTest` in android/app/src/test (7/7) and
+│   `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` passed on 2026-11-24 (169
+│   tests in all, on OpenJDK 21 and Android SDK 36); the repo has no Android CI, and
+│   nothing was tried on a device or emulator.
+├── A TYPE_NULL field (a terminal) -> its text stays on the editor's side, so Hex reads and edits
+│   none of it. Delete, and a held Delete, send one KEYCODE_DEL key press per press instead of the
+│   surrounding-text delete, which reports success but deletes nothing there; Delete's slide is off,
+│   the space bar's cursor slide steps with arrow keys, and Enter sends KEYCODE_ENTER when the
+│   editor has no action. Suggestions, autocorrection, swipes and smart quotes were already off in
+│   such a field.
+│   Checks: `editorsThatKeepTheirOwnTextTakeKeyEvents` in `FieldTypingTest`
+│   (android/app/src/test) covers the field's classification; the key presses are read from
+│   `KeyboardEngine` and were not tried on a device.
+├── Labs > Keyboard > Symbols on letter keys (off) -> hold a letter from any of QWERTY's three
+│   rows for its symbol first, with the letter's accents after it; the marks are
+│   Gboard's own (the ?123 page draws the same ones): a s d f g h j k l for
+│   @ # $ _ & - + ( ) and z x c v b n m for * " ' : ; ! ?, so ! and ? are reachable and
+│   no mark sits on two letter keys. Symbols follow the letter, so AZERTY q/w and QWERTZ y get
+│   none where their layouts draw them below row 1. With Local currency on, d holds the
+│   phone's symbol in $'s place. Row 1 keeps its digit while it shows one: with Number
+│   row off it hints and holds the digit first. With it on, the top row's letters show and
+│   hold Gboard's symbols in the hidden digit's place (q for %, p for }, r for =), while a
+│   letter that already has a row 2 or 3 symbol keeps that one wherever the layout draws it
+│   (AZERTY a and z keep @ and `*`, QWERTZ z keeps `*`). The top row's symbols
+│   stay on row 1, so a layout that draws q, w or y lower is unchanged there. Off, the keys
+│   are unchanged. `heldLettersOfferSymbolsWhenTheLabIsOn` in InsertionTest.kt covers the
+│   holds; `theHomeAndBottomRowsShowGboardsSymbols`, `noSymbolIsDrawnOnTwoLetterKeys` and
+│   `theLocalCurrencyTakesDsSymbol` in KeyboardPageTest.kt cover the two rows, the currency
+│   and that no mark repeats, beside `withBothLabsTheTopRowShowsGboardsSymbols` and
+│   `theTopRowSymbolsStayOnTheTopRow` for the top row; `./gradlew :app:testDebugUnitTest
+│   :app:compileDebugKotlin -x prepareSpeechModel` passed 198 tests in
+│   https://github.com/anomalyco/hex/actions/runs/45450568457 (Temurin JDK 21 and Android SDK 36,
+│   GitHub-hosted); not tried on a device or emulator. The repo has no Android CI.
+├── Labs > Output > Signature (off) -> one editable line (up to 200 characters; empty adds
+│   nothing, default "Sent from Hex") on its own line at the end of each keyboard dictation,
+│   added once; the next dictation starts on a new line below it, and a signed dictation
+│   never continues the signature line. Home's preview and Copy stay unsigned, and Hex's
+│   own fields are never signed.
+│   Unit tests plus a passing `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin`
+│   on a GitHub-hosted runner (https://github.com/anomalyco/hex/actions/runs/45268305325, the
+│   latest observed verification); the repo has no Android CI.
+├── Labs > Keyboard > Number row (off) -> 1 2 3 4 5 6 7 8 9 0 above the letter rows on
+│   every layout (en, es, nb, de, fr, it), typed like normal keys. The first letter row's
+│   corner digits and digit-first hold are hidden while it shows; accents on hold stay, and
+│   the Symbols on letter keys hints and holds still work: row 1's first ten letters show a
+│   symbol instead of the digit, Gboard's such as q for % and p for }, or its own home- or
+│   bottom-row symbol where it has one, like AZERTY a for @. The keyboard is one row taller
+│   and the Hex menu matches that height; ?123, the symbols pages and the pads keep their keys
+│   and are a row shorter than the letters while it is on. Off, the page is unchanged.
+│   KeyboardPageTest covers it, including the top row's symbols, and passed in
+│   https://github.com/anomalyco/hex/actions/runs/45450568457 (testDebugUnitTest + compileDebugKotlin,
+│   GitHub-hosted); not tried on a device. The repo has no Android CI.
+├── Labs > Keyboard > Local currency (off) -> the phone's region picks the ?123 page's
+│   currency symbol in $'s place from a fixed set of single-character symbols: GBP £, EUR €,
+│   JPY and CNY ¥, INR ₹, PHP ₱, KRW ₩, RUB ₽ and UAH ₴. USD, a locale with no country, a
+│   region with no currency (Antarctica), a first language whose region is not a country
+│   (Latin American Spanish, es-419) and every other currency keep $. Only the first
+│   system locale with a country is read, and its `Currency.currencyCode` rather than a
+│   localized symbol chooses the character, so the same phone shows the same one in any
+│   language. Holding the key offers $ first, then $'s held symbols without a second copy
+│   of the local one, in their order. The =< page's money row (£ ¢ € ¥) shows $ in the slot of a
+│   local £, € or ¥, and gives only ¥'s slot to $ for ₹, ₱, ₩, ₽ and ₴, so £, ¢ and € stay drawn,
+│   no page draws a symbol twice, and $ is always on one of them; $'s holds drop the local symbol
+│   itself, whichever it is, so their list never repeats it.
+│   The letters page reads it too, for d's held symbol and corner hint in place of $;
+│   otherwise only the symbol pages read it, and a number, PIN, phone or date pad, including
+│   the symbols page's own 1234 pad, draws none and reads none. Off, both pages, d's hold
+│   and every other hold are unchanged.
+│   Checks: `LocalCurrencyTest` (rows, holds, ten keys a row and region cases, 7/7),
+│   `SymbolPagesTest` (5/5) and `theLocalCurrencyTakesDsSymbol` in KeyboardPageTest.kt in
+│   android/app/src/test, and `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin`
+│   passed 198 tests in https://github.com/anomalyco/hex/actions/runs/45450568457 (Temurin JDK 21
+│   and Android SDK 36, GitHub-hosted); not tried on a device or emulator, and the repo has no
+│   Android CI.
+├── Labs > Keyboard > Emoji suggestions (off) -> on the English layout, while a word
+│   that names an emoji is being typed (smile -> 😊, joy/haha -> 😂, heart -> ❤️), the
+│   strip's last slot offers it beside the word suggestions, padded to that slot even when
+│   it is the only one. Another layout's model never offers one. A tap replaces the word
+│   and commits it with the same space rules as a word suggestion; continuing to type
+│   keeps the word. Nothing matching leaves the strip unchanged. The list keeps the same
+│   0.85 strong cut-off as the iPhone strip, plus a reviewed joy -> 😂 and a reviewed
+│   exclusion list (number words that name clock faces, and ordinary words that name an
+│   emoji's object in another sense), generated from the iOS keyboard's
+│   emoji-index-en.txt (Unicode emoji-test.txt 18.0 and CLDR 49 annotations, Unicode
+│   License v3, plus Hex's chat words). It is a compact word-to-emoji asset read lazily
+│   only while the toggle is on; the loader keeps only emoji the device's `Paint.hasGlyph`
+│   can draw (minSdk 31 draws up to Emoji 13.1), so the strip never shows tofu. Matching is
+│   case-insensitive and whole-word.
+│   Checks: `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` (includes
+│   `EmojiKeywordsTest`) and `python3 scripts/code-shape.py --check`; the repo has no
+│   Android CI.
+├── Labs > Keyboard > Keyboard tools (off) -> while the strip has nothing else to show (no
+    suggestion chips, Undo dictation, notice or dictation) and the field is not a password,
+    PIN or other secure field, the "Hold Hex to talk" hint becomes up to four icon buttons
+    without making the keyboard taller: Emoji (the bottom row's emoji key, so only on the
+    letters, never on a symbol page or a pad), Paste (the editor's own
+    `performContextMenuAction(android.R.id.paste)`, so Hex never reads the clipboard; shown
+    only while `clipboard.hasPrimaryClip()`), Settings (reopens Hex on its Keyboard page
+    through an intent extra MainActivity reads, NEW_TASK | CLEAR_TOP, replacing whatever Hex
+    screen was open) and Undo (the last autocorrection reverted exactly as the Delete right
+    after it does, shared through `KeyboardEngine.revert`; shown only while that correction is
+    still right before the cursor, and only when no next-word suggestions fill the strip, though
+    the Delete right after an autocorrection still undoes it when they do). A field with no text
+    before the cursor and none after it shows them in the sentence starters' place, so they are
+    there when an empty field opens; typing anything fills the strip with predictions as before.
+    Changing the toggle redraws a visible strip at once, starters and tools swapping in an open
+    empty field; a word being typed, a swipe's readings and a word Delete took back keep their
+    line, and off, the strip is unchanged.
+    Checks: `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` (includes
+    `KeyboardToolsTest`) and `python3 scripts/code-shape.py --check`; the repo has no
+    Android CI. Not tried on a device or emulator.
+├── Labs > Keyboard > Smart quotes (off) -> in a plain-text field (not a password, email or URL
+    field, or a TYPE_NULL field such as a terminal), the ' and " keys type ’ ‘ “ ”: an opening
+    quote — ‘ or “ — at the start, after whitespace, or after an opening bracket or quote, and
+    the closing quote or apostrophe — ’ or ” — after anything else. A word a suggestion,
+    autocorrection or swipe commits goes in with ’ for its straight apostrophe ("don't" becomes
+    "don’t"), your own text replacements get ’ for each straight apostrophe they contain (a " in
+    one stays straight), and a dictation's straight quotes are placed by the same rules, after its
+    spacing is decided, in the same plain-text fields as the keys. The strip shows the ’ a
+    suggestion will insert. The Italian and French elisions the typing part above describes
+    ("laltro" -> "l’altro") show and go in with ’ too. A quote key's held alternates still type
+    exactly the character they show. Off, keys, picks and dictation insert the straight characters
+    they did before, and existing ’ and ” are treated like ' and " for word boundaries, spacing and
+    lookups. Checks: `./gradlew :app:compileDebugKotlin :app:testDebugUnitTest` passed with 205
+    tests (including `SmartQuotesTest`'s 12) on 2026-11-24, on OpenJDK 21 and Android SDK 36
+    (platform 36, build-tools 35/36, NDK 27.2.12479018); the repo has no Android CI, and nothing was
+    tried on a device or emulator. `python3 scripts/code-shape.py --check` passes.
+├── Labs > Keyboard > Delete swiped words letter by letter (off) -> iPhone Hex's experiment (#2323):
+    Delete right after a swipe removes one letter, not the swiped word, and the swipe is forgotten
+    with it: the strip stops offering the word back, the next swipe there types a new word rather
+    than the next reading, and what's left is ordinary text. Held, Delete repeats letter by letter
+    from the first; its slide still selects whole words. Off, Delete takes the word back as before
+    (`SwipeText.takesBack`).
+├── Labs > Keyboard > Password manager suggestions (off) -> while Android's autofill service —
+    Bitwarden, 1Password or Google Password Manager, which must itself support Android 11's inline
+    suggestions — offers logins, one-time codes or cards for the focused field, its own chips take
+    the word slots' place in the strip: up to six, in the service's order, the pinned ones held at
+    the edge outside the scroll. A tap lets Android fill the field; Hex lays the service's views out
+    and never reads a login, a code or a card, and nothing is logged or sent. A new field, the
+    keyboard hiding or the toggle turning off clears them. Off, Hex makes no inline request, so
+    Android's normal autofill dropdown is exactly as before.
+    Checks: `./gradlew --no-daemon :app:testDebugUnitTest :app:compileDebugKotlin -x
+    prepareSpeechModel` passed 178 tests, `InlineAutofillTest`'s 3 among them (the pinned split and
+    the chip sizes), on 2026-11-24 on OpenJDK 21 (Arch Linux 21.0.13) and
+    Android SDK 36 (platform 36, build-tools 35.0.0, NDK 27.2.12479018) with compileSdk 36 and
+    minSdk 31; the repo has no Android CI, and nothing was tried on a device or emulator.
+├── Labs > Keyboard > Voice-only mode (off) -> a "Voice only" subtype of Hex, registered at runtime
+    with `InputMethodManager.setAdditionalInputMethodSubtypes` (never in input_method.xml), that
+    replaces the keyboard with one compact dictation bar: the strip's dot waveform and a status
+    line, ✓ to finish (or to start again after a blocked or failed start) and ✕ to cancel. Showing
+    it starts dictation at once, with the keyboard's guards: a password field, no text field, a
+    microphone another dictation holds, or a missing microphone permission shows the reason in the
+    bar, whose ✕ goes back. ✓ transcribes through the same MicCapture queue and model as the
+    keyboard and inserts the text at the cursor with the same signature and continuation rules
+    (commitSpeech). After the insertion, after ✕, or after a failed dictation (its note shows for
+    1.2 s) Hex calls `switchToPreviousInputMethod()`, opening Android's keyboard picker when that
+    returns false, at most once per dictation; an input restart right after a leave shows the bar
+    idle rather than recording again. The subtype is auxiliary, so Hex's own globe-key rotation
+    stays as it was. Enabling it: turning the toggle on has Android 14 and later enable the
+    voice subtype itself with `setExplicitlyEnabledInputMethodSubtypes` (the full keyboard and voice
+    subtypes); Android 12 and 13 have no such API, so there the toggle opens Android's Hex subtype
+    screen to tick "Voice only". Turning it off clears the subtype and returns the explicit set to
+    the implicit default. Reach it from another keyboard: Android gives a voice-input key one voice
+    input method, preferring the system's, so HeliBoard's and other AOSP-based keyboards' mic keys
+    reach Hex only when no system voice input (such as Google voice typing) is enabled; otherwise
+    use the keyboard switcher or Android's picker. The IME registers the subtype again when it
+    starts, which matters after a settings restore. Off, no subtype or explicit set is touched and
+    Hex is exactly the keyboard it was; a voice subtype that is somehow current shows the full
+    keyboard. Checks:
+    `./gradlew :app:compileDebugKotlin :app:testDebugUnitTest` (with `-x prepareSpeechModel` and a
+    build-tools 36.0.0 override, since AGP's default 35.0.0 is not installed) passed 166 tests,
+    `VoiceOnlyTest`'s 4 among them, on 2026-11-24 on Temurin JDK 21 and Android SDK 36 (platform 36,
+    build-tools 36.0.0, NDK 27.2.12479018); `VoiceOnlyTest` covers the bar-or-keyboard and restart
+    decisions, `python3 scripts/code-shape.py --check` and `git diff --check` pass, and the repo has
+    no Android CI; nothing was tried on a device or emulator.
+└── Labs > Dictation > Learn from my fixes (off) -> an Android-only port of iPhone Hex's dictation
+    correction learning, with no typing side. Off, the keyboard tracks nothing, applies nothing and
+    adds no hints. On, each keyboard dictation in a non-secure words field that the field lets Hex
+    learn from (`FieldTyping.learns`, not a `TYPE_NULL` field) and that wasn't translated, up to 400
+    words, is remembered with 32-character anchors before and after; its text stays in memory,
+    never on disk, and it is found again by those anchors, never by position, on each selection
+    update. The text around the cursor is read far enough on both sides for the whole dictation and
+    its anchors, so a cursor moved inside it never cuts a word at the window's edge, and an empty
+    anchor only counts as the field's edge when the read reached that edge. It settles after 60
+    seconds, when the field changes or the keyboard leaves, or when another dictation starts; a span
+    the field never showed reports nothing, and text read after the minute is never taken as the
+    dictation, even when the field was emptied and filled again since. A dictation the person removed
+    with Hex's own Delete (the key and its held repeat, a delete slide's selected words, or a swipe)
+    or by Undo, and dictated again within 20 seconds, is compared with the new one as a redictation.
+    A field sent with Enter, Send, Go, Done or Next, or emptied by the app, is judged from the text
+    the dictation last showed and is never held for a redictation, so a fix made just before is
+    still learned. Inference is a whole-word LCS diff of the inserted and current text
+    (apostrophes inside words): no change is kept, more than max(1, words/2) changed words is a
+    rewrite with no pairs, and pair hunks need at most three words a side and a letters-only
+    Levenshtein distance within max(2, longest/2); a sentence-start capital on the meant side is
+    dropped. Raw words the person kept, in a corrected dictation or one left untouched, contradict
+    any fix that would have changed them. A heard -> meant pair is applied after two sightings with
+    no contradiction and no second meaning for those heard words; fixing an applied fix to something
+    else, or fixing it back, contradicts it, and
+    each listed fix has a switch. Applied fixes run on the raw transcript before custom vocabulary,
+    whole words and phrases only, never inside a longer token, keeping the original's case unless
+    the fix carries capitals. The meant words are recognition hints, kept apart from the custom
+    vocabulary's forced spellings (a learned word with a capital keeps its spelling too): both
+    Whisper's prompt and Parakeet's vocabulary get the vocabulary first, then the learned words,
+    under the vocabulary's own rules (trimmed, at least two characters, at most 64, deduplicated,
+    capped at the existing 100), and either source works without the other. A translated dictation
+    gets neither fixes nor learned hints. Settings > Labs > Dictation lists each learned pair with a
+    switch and a confirmed Delete; a fix switched off keeps its counts and takes no contradiction,
+    and the Delete stays reachable while the lab is off, since the records on the phone remain. The
+    fixes live in the same `speech` SharedPreferences as one escaped line per fix (the heard and
+    meant words, count, contradictions, and when it was last made), capped at 1,000 records (the
+    least used and oldest drop first), and turning the lab off neither learns nor applies anything.
+    Checks:
+    `DictationLearningTest` (32: kept, rewrite, plausible and implausible substitutions, the
+    three-word pair limit, sentence-start capitals, redictations, a folded spoken number, the
+    two-sighting, contradiction and one-meaning thresholds (including kept words in a dictation left
+    untouched), a switched-off fix and its silence under contradiction, case-insensitive merging,
+    merging's word limit, the 1,000-record cap, whole-word and phrase application, fixes before
+    vocabulary, combining marks, hints kept apart from forced spellings, the sentence-start case,
+    hints off and translated, learned capitals, hints and their cap and the vocabulary's limits, and
+    the persistence round-trip) and `DictationTrackerTest` (22: kept at the minute, edits found with
+    and without text after, edits after the minute left out, a dictation emptied and retyped after
+    the minute, one emptied before it and retyped after it, a new dictation settling the last,
+    typing after a dictation at the field start, a cursor inside a long dictation, repeated short and
+    newline after-anchors, redictation, redictation after Undo in an empty field, an app-cleared
+    field judged from its last text before the next message, sending the field and keeping its fix,
+    deletion, a span the field never showed, and Undo) in android/app/src/test, plus `./gradlew
+    --offline :app:testDebugUnitTest --rerun -x prepareSpeechModel` passing 291 tests on 2026-11-24
+    on OpenJDK 21 and Android SDK 36; the repo has no Android CI, and nothing was tried on a device
+    or emulator.
 Unmerged Windows / deferred features -> Not part of this map
 ```
 

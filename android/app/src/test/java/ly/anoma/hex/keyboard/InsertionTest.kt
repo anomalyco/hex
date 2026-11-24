@@ -1,7 +1,20 @@
 package ly.anoma.hex.keyboard
 
+import java.net.ServerSocket
+import kotlin.concurrent.thread
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import ly.anoma.hex.feedback.FeedbackContext
+import ly.anoma.hex.feedback.FeedbackDraft
+import ly.anoma.hex.feedback.FeedbackFailure
+import ly.anoma.hex.feedback.FeedbackKind
+import ly.anoma.hex.feedback.FeedbackOutcome
+import ly.anoma.hex.feedback.FeedbackRequest
+import ly.anoma.hex.feedback.FeedbackRetry
+import ly.anoma.hex.feedback.FeedbackSender
 import ly.anoma.hex.speech.DictationLanguage
 import ly.anoma.hex.speech.FrenchSpacing
 import ly.anoma.hex.speech.Spoken
@@ -10,6 +23,9 @@ import ly.anoma.hex.speech.SpokenPunctuation
 import ly.anoma.hex.speech.SpokenText
 import ly.anoma.hex.speech.SpeechOptions
 import ly.anoma.hex.speech.Style
+import ly.anoma.hex.speech.typingLayout
+import ly.anoma.hex.speech.SpeechEdges
+import ly.anoma.hex.speech.speechSpan
 
 class InsertionTest {
     @Test fun replacesASelectedWordWithoutJoiningItsNeighbours() {
@@ -416,6 +432,17 @@ class InsertionTest {
         assertEquals(false, SpaceRules.separates("\nfox"))
         assertEquals(false, SpaceRules.separates("fox"))
         assertEquals(false, SpaceRules.separates(null))
+        // A picked word's space (Gboard adds one in Chrome's address bar too): a clause mark takes it anywhere, and in
+        // a URL field so do . / and the other joiners ("github." and "github/", never "github /").
+        for (mark in ",.!?;:)") {
+            assertEquals("$mark", true, SpaceRules.takesPickedSpace(mark, url = false))
+            assertEquals("$mark", true, SpaceRules.takesPickedSpace(mark, url = true))
+        }
+        assertEquals(false, SpaceRules.takesPickedSpace('/', url = false))
+        assertEquals(true, SpaceRules.takesPickedSpace('/', url = true))
+        assertEquals(true, SpaceRules.takesPickedSpace('-', url = true))
+        assertEquals(false, SpaceRules.takesPickedSpace('(', url = true))
+        assertEquals(false, SpaceRules.takesPickedSpace('w', url = true))
     }
     // iOS CleanupTaggerTests' English examples and its hand-written set, met with rules (no tagger).
     @Test fun englishCleanupRulesMeetTheTaggersExamples() {
@@ -468,6 +495,31 @@ class InsertionTest {
         assertEquals(DictationLanguage.Norwegian, DictationLanguage.automatic(null, listOf("nb")))
         assertEquals(DictationLanguage.English, DictationLanguage.automatic(null, listOf("ja")))
     }
+    @Test fun whisperHearsTheSpeechAndAMarginNotTheQuietAround() {
+        val second = 16_000
+        // A tap, 3 s of speech from 1 s, then quiet to the 60 s limit: 0.3 s before it to 0.5 s after it.
+        assertEquals(second * 7 / 10 until second * 9 / 2, speechSpan(second, 4 * second, 60 * second))
+        // Speech from the first block to the last keeps the whole recording.
+        assertEquals(0 until 3 * second, speechSpan(0, 3 * second, 3 * second))
+        // The margins stop at the recording's ends.
+        assertEquals(0 until 2 * second, speechSpan(second / 10, 2 * second - 640, 2 * second))
+        // Nothing voiced: the recording as it was (MicCapture says "No speech heard" before it gets here).
+        assertEquals(0 until 5 * second, speechSpan(-1, 0, 5 * second))
+    }
+    @Test fun aClickAwayFromTheSpeechIsNotSpeech() {
+        val block = 640
+        fun edges(vararg voiced: IntRange) = SpeechEdges().apply {
+            for (i in 0 until 1500) block(i * block, block, voiced.any { i in it })
+        }
+        // A tap on the key (one block), then words from 1 s to 4 s, then the tap on ✓ (two blocks) at 12 s.
+        val e = edges(2..2, 25..99, 300..301)
+        assertEquals(25 * block, e.first)
+        assertEquals(100 * block, e.last)
+        // Syllables with short gaps between them are one stretch; a short word on its own still counts.
+        assertEquals(40 * block, edges(10..12, 15..17, 20..22, 37..39).last)
+        // Only clicks: no speech found, so Whisper gets the whole recording.
+        assertEquals(-1, edges(5..6, 200..201).first)
+    }
     @Test fun frenchItalianAndDutchAreDictationLanguages() {
         assertEquals(DictationLanguage.French, DictationLanguage.automatic(Spoken.French, listOf("en")))
         assertEquals(DictationLanguage.Italian, DictationLanguage.automatic(Spoken.Italian, listOf("en")))
@@ -484,6 +536,56 @@ class InsertionTest {
         assertEquals("Paris est", SpokenText.continuing("Paris est", "et", "fr"))
         assertEquals("il treno", SpokenText.continuing("Il treno", "e", "it"))
         assertEquals("de trein", SpokenText.continuing("De trein", "en", "nl"))
+    }
+    @Test fun portugueseIsADictationLanguageWithoutEnglishRules() {
+        // A Brazilian or Portuguese phone (Locale language "pt") used to fall back to English.
+        assertEquals(DictationLanguage.Portuguese, DictationLanguage.automatic(null, listOf("pt")))
+        assertEquals(DictationLanguage.Portuguese, DictationLanguage.automatic(null, listOf("pt", "en")))
+        assertEquals(DictationLanguage.Portuguese, DictationLanguage.matching("pt"))
+        assertEquals(null, DictationLanguage.Portuguese.layout)
+        fun format(text: String, style: Style) = SpokenText.format(text, SpeechOptions(style, DictationLanguage.Portuguese,
+            clean = true, translate = false, formatLists = true, spokenPunctuation = true))
+        // English cleanup would drop "um" (a filler there, "a" here) and read "no" as a correction.
+        assertEquals("Fiquei no hotel um dia, não dois.", format("fiquei no hotel um dia, não dois", Style.Polished))
+        assertEquals("Primeiro, um café.", format("primeiro, um café", Style.Polished))
+        assertEquals("Obrigado pela ajuda, até amanhã?", format("obrigado pela ajuda vírgula até amanhã ponto de interrogação", Style.Polished))
+        assertEquals("obrigado pela ajuda", format("Obrigado pela ajuda.", Style.Casual))
+        assertEquals("Fiquei no hotel um dia", format("Fiquei no hotel um dia", Style.Verbatim))
+        assertEquals("o ônibus", SpokenText.continuing("O ônibus", "e", "pt"))
+        assertEquals("Maria chegou", SpokenText.continuing("Maria chegou", "e", "pt"))
+    }
+    @Test fun polishAndRussianAreDictationLanguagesWithoutEnglishRules() {
+        // Polish and Russian phones used to fall back to English, and Whisper told "en" translates.
+        assertEquals(DictationLanguage.Polish, DictationLanguage.automatic(null, listOf("pl", "en")))
+        assertEquals(DictationLanguage.Russian, DictationLanguage.automatic(null, listOf("ru")))
+        assertEquals(DictationLanguage.Russian, DictationLanguage.matching("ru"))
+        assertEquals(null, DictationLanguage.Polish.layout)
+        assertEquals(null, DictationLanguage.Russian.layout)
+        fun format(text: String, style: Style, language: DictationLanguage) = SpokenText.format(text, SpeechOptions(style, language,
+            clean = true, translate = false, formatLists = true, spokenPunctuation = true))
+        // Cleanup has no Polish rules, so the particle "no" ("well") is not English's correction marker.
+        assertEquals("Kupię dwa, no, trzy bilety.", format("kupię dwa, no, trzy bilety", Style.Polished, DictationLanguage.Polish))
+        assertEquals("dziękuję za pomoc", format("Dziękuję za pomoc.", Style.Casual, DictationLanguage.Polish))
+        assertEquals("Спасибо за помощь, до завтра.", format("спасибо за помощь, до завтра", Style.Polished, DictationLanguage.Russian))
+        assertEquals("спасибо за помощь", format("Спасибо за помощь.", Style.Casual, DictationLanguage.Russian))
+        assertEquals("Я немного опоздаю", format("Я немного опоздаю", Style.Verbatim, DictationLanguage.Russian))
+        assertEquals("to jest", SpokenText.continuing("To jest", "i", "pl"))
+        assertEquals("Warszawa jest", SpokenText.continuing("Warszawa jest", "i", "pl"))
+        assertEquals("это мой", SpokenText.continuing("Это мой", "и", "ru"))
+        assertEquals("Москва большая", SpokenText.continuing("Москва большая", "и", "ru"))
+    }
+    @Test fun aDictationLanguageWithoutItsOwnLayoutHasNoTypingModel() {
+        // Português keeps English's keys and accents, but its typing model would be English's: until a
+        // layout is pinned, English's word list only stands in for the keys' geometry and your own words.
+        assertEquals(null, typingLayout(null, DictationLanguage.Portuguese))
+        assertEquals(null, typingLayout(null, DictationLanguage.Dutch))
+        assertEquals(null, typingLayout(null, DictationLanguage.Polish))
+        assertEquals(null, typingLayout(null, DictationLanguage.Russian))
+        // A pinned Keyboard › Keyboard layout has its own model whatever is dictated.
+        assertEquals(Spoken.English, typingLayout(Spoken.English, DictationLanguage.Portuguese))
+        assertEquals(Spoken.English, typingLayout(Spoken.English, DictationLanguage.Dutch))
+        assertEquals(Spoken.Spanish, typingLayout(null, DictationLanguage.Spanish))
+        assertEquals(Spoken.French, typingLayout(Spoken.French, DictationLanguage.Spanish))
     }
     // Batch 3 (Rollover, holds, field kinds). These belong in a KeyboardTouchTest once new test files are agreed.
     @Test fun overlappingKeysTypeInTheOrderTheyWentDown() {
@@ -507,6 +609,24 @@ class InsertionTest {
         assertEquals("¢", LetterFeedback.symbolHolds('$').first())
         assertEquals(",", LetterFeedback.periodHolds[0][LetterFeedback.PERIOD_DEFAULT])
         assertEquals(emptyList<String>(), LetterFeedback.symbolHolds('@'))
+    }
+    @Test fun heldLettersOfferSymbolsWhenTheLabIsOn() {
+        // Off, every key offers exactly what it did: accents alone, and none on a letter without them.
+        assertEquals(LetterFeedback.options('a', "en"), LetterFeedback.holds('a', "en", null))
+        assertEquals(emptyList<String>(), LetterFeedback.holds('m', "en", null))
+        // On, a key without a digit offers its symbol first, then the same accents after it.
+        val a = LetterFeedback.holds('a', "en", null, symbolsOnLetters = true)
+        assertEquals("@", a.first())
+        assertEquals(LetterFeedback.options('a', "en"), a.drop(1))
+        assertEquals(listOf("?"), LetterFeedback.holds('m', "en", null, symbolsOnLetters = true))
+        assertEquals(LetterFeedback.options('e', "en"), LetterFeedback.holds('e', "en", null, symbolsOnLetters = true))
+        // On the top row, with the number row hiding its digit, a letter offers Gboard's symbol first.
+        assertEquals(listOf("%"), LetterFeedback.holds('q', "en", null, symbolsOnLetters = true, topRow = true))
+        assertEquals(listOf("|") + LetterFeedback.options('e', "en"),
+            LetterFeedback.holds('e', "en", null, symbolsOnLetters = true, topRow = true))
+        // A capital offers the same symbol, and row 1 keeps its digit first.
+        assertEquals("@", LetterFeedback.holds('A', "en", null, symbolsOnLetters = true).first())
+        assertEquals("1", LetterFeedback.holds('q', "en", '1', symbolsOnLetters = true).first())
     }
     @Test fun emailAndWebAddressFieldsSwapTheComma() {
         val text = android.text.InputType.TYPE_CLASS_TEXT
@@ -547,5 +667,162 @@ class InsertionTest {
         }
         assertEquals("+", KeyPads.rows(Pad.Phone)[3][1].hold)
         assertEquals(listOf(",", "0", "."), KeyPads.rows(Pad.Number)[3].take(3).map { it.label })
+    }
+
+    // Send feedback (ly.anoma.hex.feedback): what the app sends Bellhop, checked before it goes out, and its retries.
+    private val feedbackContext = FeedbackContext("0.2.2", "5", "Android 16", "Google Pixel 9", "en-US",
+        linkedMapOf("screen" to "Home", "channel" to "play"))
+
+    @Test fun feedbackWithAnEmailSendsItAndTheInstallId() {
+        val draft = FeedbackDraft(" It \"froze\"\n", subject = "[test] Hi", kind = FeedbackKind.Problem, email = " a@b.co ")
+        assertEquals("""{"subject":"[test] Hi","message":"It \"froze\"","category":"bug","email":"a@b.co","install_id":"id-1",""" +
+            """"app":{"name":"Hex","version":"0.2.2","build":"5"},"device":{"platform":"android","os":"Android 16",""" +
+            """"model":"Google Pixel 9","locale":"en-US"},"metadata":{"screen":"Home","channel":"play"}}""",
+            FeedbackRequest(draft, feedbackContext, installId = { "id-1" }).payload)
+    }
+    @Test fun feedbackWithoutAnEmailIsAnonymousAndMakesNoInstallId() {
+        var made = false
+        val payload = FeedbackRequest(FeedbackDraft("Hello", kind = FeedbackKind.Other), feedbackContext, installId = { made = true; "id" }).payload
+        assertFalse(made)
+        assertTrue(payload.contains(""""anonymous":true"""))
+        for (field in listOf("email", "install_id", "user", "logs", "category")) assertFalse(payload.contains(""""$field""""))
+    }
+    @Test fun feedbackIsCheckedBeforeItGoesOut() {
+        assertEquals(FeedbackDraft.Problem.InvalidEmail, FeedbackDraft("Hi", email = "ryan@anoma").problem)
+        assertEquals(FeedbackDraft.Problem.InvalidEmail, FeedbackDraft("Hi", email = "ryan anoma.ly").problem)
+        assertNull(FeedbackDraft("Hi", email = "ryan@anoma.ly").problem)
+        assertEquals(FeedbackDraft.Problem.EmptyMessage, FeedbackDraft("  \n").problem)
+        assertEquals(FeedbackDraft.Problem.MessageTooLong, FeedbackDraft("x".repeat(20_001)).problem)
+        assertNull(FeedbackDraft("x".repeat(20_000)).problem)
+        assertEquals(FeedbackDraft.Problem.SubjectTooLong, FeedbackDraft("Hi", subject = "s".repeat(201)).problem)
+        assertEquals(FeedbackDraft.Problem.TooManyPictures, FeedbackDraft("Hi", pictures = List(6) { ByteArray(1) }).problem)
+        assertEquals(FeedbackDraft.Problem.PicturesTooLarge, FeedbackDraft("Hi", pictures = listOf(ByteArray(10 * 1024 * 1024 + 1))).problem)
+        assertEquals(FeedbackDraft.Problem.PicturesTooLarge, FeedbackDraft("Hi", pictures = List(3) { ByteArray(7 * 1024 * 1024) }).problem)
+    }
+    @Test fun feedbackIsMultipartWithThePayloadThenEachPicture() {
+        val request = FeedbackRequest(FeedbackDraft("Hi", pictures = listOf(byteArrayOf(1, 2), byteArrayOf(3))), feedbackContext,
+            installId = { "" }, idempotencyKey = "k", boundary = "b")
+        val body = String(request.body, Charsets.ISO_8859_1)
+        assertEquals("--b\r\nContent-Disposition: form-data; name=\"payload\"\r\nContent-Type: application/json\r\n\r\n${request.payload}\r\n" +
+            "--b\r\nContent-Disposition: form-data; name=\"screenshot\"; filename=\"hex-1.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n\u0001\u0002\r\n" +
+            "--b\r\nContent-Disposition: form-data; name=\"screenshot\"; filename=\"hex-2.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n\u0003\r\n--b--\r\n", body)
+        assertEquals(mapOf("Content-Type" to "multipart/form-data; boundary=b", "Idempotency-Key" to "k", "Accept" to "application/json"), request.headers)
+    }
+    @Test fun feedbackRetriesOnlyWhatBellhopSaysToRetry() {
+        assertEquals(1000L, FeedbackRetry.delay(null, null, null, 1))
+        assertEquals(4000L, FeedbackRetry.delay(null, null, null, 3))
+        assertNull(FeedbackRetry.delay(null, null, null, 4))
+        assertEquals(2000L, FeedbackRetry.delay(503, "misconfigured", null, 2))
+        assertEquals(3000L, FeedbackRetry.delay(409, "request_pending", "3", 1))
+        assertEquals(5000L, FeedbackRetry.delay(429, "rate_limited", "5", 1))
+        assertNull(FeedbackRetry.delay(429, "feedback_daily_limit", "3600", 1))
+        for (status in listOf(400, 401, 403, 404, 413, 415, 422)) assertNull(FeedbackRetry.delay(status, null, "1", 1))
+        assertEquals(FeedbackFailure.Unavailable, FeedbackRetry.failure(403, "feedback_disabled"))
+        assertEquals(FeedbackFailure.Unavailable, FeedbackRetry.failure(401, "invalid_report_key"))
+        assertEquals(FeedbackFailure.Other, FeedbackRetry.failure(403, "blocked"))
+        assertEquals(FeedbackFailure.Offline, FeedbackRetry.failure(null, null))
+    }
+    /** A one-connection-at-a-time HTTP server on localhost: each request gets the next answer. */
+    private class Bellhop(answers: List<Pair<Int, String>>) : AutoCloseable {
+        val seen = mutableListOf<Triple<String, Map<String, String>, ByteArray>>()
+        private val socket = ServerSocket(0)
+        val url = "http://127.0.0.1:${socket.localPort}/v1/feedback"
+        init {
+            thread(isDaemon = true) {
+                for ((status, body) in answers) runCatching {
+                    socket.accept().use { client ->
+                        val input = client.getInputStream().buffered()
+                        fun line() = generateSequence { input.read().takeIf { it >= 0 } }.takeWhile { it != '\n'.code }
+                            .map { it.toChar() }.joinToString("").trimEnd('\r')
+                        val start = line()
+                        val headers = generateSequence(::line).takeWhile { it.isNotEmpty() }
+                            .associate { it.substringBefore(':').lowercase() to it.substringAfter(':').trim() }
+                        val sent = ByteArray(headers["content-length"]?.toInt() ?: 0).also { var n = 0; while (n < it.size) n += input.read(it, n, it.size - n) }
+                        synchronized(seen) { seen += Triple(start, headers, sent) }
+                        client.getOutputStream().write(("HTTP/1.1 $status X\r\nContent-Type: application/json\r\nRetry-After: 2\r\n" +
+                            "Content-Length: ${body.length}\r\nConnection: close\r\n\r\n$body").toByteArray())
+                    }
+                }
+            }
+        }
+        override fun close() = socket.close()
+    }
+
+    @Test fun feedbackRetriesWithTheSameBodyAndIdempotencyKey() {
+        // A lost answer, a 409 and a 429 with Retry-After, then the issue: four identical requests.
+        Bellhop(listOf(201 to """{"number":7}""", 409 to """{"error":{"code":"request_pending"}}""",
+            429 to """{"error":{"code":"rate_limited"}}""", 201 to """{"number":7,"received_at":"x","email":"pending"}""")).use { server ->
+            val waits = mutableListOf<Long>()
+            val progress = mutableListOf<Float>()
+            val request = FeedbackRequest(FeedbackDraft("Hi", pictures = listOf(ByteArray(40_000))), feedbackContext, installId = { "" })
+            val outcome = FeedbackSender("bh_pub_test", server.url, sleep = { waits += it }, dropFirstResponse = true)
+                .send(request) { _, fraction -> progress += fraction }
+            assertEquals(FeedbackOutcome.Sent(7, emailPending = true), outcome)
+            assertEquals(listOf(1000L, 2000L, 2000L), waits)
+            assertEquals(4, server.seen.size)
+            for ((start, headers, body) in server.seen) {
+                assertEquals("POST /v1/feedback HTTP/1.1", start)
+                assertEquals("Bearer bh_pub_test", headers["authorization"])
+                assertEquals(request.idempotencyKey, headers["idempotency-key"])
+                assertEquals(request.contentType, headers["content-type"])
+                assertTrue(body.contentEquals(request.body))
+            }
+            assertTrue(progress.any { it > 0f && it < 1f } && progress.last() == 1f)
+        }
+    }
+    @Test fun feedbackDoesNotRetryAClientError() {
+        for ((status, failure) in listOf(400 to FeedbackFailure.Other, 401 to FeedbackFailure.Unavailable,
+            413 to FeedbackFailure.TooLarge, 415 to FeedbackFailure.UnsupportedImage, 422 to FeedbackFailure.Other)) {
+            Bellhop(listOf(status to """{"error":{"code":"x"}}""", 201 to """{"number":1}""")).use { server ->
+                val outcome = FeedbackSender("bh_pub_test", server.url, sleep = { error("no retry") })
+                    .send(FeedbackRequest(FeedbackDraft("Hi"), feedbackContext, installId = { "" })) { _, _ -> }
+                assertEquals(FeedbackOutcome.Failed(failure), outcome)
+                assertEquals(1, server.seen.size)
+            }
+        }
+        // 403 feedback_disabled is the app's setup: unavailable, and not retried.
+        Bellhop(listOf(403 to """{"error":{"code":"feedback_disabled","message":"no"}}""")).use { server ->
+            assertEquals(FeedbackOutcome.Failed(FeedbackFailure.Unavailable), FeedbackSender("bh_pub_test", server.url, sleep = { error("no retry") })
+                .send(FeedbackRequest(FeedbackDraft("Hi"), feedbackContext, installId = { "" })) { _, _ -> })
+        }
+    }
+
+    // Keyboard › Swipe typing: where a swiped word's space goes (Gboard's, and iPhone Hex's where Gboard says nothing).
+    @Test fun aSwipedWordGetsASpaceBeforeItUnlessTheTextOpensOne() {
+        assertFalse(SwipeText.needsSpace(null))
+        assertFalse(SwipeText.needsSpace(""))
+        assertTrue(SwipeText.needsSpace("Hello"))
+        assertTrue(SwipeText.needsSpace("Hello,"))
+        assertTrue(SwipeText.needsSpace("Hi."))
+        assertFalse(SwipeText.needsSpace("Hello "))
+        assertFalse(SwipeText.needsSpace("Hello\n"))
+        for (opening in listOf("(", "[", "“", "¿", "¡", "@", "#", "/")) assertFalse(opening, SwipeText.needsSpace("see $opening"))
+        assertFalse(SwipeText.needsSpace("he said \""))
+        assertTrue(SwipeText.needsSpace("he said \"yes\""))
+    }
+
+    @Test fun aSwipeWhereDeleteTookAWordBackTypesItsNextReading() {
+        val retries = SwipeRetries()
+        val readings = listOf("there", "they're", "three")
+        assertEquals(readings, retries.typing(readings, "Hello world "))
+        retries.tookBack("there", "Hello world ")
+        assertEquals(listOf("they're", "three", "there"), retries.typing(readings, "Hello world "))
+        retries.tookBack("they're", "Hello world")
+        assertEquals(listOf("three", "there", "they're"), retries.typing(readings, "Hello world "))
+        // Somewhere else, or after any other edit, the words are forgotten.
+        assertEquals(readings, retries.typing(readings, "Goodbye "))
+        retries.tookBack("there", "Hello world ")
+        retries.forget()
+        assertEquals(readings, retries.typing(readings, "Hello world "))
+    }
+
+    // Labs › Keyboard › Delete swiped words letter by letter: on, delete after a swipe is an ordinary one.
+    @Test fun deleteTakesASwipedWordBackOnlyWhereTheSwipeLeftItAndOnlyWithTheLabOff() {
+        assertTrue(SwipeText.takesBack("Hello world", "Hello world", "world", letterByLetter = false))
+        assertFalse(SwipeText.takesBack("Hello world", "Hello world", "world", letterByLetter = true))
+        // The text changed or the cursor moved since the swipe: the word is ordinary text by then.
+        assertFalse(SwipeText.takesBack("Hello worl", "Hello world", "world", letterByLetter = false))
+        assertFalse(SwipeText.takesBack("Hello world", null, "world", letterByLetter = false))
+        assertFalse(SwipeText.takesBack("Hello world!", "Hello world!", "world", letterByLetter = false))
     }
 }

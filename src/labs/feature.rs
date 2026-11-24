@@ -154,6 +154,7 @@ define_features! {
     LearnFromCorrections => labs(learn_from_corrections), "learn-from-corrections", Dictation, Everyone, MACOS, 20261121;
     TerminalPaste => app(paste_with_shift), "terminal-paste", Output, Everyone, WINDOWS, 20261030;
     KeyboardModelSwitching => app(keyboard_model_switching.enabled), "keyboard-model-switching", Models, Everyone, EVERY, 20261030;
+    ModelSwitchShortcut => labs(model_switch_shortcut), "model-switch-shortcut", Models, Everyone, EVERY, 20261124;
     MouseShortcuts => labs(mouse_shortcuts), "mouse-shortcuts", Shortcuts, Everyone, MACOS, 20261030;
     PauseBrowser => app(pause_browser_media), "pause-browser", Dictation, Everyone, MACOS, 20261030;
     ShareShortcut => app(share_dictation_shortcut), "share-shortcut", Shortcuts, Everyone, WINDOWS, 20261030;
@@ -199,6 +200,7 @@ define_features! {
     Screenshots => labs(screenshots), "screenshots", Annotate, Everyone, MACOS, 20261104;
     AnnotateReplay => labs(annotate_replay), "annotate-replay", Annotate, Everyone, MACOS, 20261104, extra: ["capture.replay_hotkey"];
     MeetingImport => labs(meeting_import), "meeting-import", Meetings, Everyone, MACOS, 20261106;
+    TranscriptEdits => labs(transcript_edits), "transcript-edits", Meetings, Everyone, EVERY, 20261123;
     CapsLockDictation => labs(caps_lock_dictation), "caps-lock-dictation", Shortcuts, Everyone, MACOS, 20261107, extra: ["labs.caps_lock_light"];
     OpenCodeInWsl => labs(opencode_in_wsl), "opencode-in-wsl", Output, Everyone, WINDOWS, 20261108;
     ApiProcessing => labs(api_processing), "api-processing", Output, Everyone, EVERY, 20261109;
@@ -227,6 +229,11 @@ define_features! {
     HudHeight => labs(hud_height), "hud-height", Dictation, Everyone, MACOS, 20261122, extra: ["labs.hud_bottom_gap"];
     VoiceIsolation => labs(voice_isolation), "voice-isolation", Dictation, Everyone, MACOS, 20261122;
     DictateWhileAnnotating => labs(dictate_while_annotating), "dictate-while-annotating", Annotate, Everyone, EVERY, 20261122;
+    StopAnyCallRecording => labs(stop_any_call_recording), "stop-any-call-recording", Meetings, Everyone, EVERY, 20261123;
+    ClipboardPhrase => labs(clipboard_phrase), "clipboard-phrase", Output, Everyone, EVERY, 20261124, extra: ["labs.clipboard_phrase_text"];
+    MeetingMicrophoneMute => labs(meeting_microphone_mute), "meeting-microphone-mute", Meetings, Everyone, MACOS, 20261124;
+    MeetingIndicatorDisplay => labs(meeting_indicator_display), "meeting-indicator-display", Meetings, Everyone, MACOS_WINDOWS, 20261124;
+    MeetingAudioSource => labs(meeting_audio_source), "meeting-audio-source", Meetings, Everyone, EVERY, 20261124, extra: ["labs.meeting_audio_source_choice"];
 }
 
 impl Feature {
@@ -312,6 +319,13 @@ impl Feature {
 
     pub fn set(self, settings: &mut AppSettings, on: bool) {
         self.set_field(settings, on);
+        self.apply_side_effects(settings);
+    }
+
+    /// Runs any setting normalization or shortcut repair implied by this
+    /// feature's current value in `settings`. Shared by [`Self::set`] and
+    /// `hex settings set`.
+    pub(crate) fn apply_side_effects(self, settings: &mut AppSettings) {
         match self {
             Self::DoubleTapModifiers => {
                 // Off, a modifier-only shortcut can't be double-tap-only, so
@@ -321,7 +335,7 @@ impl Feature {
             Self::Screenshots =>
             {
                 #[cfg(hex_capture)]
-                if on {
+                if self.on(settings) {
                     settings.clear_record_shortcut_sharing_capture();
                 }
             }

@@ -1,7 +1,12 @@
 Whisper model weights by OpenAI; Q5_1 conversion distributed by Georgi Gerganov. MIT.
 whisper.cpp and ggml by Georgi Gerganov and contributors. MIT.
+Faster English dictation (Labs): Parakeet TDT-CTC 110M model weights by NVIDIA, CC BY 4.0, converted to GGUF and
+quantized to 8 bits by the transcribe.cpp authors; downloaded only when you ask. See parakeet-model.txt.
+transcribe.cpp by the transcribe.cpp authors, with ggml, miniz and Silero VAD code. MIT. See transcribe.cpp.txt.
 Kotlin and AndroidX: Apache License 2.0. LLVM libc++: Apache 2.0 with LLVM exceptions.
 The keyboard's emoji panel: the AndroidX emoji picker and Guava, by Google. Apache License 2.0.
+The keyboard's emoji suggestions: Unicode emoji-test.txt 18.0 and CLDR 49 names and
+keywords, Unicode License v3. Full licence: unicode.txt.
 Inter by Rasmus Andersson and the Inter Project Authors. SIL Open Font License 1.1.
 Unmodified InterVariable.ttf from https://github.com/rsms/inter/releases/tag/v4.1
 

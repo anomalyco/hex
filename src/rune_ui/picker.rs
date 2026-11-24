@@ -14,12 +14,11 @@ mod compare;
 mod facts;
 mod list;
 
-use rune::{El, col, el, row, text};
+use rune::{El, col, row, text};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
 use super::controls::{
-    ButtonKind, Paint, button, modal_scrim_transition, modal_transition, pressable_row, row_switch,
-    segmented,
+    ButtonKind, Paint, button, modal_sheet, pressable_row, row_switch, segmented,
 };
 use super::lists::{Tone, error_panel};
 use super::{Modal, Request, Ui};
@@ -383,6 +382,7 @@ pub(super) fn cancel(ui: &mut Ui) {
 /// its default language, which Settings then names.
 pub(super) fn choose(ui: &mut Ui, model: &ModelDefinition) {
     ui.picker.clear_deletion();
+    ui.found.error = None;
     let current = &ui.settings.transcription;
     // A file that is here but not checked is not active yet: choosing it
     // sends it through the model preparation, which verifies and adopts it.
@@ -453,8 +453,7 @@ pub(super) fn delete(ui: &mut Ui, id: TranscriptionModelId) {
     }
 }
 
-/// The picker's scrim and panel over the window: the scrim fades
-/// and the panel scales in as one surface ([`modal_transition`]).
+/// The picker's scrim and panel over the window ([`modal_sheet`]).
 pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
     let c = &p.k.c;
     let language = ui.settings.transcription.language.clone();
@@ -591,28 +590,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
             .h(PANEL_HEIGHT)
             .child(super::scroll_body(p.k, "model-scroll", content)),
     };
-    for shadow in &p.k.elevation.overlay {
-        panel = panel.box_shadow(*shadow);
-    }
-    let layer = |key: &str| {
-        el().key(key)
-            .role("none")
-            .absolute(0.0, 0.0)
-            .w_full()
-            .h_full()
-    };
-    [
-        layer("picker-scrim")
-            .fill(c.scrim)
-            .on_press(close)
-            .transition(modal_scrim_transition(p)),
-        layer("picker-layer")
-            .center()
-            .transition(modal_transition(p))
-            // Keys stay inside, Escape or a press outside closes, and focus
-            // returns to the control that opened it.
-            .child(panel.modal(true, close)),
-    ]
+    modal_sheet(p, "picker", panel, close)
 }
 
 /// `model`'s preparation label and progress while the service prepares it.

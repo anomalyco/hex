@@ -228,7 +228,7 @@ public final class Replay {
                     } else if(key!=' '&&state.getToken().isEmpty()&&!startsWord(state,out.toString())&&!(tracked&&out.length()==0)) {
                         out.append(key); tracked=false; shown=Collections.emptyList();
                     } else if(key==' ') {
-                        Correction fix=state.finish(' ',new KeyPoint(x,y),grid);
+                        Correction fix=state.finish(' ',new KeyPoint(x,y),grid,word->word); // Labs › Smart quotes off, as by default
                         if(fix!=null) {
                             if(!out.toString().endsWith(fix.getOriginal())) throw new IllegalStateException("Correction off the text");
                             out.replace(out.length()-fix.getOriginal().length(),out.length(),fix.getReplacement());

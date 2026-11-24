@@ -383,6 +383,9 @@ pub(super) enum PermissionControl {
     /// Returned from System Settings still untrusted: resets stale TCC
     /// entries and reopens the prompt and guide.
     Stale,
+    /// Returned from System Settings still untrusted where only a restart can
+    /// see the grant (macOS 27.3's post-event preflight), so nothing is reset.
+    Restart,
     Allowed,
 }
 
@@ -460,6 +463,13 @@ pub(super) fn permission_control(
                 ButtonKind::Secondary,
                 move |ui: &mut Ui, _| allow(ui),
             ),
+        ),
+        PermissionControl::Restart => (
+            None,
+            12.0,
+            button(p, key, tr("Restart Hex"), kind, move |ui: &mut Ui, _| {
+                allow(ui)
+            }),
         ),
         PermissionControl::Allowed => (Some(check_mark(p)), 6.0, allowed_pill(p, key, kind)),
     };

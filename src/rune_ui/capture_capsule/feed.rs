@@ -38,6 +38,8 @@ pub(crate) struct Follow {
     /// The shown capture is a Screenshots recording: once it stops, the
     /// screenshot card takes it and the capsule folds.
     clip: bool,
+    /// The shown capture's initial clipboard copy failed.
+    uncopied: bool,
 }
 
 impl Follow {
@@ -97,6 +99,7 @@ impl Follow {
                 self.worked = recording.worked;
                 self.began = recording.screen;
                 self.clip = recording.clip;
+                self.uncopied = false;
                 // No target chips: Annotate records the screen, and the
                 // capsule's toolbar (the pen) takes their place.
                 inputs.push(Input::Stage(Stage::Recording));
@@ -128,8 +131,12 @@ impl Follow {
                 inputs.push(Input::NothingHeard);
             }
             if copy_failed(snapshot, self.shown.as_ref()) {
+                self.uncopied = true;
                 inputs.push(Input::CopyFailed);
             }
+        } else if self.uncopied && !copy_failed(snapshot, self.shown.as_ref()) {
+            self.uncopied = false;
+            inputs.push(Input::Copied);
         }
         inputs.extend(stage);
         inputs.extend(self.routed(snapshot));
@@ -171,6 +178,9 @@ impl Follow {
         let answered = |route: Option<&CaptureRoute>| {
             route.is_some_and(|route| route.answer != RouteAnswer::Looking)
         };
+        if before.as_ref().and_then(|b| b.rule_match.as_ref()) != route.rule_match.as_ref() {
+            inputs.push(Input::RuleMatch(route.rule_match.clone()));
+        }
         if answered(Some(&route)) && !answered(before.as_ref()) {
             inputs.extend(capsule_route(&route.answer).map(Input::Routed));
         } else if before
@@ -302,9 +312,14 @@ fn capsule_route(answer: &RouteAnswer) -> Option<Route> {
                     .as_deref()
                     .and_then(|directory| directory.file_name())
                     .map(|name| name.to_string_lossy().into_owned());
+                let directory = dest
+                    .directory
+                    .as_deref()
+                    .map(|dir| dir.display().to_string());
                 Dest::new(dest.name.clone(), dest.why.clone())
                     .session(dest.session.clone())
                     .folder(folder)
+                    .directory(directory)
             })
             .collect()
     };
@@ -316,6 +331,7 @@ fn capsule_route(answer: &RouteAnswer) -> Option<Route> {
             suggested,
             recent,
             site,
+            by,
         } => Route::Rule {
             to: dests(std::slice::from_ref(to)).remove(0),
             suggested: dests(std::slice::from_ref(to))
@@ -324,6 +340,7 @@ fn capsule_route(answer: &RouteAnswer) -> Option<Route> {
                 .collect(),
             recent: dests(recent),
             site: site.clone(),
+            by: *by,
         },
         RouteAnswer::Guess {
             suggested,
@@ -360,10 +377,25 @@ impl CaptureOverlays {
     /// windows too, so a Hex that never annotates holds none: idle
     /// screen-sized panels emptied macOS 27's Mission Control Space
     /// thumbnails (#1315).
-    pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> Self {
+    pub(crate) fn install(app: &mut rune::App<crate::rune_ui::Ui>) -> Self {
         let picker = PickerOverlay::install(app, act);
         let aim = picker.clone();
-        let capsule = CaptureCapsule::install(app, move |action| act(aim.resolve(action)));
+        #[cfg(not(target_os = "macos"))]
+        let window = app.handle();
+        let capsule = CaptureCapsule::install(app, move |action| match aim.resolve(action) {
+            Action::OpenRules => {
+                #[cfg(target_os = "macos")]
+                crate::macos_rune::open_routing_rules();
+                #[cfg(not(target_os = "macos"))]
+                {
+                    window.open();
+                    window.update(|ui, tx| {
+                        crate::rune_ui::show(ui, crate::rune_ui::Destination::RoutingRules, tx);
+                    });
+                }
+            }
+            other => act(other),
+        });
         capsule.attach(picker.clone());
         let ink = InkOverlay::install(app);
         let lit = capsule.clone();
@@ -553,12 +585,21 @@ pub(crate) fn act(action: Action) {
             to,
             always: always.is_some(),
         })],
+        Action::SaveRule { kind, key, target } => {
+            vec![command(CaptureCommand::SaveRule(kind, key, target))]
+        }
+        Action::OpenRules => {
+            #[cfg(target_os = "macos")]
+            crate::macos_rune::open_routing_rules();
+            return;
+        }
         Action::Undo { .. } => vec![command(CaptureCommand::Undo)],
         Action::Hold(on) => vec![command(CaptureCommand::Hold(on))],
         Action::Pen => {
             crate::capture_host::toggle_pen();
             return;
         }
+        Action::Copy(bundle) => vec![command(CaptureCommand::Copy(bundle))],
         Action::Paste(bundle) => vec![command(CaptureCommand::Paste(bundle))],
         Action::Inspect => vec![command(CaptureCommand::Inspect)],
         Action::Allow(need) => {
@@ -694,6 +735,24 @@ mod tests {
             bundle: bundle(name),
             routing,
         }
+    }
+
+    #[test]
+    fn a_failed_copy_recovers_when_retry_clears_copy_error() {
+        let mut follow = Follow::default();
+        assert_eq!(
+            follow.next(&recording("a")),
+            [Input::Stage(Stage::Recording)]
+        );
+        let mut failed = settled("a", Stage::Done);
+        failed.last.as_mut().unwrap().copy_error = Some("clipboard busy".into());
+        assert_eq!(
+            follow.next(&failed),
+            [Input::CopyFailed, written("a", false)]
+        );
+        // Once the retry clears copy_error on the same bundle, Follow emits Copied.
+        assert_eq!(follow.next(&settled("a", Stage::Done)), [Input::Copied]);
+        assert_eq!(follow.next(&settled("a", Stage::Done)), []);
     }
 
     #[test]
@@ -980,6 +1039,7 @@ mod tests {
             answer,
             delivery,
             offer: None,
+            rule_match: None,
         });
         snapshot
     }
@@ -997,6 +1057,7 @@ mod tests {
             suggested: vec![dest("HEX", "last sent")],
             recent: vec![dest("HOME", "yesterday")],
             site: Some("seer.example.com".into()),
+            by: crate::capture_host::AutoSendBy::Rule,
         };
         // The router sends a rule's answer at once.
         let sending = || Some(RouteDelivery::Sending { to: "SEER".into() });
@@ -1011,6 +1072,7 @@ mod tests {
                     ],
                     recent: vec![Dest::new("HOME", "yesterday").session("ses_HOME")],
                     site: Some("seer.example.com".into()),
+                    by: crate::capture_host::AutoSendBy::Rule,
                 }),
                 Input::Sending
             ]

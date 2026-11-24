@@ -1,4 +1,5 @@
 use super::delete::{delete_in, delete_meeting};
+use super::finish::discard_if_empty_in;
 use super::retention::{
     audio_expired_meetings, expired_meetings, trash_audio_tracks, trash_expired,
 };
@@ -568,6 +569,123 @@ fn an_old_twelve_hour_default_title_stays_the_default_in_another_language() {
     assert_eq!(manifest.title_source(), TitleSource::Default);
     crate::desktop::i18n::apply(Some("en"));
     assert_eq!(manifest.title, default_title(None, manifest.created_at_ms));
+    fs::remove_dir_all(base).unwrap();
+}
+
+/// Writes the pair of final transcript files a completed pass publishes, so
+/// discard decisions read a real transcript.ndjson.
+fn write_final_transcript(directory: &Path, entries: &[TranscriptEntry]) {
+    let mut ndjson = String::new();
+    for entry in entries {
+        ndjson.push_str(&serde_json::to_string(entry).unwrap());
+        ndjson.push('\n');
+    }
+    fs::write(directory.join("transcript.ndjson"), ndjson).unwrap();
+    fs::write(directory.join("transcript.md"), "# Meeting\n").unwrap();
+}
+
+#[test]
+fn an_empty_finished_meeting_is_moved_to_the_trash() {
+    let (base, directory) = finished_meeting("discard-empty", "Design sync");
+    write_final_transcript(&directory, &[]);
+    let manifest = read_manifest(&directory).unwrap();
+    let export = manifest.export_path.clone().unwrap();
+    let mut trashed = Vec::new();
+    let discarded = discard_if_empty_in(&base, &manifest, |path| {
+        trashed.push(path.to_path_buf());
+        Ok(())
+    })
+    .unwrap();
+    assert!(discarded);
+    assert_eq!(trashed, [export, directory.clone()]);
+    fs::remove_dir_all(base).unwrap();
+}
+
+/// Asserts a meeting is kept: false, and nothing handed to the Trash.
+fn assert_kept(base: &Path, manifest: &MeetingManifest) {
+    let mut trashed = Vec::new();
+    let discarded = discard_if_empty_in(base, manifest, |path| {
+        trashed.push(path.to_path_buf());
+        Ok(())
+    });
+    assert!(!discarded.unwrap());
+    assert!(trashed.is_empty());
+}
+
+#[test]
+fn a_meeting_with_speech_or_a_failure_is_never_discarded() {
+    // One finished entry is enough to keep the meeting.
+    let (base, directory) = finished_meeting("discard-spoken", "Design sync");
+    write_final_transcript(
+        &directory,
+        &[TranscriptEntry {
+            source: MeetingSource::Microphone,
+            start_ms: 1_000,
+            end_ms: 2_000,
+            text: "Hi.".into(),
+        }],
+    );
+    let manifest = read_manifest(&directory).unwrap();
+    assert_kept(&base, &manifest);
+    fs::remove_dir_all(base).unwrap();
+
+    // A transcription failure is not an empty success.
+    let (base, directory) = finished_meeting("discard-failed", "Design sync");
+    write_final_transcript(&directory, &[]);
+    let mut manifest = read_manifest(&directory).unwrap();
+    manifest.status = MeetingStatus::Failed;
+    manifest.error = Some("the model failed".into());
+    write_manifest(&directory, &manifest).unwrap();
+    assert_kept(&base, &manifest);
+    fs::remove_dir_all(base).unwrap();
+
+    // An Interrupted meeting, and a Complete one that carries an error, wait
+    // for a person instead of being swept.
+    let (base, directory) = finished_meeting("discard-interrupted", "Design sync");
+    write_final_transcript(&directory, &[]);
+    let mut manifest = read_manifest(&directory).unwrap();
+    manifest.status = MeetingStatus::Interrupted;
+    write_manifest(&directory, &manifest).unwrap();
+    assert_kept(&base, &manifest);
+    fs::remove_dir_all(base).unwrap();
+
+    let (base, directory) = finished_meeting("discard-error", "Design sync");
+    write_final_transcript(&directory, &[]);
+    let mut manifest = read_manifest(&directory).unwrap();
+    manifest.error = Some("a stale failure".into());
+    write_manifest(&directory, &manifest).unwrap();
+    assert_kept(&base, &manifest);
+    fs::remove_dir_all(base).unwrap();
+
+    // Complete without the published transcript pair is not a finished pass.
+    let (base, directory) = finished_meeting("discard-unpublished", "Design sync");
+    let manifest = read_manifest(&directory).unwrap();
+    assert_kept(&base, &manifest);
+    fs::remove_dir_all(base).unwrap();
+
+    // A final pass still pending keeps the meeting: deletion would race it.
+    let (base, directory) = finished_meeting("discard-pending", "Design sync");
+    write_final_transcript(&directory, &[]);
+    let manifest = read_manifest(&directory).unwrap();
+    fs::write(directory.join(FINAL_PENDING_FILE), b"").unwrap();
+    let mut trashed = Vec::new();
+    let refused = discard_if_empty_in(&base, &manifest, |path| {
+        trashed.push(path.to_path_buf());
+        Ok(())
+    });
+    assert!(refused.is_err());
+    assert!(trashed.is_empty());
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn a_meeting_that_dropped_echo_is_kept_even_with_no_entries() {
+    let (base, directory) = finished_meeting("discard-echo", "Design sync");
+    write_final_transcript(&directory, &[]);
+    let mut manifest = read_manifest(&directory).unwrap();
+    manifest.echo_suppressed_utterances = 2;
+    write_manifest(&directory, &manifest).unwrap();
+    assert_kept(&base, &manifest);
     fs::remove_dir_all(base).unwrap();
 }
 

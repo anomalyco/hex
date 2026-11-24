@@ -30,6 +30,13 @@ impl Reasons {
     pub(crate) fn released(self) -> bool {
         self.display_asleep || self.system_asleep || self.session_locked
     }
+
+    /// Whether the session is locked or the Mac is asleep. Playback from an
+    /// app a meeting watches is no evidence that someone is at the call then,
+    /// while a display that merely dimmed is (#2685).
+    pub(crate) fn locked(self) -> bool {
+        self.session_locked || self.system_asleep
+    }
 }
 
 static DISPLAY_ASLEEP: AtomicBool = AtomicBool::new(false);
@@ -57,6 +64,12 @@ fn held() -> Reasons {
 /// released even with `release_microphone_while_idle` off.
 pub fn released() -> bool {
     held().released()
+}
+
+/// Whether the session is locked or the Mac is asleep, when a browser's
+/// playback stops counting as someone being at its call (#2685).
+pub fn session_locked() -> bool {
+    held().locked()
 }
 
 /// Holds or clears one reason for the app's life, logging each transition
@@ -294,6 +307,33 @@ mod tests {
             }
             .released()
         );
+    }
+
+    /// A locked session or a sleeping Mac stops playback counting as presence;
+    /// a display that merely dimmed does not.
+    #[test]
+    fn only_a_lock_or_sleep_stops_playback_counting() {
+        assert!(!Reasons::default().locked());
+        assert!(
+            !Reasons {
+                display_asleep: true,
+                ..Default::default()
+            }
+            .locked(),
+            "a dimmed display leaves a call where it was"
+        );
+        for reasons in [
+            Reasons {
+                session_locked: true,
+                ..Default::default()
+            },
+            Reasons {
+                system_asleep: true,
+                ..Default::default()
+            },
+        ] {
+            assert!(reasons.locked());
+        }
     }
 
     /// The reasons the observers hold are independent: a screen that wakes

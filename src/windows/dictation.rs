@@ -118,6 +118,8 @@ pub struct WindowsDictationConfig {
     pub terminal_paste_hotkey: Option<WindowsHotkey>,
     /// Labs › Second dictation shortcut, while the lab is on and it is bound.
     pub second_dictation_hotkey: Option<WindowsHotkey>,
+    /// Labs › Model switch shortcut, while the lab is on and it is bound.
+    pub model_switch_hotkey: Option<WindowsHotkey>,
     /// The Annotate key, while Annotate is on.
     pub annotate_hotkey: Option<WindowsHotkey>,
     /// Toggle mode's cancel shortcut; none in Hold mode.
@@ -178,6 +180,9 @@ impl WindowsDictationConfig {
                 .map(WindowsHotkey::from),
             second_dictation_hotkey: settings
                 .active_second_dictation_hotkey()
+                .map(WindowsHotkey::from),
+            model_switch_hotkey: settings
+                .active_model_switch_hotkey()
                 .map(WindowsHotkey::from),
             annotate_hotkey: settings
                 .capture_on()
@@ -815,6 +820,12 @@ pub fn run(
                     events.dictation(DictationPhase::Cancelled, "")?;
                     emit_current_state(&mut events, phase.is_recording(), pending, &device_label)?;
                     release_microphone!();
+                }
+                // Labs › Model switch shortcut: ask the host that owns model
+                // preparation to swap, installed only. A capture or a client's
+                // dictation keeps the model it started with.
+                HotkeyAction::ModelSwitch if phase.is_idle() && !service.is_active() => {
+                    crate::transcription::other_model::request();
                 }
                 HotkeyAction::PasteLast if phase.is_idle() => {
                     submit_paste_last(

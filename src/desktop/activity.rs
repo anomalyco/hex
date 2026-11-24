@@ -106,6 +106,8 @@ pub(crate) fn failure_explanation(message: &str) -> String {
         .to_owned()
     } else if message.contains(crate::audio::NO_MICROPHONE_ERROR) {
         crate::desktop::i18n::tr("No microphone is available. Connect a microphone.").to_owned()
+    } else if crate::paste::refused_by_macos(message) {
+        crate::desktop::i18n::tr(crate::paste::POST_EVENT_REFUSED).to_owned()
     } else {
         message.to_owned()
     }
@@ -395,6 +397,11 @@ mod tests {
         assert_eq!(
             failure_explanation("OpenCode generation failed"),
             "OpenCode generation failed"
+        );
+        assert_eq!(
+            failure_explanation(crate::paste::POST_EVENT_REFUSED),
+            crate::desktop::i18n::tr(crate::paste::POST_EVENT_REFUSED),
+            "a refused paste names the pane to add Hex to"
         );
     }
 }

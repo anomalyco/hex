@@ -1,0 +1,26 @@
+--- a/ggml/src/ggml.c
++++ b/ggml/src/ggml.c
+@@ -155,6 +155,15 @@
+ }
+ #endif
+ 
++#if defined(__ANDROID__)
++// Hex: in a keyboard's process, never fork, exec gdb or lldb, or set a ptracer: print the in-process backtrace only.
++void ggml_print_backtrace(void) {
++    if (getenv("GGML_NO_BACKTRACE")) {
++        return;
++    }
++    ggml_print_backtrace_symbols();
++}
++#else
+ void ggml_print_backtrace(void) {
+     const char * GGML_NO_BACKTRACE = getenv("GGML_NO_BACKTRACE");
+     if (GGML_NO_BACKTRACE) {
+@@ -235,6 +244,7 @@
+         waitpid(child_pid, NULL, 0);
+     }
+ }
++#endif // defined(__ANDROID__)
+ #else
+ void ggml_print_backtrace(void) {
+     // platform not supported

@@ -154,7 +154,7 @@ final class DictationStateMachineTests: XCTestCase {
         // 1. Cold at start.
         XCTAssertEqual(controller.warmSession, .cold)
         XCTAssertFalse(controller.keyboardSessionEnabled)
-        XCTAssertEqual(controller.keyboardSessionExpiresAt, 0)
+        XCTAssertEqual(controller.warmSession.expiresAt, 0)
         XCTAssertEqual(controller.keyboardSessionRemaining, 0)
         XCTAssertEqual(controller.keyboardSessionDisplayRemaining, "0:00")
 
@@ -163,7 +163,7 @@ final class DictationStateMachineTests: XCTestCase {
         try await settle()
         XCTAssertEqual(controller.warmSession, .warm(expiresAt: now + 900, suspendedOnInterruption: false))
         XCTAssertTrue(controller.keyboardSessionEnabled)
-        XCTAssertEqual(controller.keyboardSessionExpiresAt, now + 900)
+        XCTAssertEqual(controller.warmSession.expiresAt, now + 900)
         XCTAssertEqual(controller.keyboardSessionRemaining, 900)
         XCTAssertEqual(controller.keyboardSessionDisplayRemaining, "15m")
 
@@ -174,7 +174,7 @@ final class DictationStateMachineTests: XCTestCase {
         controller.handleAudioSystemEvent(.interruptionEnded(shouldResume: true))
         XCTAssertEqual(controller.warmSession, .cold)
         XCTAssertFalse(controller.keyboardSessionEnabled)
-        XCTAssertEqual(controller.keyboardSessionExpiresAt, 0)
+        XCTAssertEqual(controller.warmSession.expiresAt, 0)
         XCTAssertEqual(controller.keyboardSessionRemaining, 0)
         XCTAssertEqual(controller.keyboardSessionDisplayRemaining, "0:00")
 
@@ -191,12 +191,12 @@ final class DictationStateMachineTests: XCTestCase {
         controller.cancelCurrentJob()
         XCTAssertEqual(controller.warmSession, .cold)
         XCTAssertFalse(controller.keyboardSessionEnabled)
-        XCTAssertEqual(controller.keyboardSessionExpiresAt, 0)
+        XCTAssertEqual(controller.warmSession.expiresAt, 0)
         XCTAssertEqual(controller.keyboardSessionRemaining, 0)
         XCTAssertEqual(controller.keyboardSessionDisplayRemaining, "0:00")
         XCTAssertEqual(controller.phase, .ready)
         XCTAssertNil(controller.capture.activeSession)
-        XCTAssertEqual(controller.capture.keyboardJob, .none)
+        XCTAssertNil(controller.capture.keyboardJobID)
     }
 
     // MARK: - DictationController.Capture & Derived Phase Invariants
@@ -227,7 +227,7 @@ final class DictationStateMachineTests: XCTestCase {
         controller.startRecording(keyboardJobID: "job-denied")
         try await settle()
         XCTAssertFalse(controller.capture.allowsKeyboardRetry)
-        XCTAssertEqual(controller.capture.keyboardJob, .none)
+        XCTAssertNil(controller.capture.keyboardJobID)
         if case .failed = controller.phase {} else { XCTFail("Expected failed phase, got \(controller.phase)") }
 
         // Microphone failure with model ready IS keyboard-retryable and carries failure timestamp.
@@ -238,7 +238,7 @@ final class DictationStateMachineTests: XCTestCase {
         try await settle()
         XCTAssertTrue(controller.capture.allowsKeyboardRetry)
         XCTAssertEqual(controller.capture.failureMessage?.at, now)
-        XCTAssertEqual(controller.capture.keyboardJob, .none)
+        XCTAssertNil(controller.capture.keyboardJobID)
         XCTAssertNil(controller.capture.activeSession)
 
         // Unexpected capture failure clears activeSession and marks capture retryable.
@@ -248,11 +248,16 @@ final class DictationStateMachineTests: XCTestCase {
         try await settle()
         XCTAssertEqual(controller.phase, .recording)
         let activeURL = try XCTUnwrap(controller.capture.activeSession?.capture.url)
-        XCTAssertEqual(controller.capture.keyboardJob, .active(id: "job-unexpected"))
+        XCTAssertEqual(controller.capture.keyboardJobID, "job-unexpected")
+
+        // Transitioning modelState to .ready during an active capture preserves the recording.
+        controller.transition(model: .ready)
+        XCTAssertEqual(controller.phase, .recording)
+        XCTAssertEqual(controller.capture.keyboardJobID, "job-unexpected")
 
         audio.onUnexpectedCaptureEnd?(activeURL, false)
         XCTAssertNil(controller.capture.activeSession)
-        XCTAssertEqual(controller.capture.keyboardJob, .none)
+        XCTAssertNil(controller.capture.keyboardJobID)
         XCTAssertTrue(controller.capture.allowsKeyboardRetry)
         XCTAssertEqual(controller.phase, .failed(String(localized: "Recording stopped.")))
 
@@ -265,7 +270,7 @@ final class DictationStateMachineTests: XCTestCase {
         controller.finishRecording()
         try await settle()
         XCTAssertNil(controller.capture.activeSession)
-        XCTAssertEqual(controller.capture.keyboardJob, .none)
+        XCTAssertNil(controller.capture.keyboardJobID)
         XCTAssertTrue(controller.capture.allowsKeyboardRetry)
         if case .failed = controller.phase {} else { XCTFail("Expected failed phase") }
 
@@ -277,90 +282,52 @@ final class DictationStateMachineTests: XCTestCase {
         XCTAssertFalse(controller.capture.allowsKeyboardRetry)
     }
 
-    // MARK: - KeyboardLocalCapturePhase State Machine
+    // MARK: - KeyboardLocalCapturePhase Snapshot Projection
 
-    func testLocalCaptureStartupProgressionRequiresAudioFileBeforeRecording() {
+    func testLocalCapturePhaseSnapshotTransitionsDriveViewModel() throws {
         let t0 = 40_000.0
-        var phase: KeyboardLocalCapturePhase = .starting(
-            jobID: "job-1",
-            requestedAt: t0,
-            stage: .awaitingAudioSession
-        )
+        let model = KeyboardViewModel()
+        func apply(_ phase: KeyboardLocalCapturePhase, at now: TimeInterval, loudnessDB: Float = -62) {
+            model.applyBridgeState(
+                hasFullAccess: true,
+                snapshot: phase.snapshot(now: now, loudnessDB: loudnessDB) ?? .offline,
+                isModelInstalled: true,
+                style: .polished,
+                now: now,
+                animated: false
+            )
+        }
 
-        XCTAssertTrue(phase.isActive)
-        XCTAssertTrue(phase.isCapturing("job-1"))
-        XCTAssertTrue(phase.isAwaitingAudioSession("job-1"))
-        XCTAssertFalse(phase.isAwaitingAudioSession("other"))
-        XCTAssertEqual(phase.visibleStage, .starting)
+        // Armed touch-down emits no snapshot so the keyboard stays idle until kept.
+        let armed = KeyboardLocalCapturePhase.armed(jobID: "job-1")
+        XCTAssertTrue(armed.isActive)
+        XCTAssertTrue(armed.isCapturing("job-1"))
+        XCTAssertNil(armed.snapshot(now: t0, loudnessDB: -62))
+        apply(armed, at: t0)
+        XCTAssertEqual(model.stagePhase, .idle)
 
-        // Audio arriving before audio session and page start never promotes to recording.
-        XCTAssertFalse(phase.receiveAudio(jobID: "job-1", at: t0 + 0.05))
-        XCTAssertEqual(phase.visibleStage, .starting)
+        // Kept before audio flows: .starting keeps UI in .starting with no running clock.
+        let starting = KeyboardLocalCapturePhase.starting(jobID: "job-1")
+        XCTAssertEqual(starting.visibleStage, .starting)
+        apply(starting, at: t0 + 0.1)
+        XCTAssertEqual(model.stagePhase, .starting)
+        XCTAssertEqual(model.clock.recordingText, "0:00")
 
-        // Wrong job ID cannot advance audio session.
-        XCTAssertFalse(phase.markAudioSessionReady(jobID: "other"))
-        XCTAssertTrue(phase.markAudioSessionReady(jobID: "job-1"))
-        XCTAssertFalse(phase.isAwaitingAudioSession("job-1"))
-        XCTAssertEqual(phase, .starting(jobID: "job-1", requestedAt: t0, stage: .awaitingPage))
+        // First audio arrives: .recording advances clock from startedAt and passes loudness.
+        let recording = KeyboardLocalCapturePhase.recording(jobID: "job-1", startedAt: t0 + 0.25)
+        apply(recording, at: t0 + 2.25, loudnessDB: -24)
+        XCTAssertEqual(model.stagePhase, .recording)
+        XCTAssertEqual(model.liveLoudnessDB, -24)
+        XCTAssertEqual(model.clock.recordingText, "0:02")
 
-        // Audio arriving before WebKit .started still cannot promote to recording.
-        XCTAssertFalse(phase.receiveAudio(jobID: "job-1", at: t0 + 0.10))
-        XCTAssertEqual(phase.visibleStage, .starting)
+        // Transcribing stops capturing while keeping the job active.
+        let transcribing = KeyboardLocalCapturePhase.transcribing(jobID: "job-1")
+        XCTAssertTrue(transcribing.isActive)
+        XCTAssertFalse(transcribing.isCapturing("job-1"))
+        apply(transcribing, at: t0 + 2.5)
+        XCTAssertEqual(model.stagePhase, .transcribing)
 
-        // Page .started advances to .awaitingFirstAudio; now first PCM buffer promotes to .recording.
-        XCTAssertTrue(phase.markPageStarted(jobID: "job-1"))
-        XCTAssertEqual(phase, .starting(jobID: "job-1", requestedAt: t0, stage: .awaitingFirstAudio))
-        XCTAssertTrue(phase.receiveAudio(jobID: "job-1", at: t0 + 0.25))
-        XCTAssertEqual(phase, .recording(jobID: "job-1", startedAt: t0 + 0.25))
-        XCTAssertEqual(phase.visibleStage, .recording)
-    }
-
-    func testArmedCaptureDeferredFailureSurfacesOnlyWhenKeptAndDropsOnDiscard() {
-        let t0 = 50_000.0
-        var kept: KeyboardLocalCapturePhase = .armed(
-            jobID: "armed-1",
-            requestedAt: t0,
-            readiness: .starting(.awaitingAudioSession)
-        )
-        XCTAssertTrue(kept.isCapturing("armed-1"))
-        XCTAssertNil(kept.snapshot(now: t0 + 0.05, loudnessDB: -62))
-
-        // Failure while armed stays hidden until the touch is kept.
-        XCTAssertTrue(kept.recordFailure(message: "Mic busy", detail: "NotReadableError", now: t0 + 0.1))
-        XCTAssertFalse(kept.isCapturing("armed-1"), "failed armed capture accepts no further audio")
-        XCTAssertEqual(kept.visibleStage, .idle)
-        XCTAssertNil(kept.snapshot(now: t0 + 0.15, loudnessDB: -62))
-
-        // Keeping the armed touch surfaces the deferred failure.
-        let outcome = kept.keepArmed(now: t0 + 0.2, failureDuration: 6)
-        XCTAssertEqual(outcome, .failed(.init(message: "Mic busy", detail: "NotReadableError")))
-        XCTAssertEqual(kept, .failed(message: "Mic busy", until: t0 + 6.2))
-        XCTAssertEqual(kept.visibleStage, .failed)
-        XCTAssertEqual(kept.snapshot(now: t0 + 0.3, loudnessDB: -62)?.state, .failed)
-
-        // Failure expires cleanly back to idle.
-        XCTAssertFalse(kept.expireFailureIfNeeded(at: t0 + 6.1))
-        XCTAssertTrue(kept.expireFailureIfNeeded(at: t0 + 6.2))
-        XCTAssertEqual(kept, .idle)
-        XCTAssertNil(kept.snapshot(now: t0 + 6.2, loudnessDB: -62))
-    }
-
-    func testArmedCapturePreservesStartupStageAcrossKeepArmedAndAudioArrival() {
-        let t0 = 60_000.0
-        var phase: KeyboardLocalCapturePhase = .armed(
-            jobID: "armed-2",
-            requestedAt: t0,
-            readiness: .starting(.awaitingAudioSession)
-        )
-        XCTAssertTrue(phase.markAudioSessionReady(jobID: "armed-2"))
-        // Kept mid-startup (page still opening): preserves .awaitingPage in .starting.
-        XCTAssertEqual(phase.keepArmed(now: t0 + 0.1), .starting(.awaitingPage))
-        XCTAssertEqual(phase, .starting(jobID: "armed-2", requestedAt: t0, stage: .awaitingPage))
-        XCTAssertTrue(phase.markPageStarted(jobID: "armed-2"))
-        XCTAssertTrue(phase.receiveAudio(jobID: "armed-2", at: t0 + 0.3))
-        XCTAssertEqual(phase, .recording(jobID: "armed-2", startedAt: t0 + 0.3))
-
-        // Finished result carries one KeyboardResult payload and produces a deliverable snapshot.
+        // Finished carries one KeyboardResult payload and produces a deliverable snapshot.
         let result = KeyboardResult(
             id: "res-1",
             transcript: "Ship it.",
@@ -368,12 +335,22 @@ final class DictationStateMachineTests: XCTestCase {
             stages: nil,
             translationFailure: nil
         )
-        phase = .finished(jobID: "armed-2", result: result)
-        let snap = phase.snapshot(now: t0 + 1.0, loudnessDB: -62)
-        XCTAssertEqual(snap?.state, .ready)
-        XCTAssertEqual(snap?.resultID, "res-1")
-        XCTAssertEqual(snap?.transcript, "Ship it.")
-        XCTAssertEqual(snap?.heard, "ship it")
+        let finished = KeyboardLocalCapturePhase.finished(jobID: "job-1", result: result)
+        let finSnap = try XCTUnwrap(finished.snapshot(now: t0 + 3.0, loudnessDB: -62))
+        XCTAssertEqual(finSnap.state, .ready)
+        XCTAssertEqual(finSnap.resultID, "res-1")
+        XCTAssertEqual(finSnap.transcript, "Ship it.")
+        XCTAssertEqual(finSnap.heard, "ship it")
+
+        // Failure surfaces with heartbeat/expiresAt 0 (not warm) and clears once expired.
+        let failed = KeyboardLocalCapturePhase.failed(message: "Mic busy", until: t0 + 10.0)
+        apply(failed, at: t0 + 4.0)
+        XCTAssertEqual(model.stagePhase, .failed)
+        XCTAssertFalse(model.isWarmAvailable)
+        XCTAssertEqual(model.statusSlot, .message("Mic busy", isFailure: true))
+        XCTAssertNil(failed.snapshot(now: t0 + 10.0, loudnessDB: -62))
+        apply(failed, at: t0 + 10.0)
+        XCTAssertEqual(model.stagePhase, .idle)
     }
 
     func testKeyboardCaptureWatchDetectsStartupAndInterruptionStalls() {

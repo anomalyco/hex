@@ -219,6 +219,55 @@ final class TranslationPasteSwitchTests: XCTestCase {
         )
     }
 
+    /// Settings checks and downloads the pair the keyboard translates, from the language the
+    /// keyboard speaks. Hex set to English on a Chinese iPhone writes its own Automatic pick
+    /// (English), which the keyboard, following the iPhone, doesn't use.
+    func testSettingsChecksTheLanguageTheKeyboardSpeaks() {
+        let languages = LanguageSettings(defaults: defaults)
+        let settings = DictationTranslationSettings(defaults: defaults)
+        let chineseIPhone = ["zh-Hans-CN", "en-US"]
+
+        XCTAssertNil(
+            settings.keyboardSpokenLanguage(languages: languages, iPhoneLanguages: chineseIPhone),
+            "before Hex has listed Apple's languages or the keyboard has dictated: unknown, never a guess"
+        )
+
+        languages.supportedDictationLanguages = ["en-US", "ja-JP", "zh-TW", "zh-CN"]
+        languages.automaticDictationLanguage = "en-US"
+        XCTAssertEqual(
+            settings.keyboardSpokenLanguage(languages: languages, iPhoneLanguages: chineseIPhone),
+            "zh-CN",
+            "before the keyboard's first dictation: the iPhone's first language Hex dictates, as the keyboard's Automatic picks"
+        )
+        XCTAssertEqual(
+            settings.keyboardSpokenLanguage(languages: languages, iPhoneLanguages: ["ga-IE"]),
+            "en-US",
+            "an iPhone in a language Hex doesn't dictate: US English, the keyboard's last resort"
+        )
+
+        settings.noteKeyboardDictation(in: "zh-TW", languages: languages, at: Date(timeIntervalSince1970: 100))
+        XCTAssertEqual(settings.keyboardSpokenLanguage(languages: languages, iPhoneLanguages: chineseIPhone), "zh-TW")
+        XCTAssertEqual(
+            Set(defaults.dictionary(forKey: "experiments.translateDictation.keyboardAutomaticLanguage")?.keys.map { $0 } ?? []),
+            ["language", "at"],
+            "only the language and when: nothing that says what was said"
+        )
+
+        languages.dictationLanguage = "ja-JP"
+        settings.noteKeyboardDictation(in: "ja-JP", languages: languages)
+        XCTAssertEqual(settings.keyboardSpokenLanguage(languages: languages, iPhoneLanguages: chineseIPhone), "ja-JP")
+        XCTAssertEqual(settings.keyboardAutomaticLanguage?.language, "zh-TW", "kept only while the keyboard is on Automatic")
+    }
+
+    /// Apple's download sheet comes only after the person turned translation on or picked a
+    /// target, and only for a pair whose packs aren't on the iPhone; opening Settings never shows it.
+    func testOnlyThePersonsChoiceAsksForTheDownload() {
+        XCTAssertTrue(DictationTranslationSettings.asksToDownload(.supported, afterPersonActed: true))
+        XCTAssertFalse(DictationTranslationSettings.asksToDownload(.supported, afterPersonActed: false), "the page appearing")
+        XCTAssertFalse(DictationTranslationSettings.asksToDownload(.installed, afterPersonActed: true))
+        XCTAssertFalse(DictationTranslationSettings.asksToDownload(.unsupported, afterPersonActed: true))
+    }
+
     func testTheHexKeyWearsTheTargetWhileTranslating() {
         let model = KeyboardViewModel()
         model.translationLanguage = "en"

@@ -18,9 +18,21 @@ unsafe extern "C" {
     fn hex_close_permission_guide(permission: i32);
     fn hex_permission_guide_active(permission: i32) -> bool;
     fn hex_permission_list_name(permission: i32) -> *const std::ffi::c_char;
+    fn hex_permission_drag_supported(permission: i32) -> bool;
+    fn hex_permission_split_accessibility() -> bool;
     fn hex_permission_settings_state() -> i32;
     fn hex_prompt_accessibility_trust() -> bool;
     fn hex_running_app_bundle_id(buf: *mut u8, cap: usize) -> usize;
+}
+
+#[link(name = "CoreGraphics", kind = "framework")]
+unsafe extern "C" {
+    /// Whether this process may post key events, the privilege behind ⌘V.
+    safe fn CGPreflightPostEventAccess() -> bool;
+    /// Asks macOS for that privilege and shows its request. macOS 27.3 moved
+    /// the grant to System & App Protection Override, where an app appears
+    /// only after it asks.
+    safe fn CGRequestPostEventAccess() -> bool;
 }
 
 const fn code(kind: PermissionKind) -> i32 {
@@ -64,10 +76,53 @@ pub(crate) fn screen_recording_answered(access: crate::capture_host::ScreenAcces
     access != crate::capture_host::ScreenAccess::Off
 }
 
-/// What System Settings calls the list: macOS 27 renamed Accessibility.
+/// What System Settings calls the list: macOS 27 renamed Accessibility, and
+/// 27.3 renamed it again to "System & App Protection Override".
 pub(crate) fn list_name(kind: PermissionKind) -> &'static str {
     let name = unsafe { CStr::from_ptr(hex_permission_list_name(code(kind))) };
     name.to_str().unwrap_or("Accessibility")
+}
+
+/// Whether Hex's guide can offer a tile to drag into `kind`'s list.
+///
+/// macOS 27.3's System & App Protection Override rejects dropped tiles: it
+/// asks for a click on the Privacy & Security notification instead, and apps
+/// are added with the pane's own + control. The Microphone list never takes a
+/// tile either, because it only holds apps that already asked.
+pub(crate) fn drag_supported(kind: PermissionKind) -> bool {
+    unsafe { hex_permission_drag_supported(code(kind)) }
+}
+
+/// Whether macOS 27.3 split Accessibility into Accessibility and System & App
+/// Protection Override. There the Accessibility grant no longer covers posting
+/// key events, so setup and paste ask about that privilege separately.
+pub(crate) fn split_accessibility() -> bool {
+    unsafe { hex_permission_split_accessibility() }
+}
+
+/// Whether macOS lets this process post key events: the privilege behind ⌘V,
+/// Return, and typed text. On macOS 27.3 it is granted through System & App
+/// Protection Override, apart from the Accessibility (AX) trust that lets Hex
+/// read the focused app. The answer keeps its launch-time value, so a grant
+/// made while Hex runs shows only after Hex restarts.
+pub(crate) fn post_event_access() -> bool {
+    CGPreflightPostEventAccess()
+}
+
+/// Asks macOS to allow this process to post key events, and shows its request
+/// (on macOS 27.3 the Privacy & Security notification that adds Hex to System
+/// & App Protection Override). Below 27.3 the Accessibility grant already
+/// covers posting, so nothing is asked. The answer is logged: a fresh grant
+/// can read as refused until Hex restarts, so no caller can act on it.
+pub(crate) fn request_post_event_access() {
+    if !split_accessibility() {
+        return;
+    }
+    let granted = CGRequestPostEventAccess();
+    tracing::info!(
+        granted = granted,
+        "asked macOS for permission to post key events (System & App Protection Override)"
+    );
 }
 
 /// Whether System Settings has an open window, whether it is frontmost, and
@@ -229,5 +284,18 @@ mod tests {
         assert!(!screen_recording_answered(ScreenAccess::Off));
         assert!(screen_recording_answered(ScreenAccess::NeedsRestart));
         assert!(screen_recording_answered(ScreenAccess::Allowed));
+    }
+
+    /// Only macOS 27.3's renamed Accessibility list lost the dropped tile;
+    /// the Microphone list never took one, and the other lists still do.
+    #[test]
+    fn only_macos_27_3_accessibility_refuses_the_dragged_tile() {
+        assert!(!drag_supported(PermissionKind::Microphone));
+        assert!(drag_supported(PermissionKind::SystemAudio));
+        assert!(drag_supported(PermissionKind::ScreenRecording));
+        assert_eq!(
+            drag_supported(PermissionKind::Accessibility),
+            list_name(PermissionKind::Accessibility) != "System & App Protection Override",
+        );
     }
 }

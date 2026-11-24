@@ -3,10 +3,11 @@
 //! select-style menus, buttons, keycaps, and note. Colours,
 //! type, radii, elevation, and motion come from the kit's tokens.
 
-use rune::{
-    Color, Edge, El, LoopSpec, Shadow, Spring, SpringPair, TextStyle, Transition, Tx, col, el, row,
-    text,
-};
+mod keycaps;
+
+pub(super) use keycaps::*;
+
+use rune::{Color, El, LoopSpec, SpringPair, TextStyle, Transition, Tx, col, el, row, text};
 use rune_kit::{
     Button, ButtonVariant, ControlSize, Kit, Menu, MenuItem, Placement, SegmentedControl, Select,
     SelectAppearance, Switch,
@@ -16,9 +17,8 @@ use super::Ui;
 
 /// Row descriptions and secondary copy.
 pub(super) const DESCRIPTION: TextStyle = TextStyle::new(12.0, 440.0).lh(16.0);
-/// The Dictation stats dialog's headline numbers, above the kit's steps.
-pub(super) const STATS_NUMBER: TextStyle =
-    TextStyle::new(18.0, 620.0).lh(22.0).features("'tnum' 1");
+/// User-content detail titles (such as a meeting's name) and headline stat numbers.
+pub(super) const DISPLAY: TextStyle = TextStyle::new(18.0, 600.0).lh(24.0);
 const SELECT_WIDTH: f32 = 220.0;
 /// A select whose rows carry a description: wide enough for a full choice
 /// name beside the hint under it, which takes whatever is left.
@@ -30,14 +30,13 @@ pub(super) const DEVICE_SELECT_WIDTH: f32 = 320.0;
 /// squeezing the description to a word per line (tiling desktops ignore
 /// the window's 860 px minimum width).
 const COPY_MIN_WIDTH: f32 = 100.0;
-/// An [`icon_row`]'s icon and the gap after it.
-const ICON_LEAD: f32 = 28.0;
 
-/// A settings page's measurements: raised cards of rows under muted
-/// labels. The title, section labels, and row text share the gutter; cards
-/// hang outward by `row_px` on both sides, so row controls end where the
+/// A settings page's and split pane's measurements: raised cards of rows under
+/// muted labels. The title, section labels, and row text share the gutter;
+/// cards hang outward by `row_px` on both sides, so row controls end where the
 /// title bar's actions do.
 #[derive(Clone, Copy)]
+#[allow(dead_code)]
 pub(super) struct Metrics {
     /// The page's text edge: the title's, section labels', and rows'.
     pub(super) gutter: f32,
@@ -49,6 +48,26 @@ pub(super) struct Metrics {
     pub(super) row_px: f32,
     pub(super) row_h: f32,
     pub(super) row_h_described: f32,
+    /// Pane header height.
+    pub(super) header_h: f32,
+    /// Compact row height (sidebar items, menu rows).
+    pub(super) row_h_compact: f32,
+    /// Two-line list item height in split panes.
+    pub(super) item_h: f32,
+    /// Leading row icon size.
+    pub(super) icon: f32,
+    /// Leading icon column width (icon + gap) in settings rows and list rows.
+    pub(super) icon_lead: f32,
+    /// Fixed list column width in list + detail panes.
+    pub(super) list_w: f32,
+    /// Gap between list column and detail card.
+    pub(super) split_gap: f32,
+    /// Detail card inner padding on all sides.
+    pub(super) detail_pad: f32,
+    /// Fact label column width in detail views.
+    pub(super) fact_label_w: f32,
+    /// Centred empty-state and option copy width.
+    pub(super) copy_w: f32,
 }
 
 pub(super) const METRICS: Metrics = Metrics {
@@ -58,7 +77,115 @@ pub(super) const METRICS: Metrics = Metrics {
     row_px: 16.0,
     row_h: 48.0,
     row_h_described: 60.0,
+    header_h: 52.0,
+    row_h_compact: 28.0,
+    item_h: 52.0,
+    icon: 16.0,
+    icon_lead: 28.0,
+    list_w: 320.0,
+    split_gap: 12.0,
+    detail_pad: 24.0,
+    fact_label_w: 120.0,
+    copy_w: 280.0,
 };
+
+/// Standard modal sheet widths. A modal is a small page and reuses the page's
+/// rails: card edge at `gutter - row_px` (16), title and footer on `gutter` (32).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ModalWidth {
+    /// Sounds, Dictation stats.
+    Narrow = 460,
+    /// Calls, Auto-send rules.
+    Medium = 560,
+    /// Shortcut mode, Vocabulary.
+    Wide = 640,
+}
+
+impl ModalWidth {
+    pub(super) const fn px(self) -> f32 {
+        self as u16 as f32
+    }
+}
+
+/// Shared vertical rhythm and window clearance for modal sheets.
+#[derive(Clone, Copy)]
+pub(super) struct Modal {
+    pub(super) top: f32,
+    pub(super) bottom: f32,
+    pub(super) gap: f32,
+    pub(super) margin: f32,
+}
+
+pub(super) const MODAL: Modal = Modal {
+    top: 20.0,
+    bottom: 16.0,
+    gap: 16.0,
+    margin: 24.0,
+};
+
+/// Unified capsule geometry shared across overlay surfaces (Meetings, Annotate,
+/// and Screenshots). Every nested shape obeys `R_inner = CAPSULE.radius - inset`
+/// and lands on a kit radius token (`xl`, `lg`, `md`).
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+pub(crate) struct Capsule {
+    pub(crate) radius: f32,
+    pub(crate) window_inset: f32,
+    pub(crate) chip_inset: f32,
+    pub(crate) row_inset: f32,
+    pub(crate) button_inset: f32,
+    pub(crate) row_px: f32,
+    pub(crate) icon: f32,
+    pub(crate) icon_gap: f32,
+    pub(crate) header_h: f32,
+    pub(crate) row_h: f32,
+    pub(crate) row_gap: f32,
+    pub(crate) island_h: f32,
+    pub(crate) banner_h: f32,
+    pub(crate) close: f32,
+    pub(crate) panel_w: f32,
+}
+
+#[allow(dead_code)]
+pub(crate) const CAPSULE: Capsule = Capsule {
+    radius: 14.0,
+    window_inset: 4.0,
+    chip_inset: 4.0,
+    row_inset: 6.0,
+    button_inset: 8.0,
+    row_px: 10.0,
+    icon: 16.0,
+    icon_gap: 8.0,
+    header_h: 36.0,
+    row_h: 44.0,
+    row_gap: 2.0,
+    island_h: 40.0,
+    banner_h: 44.0,
+    close: 28.0,
+    panel_w: 252.0,
+};
+
+#[allow(dead_code)]
+impl Capsule {
+    pub(crate) const fn inner(self, inset: f32) -> f32 {
+        self.radius - inset
+    }
+    pub(crate) const fn text_rail(self) -> f32 {
+        self.row_inset + self.row_px
+    }
+    pub(crate) const fn icon_spine(self) -> f32 {
+        self.text_rail() + self.icon / 2.0
+    }
+    pub(crate) const fn label_rail(self) -> f32 {
+        self.text_rail() + self.icon + self.icon_gap
+    }
+}
+
+// The concentric radius table, checked at compile time.
+const _: () = assert!(CAPSULE.inner(CAPSULE.chip_inset) == 10.0); // radius.xl
+const _: () = assert!(CAPSULE.inner(CAPSULE.row_inset) == 8.0); // radius.lg
+const _: () = assert!(CAPSULE.inner(CAPSULE.button_inset) == 6.0); // radius.md
+const _: () = assert!(CAPSULE.text_rail() == METRICS.row_px);
 
 /// A settings page's column of sections: cards hang `row_px` past the
 /// gutter, so their rows' text lands on it.
@@ -76,7 +203,7 @@ pub(super) fn bare_page(key: &str) -> El {
 
 /// Everything a control needs to paint itself.
 #[derive(Clone, Copy)]
-pub(super) struct Paint {
+pub(crate) struct Paint {
     pub(super) k: &'static Kit,
     pub(super) hair: f32,
 }
@@ -95,8 +222,52 @@ impl Paint {
             .key("header")
             .role("heading")
             .level(2)
-            .font(self.k.ty.ui_medium.lh(SECTION_LABEL_LINE))
+            .font(self.label())
             .color(self.k.c.text_muted)
+    }
+    /// Pane title, modal title, and kind detail titles.
+    pub(super) fn title(self) -> TextStyle {
+        self.k.ty.body_medium
+    }
+    /// User-content detail titles (such as a meeting's name) and headline stat numbers.
+    #[allow(dead_code)]
+    pub(super) fn display(self) -> TextStyle {
+        DISPLAY
+    }
+    /// Section label above a card and a row's value (value button, borderless select).
+    pub(super) fn label(self) -> TextStyle {
+        self.k.ty.ui_medium.lh(SECTION_LABEL_LINE)
+    }
+    /// Row title and sidebar item.
+    #[allow(dead_code)]
+    pub(super) fn row_title(self) -> TextStyle {
+        self.k.ty.ui
+    }
+    /// List item title, capsule title, capsule primary row, and button label.
+    #[allow(dead_code)]
+    pub(super) fn strong(self) -> TextStyle {
+        self.k.ty.ui_medium
+    }
+    /// Row description, note, detail meta, capsule detail and summary, and empty-state hints.
+    #[allow(dead_code)]
+    pub(super) fn description(self) -> TextStyle {
+        DESCRIPTION
+    }
+    /// List item meta, sidebar footer, and compact hints.
+    #[allow(dead_code)]
+    pub(super) fn meta(self) -> TextStyle {
+        self.k.ty.small
+    }
+    /// Timer, elapsed time, and countdown (`ui_medium` with tabular numerals).
+    #[allow(dead_code)]
+    pub(super) fn clock(self) -> TextStyle {
+        self.tabular(self.k.ty.ui_medium)
+    }
+    /// Applies tabular numerals (`'tnum' 1`) so digits changing in place or
+    /// stacked in a column stay aligned.
+    #[allow(dead_code)]
+    pub(super) fn tabular(self, style: TextStyle) -> TextStyle {
+        style.features("'tnum' 1")
     }
     pub(super) fn text(self) -> Color {
         self.k.c.text_base
@@ -299,7 +470,7 @@ pub(super) fn described_row(
 /// A row that belongs to the [`icon_row`] above it: its title starts where
 /// that row's title does.
 pub(super) fn nested(row: El) -> El {
-    row.pl(METRICS.row_px + ICON_LEAD)
+    row.pl(METRICS.row_px + METRICS.icon_lead)
 }
 
 /// One numbered step of a how-to card: the number, the title with the
@@ -548,13 +719,13 @@ pub(super) fn copy_row_tagged(
             None => copy,
             Some(glyph) => row()
                 .key("lead")
-                .w(COPY_MIN_WIDTH + ICON_LEAD)
-                .min_w(COPY_MIN_WIDTH + ICON_LEAD)
+                .w(COPY_MIN_WIDTH + METRICS.icon_lead)
+                .min_w(COPY_MIN_WIDTH + METRICS.icon_lead)
                 .grow(1.0)
-                .gap(ICON_LEAD - 16.0)
+                .gap(METRICS.icon_lead - METRICS.icon)
                 .center_y()
                 .child(
-                    rune::icon(glyph, 16.0)
+                    rune::icon(glyph, METRICS.icon)
                         .key("icon")
                         .color(p.k.c.icon_base)
                         .a11y_hidden(),
@@ -975,7 +1146,7 @@ pub(super) fn quiet_button(
 
 /// The type of a row's value: a borderless select's, a [`value_button`]'s.
 pub(super) fn value_font(p: Paint) -> TextStyle {
-    p.k.ty.ui_medium.lh(16.0)
+    p.label()
 }
 
 /// A value that opens something, drawn like the kit's borderless select.
@@ -1022,274 +1193,158 @@ pub(super) fn value_button(
         )
 }
 
+/// The one modal shell: title on the text rail, body on the card edge, and
+/// footer on the control rail.
+pub(super) fn modal_panel(
+    p: Paint,
+    key: &str,
+    title: &str,
+    width: ModalWidth,
+    body: Vec<El>,
+    footer: Vec<El>,
+) -> El {
+    let c = &p.k.c;
+    col()
+        .key(key)
+        .role("dialog")
+        .label(title)
+        .w(width.px())
+        .pt(MODAL.top)
+        .px(METRICS.gutter - METRICS.row_px)
+        .pb(MODAL.bottom)
+        .gap(MODAL.gap)
+        .radius(p.k.radius.xl)
+        .fill(c.bg_base)
+        .border(p.hair, c.border_weak)
+        // Presses inside the panel stay inside.
+        .on_press(|_: &mut Ui| {})
+        .child(
+            text(title)
+                .key("title")
+                .mx(METRICS.row_px)
+                .font(p.title())
+                .color(p.text()),
+        )
+        .children(body)
+        .child(
+            row()
+                .key("footer")
+                .mx(METRICS.row_px)
+                .justify_end()
+                .center_y()
+                .gap(8.0)
+                .children(footer),
+        )
+}
+
+/// The capsule confirmation block: no icon, title and detail on the 16 pt text
+/// rail, equal-width Keep (neutral) and destructive (danger) buttons at inset
+/// 8 so their radius-6 corners are concentric with the radius-14 shell.
+#[allow(dead_code)]
+pub(crate) fn capsule_confirm<S: 'static>(
+    p: Paint,
+    title: &str,
+    detail: &str,
+    keep: (&str, impl Fn(&mut S, &mut Tx) + 'static),
+    act: (&str, impl Fn(&mut S, &mut Tx) + 'static),
+) -> El {
+    let (keep_label, on_keep) = keep;
+    let (act_label, on_act) = act;
+    col()
+        .key("confirm")
+        .w_full()
+        .pt(4.0)
+        .gap(12.0)
+        .child(
+            col()
+                .key("copy")
+                .px(CAPSULE.text_rail())
+                .gap(2.0)
+                .child(
+                    text(title)
+                        .key("title")
+                        .font(p.strong())
+                        .color(p.text())
+                        .wrap(),
+                )
+                .child(
+                    text(detail)
+                        .key("detail")
+                        .font(p.description())
+                        .color(p.muted())
+                        .wrap(),
+                ),
+        )
+        .child(
+            row()
+                .key("actions")
+                .w_full()
+                .px(CAPSULE.button_inset)
+                .pb(CAPSULE.button_inset)
+                .gap(8.0)
+                .child(
+                    Button::new(keep_label)
+                        .variant(ButtonVariant::Neutral)
+                        .on_press_tx(on_keep)
+                        .build_push(p.k)
+                        .key("keep")
+                        .grow(1.0)
+                        .shrink()
+                        .min_w(0.0),
+                )
+                .child(
+                    Button::new(act_label)
+                        .variant(ButtonVariant::Danger)
+                        .on_press_tx(on_act)
+                        .build_push(p.k)
+                        .key("act")
+                        .grow(1.0)
+                        .shrink()
+                        .min_w(0.0),
+                ),
+        )
+}
+
+/// Wraps `panel` in a modal sheet's overlay elevation, scrim, and centered
+/// modal layer: keys stay inside, Escape or a press outside runs `close`, and
+/// focus returns to the control that opened it.
+pub(super) fn modal_sheet(p: Paint, prefix: &str, mut panel: El, close: fn(&mut Ui)) -> [El; 2] {
+    for shadow in &p.k.elevation.overlay {
+        panel = panel.box_shadow(*shadow);
+    }
+    let layer = |key: String| {
+        el().key(key)
+            .role("none")
+            .absolute(0.0, 0.0)
+            .w_full()
+            .h_full()
+    };
+    [
+        layer(format!("{prefix}-scrim"))
+            .fill(p.k.c.scrim)
+            .on_press(close)
+            .transition(modal_scrim_transition(p)),
+        layer(format!("{prefix}-layer"))
+            .center()
+            .transition(modal_transition(p))
+            .child(panel.modal(true, close)),
+    ]
+}
+
 /// How a modal's surface enters and leaves: scaled from 0.96 about its
 /// centre, with a fade. Its text scales with its boxes, so the panel moves
 /// as one surface.
-pub(super) fn modal_transition(p: Paint) -> Transition {
+fn modal_transition(p: Paint) -> Transition {
     Transition::scale(0.96).springs(overlay_springs(p))
 }
 
 /// The scrim behind a modal: the surface's springs, fading only.
-pub(super) fn modal_scrim_transition(p: Paint) -> Transition {
+fn modal_scrim_transition(p: Paint) -> Transition {
     Transition::opacity().springs(overlay_springs(p))
 }
 
 fn overlay_springs(p: Paint) -> SpringPair {
     SpringPair::new(p.k.motion.overlay, p.k.motion.overlay)
-}
-
-/// How big a keycap is: `Small` in a row's tray, `Large` in the explainer.
-///
-/// Every key is a low-profile scissor key, after Apple's Magic Keyboard: a
-/// flat face on a cap whose skirt shows below it. A press sinks the face
-/// into the skirt; the key's bounds never change.
-#[derive(Clone, Copy, PartialEq)]
-pub(super) enum KeySize {
-    Small,
-    Large,
-}
-
-impl KeySize {
-    /// Height, skirt included.
-    pub(super) const fn height(self) -> f32 {
-        match self {
-            Self::Small => 22.0,
-            Self::Large => 28.0,
-        }
-    }
-
-    /// A one-glyph key is square.
-    pub(super) const fn min_width(self) -> f32 {
-        self.height()
-    }
-
-    /// The skirt showing below a key at rest.
-    const fn skirt(self) -> f32 {
-        match self {
-            Self::Small => 1.5,
-            Self::Large => 2.0,
-        }
-    }
-
-    /// A press sinks the face most of the way, leaving a hairline of skirt.
-    const fn travel(self) -> f32 {
-        self.skirt() - KEY_RIM
-    }
-
-    const fn face_radius(self) -> f32 {
-        match self {
-            Self::Small => 4.0,
-            Self::Large => 5.0,
-        }
-    }
-
-    pub(super) fn legend(self) -> TextStyle {
-        match self {
-            Self::Small => TextStyle::new(11.0, 400.0).lh(14.0),
-            Self::Large => TextStyle::new(13.0, 400.0).lh(16.0),
-        }
-    }
-
-    /// Beside the legend on the face.
-    const fn face_padding(self) -> f32 {
-        match self {
-            Self::Small => 6.0,
-            Self::Large => 8.0,
-        }
-    }
-}
-
-/// The cap's rim beside and above the face.
-const KEY_RIM: f32 = 0.5;
-/// A face sinks fast and comes back up a little slower, both without bounce.
-const KEY_DOWN: Spring = Spring::new(0.08, 0.0);
-const KEY_UP: Spring = Spring::new(0.18, 0.0);
-/// Between the keycaps of a chord.
-pub(super) const KEY_GAP: f32 = 3.0;
-/// Between a tray's edge and its keys: a `Small` tray is as tall as a
-/// button.
-pub(super) const TRAY_PADDING: f32 = 3.0;
-
-/// The keys' material, from the theme's tokens: in light a warm off-white
-/// face (the warning cream warms the neutral layers) on a cap that shades
-/// to warm grey; in dark a space-black face on a cap that falls to the
-/// deepest background.
-pub(super) struct KeyMaterial {
-    pub(super) cap_top: Color,
-    pub(super) cap_bottom: Color,
-    pub(super) face: Color,
-    pub(super) ink: Color,
-    /// The tight shadow under the cap and the soft one it casts at rest.
-    pub(super) contact: f32,
-    pub(super) cast: f32,
-}
-
-impl KeyMaterial {
-    pub(super) fn new(k: &Kit) -> Self {
-        let c = &k.c;
-        if k.dark {
-            let face = c.bg_base.mix(c.layer_01, 0.6);
-            Self {
-                cap_top: c.layer_03.mix(c.layer_04, 0.35),
-                cap_bottom: c.bg_deep,
-                face,
-                ink: c.text_base.mix(c.text_faint, 0.15),
-                contact: 0.8,
-                cast: 0.5,
-            }
-        } else {
-            let warm = c.warning.bg;
-            Self {
-                cap_top: c.white,
-                cap_bottom: c.layer_04.mix(c.text_faint, 0.28).mix(c.warning.fg, 0.05),
-                face: c.layer_02.mix(warm, 0.35),
-                ink: c.text_base.mix(c.text_muted, 0.15),
-                contact: 0.2,
-                cast: 0.12,
-            }
-        }
-    }
-}
-
-/// One tray of keys per shortcut: the keys sit in a well recessed into
-/// the surface, lit from above so its top edge falls into shadow. The well
-/// clips its keys, so while it springs to a new shortcut's width they never
-/// poke out over what is beside it.
-pub(super) fn key_tray(
-    p: Paint,
-    key: &str,
-    size: KeySize,
-    keys: impl IntoIterator<Item = El>,
-) -> El {
-    let k = p.k;
-    let c = &k.c;
-    let (top, bottom, rim, well) = if k.dark {
-        (
-            c.bg_deep,
-            c.bg_base.mix(c.layer_01, 0.7),
-            k.light(0.07),
-            0.6,
-        )
-    } else {
-        (
-            c.layer_04.mix(c.layer_03, 0.35),
-            c.layer_03.mix(c.layer_02, 0.6),
-            k.dark_a(0.07),
-            0.14,
-        )
-    };
-    // Concentric with the caps inside it.
-    let radius = size.face_radius() + KEY_RIM + TRAY_PADDING;
-    row()
-        .key(key)
-        .padding(TRAY_PADDING)
-        .gap(KEY_GAP)
-        .center_y()
-        .radius(radius)
-        .continuous_corners()
-        .clip_rounded(radius)
-        .fill(bottom)
-        .gradient(top, bottom)
-        .border(p.hair.max(0.5), rim)
-        .box_shadow(Shadow {
-            y: 1.0,
-            blur: 2.5,
-            color: k.dark_a(well),
-            inset: true,
-            ..Shadow::default()
-        })
-        .children(keys)
-}
-
-/// A shortcut's keys at rest, in one `Small` tray. Keys a new shortcut
-/// adds rise into the well, and keys it drops leave through its top.
-pub(super) fn keycaps(p: Paint, key: &str, parts: &[String]) -> El {
-    key_tray(
-        p,
-        key,
-        KeySize::Small,
-        parts.iter().enumerate().map(|(index, part)| {
-            keycap(p, index, part, KeySize::Small, false).transition(tray_roll())
-        }),
-    )
-}
-
-/// The width [`keycaps`] draws `parts` at, with `measure` giving a
-/// legend's width.
-#[cfg(hex_capture)]
-pub(super) fn keycaps_width(parts: &[String], measure: impl Fn(&str, TextStyle) -> f32) -> f32 {
-    let size = KeySize::Small;
-    let caps: f32 = parts
-        .iter()
-        .map(|part| {
-            (measure(part, size.legend()) + 2.0 * (size.face_padding() + KEY_RIM))
-                .max(size.min_width())
-        })
-        .sum();
-    caps + KEY_GAP * parts.len().saturating_sub(1) as f32 + 2.0 * TRAY_PADDING
-}
-
-/// In from the well's bottom, out through its top, inside its clip.
-pub(super) fn tray_roll() -> Transition {
-    Transition::push(Edge::Bottom)
-}
-
-/// One key: a face on a cap whose skirt shows below it. A press sinks the
-/// face into the skirt, tightens the cap's shadow and shades the face
-/// toward its bottom edge.
-pub(super) fn keycap(p: Paint, index: usize, label: &str, size: KeySize, down: bool) -> El {
-    let k = p.k;
-    let m = KeyMaterial::new(k);
-    let pressed = if down { 1.0 } else { 0.0 };
-    let travel = size.travel() * pressed;
-    let face_height = size.height() - KEY_RIM - size.skirt();
-    // Shadow offsets never spring, so the resting and pressed casts are two
-    // layers that trade strength.
-    let cast = |y: f32, blur: f32, strength: f32| Shadow {
-        y,
-        blur,
-        color: k.dark_a(m.cast * strength),
-        ..Shadow::default()
-    };
-    let cap = col()
-        .key("cap")
-        .px(KEY_RIM)
-        .pt(KEY_RIM)
-        .pb(size.skirt() - travel)
-        .radius(size.face_radius() + KEY_RIM)
-        .continuous_corners()
-        .fill(m.cap_bottom)
-        .gradient(m.cap_top, m.cap_bottom)
-        .shadow(0.5, 0.5, k.dark_a(m.contact))
-        .box_shadow(cast(size.skirt(), 2.0 * size.skirt(), 1.0 - pressed))
-        .box_shadow(cast(KEY_RIM, 2.0, pressed))
-        .child(
-            row()
-                .key("face")
-                .min_w(size.min_width() - 2.0 * KEY_RIM)
-                .h(face_height)
-                .px(size.face_padding())
-                .center()
-                .radius(size.face_radius())
-                .continuous_corners()
-                .fill(m.face)
-                .gradient(
-                    k.light(0.03 - 0.03 * pressed),
-                    k.dark_a(0.02 + 0.06 * pressed),
-                )
-                .child(
-                    text(label.to_string())
-                        .key("label")
-                        .font(size.legend())
-                        .color(m.ink),
-                ),
-        );
-    col()
-        .key(format!("keycap{index}"))
-        .h(size.height())
-        .pt(travel)
-        .motion(if down { KEY_DOWN } else { KEY_UP })
-        .child(cap)
 }
 
 /// Decoration: the text beside it says what it means.

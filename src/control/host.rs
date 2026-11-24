@@ -65,6 +65,10 @@ pub(crate) trait Host {
     /// Prepares `selection` (downloading it when missing) and switches to
     /// it once it is ready.
     fn choose_model(&self, selection: TranscriptionSelection) -> Result<(), ControlError>;
+    /// Labs › Model switch shortcut from `hex model switch`: swaps the
+    /// dictation model with the saved other one, through the same
+    /// installed-only preparation as a picker choice.
+    fn model_switch(&self) -> Result<(), ControlError>;
     fn cancel_model(&self);
     fn check_for_updates(&self) -> Result<(), ControlError>;
     /// Launch at login, after setting it when `enabled` is given; `None`
@@ -118,6 +122,44 @@ pub(crate) fn answer(host: &dyn Host, request: ControlRequest) -> ControlRespons
     .into()
 }
 
+/// `hex model switch`: the same installed-only preparation as a picker
+/// choice, refused while Hex records. A failed preparation keeps the running
+/// model and the saved selection.
+fn switch_model(host: &dyn Host) -> Result<ControlReply, ControlError> {
+    use crate::transcription::other_model::{self, SwitchError};
+    let state = host.state()?;
+    let capture = host.capture()?;
+    if capture.recording.is_some() || capture.pending_jobs > 0 {
+        return Err(ControlError::new(
+            "busy",
+            "Hex is dictating; try again once it finishes",
+        ));
+    }
+    let plan = match other_model::planned(&state.settings).map_err(|error| match error {
+        SwitchError::NotInstalled(message) => ControlError::new("not-installed", message),
+        other => ControlError::new("unavailable", other.message()),
+    })? {
+        Some(plan) => plan,
+        None => {
+            return Ok(ControlReply::unchanged(format!(
+                "Already using {} · {}",
+                crate::transcription::models::definition(state.settings.transcription.model).name,
+                crate::transcription::models::language_name(&state.settings.transcription.language)
+            )));
+        }
+    };
+    other_model::installed(&plan).map_err(|error| match error {
+        SwitchError::NotInstalled(message) => ControlError::new("not-installed", message),
+        other => ControlError::new("unavailable", other.message()),
+    })?;
+    host.model_switch()?;
+    Ok(ControlReply::done(format!(
+        "Switching to {} · {}; Hex keeps the current model if it fails",
+        crate::transcription::models::definition(plan.to.model).name,
+        crate::transcription::models::language_name(&plan.to.language)
+    )))
+}
+
 fn command(host: &dyn Host, command: ControlCommand) -> ControlReply {
     let reply =
         |result: Result<ControlReply, ControlError>| result.unwrap_or_else(ControlReply::from);
@@ -169,6 +211,7 @@ fn command(host: &dyn Host, command: ControlCommand) -> ControlReply {
             host.typed_text()
                 .map(|()| ControlReply::done("Transforming the focused text")),
         ),
+        ControlCommand::ModelSwitch => reply(switch_model(host)),
         ControlCommand::MeetingRecord { title } => meeting(false, title),
         ControlCommand::MeetingStop => meeting(true, None),
         ControlCommand::MeetingCopyLast => match crate::meeting::runtime::copy_last_transcript() {
@@ -281,56 +324,19 @@ fn dictation_message(action: CaptureAction) -> &'static str {
 
 /// What the meeting recorder is doing (`meeting_runtime`).
 fn meeting_report() -> MeetingReport {
-    use crate::meeting::watcher::MeetingMenuState;
-    let state = |state: &str| MeetingReport {
-        state: state.into(),
-        ..Default::default()
-    };
-    match crate::meeting::runtime::state() {
-        MeetingMenuState::Idle => state("idle"),
-        MeetingMenuState::Starting => state("starting"),
-        MeetingMenuState::Recording { started, title, .. } => MeetingReport {
-            state: "recording".into(),
-            title: Some(title),
-            elapsed_seconds: Some(started.elapsed().as_secs()),
-        },
-        MeetingMenuState::Transcribing => state("transcribing"),
-    }
+    super::meetings::report(&crate::meeting::runtime::state())
 }
 
 /// `hex meetings record|stop`, as the tray's items do; waits a moment for
 /// the recorder to confirm.
 fn meeting(stop: bool, title: Option<String>) -> ControlReply {
-    use crate::meeting::MeetingRequest;
     use crate::meeting::watcher::MeetingMenuState;
     if !crate::app_settings::meetings_enabled() {
         return ControlReply::error("feature-off", crate::app_settings::meetings_off_reason());
     }
-    let request = match (crate::meeting::runtime::state(), stop) {
-        (MeetingMenuState::Recording { title, .. }, false) => {
-            return ControlReply::unchanged(format!("Already recording “{title}”"));
-        }
-        (MeetingMenuState::Starting, false) => {
-            return ControlReply::unchanged("A meeting recording is already starting");
-        }
-        (MeetingMenuState::Transcribing, false) => {
-            return ControlReply::error(
-                "busy",
-                "the last meeting is still transcribing; try again when it finishes",
-            );
-        }
-        (MeetingMenuState::Idle, false) => MeetingRequest::Start {
-            title: title.filter(|title| !title.trim().is_empty()),
-        },
-        (MeetingMenuState::Idle, true) => {
-            return ControlReply::unchanged("No meeting is recording");
-        }
-        (MeetingMenuState::Transcribing, true) => {
-            return ControlReply::unchanged("The meeting is already transcribing");
-        }
-        (MeetingMenuState::Starting | MeetingMenuState::Recording { .. }, true) => {
-            MeetingRequest::Stop
-        }
+    let request = match super::meetings::plan(&crate::meeting::runtime::state(), stop, title) {
+        Ok(request) => request,
+        Err(reply) => return reply,
     };
     if let Err(error) = crate::meeting::runtime::request(request) {
         return ControlReply::error("unavailable", error);
@@ -723,6 +729,9 @@ mod tests {
         fn choose_model(&self, _: TranscriptionSelection) -> Result<(), ControlError> {
             Ok(())
         }
+        fn model_switch(&self) -> Result<(), ControlError> {
+            Ok(())
+        }
         fn cancel_model(&self) {}
         fn check_for_updates(&self) -> Result<(), ControlError> {
             Ok(())
@@ -801,6 +810,27 @@ mod tests {
             "ok"
         );
         assert_eq!(*host.quits.lock().unwrap(), [true]);
+    }
+
+    /// A switch never disturbs a recording or an accepted dictation job.
+    #[test]
+    fn model_switch_is_busy_while_dictation_is_pending() {
+        for host in [
+            FakeHost {
+                recording: true,
+                ..Default::default()
+            },
+            FakeHost {
+                pending_jobs: 1,
+                ..Default::default()
+            },
+        ] {
+            assert_eq!(
+                code(&ask(&host, ControlCommand::ModelSwitch)),
+                "busy",
+                "recording or a pending job refuses the switch"
+            );
+        }
     }
 
     #[test]

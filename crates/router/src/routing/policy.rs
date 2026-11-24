@@ -180,8 +180,9 @@ pub fn suggest(
 // MARK: General-purpose apps
 
 /// Apps whose captures are about anything: no `routing.apps` rule may name them, and Scrawl
-/// never offers one. An entry covers its own bundle ID and any below it (`ai.opencode.desktop`
-/// covers `ai.opencode.desktop.beta`).
+/// never offers one. An entry covers its own identifier and any below it (`ai.opencode.desktop`
+/// covers `ai.opencode.desktop.beta`). macOS entries are bundle IDs; Windows ones are
+/// executable file names.
 pub const GENERAL_APPS: &[&str] = &[
     // Browsers
     "com.apple.safari",
@@ -209,6 +210,31 @@ pub const GENERAL_APPS: &[&str] = &[
     "com.apple.mobilesms",
     "com.apple.mail",
     "com.tinyspeck.slackmacgap",
+    // The same apps on Windows, which names an app by its executable's file
+    // name, lowercased (`crates/capture/src/win/mod.rs`'s `app_identity`),
+    // where macOS uses a bundle ID.
+    // Browsers
+    "chrome.exe",
+    "brave.exe",
+    "msedge.exe",
+    "firefox.exe",
+    "vivaldi.exe",
+    "helium.exe",
+    "opera.exe",
+    "zen.exe",
+    // Terminals
+    "windowsterminal.exe",
+    "openconsole.exe",
+    "conhost.exe",
+    "cmd.exe",
+    "powershell.exe",
+    "pwsh.exe",
+    "mintty.exe",
+    "alacritty.exe",
+    "wezterm-gui.exe",
+    "ghostty.exe",
+    // Slack
+    "slack.exe",
 ];
 
 /// Whether `bundle_id` is, falls under or covers a general-purpose app (a rule for `com.apple`
@@ -763,8 +789,19 @@ mod tests {
         ] {
             assert!(is_general_app(id), "{id}");
         }
+        // Windows names apps by executable file name.
+        for id in [
+            "chrome.exe",
+            "msedge.exe",
+            "windowsterminal.exe",
+            "ghostty.exe",
+            "slack.exe",
+        ] {
+            assert!(is_general_app(id), "{id}");
+        }
         assert!(!is_general_app("com.example.mytool"));
         assert!(!is_general_app("com.apple.safarix"));
+        assert!(!is_general_app("code.exe"));
         let apps = vec![
             ("com.example".to_owned(), PathBuf::from("/code/example")),
             ("com.example.tool".to_owned(), PathBuf::from("/code/tool")),

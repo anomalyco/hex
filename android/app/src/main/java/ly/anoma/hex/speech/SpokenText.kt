@@ -2,14 +2,18 @@ package ly.anoma.hex.speech
 
 import java.util.Locale
 
-/** iOS's DictationPipeline and TranscriptFormatter: string rules only, no learned or remote rewriting. */
+/** iOS's DictationPipeline and TranscriptFormatter: string rules and Labs › Learn from my fixes' local word
+ * pairs, no remote rewriting. */
 internal object SpokenText {
-    /** Custom vocabulary, spoken symbols and counts, cleanup, the style, the vocabulary's spellings
-     * again (a style can capitalize "iPhone"), then Lowercase, the same wherever Hex dictates.
+    /** Labs › Learn from my fixes' fixes, custom vocabulary, spoken symbols and counts, cleanup, the style,
+     * the vocabulary's spellings again (a style can capitalize "iPhone"), then Lowercase, the same wherever Hex
+     * dictates. Fixes go first, on the raw transcript, so a learned spelling reaches every later stage unchanged.
      * Translation already happened in Whisper, so a translated dictation is English. */
     fun format(raw: String, options: SpeechOptions): String {
         val language = if (options.translate) "en" else options.spoken.code
-        val spelled = VocabularySpelling.apply(options.vocabulary, raw)
+        // A translated dictation is the model's English: none of this phone's learned fixes touch it.
+        val fixed = if (options.translate) raw else DictationFixes.apply(options.fixes, raw)
+        val spelled = VocabularySpelling.apply(options.vocabulary, fixed)
         if (options.style == Style.Verbatim || raw.isBlank()) return finished(style(spelled, options.style, language), options)
         val spoken = SpokenCleanup.counts(SpokenCleanup.symbols(spelled.trim(), language), language)
         val cleaned = if (options.clean) SpokenCleanup.clean(spoken, language) else spoken
@@ -414,6 +418,9 @@ internal object SpokenText {
             "tengo tiene todo todos tu un una uno vale vamos y ya yo").split(' ').toSet(),
         "fr" to ("à au aux avec ce cela ces cette c'est comme dans de des donc du elle elles en est et était il ils je j'ai la le les leur lui mais me merci moi mon ne nous on ou où oui par pas peut plus pour quand que qui sa sans se ses si son sont sur ta te tes toi ton tout tous très tu un une vous vos votre y ça").split(' ').toSet(),
         "it" to ("a al alla anche che chi ci come con da dal del della di e è gli grazie ha hanno i il in io la le li lo lui ma mi mio mia ne nel nella no non noi per perché più poi qui se si sì sono su sua suo ti tu tutto tutti un una uno voi").split(' ').toSet(),
+        "pt" to ("a à ao aos as com como da das de do dos e é ela elas ele eles em então essa esse esta este eu foi isso já mas me meu minha muito na nas não no nos o obrigado obrigada os ou para pela pelo por porque pra quando que se sem seu sua também tem tudo um uma você vocês").split(' ').toSet(),
+        "pl" to ("a ale bo by być był była było co czy dla do dobrze dziękuję gdy gdzie i ich im jak jakie jaki jest jestem jeszcze już ja jej jego kiedy która które który ma mam mi mnie może my na nas nie nic no o od on ona oni po pod przez przy się są ta tak tam te teraz to tu ty tylko w we wszystko z za ze że żeby").split(' ').toSet(),
+        "ru" to ("а без бы был была было в вам вас во вот все всё вы где да для до его ее её если есть еще ещё же за и из или им их к как когда кто ли мне мы на нас не нет ну о он она они от по под пожалуйста потому почему при с со спасибо так там тебе то тоже только ты у уже что чтобы это я").split(' ').toSet(),
         "nl" to ("aan als bij dan dat de die dit door een en er het hij hem hun ik in is je jij kan maar me met mijn naar niet nog nu of om ook op te toch tot u uit van voor wat we wij wel zal ze zij zijn").split(' ').toSet(),
         "no" to ("alle at av bare da de del dem den denne der det dette du eller en er et etter for fordi fra går ha han " +
             "har hun hva hvis hvor i igjen ikke inn ja jeg kan kanskje med men mer meg min nei når og også om opp på så " +

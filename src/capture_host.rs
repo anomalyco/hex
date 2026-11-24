@@ -77,7 +77,7 @@ pub(crate) use microphone::recording_level;
 pub(crate) mod paste_source;
 mod permissions;
 mod replay;
-mod routing;
+pub(crate) mod routing;
 #[cfg(target_os = "macos")]
 mod screen_access;
 mod sink;
@@ -121,10 +121,12 @@ pub use permissions::{
     restart as restart_for_permission, state_of as permission_state,
 };
 pub use replay::available as replay_available;
-pub use routing::CaptureRoute;
-pub use routing::{RouteAnswer, RouteDelivery, RouteDest, SEND_HOLD};
 #[cfg(target_os = "macos")]
-pub use routing::{recent_sessions, send_image};
+pub use routing::send_image;
+pub use routing::{
+    AutoSendBy, CaptureRoute, RouteAnswer, RouteDelivery, RouteDest, RuleMatch, SEND_HOLD,
+    jev_available, recent_sessions,
+};
 #[cfg(target_os = "macos")]
 pub use screen_access::*;
 #[cfg(target_os = "macos")]
@@ -304,33 +306,28 @@ pub enum TargetKind {
 pub enum CaptureCommand {
     /// Starts a capture on the picker's pick; nothing while one records.
     Start(CaptureTarget),
-    /// Labs › Screenshots' recording: a capture of `target` that, once
-    /// written, goes to the screenshot card ([`on_clip_written`]) rather
-    /// than the clipboard and the router.
+    /// Labs › Screenshots' recording: goes to [`on_clip_written`] instead of clipboard/router.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Clip(CaptureTarget),
-    /// Looks for a cabled iPhone off the listener's thread;
-    /// [`CaptureSnapshot::phone`] follows. Each start also looks.
+    /// Looks for a cabled iPhone off the listener's thread ([`CaptureSnapshot::phone`]).
     FindPhone,
-    /// Drops the recording capture: its bundle is removed and it never
-    /// settles, so the capsule can turn into the picker in its place.
+    /// Drops the recording capture and removes its bundle without settling.
     Discard,
-    /// Scrawl's `switch_recording`: drops the recording capture as
-    /// [`Self::Discard`] does and starts `target` in the same step, so no
-    /// snapshot shows nothing recording in between. With nothing recording,
-    /// only starts.
+    /// Drops the recording capture and starts `target` atomically.
     Switch(CaptureTarget),
-    /// Sends the newest written capture (`snapshot().last`) to `to` now: a
-    /// session ID, or a name its route lists, suggestions first. A send
-    /// already elsewhere is taken back first. `always` also saves a rule
-    /// sending its site or app there from now on.
+    /// Sends `snapshot().last` to `to` (taking back any prior send); `always` saves a rule.
     Send { to: String, always: bool },
+    /// Saves a routing rule chosen from the post-send `Always…` configurator.
+    SaveRule(scrawl_capture::RuleKind, String, String),
     /// Takes back the newest capture's send: one OpenCode took is
     /// withdrawn unless the session already acted on it.
     Undo,
     /// The pointer is on the capsule (`true`) or left it: a rule's send
     /// still waiting out its Undo window pauses while it is there.
     Hold(bool),
+    /// Copies the capsule's written capture to the clipboard again after a
+    /// failed initial copy.
+    Copy(PathBuf),
     /// Pastes the capsule's written capture, never a later completion.
     Paste(PathBuf),
     /// Opens the newest written capture's contact sheet: Hex has no review
@@ -1360,8 +1357,12 @@ impl CaptureHost {
             CaptureCommand::Send { to, always } => {
                 Ok(self.route(routing::Job::Send { to, always }))
             }
+            CaptureCommand::SaveRule(kind, key, target) => {
+                Ok(self.route(routing::Job::SaveRule { kind, key, target }))
+            }
             CaptureCommand::Undo => Ok(self.route(routing::Job::Undo)),
             CaptureCommand::Hold(on) => Ok(self.route(routing::Job::Hold(on))),
+            CaptureCommand::Copy(bundle) => self.hand_off(HandOff::Copy, Some(bundle)),
             CaptureCommand::Paste(bundle) => self.hand_off(HandOff::Paste, Some(bundle)),
             CaptureCommand::Inspect => self.hand_off(HandOff::Inspect, None),
         };
@@ -1659,9 +1660,7 @@ impl CaptureHost {
         self.input.recording(None);
         microphone::hide_level();
         drop(active.quiet.take());
-        let microphone =
-            std::mem::replace(&mut active.microphone, microphone::Microphone::Timeline);
-        let closed = microphone.close(audio, now).unwrap_or_else(|error| {
+        let closed = active.microphone.close(audio, now).unwrap_or_else(|error| {
             tracing::warn!(%error, "could not close the capture sink");
             None
         });
@@ -1697,16 +1696,23 @@ impl CaptureHost {
             if HANDING_OFF.swap(true, Ordering::AcqRel) {
                 return Ok(self.report(false, None));
             }
+            let outcomes = self.outcomes.clone();
             let spawned = std::thread::Builder::new()
                 .name("capture-hand-off".into())
                 .spawn(move || {
                     let done = hand_off(how, &bundle);
-                    if let Err(error) = done {
-                        tracing::warn!(
-                            error = format!("{error:#}"),
-                            ?how,
-                            "capture hand-off failed"
-                        );
+                    match done {
+                        Ok(()) if matches!(how, HandOff::Copy) => {
+                            lock(&outcomes).copied(&bundle);
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                error = format!("{error:#}"),
+                                ?how,
+                                "capture hand-off failed"
+                            );
+                        }
+                        Ok(()) => {}
                     }
                     HANDING_OFF.store(false, Ordering::Release);
                 });
@@ -2687,13 +2693,7 @@ fn finish_captures(
                     missing_transcript = written.missing_transcript.as_deref(),
                     "capture finished"
                 );
-                let copy_error = if crate::capture_zip::copy_as_zip(&bundle) {
-                    None
-                } else {
-                    copy_to_clipboard(&bundle)
-                        .err()
-                        .map(|error| format!("{error:#}"))
-                };
+                let copy_error = copy_bundle(&bundle).err().map(|error| format!("{error:#}"));
                 let route = look.as_ref().map(|_| CaptureRoute::looking());
                 #[cfg(target_os = "macos")]
                 if let Err(error) = paste_source::mark_ready(&bundle, crate::history::now_ms()) {
@@ -2739,18 +2739,33 @@ pub fn on_clip_written(written: fn(PathBuf)) {
 /// What the capsule's Paste and Inspect do with the newest written capture.
 #[derive(Clone, Copy, Debug)]
 enum HandOff {
+    Copy,
     Paste,
     Inspect,
 }
 
-/// Pastes or opens a written capture: its contact sheet and summary.
+/// Copies a written capture to the clipboard as the writer does (ZIP when
+/// Labs › Copy a capture as one file is on, else the summary).
+fn copy_bundle(bundle: &Path) -> anyhow::Result<()> {
+    if crate::capture_zip::copy_as_zip(bundle) {
+        return Ok(());
+    }
+    copy_to_clipboard(bundle)
+}
+
+/// Copies, pastes, or opens a written capture: its contact sheet and summary.
 #[cfg(target_os = "macos")]
 fn hand_off(how: HandOff, bundle: &Path) -> anyhow::Result<()> {
     objc2::rc::autoreleasepool(|_| match how {
+        HandOff::Copy => copy_bundle(bundle),
         // ⌘V from Hex's keyboard layout snapshot, marked as Hex's: the
         // crate's own reads TIS off the main thread. A capture replaces what
         // a dictation watch has in front of it, as another paste would.
         HandOff::Paste => {
+            // macOS 27.3 refuses to post ⌘V without its keystroke grant, so
+            // fail before the clipboard changes instead of after.
+            crate::paste::ensure_keystroke_access()
+                .map_err(|error| anyhow::anyhow!("{error:#}"))?;
             crate::paste::note_paste();
             scrawl_capture::handoff::paste_bundle_with(bundle, &|| {
                 crate::keyboard::post_command('v').map_err(|error| anyhow::anyhow!("{error:#}"))
@@ -2766,6 +2781,7 @@ fn hand_off(how: HandOff, bundle: &Path) -> anyhow::Result<()> {
 #[cfg(target_os = "linux")]
 fn hand_off(how: HandOff, bundle: &Path) -> anyhow::Result<()> {
     match how {
+        HandOff::Copy => copy_bundle(bundle),
         HandOff::Paste => {
             let (dir, loaded) = scrawl_capture::handoff::load_bundle(bundle)?;
             let summary = scrawl_capture::sketch::summary_markdown(&loaded, &dir);
@@ -2797,6 +2813,7 @@ fn hand_off(how: HandOff, bundle: &Path) -> anyhow::Result<()> {
 #[cfg(target_os = "windows")]
 fn hand_off(how: HandOff, bundle: &Path) -> anyhow::Result<()> {
     match how {
+        HandOff::Copy => copy_bundle(bundle),
         HandOff::Paste => scrawl_capture::handoff::paste_bundle_image_and_text(bundle),
         HandOff::Inspect => inspect(bundle),
     }
@@ -4623,7 +4640,7 @@ mod tests {
         let mut outcomes = lock(&host.outcomes);
         for index in 0..MAX_FINISHING {
             let bundle = dir.join(format!("gone-{index}"));
-            outcomes.started(bundle.clone(), t(0), TargetKind::Pointer);
+            outcomes.start(bundle.clone(), t(0), TargetKind::Pointer, false);
             outcomes.stopped(&bundle, End::Discard);
         }
         assert_eq!(outcomes.finishing_count(), 0);
@@ -4651,7 +4668,7 @@ mod tests {
             let mut outcomes = lock(&host.outcomes);
             for index in 0..MAX_FINISHING {
                 let bundle = dir.join(format!("writing-{index}"));
-                outcomes.started(bundle.clone(), t(0), TargetKind::Pointer);
+                outcomes.start(bundle.clone(), t(0), TargetKind::Pointer, false);
                 outcomes.stopped(&bundle, End::Finish);
             }
         }
@@ -4758,7 +4775,7 @@ mod tests {
         let live = LiveInput(Arc::default());
         let outcomes = SharedOutcomes::default();
         let bundle = PathBuf::from("/work.scrawl");
-        lock(&outcomes).started(bundle.clone(), t(0), TargetKind::Pointer);
+        lock(&outcomes).start(bundle.clone(), t(0), TargetKind::Pointer, false);
         live.recording(Some(&bundle));
         live.attach(&bundle, InputSink::default(), t(0), false, &outcomes);
         let (sender, received) = mpsc::sync_channel(4);
@@ -5098,7 +5115,7 @@ mod tests {
         let mut outcomes = Outcomes::on(feed);
         let (one, two) = (PathBuf::from("/c/one"), PathBuf::from("/c/two"));
         let since = CaptureInstant::from_nanos(5);
-        outcomes.started(one.clone(), since, TargetKind::Pointer);
+        outcomes.start(one.clone(), since, TargetKind::Pointer, false);
         let recording = watch.changed().unwrap();
         assert_eq!(
             recording.recording,
@@ -5128,7 +5145,7 @@ mod tests {
         );
 
         // A second capture records while the first is written.
-        outcomes.started(two.clone(), since, TargetKind::Window);
+        outcomes.start(two.clone(), since, TargetKind::Window, false);
         outcomes.stopped(&two, End::Cancel);
         // A cancelled capture's stage stays put.
         outcomes.progress(&two, Stage::Writing);
@@ -5185,7 +5202,7 @@ mod tests {
 
         // A dropped watcher stops being woken.
         drop(watch);
-        outcomes.started(one, since, TargetKind::Pointer);
+        outcomes.start(one, since, TargetKind::Pointer, false);
         assert!(feed.watchers.lock().unwrap().is_empty());
     }
 

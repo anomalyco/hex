@@ -1,0 +1,12 @@
+// Send feedback's Bellhop report key (https://blhp.app/docs/feedback). It is a publishable key,
+// safe to ship inside the app: it can only file feedback into Hex's Bellhop workspace (as
+// Android keeps its key in android/gradle.properties). It lives here, in the build
+// configuration, and reaches the app as Info.plist's BellhopReportKey (Feedback.reportKey);
+// no Swift file holds it. To rotate it, make a new key and revoke this one in Bellhop ›
+// Settings › Report keys, then change it here (or override it below) and ship a build.
+BELLHOP_REPORT_KEY = bh_pub_b3291b43ea6d780f51d69b8145c6faac831e33f7877a6a35b108ca010547a0ff
+
+// Optional override, after the key so it wins: a gitignored Feedback.local.xcconfig, written
+// locally or by ci_scripts/ci_post_clone.sh from Xcode Cloud's BELLHOP_REPORT_KEY secret.
+// Set BELLHOP_REPORT_KEY = (empty) there for a build without Send feedback.
+#include? "Feedback.local.xcconfig"

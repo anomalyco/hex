@@ -1,5 +1,5 @@
 <resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
-    <string name="setup_welcome_detail">Hex Preview 只在下载语音模型（190 MB）和向 GitHub 检查更新时使用网络。你的声音和文字都保留在这台设备上。</string>
+    <string name="setup_welcome_detail">Hex Preview 只在下载语音模型（190 MB，以及你在实验室中添加的模型）、向 GitHub 检查更新，以及你点按“发送”提交反馈时使用网络。你的声音和文字都保留在这台设备上。</string>
     <string name="setup_title">设置 Hex Preview</string>
     <string name="setup_detail">允许使用麦克风，然后选择 Hex Preview 作为键盘。</string>
     <string name="setup_microphone_detail">让 Hex Preview 能听见你</string>
@@ -8,25 +8,11 @@
     <string name="setup_keyboard_off">在“设置”中打开 Hex Preview</string>
     <string name="setup_choose_hex">选择 Hex Preview 键盘</string>
     <string name="keyboard_hint_microphone">请在 Hex Preview 中允许使用麦克风</string>
-    <string name="settings_privacy_detail">Hex 在这台手机上将语音转换为文字，绝不上传你的声音或输入的内容，也不保存任何按键记录或转录内容。为了查找更新，Hex Preview 会在你打开它时，以及每天最多一次在键盘上，向 GitHub 询问最新版本。这个请求不包含任何关于你或你输入内容的信息，不过和访问任何网站一样，GitHub 会看到你的网络地址。可以用“自动检查更新”关闭。</string>
+    <string name="settings_privacy_detail">Hex 在这台手机上将语音转换为文字，绝不上传你的声音或用它的键盘输入的内容，也不保存任何按键记录或转录内容。只有在“发送反馈”中点按“发送”时，反馈才会离开这台手机：你的留言、保留的图片、你填写的邮箱（如有），以及 Hex 和这台手机的相关信息会发送到 Anomaly 的反馈收件箱（Bellhop）。你的听写、录音、词汇和更正都不会包含在内。为了查找更新，Hex Preview 会在你打开它时，以及每天最多一次在键盘上，向 GitHub 询问最新版本。这个请求不包含任何关于你或你输入内容的信息，不过和访问任何网站一样，GitHub 会看到你的网络地址。可以用“自动检查更新”关闭。</string>
     <string name="updates_available">Hex Preview %1$s（版本号 %2$d）已可更新</string>
-    <string name="updates_update">更新</string>
+    <string name="updates_update">下载更新</string>
+    <string name="updates_browser_note">浏览器会从 GitHub 下载更新。打开下载的文件，在 Android 询问时点按“更新”。第一次时，Android 会请你允许浏览器安装应用。允许后返回，再点按一次下载的文件。</string>
     <string name="updates_keyboard_note">更新时键盘会暂时关闭，点按文本框即可重新打开。</string>
-    <string name="updates_metered">你正在使用移动数据。这次下载需要 %1$s。</string>
-    <string name="updates_download">下载</string>
-    <string name="updates_not_now">以后再说</string>
-    <string name="updates_downloading">正在下载… %1$d%%</string>
-    <string name="updates_verifying">正在检查下载内容…</string>
-    <string name="updates_installing">正在安装…</string>
-    <string name="updates_permission">Android 会询问一次是否允许 Hex Preview 安装自己的更新。请打开“允许来自此来源的应用”，然后回到这里。</string>
-    <string name="updates_open_settings">打开设置</string>
-    <string name="updates_failed_connection">下载已中断。请检查网络连接后重试。</string>
-    <string name="updates_failed_server">GitHub 的回应不正常。请稍后重试。</string>
-    <string name="updates_failed_space">可用空间不足，无法下载。</string>
-    <string name="updates_failed_mismatch">下载的内容与发布的不一致，所以没有安装任何东西。</string>
-    <string name="updates_failed_signature">下载的内容不是用 Hex Preview 的密钥签名的，所以没有安装任何东西。</string>
-    <string name="updates_failed_install">Android 没有安装这次更新。</string>
-    <string name="updates_retry">重试</string>
     <string name="updates_auto">自动检查更新</string>
     <string name="updates_auto_detail">打开 Hex Preview 时，以及每天一次从键盘检查</string>
     <string name="updates_check_now">立即检查</string>
@@ -37,9 +23,4 @@
     <string name="updates_ready">有可用更新</string>
     <string name="updates_strip">Hex Preview 有可用更新</string>
     <string name="updates_strip_dismiss">关闭</string>
-    <string name="updates_install">安装</string>
-    <string name="updates_channel">更新</string>
-    <string name="updates_notification_downloading">正在下载 Hex Preview %1$s</string>
-    <string name="updates_notification_ready">Hex Preview %1$s 已下载</string>
-    <string name="updates_notification_open">打开 Hex Preview 即可安装。</string>
 </resources>

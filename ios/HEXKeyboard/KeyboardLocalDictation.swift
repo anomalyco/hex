@@ -18,6 +18,10 @@ final class KeyboardLocalDictation {
         let document: UUID?
         var preferences: DictationPipeline.Preferences
         var interrupted = false
+        /// The finished recording's file name and length, once it stopped.
+        var recording: (fileName: String, seconds: TimeInterval)?
+        /// Where the recording stopped when the keyboard closed during it.
+        var stoppedAfter: TimeInterval?
 
         init(id: String, document: UUID?, preferences: DictationPipeline.Preferences) {
             self.id = id
@@ -102,19 +106,19 @@ final class KeyboardLocalDictation {
     private enum ArmedState {
         case capturing(CapturingState)
         /// A failure while armed, shown only if the touch is kept: a slide to the menu drops it.
-        case failed(job: Job, requestedAt: TimeInterval, failure: KeyboardLocalCapturePhase.ArmedFailure)
+        case failed(job: Job, requestedAt: TimeInterval, message: String, detail: String?)
 
         var job: Job {
             switch self {
             case .capturing(let state): state.job
-            case .failed(let job, _, _): job
+            case .failed(let job, _, _, _): job
             }
         }
 
         var requestedAt: TimeInterval {
             switch self {
             case .capturing(let state): state.requestedAt
-            case .failed(_, let requestedAt, _): requestedAt
+            case .failed(_, let requestedAt, _, _): requestedAt
             }
         }
     }
@@ -133,28 +137,13 @@ final class KeyboardLocalDictation {
             case .idle:
                 return .idle
             case .armed(.capturing(let state)):
-                let readiness: KeyboardLocalCapturePhase.ArmedReadiness
-                switch state.resources {
-                case .awaitingAudioSession:
-                    readiness = .starting(.awaitingAudioSession)
-                case .awaitingPage:
-                    readiness = .starting(.awaitingPage)
-                case .awaitingFirstAudio:
-                    readiness = .starting(.awaitingFirstAudio)
-                case .streaming(_, let audioStartedAt):
-                    readiness = .receivingAudio(startedAt: audioStartedAt)
-                }
-                return .armed(jobID: state.job.id, requestedAt: state.requestedAt, readiness: readiness)
-            case .armed(.failed(let job, let requestedAt, let failure)):
-                return .armed(jobID: job.id, requestedAt: requestedAt, readiness: .failed(failure))
+                return .armed(jobID: state.job.id, failed: false)
+            case .armed(.failed(let job, _, _, _)):
+                return .armed(jobID: job.id, failed: true)
             case .active(let state):
                 switch state.resources {
-                case .awaitingAudioSession:
-                    return .starting(jobID: state.job.id, requestedAt: state.requestedAt, stage: .awaitingAudioSession)
-                case .awaitingPage:
-                    return .starting(jobID: state.job.id, requestedAt: state.requestedAt, stage: .awaitingPage)
-                case .awaitingFirstAudio:
-                    return .starting(jobID: state.job.id, requestedAt: state.requestedAt, stage: .awaitingFirstAudio)
+                case .awaitingAudioSession, .awaitingPage, .awaitingFirstAudio:
+                    return .starting(jobID: state.job.id)
                 case .streaming(_, let audioStartedAt):
                     return .recording(jobID: state.job.id, startedAt: audioStartedAt)
                 }
@@ -524,11 +513,11 @@ final class KeyboardLocalDictation {
     private func keepArmed() {
         guard case .armed(let armed) = session else { return }
         switch armed {
-        case .failed(_, _, let failure):
+        case .failed(_, _, let message, let detail):
             endCaptureOwnership()
             releaseAudioSession()
-            KeyboardProbeLog.shared.write("FAILED: \(failure.detail ?? failure.message) \(KeyboardProbeLog.memory())")
-            setSession(.failed(message: failure.message, until: Date().timeIntervalSince1970 + 6))
+            KeyboardProbeLog.shared.write("FAILED: \(detail ?? message) \(KeyboardProbeLog.memory())")
+            setSession(.failed(message: message, until: Date().timeIntervalSince1970 + 6))
         case .capturing(let state):
             setSession(.active(state))
             let liveLabel = state.resources.isStreaming ? "already live" : "waiting for first audio"
@@ -890,6 +879,7 @@ final class KeyboardLocalDictation {
             if !job.interrupted {
                 job.interrupted = true
                 KeyboardProbeLog.shared.write("keyboard hidden while transcribing: holding its text for the next keyboard")
+                Self.leaveRecording(of: job)
             }
         case .finished(let job, let result):
             // Shown but not yet inserted: the next keyboard inserts it.
@@ -930,8 +920,47 @@ final class KeyboardLocalDictation {
             KeyboardProbeLog.shared.write("transcription stuck for \(Int(now - startedAt)) s: giving up")
             task?.cancel()
             setSession(.idle)
+        case .idle:
+            recoverLeftRecording(now: now)
         default:
             break
+        }
+    }
+
+    /// A recording an earlier keyboard closed during and never transcribed (iOS ended it while
+    /// the screen was locked): transcribe it now and hold its text, as that keyboard would have.
+    private func recoverLeftRecording(now: TimeInterval) {
+        guard #available(iOS 26.0, *), let record = KeyboardInterruptedRecording.load(),
+              !Self.transcribingJobs.contains(record.jobID) else { return }
+        guard !record.isExpired(at: now), FileManager.default.fileExists(atPath: record.url.path) else {
+            KeyboardInterruptedRecording.clear(jobID: record.jobID)
+            return
+        }
+        Self.transcribingJobs.insert(record.jobID)
+        let preferences = DictationPipeline.Preferences.current(style: KeyboardBridge().style, corrections: corrections())
+        KeyboardProbeLog.shared.write("transcribing a recording an earlier keyboard left: \(String(format: "%.1f", record.seconds)) s")
+        Task {
+            defer {
+                Self.transcribingJobs.remove(record.jobID)
+                KeyboardInterruptedRecording.clear(jobID: record.jobID)
+            }
+            do {
+                let (heard, language, _) = try await KeyboardTranscription.transcribe(
+                    record.url, hints: preferences.recognitionHints, audioSeconds: record.seconds
+                )
+                let steps = await DictationPipeline(preferences: preferences, language: language.identifier)
+                    .run(heard, translationSource: language.locale.language)
+                guard !steps.formatted.isEmpty else { return }
+                Self.hold(
+                    resultID: UUID().uuidString,
+                    text: steps.formatted,
+                    heard: steps.translated == nil ? steps.heard : nil,
+                    document: record.document,
+                    stoppedAfter: record.cutShort ? record.seconds : nil
+                )
+            } catch {
+                KeyboardProbeLog.shared.write("a left recording didn't transcribe: \(Self.describe(error))")
+            }
         }
     }
 
@@ -960,15 +989,34 @@ final class KeyboardLocalDictation {
     }
     #endif
 
-    private static func hold(resultID: String, text: String, heard: String?, document: UUID?) {
+    private static func hold(resultID: String, text: String, heard: String?, document: UUID?, stoppedAfter: TimeInterval? = nil) {
         KeyboardBridge().heldDictation = KeyboardHeldDictation(
             id: resultID,
             text: text,
             heard: heard,
             document: document,
-            finishedAt: Date().timeIntervalSince1970
+            finishedAt: Date().timeIntervalSince1970,
+            stoppedAfter: stoppedAfter
         )
         KeyboardProbeLog.shared.write("held a dictation for the next keyboard: \(text.count) chars")
+    }
+
+    /// The jobs this keyboard process is transcribing, which no keyboard view may start again
+    /// from the recording they left (`recoverLeftRecording`).
+    private static var transcribingJobs: Set<String> = []
+
+    /// Keeps `job`'s recording for whichever keyboard comes next, in case iOS ends this one
+    /// before it has transcribed it (`KeyboardInterruptedRecording`).
+    private static func leaveRecording(of job: Job) {
+        guard let recording = job.recording else { return }
+        KeyboardInterruptedRecording(
+            jobID: job.id,
+            fileName: recording.fileName,
+            document: job.document,
+            seconds: recording.seconds,
+            cutShort: job.stoppedAfter != nil,
+            at: Date().timeIntervalSince1970
+        ).save()
     }
 
     private func finishRecording(jobID: String) {
@@ -1001,13 +1049,21 @@ final class KeyboardLocalDictation {
         let transcribingStartedAt = Date().timeIntervalSince1970
         setSession(.transcribing(job: job, startedAt: transcribingStartedAt, task: nil))
         let url = file.url
+        job.recording = (url.lastPathComponent, seconds)
+        if job.interrupted {
+            job.stoppedAfter = seconds
+            Self.leaveRecording(of: job)
+        }
         let preferences = job.preferences
         let hints = preferences.recognitionHints
+        Self.transcribingJobs.insert(job.id)
         let task = Task { [weak self] in
+            defer { Self.transcribingJobs.remove(job.id) }
             let started = Date()
             do {
                 let (heard, language, engine) = try await KeyboardTranscription.transcribe(url, hints: hints, audioSeconds: seconds)
-                try? FileManager.default.removeItem(at: url)
+                // A recording left for the next keyboard stays until its text is held.
+                if !job.interrupted { try? FileManager.default.removeItem(at: url) }
                 let locale = language.identifier
                 // The app's steps (but Apple Intelligence's cleanup), snapshotted at capture start.
                 let pipeline = DictationPipeline(preferences: preferences, language: locale)
@@ -1025,8 +1081,10 @@ final class KeyboardLocalDictation {
                 guard let self, !job.interrupted else {
                     // The keyboard hid before it finished, or is gone: the next one delivers it.
                     if !text.isEmpty {
-                        Self.hold(resultID: resultID, text: text, heard: learnable, document: job.document)
+                        Self.hold(resultID: resultID, text: text, heard: learnable, document: job.document, stoppedAfter: job.stoppedAfter)
                     }
+                    try? FileManager.default.removeItem(at: url)
+                    KeyboardInterruptedRecording.clear(jobID: job.id)
                     if let self, self.session.job === job {
                         self.setSession(.idle)
                     }
@@ -1059,7 +1117,11 @@ final class KeyboardLocalDictation {
                     )
                 ))
             } catch {
-                try? FileManager.default.removeItem(at: url)
+                // Given up on with the keyboard gone, its recording waits for the next keyboard.
+                if !(job.interrupted && Task.isCancelled) {
+                    try? FileManager.default.removeItem(at: url)
+                    KeyboardInterruptedRecording.clear(jobID: job.id)
+                }
                 guard let self, !Task.isCancelled,
                       case .transcribing(let currentJob, _, _) = self.session, currentJob.id == jobID else { return }
                 if EmptyCapture.endsQuietly(error) {
@@ -1085,8 +1147,7 @@ final class KeyboardLocalDictation {
             }
             endCaptureOwnership()
             releaseAudioSession()
-            let failure = KeyboardLocalCapturePhase.ArmedFailure(message: message, detail: detail)
-            setSession(.armed(.failed(job: armed.job, requestedAt: armed.requestedAt, failure: failure)))
+            setSession(.armed(.failed(job: armed.job, requestedAt: armed.requestedAt, message: message, detail: detail)))
             KeyboardProbeLog.shared.write("FAILED at touch-down (held): \(detail ?? message) \(KeyboardProbeLog.memory())")
             return
         }

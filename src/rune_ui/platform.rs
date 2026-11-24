@@ -251,6 +251,8 @@ pub(super) struct ScrawlView {
     pub(super) folder_error: Option<String>,
     /// Turning captures on or off failed (the pane sets it).
     pub(super) enable_error: Option<String>,
+    /// How it works is open (the pane sets it).
+    pub(super) how_it_works: bool,
 }
 
 #[cfg(hex_capture)]
@@ -332,9 +334,24 @@ pub(super) struct PlatformState {
     /// Developer builds: keeps Meetings available without opt-in in debug builds
     /// (`crate::DEVELOPER_FEATURES_ENABLED` on a native host).
     pub(super) developer: bool,
-    /// macOS 27 lists Accessibility as "Device Control and Data Access"
+    /// macOS 27 lists Accessibility as "Device Control and Data Access", and
+    /// 27.3 as "System & App Protection Override"
     /// (`permission_guide::list_name`); the permission rows use that name.
     pub(super) accessibility_renamed: bool,
+    /// Whether System Settings takes a tile dragged into the Accessibility
+    /// list (`permission_guide::drag_supported`); macOS 27.3 adds Hex with +
+    /// instead, so no copy asks for a drag there.
+    pub(super) accessibility_drag_supported: bool,
+    /// Whether macOS 27.3 split Accessibility from System & App Protection
+    /// Override (`permission_guide::split_accessibility`). There posting key
+    /// events is its own grant, and the post-event preflight can stay false
+    /// after a grant until Hex restarts, so a stale row offers a restart
+    /// rather than a TCC reset that would drop the grant.
+    pub(super) accessibility_split: bool,
+    /// Whether that one restart was already used (`onboarding::
+    /// post_event_restart_recorded`). A row that still reads stale then takes
+    /// the reset flow, so a grant that never lands cannot restart forever.
+    pub(super) accessibility_restart_done: bool,
     /// The Hex Microphone's live filter tuning
     /// (`hex_microphone::current_tuned_config`).
     pub(super) tuning: TunedFilterConfig,
@@ -421,6 +438,9 @@ impl PlatformState {
             preview: false,
             developer: false,
             accessibility_renamed: false,
+            accessibility_drag_supported: true,
+            accessibility_split: false,
+            accessibility_restart_done: false,
             tuning: TunedFilterConfig::default(),
             demo: None,
             hud: HudLab::default(),
@@ -529,6 +549,16 @@ impl PlatformState {
         self.permissions_stale.retain(|entry| *entry != kind);
     }
 
+    /// Whether a stale row should offer Restart Hex rather than resetting TCC:
+    /// macOS 27.3's post-event preflight keeps its launch-time answer, so a
+    /// reset there would drop a grant that may already be on. One restart is
+    /// offered per pending grant; a row stale after it takes the reset flow.
+    fn restart_on_stale(&self, kind: PermissionKind) -> bool {
+        self.accessibility_split
+            && !self.accessibility_restart_done
+            && kind == PermissionKind::Accessibility
+    }
+
     pub(super) fn control_for(
         &self,
         kind: PermissionKind,
@@ -537,6 +567,10 @@ impl PlatformState {
         use super::lists::PermissionControl;
         if permitted {
             PermissionControl::Allowed
+        } else if self.stale(kind) && self.restart_on_stale(kind) {
+            // macOS 27.3: the post-event preflight reads stale until Hex
+            // restarts, so resetting TCC would drop a grant that is already on.
+            PermissionControl::Restart
         } else if self.stale(kind) {
             PermissionControl::Stale
         } else if self.asked(kind) {
@@ -592,6 +626,15 @@ pub(super) enum MeetingRequest {
     Stop,
     /// Import a local audio file as a meeting (macOS; Labs › Import audio).
     Import(PathBuf),
+    /// Delete selected lines from a saved meeting's transcript
+    /// (Labs › Delete transcript lines).
+    DeleteTranscript {
+        id: String,
+        entries: Vec<crate::meeting::TranscriptEntryKey>,
+    },
+    /// Leave Hex's microphone out of the recording under way, or put it back
+    /// (macOS; Labs › Mute the microphone while recording).
+    SetMicrophoneMuted(bool),
     Rename {
         id: String,
         title: String,

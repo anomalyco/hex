@@ -1526,6 +1526,12 @@ fn post(key: &str, body: &str, timeout: Duration) -> Result<Reply> {
     })
 }
 
+/// Whether a Jev credential is available (`jev_api_key`, `$OPENCODE_API_KEY`, or an active,
+/// unexpired `opencode` credential in OpenCode's database) within `budget`. Never logs the key.
+pub fn available(budget: Duration) -> bool {
+    api_key(Instant::now() + budget).is_ok()
+}
+
 /// The OpenCode key: the host's `jev_api_key`, `$OPENCODE_API_KEY`, or the active `opencode`
 /// credential in OpenCode's database (read-only). Never printed or logged.
 fn api_key(deadline: Instant) -> Result<String> {

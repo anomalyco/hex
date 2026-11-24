@@ -264,7 +264,10 @@ impl SendState {
     }
 
     pub(super) fn has_delivery(&self) -> bool {
-        self.delivery().is_some()
+        !matches!(
+            self,
+            Self::Idle | Self::ResolvingRule { .. } | Self::Scheduled { .. }
+        )
     }
 
     /// Whether a saved rule's countdown is active (waiting to resolve or send).

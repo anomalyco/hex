@@ -308,6 +308,11 @@ fn live_page(p: Paint, live: &Live, s: &Onboard, which: Perm) -> El {
         Perm::Accessibility if live.accessibility_row => {
             let ax_desc = match live.accessibility {
                 ItemStatus::Stale => tr("An older Hex entry can keep this off"),
+                // macOS 27.3's list takes no dragged tile: Hex is added with +
+                // or from the Privacy & Security notification.
+                ItemStatus::Waiting if !live.accessibility_drag_supported => {
+                    tr("Click the Privacy & Security notification, or add Hex with +")
+                }
                 ItemStatus::Waiting => tr("Switch on Hex in System Settings"),
                 ItemStatus::Restart => tr("Turns on when Hex restarts"),
                 _ => tr("Notices the shortcut and pastes your words"),
@@ -317,7 +322,10 @@ fn live_page(p: Paint, live: &Live, s: &Onboard, which: Perm) -> El {
                     p,
                     "ax-row",
                     &glyphs::CURSOR_TEXT,
-                    super::super::platform_settings::accessibility_name(live.accessibility_renamed),
+                    super::super::platform_settings::accessibility_name(
+                        live.accessibility_renamed,
+                        live.accessibility_drag_supported,
+                    ),
                     ax_desc,
                     live_pill(
                         p,

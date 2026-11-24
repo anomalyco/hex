@@ -270,11 +270,23 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
     });
 }
 
+/// Whether a failure reaches the HUD notice: Labs › Failure notices, or a
+/// refusal the person must act on. Nothing else tells them why their words
+/// never landed.
+fn notifies_with(lab: bool, message: &str) -> bool {
+    lab || crate::paste::refused_by_macos(message)
+}
+
+fn notifies(message: &str) -> bool {
+    notifies_with(crate::labs::failure_notices(), message)
+}
+
 /// Shows `message` as a one-line notice beside the HUD for
 /// [`FAILURE_VISIBLE`] (Labs › Failure notices), replacing any live words
-/// until it leaves or a new capture starts.
+/// until it leaves or a new capture starts. A refused paste is shown even
+/// with that lab off.
 pub(crate) fn show_failure(message: &str) {
-    if !crate::labs::failure_notices() {
+    if !notifies(message) {
         return;
     }
     let (Some(overlay), Some(place)) = (LIVE.get(), PLACE.get().copied()) else {
@@ -496,6 +508,13 @@ mod tests {
     const LONG: &str = "So the plan for today is to finish the release notes, then check the \
         streaming numbers on the M4, and after lunch we can review the onboarding flow together";
     const HEBREW: &str = "אז התוכנית להיום";
+
+    #[test]
+    fn a_refused_paste_is_shown_with_failure_notices_off() {
+        assert!(notifies_with(false, crate::paste::POST_EVENT_REFUSED));
+        assert!(!notifies_with(false, "Could not open microphone"));
+        assert!(notifies_with(true, "Could not open microphone"));
+    }
 
     #[test]
     fn a_failure_notice_lasts_six_seconds() {

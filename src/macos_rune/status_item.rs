@@ -13,7 +13,7 @@ use objc2_foundation::{MainThreadMarker, NSData, NSObject, NSSize, NSString};
 
 use crate::app_settings::{AppSettings, HotkeyBinding};
 use crate::calendar::CalendarMeeting;
-use crate::desktop::i18n::{tr, tr_fill};
+use crate::desktop::i18n::{menu_label as label, tr, tr_fill};
 use crate::desktop::tray_menu::model_menu_entries;
 use crate::dictation::vocabulary::VocabularyEntry;
 use crate::transcription::models::{MODELS, TranscriptionModelId};
@@ -46,6 +46,9 @@ pub enum StatusItemAction {
     JoinCalendarMeeting(CalendarMeeting),
     StartMeeting,
     StopMeeting,
+    /// Labs › Mute the microphone while recording: the recording's microphone
+    /// leaves or returns.
+    ToggleMeetingMicrophoneMute,
     CopyLastMeetingTranscript,
     /// Pause Hex, or Resume Hex while shortcuts are suspended (Labs › Pause
     /// from menu bar).
@@ -225,6 +228,16 @@ objc2::define_class!(
             let _ = self.ivars().actions.try_send(StatusItemAction::StopMeeting);
         }
 
+        /// Labs › Mute the microphone while recording: Hex's microphone leaves
+        /// the recording while the call's audio keeps it.
+        #[unsafe(method(muteMeeting:))]
+        fn mute_meeting(&self, _sender: &AnyObject) {
+            let _ = self
+                .ivars()
+                .actions
+                .try_send(StatusItemAction::ToggleMeetingMicrophoneMute);
+        }
+
         #[unsafe(method(copyLastMeetingTranscript:))]
         fn copy_last_meeting_transcript(&self, _sender: &AnyObject) {
             let _ = self
@@ -301,6 +314,9 @@ enum Row {
     /// Labs › Copy recent dictations: hidden until the menu opens with it on.
     CopyRecentDictation,
     CopyLastMeetingTranscript,
+    /// Labs › Mute the microphone while recording: hidden until a meeting
+    /// records with the lab on.
+    MuteMeeting,
     /// Labs › Screenshots: hidden until the menu opens with it on.
     RestoreCapture,
     SpeechModel,
@@ -315,7 +331,7 @@ enum Row {
 /// How many upcoming meetings the menu lists at most.
 const UPCOMING_ROWS: usize = crate::calendar_menu::MAX_ROWS;
 
-const ROWS: [Row; 25] = [
+const ROWS: [Row; 26] = [
     Row::UpcomingHeader,
     Row::UpcomingSlot,
     Row::UpcomingSlot,
@@ -326,6 +342,7 @@ const ROWS: [Row; 25] = [
     Row::UpcomingSeparator,
     Row::MeetingStatus,
     Row::StopMeeting,
+    Row::MuteMeeting,
     Row::CopySection,
     Row::RecordMeeting,
     Row::MeetingSeparator,
@@ -355,6 +372,7 @@ impl Row {
             Row::UpcomingEmpty => tr("No upcoming meetings").into(),
             Row::MeetingStatus => tr("Recording").into(),
             Row::StopMeeting => label("Stop & Transcribe", tr("Stop & transcribe")),
+            Row::MuteMeeting => mute_title(),
             Row::CopySection => label("Copy Section", tr("Copy section")),
             Row::RecordMeeting => label("Record Meeting", tr("Record meeting")),
             Row::PauseHex => pause_title(false),
@@ -386,7 +404,7 @@ impl Row {
     fn titled_by_state(self) -> bool {
         matches!(
             self,
-            Row::UpcomingSlot | Row::MeetingStatus | Row::PauseHex | Row::Update
+            Row::UpcomingSlot | Row::MeetingStatus | Row::MuteMeeting | Row::PauseHex | Row::Update
         )
     }
 
@@ -395,6 +413,7 @@ impl Row {
             Row::UpcomingSlot => sel!(openCalendarMeeting:),
             Row::MeetingStatus => sel!(openMeetings:),
             Row::StopMeeting => sel!(stopMeeting:),
+            Row::MuteMeeting => sel!(muteMeeting:),
             Row::RecordMeeting => sel!(startMeeting:),
             Row::PauseHex => sel!(togglePause:),
             Row::PasteLast => sel!(pasteLast:),
@@ -436,6 +455,7 @@ impl Row {
                 | Row::UpcomingSeparator
                 | Row::MeetingStatus
                 | Row::StopMeeting
+                | Row::MuteMeeting
                 | Row::CopySection
                 | Row::RecordMeeting
                 | Row::MeetingSeparator
@@ -496,19 +516,6 @@ fn menu_key(label: &str) -> Option<String> {
         .map(String::from)
 }
 
-/// A menu label in the interface language: macOS's title case in English
-/// (`title`), else the window's sentence-case label translated, with the
-/// title's trailing `…` kept.
-fn label(title: &str, translated: &str) -> String {
-    if crate::desktop::i18n::english() {
-        return title.into();
-    }
-    match title.strip_suffix('…') {
-        Some(_) if !translated.ends_with('…') => format!("{translated}…"),
-        _ => translated.into(),
-    }
-}
-
 /// The Speech Model submenu's fixed items, with their titles.
 fn no_models() -> String {
     tr("No downloaded models").into()
@@ -540,6 +547,7 @@ struct StatusItemController {
     meeting_status: Retained<NSMenuItem>,
     meeting_start: Retained<NSMenuItem>,
     meeting_stop: Retained<NSMenuItem>,
+    meeting_mute: Retained<NSMenuItem>,
     meeting_copy_last: Retained<NSMenuItem>,
     meeting_sections: Retained<NSMenuItem>,
     meeting_sections_menu: Retained<NSMenu>,
@@ -724,6 +732,7 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
             meeting_status: row(Row::MeetingStatus),
             meeting_start: row(Row::RecordMeeting),
             meeting_stop: row(Row::StopMeeting),
+            meeting_mute: row(Row::MuteMeeting),
             meeting_copy_last: row(Row::CopyLastMeetingTranscript),
             meeting_sections: row(Row::CopySection),
             meeting_sections_menu,
@@ -865,6 +874,9 @@ struct MeetingMenu {
     recording: bool,
     can_start: bool,
     can_stop: bool,
+    /// Labs › Mute the microphone while recording: the row's title while it
+    /// shows, which is only while a recording runs with the lab on.
+    mute: Option<String>,
     /// One Copy Section item per live chapter.
     sections: Vec<String>,
 }
@@ -878,14 +890,41 @@ fn meeting_menu(state: &crate::meeting::watcher::MeetingMenuState, enabled: bool
             recording: false,
             can_start: enabled,
             can_stop: false,
+            mute: None,
             sections: Vec::new(),
         },
-        MeetingMenuState::Starting => MeetingMenu {
-            status: Some(tr("Starting meeting recording…").into()),
+        // A stop asked while the recorder starts keeps Record disabled and
+        // says so, exactly as the tray's Stopping item does.
+        MeetingMenuState::Starting { stopping } => MeetingMenu {
+            status: Some(if *stopping {
+                tr("Stopping…").into()
+            } else {
+                tr("Starting meeting recording…").into()
+            }),
             button_title: String::new(),
             recording: true,
             can_start: false,
             can_stop: false,
+            mute: None,
+            sections: Vec::new(),
+        },
+        // A stop already went to the recorder: Stop hides, Record stays
+        // disabled, and the elapsed time holds until the transcription row
+        // takes over (as the tray's Stopping item does).
+        MeetingMenuState::Recording {
+            started,
+            stopping: true,
+            ..
+        } => MeetingMenu {
+            status: Some(tr("Stopping…").into()),
+            button_title: format!(
+                " {}",
+                crate::meeting::format_duration(started.elapsed().as_millis() as u64)
+            ),
+            recording: true,
+            can_start: false,
+            can_stop: false,
+            mute: None,
             sections: Vec::new(),
         },
         MeetingMenuState::Recording {
@@ -897,16 +936,25 @@ fn meeting_menu(state: &crate::meeting::watcher::MeetingMenuState, enabled: bool
         } => {
             let elapsed = crate::meeting::format_duration(started.elapsed().as_millis() as u64);
             let mut status = format!("{} · {} · {elapsed}", tr("Recording"), menu_title(title));
-            if warning.is_some() {
+            // Labs › Mute the microphone while recording says so in place of
+            // the silence warning, which the microphone's own track no longer
+            // shows while Hex leaves it out.
+            let muted = crate::meeting::microphone_muted();
+            if muted {
+                status.push_str(" · ");
+                status.push_str(tr("Microphone muted"));
+            } else if warning.is_some() {
                 status.push_str(" · ");
                 status.push_str(tr("Microphone is silent"));
             }
+            let mute = crate::labs::meeting_microphone_mute().then(mute_title);
             MeetingMenu {
                 status: Some(status),
                 button_title: format!(" {elapsed}"),
                 recording: true,
                 can_start: false,
                 can_stop: true,
+                mute,
                 sections: chapters
                     .iter()
                     .map(|chapter| {
@@ -925,6 +973,7 @@ fn meeting_menu(state: &crate::meeting::watcher::MeetingMenuState, enabled: bool
             recording: false,
             can_start: false,
             can_stop: false,
+            mute: None,
             sections: Vec::new(),
         },
     }
@@ -934,6 +983,17 @@ fn meeting_menu(state: &crate::meeting::watcher::MeetingMenuState, enabled: bool
 /// icon is on and no meeting is under way.
 fn icon_shown(hide: bool, meeting_active: bool) -> bool {
     !hide || meeting_active
+}
+
+/// Labs › Mute the microphone while recording's row: choosing it does what
+/// the title says. Its title follows the switch itself, so a lab turned off
+/// under a muted recording reads Mute Microphone again as the row goes.
+fn mute_title() -> String {
+    if crate::meeting::microphone_muted() {
+        label("Unmute Microphone", tr("Unmute microphone"))
+    } else {
+        label("Mute Microphone", tr("Mute microphone"))
+    }
 }
 
 /// Labs › Pause from menu bar's row: Pause Hex while shortcuts run, Resume
@@ -1302,6 +1362,10 @@ pub fn update_meeting(state: &crate::meeting::watcher::MeetingMenuState, enabled
         controller.meeting_copy_last.setHidden(!visible);
         controller.meeting_start.setHidden(!menu.can_start);
         controller.meeting_stop.setHidden(!menu.can_stop);
+        controller.meeting_mute.setHidden(menu.mute.is_none());
+        if let Some(title) = &menu.mute {
+            controller.meeting_mute.setTitle(&NSString::from_str(title));
+        }
         controller.meeting_status.setHidden(menu.status.is_none());
         controller
             .meeting_sections
@@ -1354,15 +1418,17 @@ mod tests {
         assert!(idle.can_start && !idle.can_stop && idle.status.is_none());
         assert!(!meeting_menu(&MeetingMenuState::Idle, false).can_start);
         let started = std::time::Instant::now() - std::time::Duration::from_secs(754);
-        let recording_state = |title: &str, chapters, warning| MeetingMenuState::Recording {
-            started,
-            id: "1".into(),
-            title: title.into(),
-            chapters,
-            warning,
-        };
+        let recording_state =
+            |title: &str, chapters, warning, stopping| MeetingMenuState::Recording {
+                started,
+                id: "1".into(),
+                title: title.into(),
+                chapters,
+                warning,
+                stopping,
+            };
         let recording = meeting_menu(
-            &recording_state("Zoom call — 2:30 PM", Vec::new(), None),
+            &recording_state("Zoom call — 2:30 PM", Vec::new(), None, false),
             false,
         );
         assert_eq!(
@@ -1374,6 +1440,7 @@ mod tests {
                 "A very long provisional title that keeps going past the limit",
                 Vec::new(),
                 None,
+                false,
             ),
             false,
         );
@@ -1389,6 +1456,7 @@ mod tests {
                 "Team sync",
                 Vec::new(),
                 Some(crate::meeting::TrackWarning::DigitalSilence),
+                false,
             ),
             false,
         );
@@ -1406,6 +1474,7 @@ mod tests {
                 "Team sync",
                 vec![chapter("Image storage", 0), chapter("Motion lint", 190_000)],
                 None,
+                false,
             ),
             false,
         );
@@ -1419,6 +1488,12 @@ mod tests {
             transcribing.status.as_deref(),
             Some("Transcribing meeting…")
         );
+        // A stop under way keeps the recording visible with no Record and no
+        // Stop until the transcription row takes over.
+        let stopping = meeting_menu(&recording_state("Team sync", Vec::new(), None, true), true);
+        assert!(!stopping.can_start && !stopping.can_stop);
+        assert!(stopping.recording);
+        assert_eq!(stopping.status.as_deref(), Some("Stopping…"));
     }
 
     #[test]
@@ -1440,6 +1515,7 @@ mod tests {
                 "—".into(),
                 "Recording".into(),
                 "Stop & Transcribe".into(),
+                "Mute Microphone".into(),
                 "Copy Section".into(),
                 "Record Meeting".into(),
                 "—".into(),
@@ -1515,6 +1591,7 @@ mod tests {
             title: "Team sync".into(),
             chapters: Vec::new(),
             warning: None,
+            stopping: false,
         };
 
         i18n::apply(Some("en"));
