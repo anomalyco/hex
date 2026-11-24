@@ -16,7 +16,7 @@
     <string name="settings_privacy_detail">Hex turns speech into text on this phone and never uploads your voice or what you type with its keyboard. It keeps no keystrokes or transcripts. Feedback leaves the phone only when you tap Send in Send feedback: then your message, the pictures you keep, your email if you add one and details about Hex and this phone go to Anomaly’s feedback inbox (Bellhop). Your dictations, recordings, vocabulary and corrections are never included. To find updates, Hex Preview asks GitHub for its latest version when you open it and at most once a day from the keyboard. That request carries nothing about you or what you type, though GitHub sees your internet address, as with any website. Turn it off with Check for updates automatically.</string>
     <string name="updates_available">Hex Preview %1$s (build %2$d) is available</string>
     <string name="updates_update">Download update</string>
-    <string name="updates_browser_note">Your browser downloads it from GitHub. Open the download and tap Update when Android asks. The first time, Android may ask you to allow your browser to install apps.</string>
+    <string name="updates_browser_note">Your browser downloads it from GitHub. Open the download and tap Update when Android asks. The first time, Android asks you to allow your browser to install apps. Allow it, go back, and tap the download again.</string>
     <string name="updates_keyboard_note">Updating closes the keyboard for a moment. Tap a text field to bring it back.</string>
     <string name="updates_auto">Check for updates automatically</string>
     <string name="updates_auto_detail">When you open Hex Preview, and once a day from the keyboard</string>
