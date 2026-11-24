@@ -4090,6 +4090,31 @@
       "expect": {"result": "refused", "reason": "duplicateKey"}
     },
     {
+      "name": "Two problems: the repeated key comes before the deep nesting, so the refusal is duplicateKey (the first problem met reading from the start)",
+      "file": "files/first-problem-duplicate-key.hexwords",
+      "expect": {"result": "refused", "reason": "duplicateKey"}
+    },
+    {
+      "name": "Two problems: the deep nesting comes before the repeated key, so the refusal is tooDeep",
+      "file": "files/first-problem-too-deep.hexwords",
+      "expect": {"result": "refused", "reason": "tooDeep"}
+    },
+    {
+      "name": "Two problems: a syntax error (a double comma) comes before the repeated key, so the refusal is notJSON",
+      "file": "files/first-problem-not-json.hexwords",
+      "expect": {"result": "refused", "reason": "notJSON"}
+    },
+    {
+      "name": "A number a 64-bit float can't hold is not JSON for this format, even as the version",
+      "file": "files/number-out-of-range.hexwords",
+      "expect": {"result": "refused", "reason": "notJSON"}
+    },
+    {
+      "name": "A 400-digit number in an unknown field is not JSON either: the whole file is refused",
+      "file": "files/number-out-of-range-integer.hexwords",
+      "expect": {"result": "refused", "reason": "notJSON"}
+    },
+    {
       "name": "The same key twice inside an entry",
       "file": "files/duplicate-key-in-entry.hexwords",
       "expect": {"result": "refused", "reason": "duplicateKey"}
