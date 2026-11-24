@@ -22,7 +22,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
@@ -205,9 +204,12 @@ private fun Field(value: String, hint: String, enabled: Boolean, options: Keyboa
 
 @Composable
 private fun Button(text: String, enabled: Boolean, mod: Modifier = Modifier, action: () -> Unit) {
-    Box(mod.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(14.dp)).background(colorResource(R.color.ink))
-        .alpha(if (enabled) 1f else 0.4f).clickable(enabled, role = Role.Button, onClick = action),
-        contentAlignment = Alignment.Center) { Label(text, inverted = true, weight = FontWeight.SemiBold) }
+    // Both states share the same modifiers and differ only in colour; a graphics layer that existed only while
+    // disabled left the whole button undrawn once it went away as it became enabled.
+    Box(mod.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(14.dp))
+        .background(colorResource(if (enabled) R.color.ink else R.color.sheet))
+        .clickable(enabled, role = Role.Button, onClick = action),
+        contentAlignment = Alignment.Center) { Label(text, inverted = enabled, muted = !enabled, weight = FontWeight.SemiBold) }
 }
 
 private val FeedbackKind.label get() = when (this) {
