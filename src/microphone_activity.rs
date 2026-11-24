@@ -7,7 +7,7 @@
 #[cfg(target_os = "macos")]
 use std::ffi::c_void;
 #[cfg(target_os = "macos")]
-use std::mem::size_of;
+use std::mem::{offset_of, size_of};
 #[cfg(target_os = "macos")]
 use std::ptr::NonNull;
 
@@ -21,12 +21,15 @@ use objc2_app_kit::NSRunningApplication;
 use objc2_core_audio::{
     AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize, AudioObjectID,
     AudioObjectPropertyAddress, AudioObjectPropertyScope, AudioObjectPropertySelector,
-    kAudioDevicePropertyDeviceUID, kAudioHardwarePropertyProcessObjectList,
-    kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
-    kAudioObjectPropertyScopeInput, kAudioObjectSystemObject, kAudioProcessPropertyBundleID,
-    kAudioProcessPropertyDevices, kAudioProcessPropertyIsRunningInput,
-    kAudioProcessPropertyIsRunningOutput, kAudioProcessPropertyPID,
+    kAudioDevicePropertyDeviceUID, kAudioDevicePropertyStreamConfiguration,
+    kAudioHardwarePropertyProcessObjectList, kAudioObjectPropertyElementMain,
+    kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyScopeInput, kAudioObjectSystemObject,
+    kAudioProcessPropertyBundleID, kAudioProcessPropertyDevices,
+    kAudioProcessPropertyIsRunningInput, kAudioProcessPropertyIsRunningOutput,
+    kAudioProcessPropertyPID,
 };
+#[cfg(target_os = "macos")]
+use objc2_core_audio_types::{AudioBuffer, AudioBufferList};
 #[cfg(target_os = "macos")]
 use objc2_core_foundation::{CFRetained, CFString};
 #[cfg(target_os = "macos")]
@@ -191,17 +194,29 @@ pub(crate) fn application_running_output(canonical_bundle_id: &str) -> Result<bo
     })
 }
 
+/// One device a call app's process reports recording from: the UID Core
+/// Audio names it by and the input channels it offers. An output-only device
+/// the app lists, such as the MacBook Pro Speakers, has no input channels and
+/// is never a microphone.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ReportedInput {
+    pub(crate) uid: String,
+    pub(crate) input_channels: u32,
+}
+
 #[cfg(target_os = "macos")]
-/// The UIDs of the input devices the app `canonical_bundle_id` (its helpers
-/// included) records from, read from each of its processes running input.
-/// macOS 14 and later report them; earlier systems report none.
-pub(crate) fn application_input_devices(canonical_bundle_id: &str) -> Result<Vec<String>> {
+/// The devices the app `canonical_bundle_id` (its helpers included) reports
+/// recording from, read from each of its processes running input, with the
+/// input channels each one offers. macOS 14 and later report them; earlier
+/// systems report none. Output-only devices are reported too, so the caller
+/// can log and skip them; only the ones with input channels may be followed.
+pub(crate) fn application_input_devices(canonical_bundle_id: &str) -> Result<Vec<ReportedInput>> {
     objc2::rc::autoreleasepool(|_| {
         let process_objects = property_vec::<AudioObjectID>(
             kAudioObjectSystemObject as AudioObjectID,
             kAudioHardwarePropertyProcessObjectList,
         )?;
-        let mut uids = Vec::new();
+        let mut reported: Vec<ReportedInput> = Vec::new();
         for process_object in process_objects {
             let recording =
                 property_value::<u32>(process_object, kAudioProcessPropertyIsRunningInput)
@@ -219,14 +234,90 @@ pub(crate) fn application_input_devices(canonical_bundle_id: &str) -> Result<Vec
                 continue;
             };
             for device in devices {
-                if let Some(uid) = property_cf_string(device, kAudioDevicePropertyDeviceUID)
-                    && !uids.contains(&uid)
-                {
-                    uids.push(uid);
+                let Some(uid) = property_cf_string(device, kAudioDevicePropertyDeviceUID) else {
+                    continue;
+                };
+                let input_channels = input_channel_count(device);
+                match reported.iter_mut().find(|input| input.uid == uid) {
+                    Some(input) => input.input_channels = input.input_channels.max(input_channels),
+                    None => reported.push(ReportedInput {
+                        uid,
+                        input_channels,
+                    }),
                 }
             }
         }
-        Ok(uids)
+        Ok(reported)
+    })
+}
+
+#[cfg(target_os = "macos")]
+/// How many input channels `device` offers, from its input stream
+/// configuration: an output-only device such as the built-in speakers has
+/// none. A device Core Audio will not describe counts as having none.
+fn input_channel_count(device: AudioObjectID) -> u32 {
+    let mut address = property_address_in(
+        kAudioDevicePropertyStreamConfiguration,
+        kAudioObjectPropertyScopeInput,
+    );
+    let mut bytes = 0u32;
+    // SAFETY: The property address and size point to initialized stack values.
+    let status = unsafe {
+        AudioObjectGetPropertyDataSize(
+            device,
+            NonNull::from(&mut address),
+            0,
+            std::ptr::null(),
+            NonNull::from(&mut bytes),
+        )
+    };
+    if status != 0 || !(size_of::<AudioBufferList>() as u32..=65536).contains(&bytes) {
+        return 0;
+    }
+    // u64 storage gives AudioBufferList and its pointer fields their required alignment.
+    let mut storage = vec![0u64; (bytes as usize).div_ceil(size_of::<u64>())];
+    // SAFETY: Storage is aligned and has at least the size reported by CoreAudio.
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            device,
+            NonNull::from(&mut address),
+            0,
+            std::ptr::null(),
+            NonNull::from(&mut bytes),
+            NonNull::new(storage.as_mut_ptr()).unwrap().cast(),
+        )
+    };
+    if status != 0
+        || bytes as usize > storage.len() * size_of::<u64>()
+        || (bytes as usize) < size_of::<AudioBufferList>()
+    {
+        return 0;
+    }
+    // SAFETY: The successful property read initialized the header within storage.
+    let count = unsafe { (*(storage.as_ptr().cast::<AudioBufferList>())).mNumberBuffers } as usize;
+    let offset = offset_of!(AudioBufferList, mBuffers);
+    let Some(end) = count
+        .checked_mul(size_of::<AudioBuffer>())
+        .and_then(|buffers| offset.checked_add(buffers))
+    else {
+        return 0;
+    };
+    if end > bytes as usize {
+        return 0;
+    }
+    // SAFETY: The bounds above cover every buffer, and offset preserves alignment.
+    let buffers = unsafe {
+        std::slice::from_raw_parts(
+            storage
+                .as_ptr()
+                .cast::<u8>()
+                .add(offset)
+                .cast::<AudioBuffer>(),
+            count,
+        )
+    };
+    buffers.iter().fold(0u32, |channels, buffer| {
+        channels.saturating_add(buffer.mNumberChannels)
     })
 }
 

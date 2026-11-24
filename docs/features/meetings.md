@@ -1494,8 +1494,13 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │   │   device UID, ahead of the saved device and the default (#1086)
 │   │   ├── App switches input mid-call -> followed within 1 s, same track
 │   │   ├── App reports no input (muted) -> keeps the one it followed
+│   │   ├── App lists an output-only device (MacBook Pro Speakers) -> never
+│   │   │   followed: only devices with input channels are chosen, so the
+│   │   │   saved device, else System default, stands in; the app's reported
+│   │   │   devices and channels are logged at debug
 │   │   └── Not reported, not listed, Hex Microphone, or won't open -> as below
 │   │      // a_meeting_follows_the_input_its_call_app_records_from,
+│   │      // a_meeting_never_follows_a_device_without_input_channels,
 │   │      // a_meeting_finds_the_input_its_call_uses_by_uid; unverified on a real call
 │   ├── System default changes, the Settings microphone changes, or a missing
 │   │   saved device returns, mid-meeting
@@ -1652,6 +1657,7 @@ Other checks: `running_output_streams_say_whether_an_app_still_plays` in
 `a_meeting_manifest_round_trips_a_microphone_warning_and_old_ones_have_none` in
 [meeting/tests.rs](../../src/meeting/tests.rs);
 `a_meeting_follows_the_input_its_call_app_records_from`,
+`a_meeting_never_follows_a_device_without_input_channels`,
 `a_microphone_that_would_not_open_is_tried_a_bounded_number_of_times`, and
 `only_an_input_the_call_app_reports_counts_as_held` in
 [meeting/capture.rs](../../src/meeting/capture.rs); and

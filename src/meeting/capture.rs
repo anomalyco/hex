@@ -518,10 +518,25 @@ impl UnopenableRetry {
 /// How often a meeting looks at which input its call app records from.
 const CALL_INPUT_INTERVAL: Duration = Duration::from_secs(1);
 
+/// The UIDs of the reported devices that can record, in the app's order: an
+/// output-only device a call app lists as its input, such as the MacBook Pro
+/// Speakers, offers no input channels and is dropped.
+fn recordable_inputs(reported: &[crate::microphone_activity::ReportedInput]) -> Vec<String> {
+    reported
+        .iter()
+        .filter(|input| input.input_channels > 0)
+        .map(|input| input.uid.clone())
+        .collect()
+}
+
 /// The input a meeting follows for its call app, by UID: the one it follows
 /// while the app still reports it or reports none (as some do while muted),
-/// else the first the app reports.
-fn follow_call_input(current: Option<String>, reported: Vec<String>) -> Option<String> {
+/// else the first input the app reports that can record.
+fn follow_call_input(
+    current: Option<String>,
+    reported: Vec<crate::microphone_activity::ReportedInput>,
+) -> Option<String> {
+    let reported = recordable_inputs(&reported);
     match current {
         Some(current) if reported.is_empty() || reported.contains(&current) => Some(current),
         _ => reported.into_iter().next(),
@@ -534,9 +549,9 @@ fn call_app_reports_input(opened: Option<&str>, reported: &[String]) -> bool {
     opened.is_some_and(|opened| reported.iter().any(|reported| reported == opened))
 }
 
-/// The UIDs of the inputs the call app records from; none where the OS
-/// does not report them.
-fn call_app_inputs(application: &str) -> Vec<String> {
+/// The devices the call app reports recording from, with their input
+/// channel counts; none where the OS does not report them.
+fn call_app_inputs(application: &str) -> Vec<crate::microphone_activity::ReportedInput> {
     #[cfg(target_os = "macos")]
     {
         crate::microphone_activity::application_input_devices(application).unwrap_or_else(|error| {
@@ -691,11 +706,20 @@ impl MicrophoneSource {
         warnings: TrackWarnings,
     ) -> Result<Self> {
         let route_generation = crate::audio::input_route_generation();
-        let call_inputs = application
+        let reported = application
             .as_deref()
             .map(call_app_inputs)
             .unwrap_or_default();
-        let call_input = follow_call_input(None, call_inputs.clone());
+        let call_input = follow_call_input(None, reported.clone());
+        let call_inputs = recordable_inputs(&reported);
+        if application.is_some() {
+            tracing::debug!(
+                application = application.as_deref(),
+                reported = ?reported,
+                followed = ?call_input,
+                "meeting call app reports the inputs it records from"
+            );
+        }
         let renegotiate =
             silence_recovery.take_renegotiation(crate::transcription::engine::dictation_busy());
         if !renegotiate && silence_recovery.renegotiation_pending() {
@@ -814,13 +838,22 @@ impl MicrophoneSource {
             && now.duration_since(self.call_input_checked) >= CALL_INPUT_INTERVAL
         {
             self.call_input_checked = now;
-            self.call_inputs = self
+            let reported = self
                 .application
                 .as_deref()
                 .map(call_app_inputs)
                 .unwrap_or_default();
-            let call_input = follow_call_input(self.call_input.clone(), self.call_inputs.clone());
+            self.call_inputs = recordable_inputs(&reported);
+            let call_input = follow_call_input(self.call_input.clone(), reported.clone());
             call_input_changed = call_input != self.call_input;
+            if call_input_changed {
+                tracing::debug!(
+                    reported = ?reported,
+                    from = ?self.call_input,
+                    to = ?call_input,
+                    "meeting microphone follows the input its call app records from"
+                );
+            }
             self.call_input = call_input;
         }
         let generation = crate::audio::input_route_generation();
@@ -968,18 +1001,28 @@ mod tests {
     use super::*;
     use crate::audio::Selection;
 
+    fn reported(uid: &str, input_channels: u32) -> crate::microphone_activity::ReportedInput {
+        crate::microphone_activity::ReportedInput {
+            uid: uid.to_owned(),
+            input_channels,
+        }
+    }
+
     #[test]
     fn a_meeting_follows_the_input_its_call_app_records_from() {
-        let uids = |uids: &[&str]| uids.iter().map(|uid| (*uid).to_owned()).collect::<Vec<_>>();
+        let inputs = |uids: &[&str]| uids.iter().map(|uid| reported(uid, 2)).collect::<Vec<_>>();
         let current = |uid: &str| Some(uid.to_owned());
         // The first input the app reports, until it reports a different one.
-        assert_eq!(follow_call_input(None, uids(&["Jabra"])), current("Jabra"));
         assert_eq!(
-            follow_call_input(current("Jabra"), uids(&["BuiltIn", "Jabra"])),
+            follow_call_input(None, inputs(&["Jabra"])),
             current("Jabra")
         );
         assert_eq!(
-            follow_call_input(current("Jabra"), uids(&["BuiltIn"])),
+            follow_call_input(current("Jabra"), inputs(&["BuiltIn", "Jabra"])),
+            current("Jabra")
+        );
+        assert_eq!(
+            follow_call_input(current("Jabra"), inputs(&["BuiltIn"])),
             current("BuiltIn")
         );
         // An app that reports none, as some do while muted, keeps its input.
@@ -989,6 +1032,33 @@ mod tests {
         );
         // With nothing reported yet, the configured microphone stays.
         assert_eq!(follow_call_input(None, Vec::new()), None);
+    }
+
+    #[test]
+    fn a_meeting_never_follows_a_device_without_input_channels() {
+        // WhatsApp reported the MacBook Pro Speakers as its input device, and
+        // Hex recorded speaker bleed and silence from it.
+        let speakers = reported("MacBookProSpeakers", 0);
+        assert_eq!(follow_call_input(None, vec![speakers.clone()]), None);
+        // An input the app really records from is followed instead.
+        assert_eq!(
+            follow_call_input(None, vec![speakers.clone(), reported("MacBookProMic", 1)]),
+            Some("MacBookProMic".to_owned())
+        );
+        // An output-only device never displaces the input already followed.
+        assert_eq!(
+            follow_call_input(Some("Jabra".to_owned()), vec![speakers.clone()]),
+            Some("Jabra".to_owned())
+        );
+        assert_eq!(
+            follow_call_input(
+                Some("Jabra".to_owned()),
+                vec![speakers.clone(), reported("BuiltIn", 2)]
+            ),
+            Some("BuiltIn".to_owned())
+        );
+        // A device that loses its input channels is no longer recordable.
+        assert!(recordable_inputs(&[speakers, reported("BuiltIn", 0)]).is_empty());
     }
 
     #[test]
