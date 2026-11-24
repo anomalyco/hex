@@ -251,7 +251,14 @@ internal class KeyboardEngine(
         shift.up()
         if (was != shift.uppercase) showPlane()
     }
-    fun mode() { resetTyping(); clearSpaces(); surface?.suggestions(emptyList()); symbols = !symbols; more = false; shift.forgetTap(); showPlane() }
+    /** ?123 and ABC. A word being typed goes along, as on Gboard and iPhone Hex: its strip stays, a mark on the
+     * symbol page ends it as on the letters ("teh" ?123 "?" is "the?"), and back on the letters it goes on. */
+    fun mode() {
+        symbols = !symbols; more = false; shift.forgetTap(); showPlane()
+        val w = word
+        if (w != null && w.token.isNotEmpty() && endsWith(prefix + w.token)) { showSuggestions(w); return }
+        resetTyping(); clearSpaces(); surface?.suggestions(emptyList())
+    }
     /** Back to the letters page from wherever (the emoji panel's and the symbol pad's ABC). */
     fun letters() {
         if (pad == null && !symbols) return
@@ -420,7 +427,7 @@ internal class KeyboardEngine(
         val w = word ?: return
         if (pickSwiped(text)) return
         edited()
-        if (symbols || !canEndWord()) return
+        if ((symbols && w.token.isEmpty()) || !canEndWord()) return
         val old = w.token
         if (old.isNotEmpty() && !endsWith(prefix + old)) { resetTyping(); surface?.suggestions(emptyList()); return }
         if (old.isEmpty() && !w.startsWord(before())) return
@@ -518,7 +525,7 @@ internal class KeyboardEngine(
         val text = if (value.any { it in SpaceRules.JOINERS || it.isWhitespace() }) b else takeHeldSpace(b)
         clearSpaces()
         val w = word
-        if (mark && w != null && !symbols && canEndWord() && !afterSwipe) {
+        if (mark && w != null && pad == null && canEndWord() && !afterSwipe) {
             val swap = w.textReplacement(text)
             if (swap != null && replace(swap.original, smartWord(swap.replacement) + value)) { resetTyping(); showPredictions(before()); inputDone(); return }
             if (feedback.autocorrect && correctingField && w.token.isNotEmpty() && endsWith(prefix + w.token)) {
