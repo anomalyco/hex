@@ -34,6 +34,7 @@ import ly.anoma.hex.Entry
 import ly.anoma.hex.Label
 import ly.anoma.hex.R
 import ly.anoma.hex.Rule
+import ly.anoma.hex.speech.lastDictation
 
 /** Labs › Diagnostics: buttons that collect the report and run its tests, and the report itself with Copy. */
 @Composable
@@ -42,6 +43,7 @@ internal fun DiagnosticsPage() {
     val facts by Diagnostics.facts.collectAsState()
     val app by Diagnostics.app.collectAsState()
     val keyboard by Diagnostics.keyboard.collectAsState()
+    val last by lastDictation.collectAsState()
     val busy = app is Diagnostics.Speed.Running || keyboard is Diagnostics.Speed.Running
     val view = LocalView.current
     // The tap counts change while the person types in another app: read again on coming back and after each test tap.
@@ -80,11 +82,11 @@ internal fun DiagnosticsPage() {
         Rule()
         Entry(stringResource(R.string.diagnostics_pulse), stringResource(R.string.diagnostics_pulse_detail), "", { Diagnostics.strongPulse(context) })
     }
-    if (facts == null && app == Diagnostics.Speed.Idle && keyboard == Diagnostics.Speed.Idle) {
+    if (facts == null && app == Diagnostics.Speed.Idle && keyboard == Diagnostics.Speed.Idle && last == null) {
         Label(stringResource(R.string.diagnostics_none), muted = true, size = 14, lines = Int.MAX_VALUE)
         return
     }
-    val text = report(facts, app, keyboard, taps)
+    val text = report(facts, app, keyboard, taps, last)
     var copied by remember(text) { mutableStateOf(false) }
     Card {
         SelectionContainer {

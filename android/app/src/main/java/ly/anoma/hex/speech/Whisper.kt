@@ -8,12 +8,15 @@ import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
 internal interface Recognizer {
-    /** Loads the model ahead of a dictation, while it records (on the transcription thread). */
-    fun prepare() {}
+    /** Loads the model ahead of a dictation, while it records (on the transcription thread). Returns whether it read
+     * the model, false when it was already loaded. */
+    fun prepare(): Boolean = false
     /** [job] names this decode, so [abort] can stop it. */
     fun decode(pcm: ShortArray, count: Int, language: String, translate: Boolean, prompt: String? = null, job: Long = 0): String?
     /** Stops [job]'s decode, from any thread, if it is running: the person discarded it. */
     fun abort(job: Long) {}
+    /** [job]'s decode times for Labs › Diagnostics, once it has run; null for another or none. */
+    fun spent(job: Long): SpeechModel.Spent? = null
 }
 
 internal class LocalSpeech(private val app: Context) : Recognizer {
@@ -21,6 +24,7 @@ internal class LocalSpeech(private val app: Context) : Recognizer {
     override fun decode(pcm: ShortArray, count: Int, language: String, translate: Boolean, prompt: String?, job: Long): String? =
         SpeechModel.decode(app, pcm, count, language, translate, prompt, job)
     override fun abort(job: Long) = SpeechModel.abort(job)
+    override fun spent(job: Long) = SpeechModel.spent(job)
 }
 
 /** The one speech model in Hex's process, shared by the keyboard and Home. It loads when a dictation
@@ -46,19 +50,42 @@ internal object SpeechModel {
         fast.coerceIn(1, 4)
     }
 
-    @Synchronized fun prepare(app: Context) { load(app); keep() }
+    /** Models opened since the process started, so a caller can tell whether a load read one. */
+    private var opened = 0L
+
+    @Synchronized fun prepare(app: Context): Boolean {
+        val before = opened
+        load(app); keep()
+        return opened != before
+    }
+
+    /** A dictation decode's times for Labs › Diagnostics: its start and end (System.nanoTime), the process's processor
+     * time over it (-1: unreadable), whisper.cpp's timings, copied before the speed test can replace them, and whether it
+     * loaded the model itself. Only [decode] writes it; the speed test's [measure] never does. */
+    class Spent(val job: Long, val startedAt: Long, val endedAt: Long, val cpuMs: Long, val timings: LongArray?, val loaded: Boolean)
+    @Volatile private var spent: Spent? = null
+    fun spent(job: Long) = spent?.takeIf { it.job == job }
+    private fun cpuMs() = runCatching { android.os.Process.getElapsedCpuTime() }.getOrDefault(-1L)
 
     /** The last decode stopped by [abort]: its empty result says nothing about the model. */
     @Volatile private var abandoned = 0L
 
     @Synchronized fun decode(app: Context, pcm: ShortArray, count: Int, language: String, translate: Boolean, prompt: String?, job: Long): String? {
+        val before = opened
         val small = load(app)
+        val cpu = cpuMs()
+        val started = System.nanoTime()
+        // whisper.cpp's timings belong to this decode only once one ran; with no model they are an earlier one's.
+        val ran = handle != 0L
         var bytes = if (handle != 0L) Whisper.decode(handle, small, pcm, count, threads, language, translate, prompt, job) else null
         // Unusable downloaded weights fall back to the bundled model.
         if (bytes == null && small && abandoned != job) {
             unload()
             if (open(app, null)) bytes = Whisper.decode(handle, false, pcm, count, threads, language, translate, prompt, job)
         }
+        val ended = System.nanoTime()
+        val processor = cpuMs().let { if (it < 0 || cpu < 0) -1L else it - cpu }
+        spent = Spent(job, started, ended, processor, if (ran) runCatching { Whisper.timings() }.getOrNull() else null, opened != before)
         keep()
         return bytes?.decodeToString()?.trim()
     }
@@ -105,6 +132,7 @@ internal object SpeechModel {
 
     private fun open(app: Context, path: String?): Boolean {
         handle = Whisper.load(app.assets, path)
+        opened++
         loaded = if (handle != 0L) path ?: "" else null
         return handle != 0L
     }

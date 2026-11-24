@@ -78,7 +78,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        capture = MicCapture(LocalSpeech(applicationContext),
+        capture = MicCapture(LocalSpeech(applicationContext), DictationPlace.Home,
             // Home's Dictate bar too: onStop cancels, so the screen mustn't sleep mid-dictation.
             update = { next, reason -> phase = next; notice = speechNote(reason); window.keepAwake(next) },
             meter = {}, insert = { text, _ -> transcript = text })

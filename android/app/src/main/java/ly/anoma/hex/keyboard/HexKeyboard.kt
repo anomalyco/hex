@@ -32,6 +32,7 @@ import ly.anoma.hex.MainActivity
 import ly.anoma.hex.R
 import ly.anoma.hex.diagnostics.Diagnostics
 import ly.anoma.hex.speech.LocalSpeech
+import ly.anoma.hex.speech.DictationPlace
 import ly.anoma.hex.speech.MicCapture
 import ly.anoma.hex.speech.Signature
 import ly.anoma.hex.speech.SpeechPhase
@@ -128,7 +129,7 @@ class HexKeyboard : InputMethodService() {
         super.onCreate()
         getSharedPreferences("typing", MODE_PRIVATE).registerOnSharedPreferenceChangeListener(typingChanged)
         contentResolver.registerContentObserver(UserDictionary.Words.CONTENT_URI, true, dictionaryChanged)
-        capture = MicCapture(LocalSpeech(applicationContext), update = ::showStatus, meter = ::showLevel,
+        capture = MicCapture(LocalSpeech(applicationContext), DictationPlace.Keyboard, update = ::showStatus, meter = ::showLevel,
             insert = ::commitSpeech)
         // The lab off is the keyboard it always was: never touch the system's subtype list for it.
         if (feedback.voiceOnly) VoiceOnly.setEnabled(this, true)

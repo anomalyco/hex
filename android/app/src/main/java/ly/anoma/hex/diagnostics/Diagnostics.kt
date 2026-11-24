@@ -31,14 +31,18 @@ import ly.anoma.hex.keyboard.TapCounts
 import ly.anoma.hex.keyboard.TapPlay
 import ly.anoma.hex.keyboard.tap
 import ly.anoma.hex.keyboard.vibrates
+import ly.anoma.hex.speech.DictationPlace
+import ly.anoma.hex.speech.DictationTimes
+import ly.anoma.hex.speech.ModelAtTick
 import ly.anoma.hex.speech.ModelStore
 import ly.anoma.hex.speech.SpeechModel
 import ly.anoma.hex.speech.Whisper
+import ly.anoma.hex.speech.lastDictation
 import ly.anoma.hex.typing.TypingPreferences
 
 /** Labs › Diagnostics (Hex Preview and debug builds, [BuildConfig.DIAGNOSTICS]): a plain-text report a tester copies and
  * pastes wherever they like. It holds this phone's model, Android version, memory and processor, Hex's choices on it, a
- * speed test on a bundled clip and what the vibrator supports: nothing typed or said, no identifiers, no list of apps,
+ * speed test on a bundled clip, how long the last dictation's steps took and what the vibrator supports: nothing typed or said, no identifiers, no list of apps,
  * and nothing is sent. Nothing here runs until a button on the page is tapped. */
 internal object Diagnostics {
     /** The speed test's clip: whisper.cpp's samples/jfk.wav (public domain), 11 s of English, never anything recorded. */
@@ -126,7 +130,7 @@ internal object Diagnostics {
             .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
     }
 
-    fun report() = report(facts.value, app.value, keyboard.value, tapCounts())
+    fun report() = report(facts.value, app.value, keyboard.value, tapCounts(), lastDictation.value)
 
     /** KeyHaptics' counts since Hex's process started, read live: the keyboard shares the process. */
     fun tapCounts() = tapCountLine(TapCounts.asked.get(), TapCounts.stopped.get())
@@ -466,11 +470,46 @@ private fun schedParts(s: Sched) = linkedMapOf("cpuset" to (s.cpuset ?: "not rea
 
 private fun schedLine(parts: Map<String, String>) = parts.entries.joinToString(", ") { "${it.key} ${it.value}" }
 
+/** The last real dictation's durations (MicCapture's [DictationTimes]), or that there was none since Hex started. */
+internal fun lastDictationLines(t: DictationTimes?): String = buildString {
+    append("Last dictation (durations only, held in memory until Hex's process ends; a dictation discarded with ✕ isn't counted; nothing said or typed):")
+    if (t == null) { append(" none since Hex started\n"); return@buildString }
+    append('\n')
+    val mark = if (t.tick) "✓" else "the 1-minute stop"
+    append(if (t.place == DictationPlace.Keyboard) "  in the keyboard" else "  on Home")
+    append(String.format(Locale.ROOT, ", %.1f s recorded, %.1f s kept", t.recordedMs / 1000.0, t.keptMs / 1000.0))
+    val timings = t.timings?.takeIf { it.size >= 7 }
+    if (timings != null) append("; ${timings[6]} threads, encoder window ${if (timings[5] == 0L) "full" else "${timings[5]}"}")
+    append("; model ").append(when (t.model) {
+        ModelAtTick.Loaded -> "already loaded"
+        ModelAtTick.LoadedWhileSpeaking -> "loaded while you spoke"
+        ModelAtTick.Loading -> "still loading at $mark, ready ${t.modelReadyMs} ms after"
+        ModelAtTick.LoadedAfter -> "loaded after $mark"
+        ModelAtTick.Unknown -> "state not known"
+    }).append('\n')
+    append("  after $mark: ")
+    append("recording stopped ${t.stoppedMs} ms, decode started ${t.decodeStartedMs} ms, decode finished ${t.decodeEndedMs} ms, ")
+    append(t.insertedMs?.let { "text inserted $it ms" } ?: "no text inserted").append('\n')
+    val wall = t.decodeEndedMs - t.decodeStartedMs
+    append("  decode $wall ms")
+    if (timings != null) {
+        val encoder = timings[1] / 1000
+        val decoder = (timings[0] + timings[2] + timings[3]) / 1000
+        val prompt = timings[4] / 1000
+        append("; encoder $encoder ms, decoder $decoder ms, prompt $prompt ms, other ${maxOf(0, wall - encoder - decoder - prompt)} ms")
+    }
+    append("; processor ").append(if (t.cpuMs < 0) "not readable" else "${t.cpuMs} ms")
+    if (t.cpuMs >= 0 && wall > 0) append(String.format(Locale.ROOT, ", %.1f× the decode's wall time", t.cpuMs.toDouble() / wall))
+    append('\n')
+}
+
 /** The text the page shows and Copy copies. */
-internal fun report(facts: List<String>?, app: Diagnostics.Speed, keyboard: Diagnostics.Speed, taps: String? = null): String = buildString {
+internal fun report(facts: List<String>?, app: Diagnostics.Speed, keyboard: Diagnostics.Speed, taps: String? = null,
+                    last: DictationTimes? = null): String = buildString {
     append("Hex diagnostics\n")
     facts?.forEach { append(it).append('\n') }
     if (taps != null) append(taps).append('\n')
+    append('\n').append(lastDictationLines(last))
     for ((title, speed) in listOf("Speed test in the app" to app, "Speed test in the keyboard, open in another app" to keyboard)) {
         append('\n').append(title).append(": ")
         when (speed) {
