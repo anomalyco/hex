@@ -96,6 +96,7 @@ class MainActivity : ComponentActivity() {
             contentResolver.registerContentObserver(Settings.Secure.getUriFor(name), false, changed)
         refresh()
         ModelStore.small.refresh(this)
+        ModelStore.english.refresh(this)
         setContent {
             HexTheme {
                 BackHandler(page in 1..2) { go(page - 1) }

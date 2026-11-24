@@ -113,6 +113,8 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val customVocabulary = remember(revision) { speech.customVocabulary }
     var vocabularyDraft by remember { mutableStateOf(speech.vocabularyTerms.joinToString("\n")) }
     val signature = remember(revision) { speech.signature }
+    val fastEnglish = remember(revision) { speech.fastEnglish }
+    val english = ModelStore.english.state.collectAsState().value
     var signatureDraft by remember { mutableStateOf(speech.signatureText) }
     val emojiSuggestions = remember(revision) { typing.emojiSuggestions }
     val keyboardTools = remember(revision) { typing.keyboardTools }
@@ -271,6 +273,9 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             val action = modelAction(model)
                             Entry(stringResource(R.string.model_title), modelStatus(model), action?.let { stringResource(it) } ?: "",
                                 if (action != null) download else null)
+                            if (fastEnglish && english == ModelStore.State.Ready) {
+                                Rule(); Entry(stringResource(R.string.fast_english_in_use), action = { open(Page.Labs) })
+                            }
                         }
                     }
                     Page.Keyboard -> {
@@ -317,6 +322,35 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                     Page.Diagnostics -> DiagnosticsPage()
                     Page.Labs -> {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Label(stringResource(R.string.labs_dictation), muted = true, size = 14,
+                                mod = Modifier.padding(start = 16.dp))
+                            Card {
+                                val size = ModelStore.english.megabytes
+                                Toggle(stringResource(R.string.fast_english), stringResource(R.string.fast_english_detail, size),
+                                    fastEnglish) {
+                                    speech.fastEnglish = it
+                                    // Off stops a download under way and drops its partial file; a finished one stays
+                                    // until Delete download.
+                                    if (!it && english != ModelStore.State.Ready) ModelStore.english.delete(context)
+                                }
+                                if (fastEnglish) {
+                                    Rule()
+                                    // The download starts only on this tap, with its size on the row.
+                                    when (english) {
+                                        ModelStore.State.Available -> Entry(stringResource(R.string.fast_english_download, size), value = "",
+                                            action = { ModelStore.english.download(context) })
+                                        is ModelStore.State.Loading -> Entry(stringResource(R.string.fast_english_loading, size, english.percent))
+                                        is ModelStore.State.Retry -> Entry(stringResource(when (english.problem) {
+                                            ModelStore.Problem.Connection -> R.string.fast_english_no_connection
+                                            ModelStore.Problem.Space -> R.string.fast_english_no_space
+                                            ModelStore.Problem.Server -> R.string.fast_english_stopped
+                                        }), value = stringResource(R.string.model_try_again), action = { ModelStore.english.download(context) })
+                                        ModelStore.State.Ready -> Entry(stringResource(R.string.fast_english_ready, size),
+                                            value = stringResource(R.string.fast_english_delete),
+                                            action = { ModelStore.english.delete(context); speech.fastEnglish = false })
+                                    }
+                                }
+                            }
                             Label(stringResource(R.string.labs_output), muted = true, size = 14,
                                 mod = Modifier.padding(start = 16.dp))
                             Card {
