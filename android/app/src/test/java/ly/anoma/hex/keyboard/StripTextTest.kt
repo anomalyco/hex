@@ -294,4 +294,10 @@ class StripTextTest {
         assertEquals("Faster English dictation: on, not downloaded; the dictation language now uses standard dictation",
             fasterEnglishLine(true, false, Engine.English))
     }
+    @Test fun undoBesideANoteIsItsIconSoTheNoteKeepsTheLine() {
+        // "Stopped at 1 minute" or the low-memory note shares the line with Undo: the chip drops its words, the note
+        // may wrap once. Alone, Undo dictation keeps its words and the hint line stays one line.
+        assertEquals(UndoLook(label = false, noteLines = 2), undoLook(shared = true))
+        assertEquals(UndoLook(label = true, noteLines = 1), undoLook(shared = false))
+    }
 }
