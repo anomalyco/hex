@@ -922,29 +922,20 @@ final class KeyboardBridgeTests: XCTestCase {
         XCTAssertEqual(bridge.defaultWarmDuration(osMajorVersion: 26, now: now), .fifteenMinutes, "no speech model in the keyboard")
         languages.clearKeyboardNeedsHex()
 
+        // The multilingual model never takes dictation away from the keyboard: it dictates
+        // that model's languages itself, with Apple's speech recognition until it has the model.
         languages.chooseDictationLanguage("nl-NL")
         let multilingual = MultilingualParakeetSettings(defaults: defaults)
         multilingual.isEnabled = true
-        multilingual.isModelReady = true
         let keyboardParakeet = KeyboardParakeetSettings(defaults: defaults)
         XCTAssertTrue(keyboardParakeet.isEnabled, "Speech model in keyboard is on by default")
-        if MultilingualParakeetSettings.fits() {
-            XCTAssertEqual(
-                bridge.defaultWarmDuration(osMajorVersion: 26, now: now),
-                .fifteenMinutes,
-                "on by default, but only Hex has the multilingual model loaded"
-            )
-            keyboardParakeet.setKeyboardState(.ready)
-            XCTAssertEqual(bridge.defaultWarmDuration(osMajorVersion: 26, now: now), .fifteenMinutes, "the keyboard has V2, not it")
-            keyboardParakeet.setKeyboardState(.preparing, multilingual: true)
-            XCTAssertEqual(bridge.defaultWarmDuration(osMajorVersion: 26, now: now), .fifteenMinutes, "still loading it")
-        }
+        XCTAssertEqual(bridge.defaultWarmDuration(osMajorVersion: 26, now: now), .off, "only Hex has the multilingual model loaded")
+        keyboardParakeet.setKeyboardState(.preparing, multilingual: true)
+        XCTAssertEqual(bridge.defaultWarmDuration(osMajorVersion: 26, now: now), .off, "the keyboard is still loading it")
         keyboardParakeet.setKeyboardState(.ready, multilingual: true)
-        XCTAssertEqual(bridge.defaultWarmDuration(osMajorVersion: 26, now: now), .off, "the keyboard has it loaded and dictates it")
+        XCTAssertEqual(bridge.defaultWarmDuration(osMajorVersion: 26, now: now), .off, "the keyboard has it loaded")
         keyboardParakeet.isEnabled = false
-        if MultilingualParakeetSettings.fits() {
-            XCTAssertEqual(bridge.defaultWarmDuration(osMajorVersion: 26, now: now), .fifteenMinutes, "Speech model in keyboard off")
-        }
+        XCTAssertEqual(bridge.defaultWarmDuration(osMajorVersion: 26, now: now), .off, "Speech model in keyboard off")
         multilingual.isEnabled = false
 
         bridge.warmDuration = .oneHour

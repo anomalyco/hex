@@ -51,11 +51,7 @@ extension DictationController {
             }
             return false
         }
-        if !ParakeetUltraModel.isDownloaded() {
-            settings.isModelReady = false
-        }
         if loads.lastLoadWasInterrupted, settings.language() != nil {
-            settings.isModelReady = false
             multilingualDownload.fail(ParakeetUltraTranscriber.setAsideMessage)
         }
         guard Self.multilingualStep(
@@ -94,7 +90,6 @@ extension DictationController {
         // Memory left only matters for a load, not a download.
         guard ParakeetUltraTranscriber.chosenLanguage(availableMemory: 0) != nil,
               !ParakeetUltraModel.isDownloaded() else { return }
-        MultilingualParakeetSettings().isModelReady = false
         multilingualDownload.start()
     }
 
@@ -133,18 +128,15 @@ extension DictationController {
         }
     }
 
-    /// Parakeet Ultra loaded: the keyboard opens Hex for its languages from now on.
+    /// Parakeet Ultra loaded: Hex dictates its languages with it from now on.
     func multilingualParakeetLoaded() {
-        MultilingualParakeetSettings().isModelReady = true
         multilingualDownload.settle()
     }
 
     /// Parakeet Ultra didn't load. Missing files download again; anything else sets it aside
     /// (`ParakeetLoadGuard`) until Try again, so Hex doesn't try at every launch.
     func multilingualParakeetFailedToLoad(_ error: Error) {
-        let settings = MultilingualParakeetSettings()
-        settings.isModelReady = false
-        guard settings.isEnabled, !(error is CancellationError) else {
+        guard MultilingualParakeetSettings().isEnabled, !(error is CancellationError) else {
             multilingualDownload.settle()
             return
         }
@@ -167,7 +159,6 @@ extension DictationController {
         if ParakeetUltraModel.isDownloaded() {
             syncMultilingualParakeet()
         } else if ParakeetUltraTranscriber.chosenLanguage(availableMemory: 0) != nil {
-            MultilingualParakeetSettings().isModelReady = false
             multilingualDownload.restart()
         }
     }

@@ -69,12 +69,6 @@ nonisolated struct KeyboardParakeetSettings {
         defaults?.set(now.timeIntervalSince1970, forKey: Self.keyboardStateAtKey)
     }
 
-    /// The keyboard has the multilingual model loaded, so it dictates that model's language
-    /// itself instead of opening Hex (`KeyboardSelfDictation`).
-    var keyboardHasMultilingualModel: Bool {
-        isEnabled && keyboardState?.state == .ready && defaults?.bool(forKey: Self.keyboardStateMultilingualKey) == true
-    }
-
     /// The keyboard's memory limit (bytes), nil until the keyboard first opened on this iPhone.
     var keyboardLimit: Int? {
         defaults?.object(forKey: Self.keyboardLimitKey) as? Int

@@ -261,6 +261,7 @@ final class KeyboardViewController: UIInputViewController {
         Self.onScreen.disappeared(keyboardID)
         launchWork.forEach { $0.cancel() }
         launchWork = []
+        viewModel.dismissDictationBlock()
         fullKeyboard?.engine.commitHangulComposition()
         closeBarEmojiPanel()
         // A dictation under way finishes without the keyboard, and the next one delivers it.
@@ -826,6 +827,7 @@ final class KeyboardViewController: UIInputViewController {
             }
             ContainingAppOpener.open(url, from: self)
         }
+        viewModel.onDismissTranslationNote = { [weak self] in self?.showTranslationNote(nil) }
 
         mountSurface()
     }
@@ -1251,7 +1253,6 @@ final class KeyboardViewController: UIInputViewController {
         let reason: KeyboardSelfDictation.Reason? = localDictation.isActive
             ? nil
             : KeyboardSelfDictation().handoffReason(
-                hasMultilingualModelInKeyboard: KeyboardParakeet.shared.dictatesMultilingualHere,
                 hasMemoryToStart: localDictation.hasMemoryToStart,
                 includeRecentHandoff: false
             )
@@ -1264,12 +1265,12 @@ final class KeyboardViewController: UIInputViewController {
             lastAvailabilityNote = now
             let change: String = switch reason {
             case nil: "dictating in the keyboard"
-            case .multilingual: "multilingual model on, Dictate opens Hex"
-            case .speechModel: "speech model missing here, Dictate opens Hex"
-            case .memory, .openedHex: "short of memory, Dictate opens Hex"
+            case .speechModel, .languageUnavailable: "speech model missing here, Dictate says so"
+            case .memory, .openedHex: "short of memory, Dictate says so with Open Hex"
             }
             KeyboardProbeLog.shared.write("\(change) \(KeyboardProbeLog.memory())")
         }
+        let wasAvailable = localDictationAvailable
         localDictationAvailable = available
         viewModel.onLocalDictateTap = available ? { [weak self] in
             guard let self else { return }
@@ -1279,6 +1280,7 @@ final class KeyboardViewController: UIInputViewController {
                 pressedAt: self.takeHexKeyPress()
             )
         } : nil
+        viewModel.localDictationChanged(available: available, was: wasAvailable, reason: reason)
     }
 
     /// Loads in-keyboard dictation's capture page once the keyboard has shown

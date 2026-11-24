@@ -11,11 +11,17 @@ Dictation itself is in [dictation.md](dictation.md).
 
 A tap, or a
 still hold of 0.35 s, starts dictation: in a warm session, else inside
-the keyboard (in-keyboard dictation, iOS 26+), else by opening Hex.
+the keyboard (in-keyboard dictation, iOS 26+), else before iOS 26 by opening Hex.
 In-keyboard dictation uses the keyboard's own speech model, so it also
 dictates while Hex's isn't ready (a first download, Continue without a
-model, a failed preparation); only without it does the Hex key open Hex
-to finish setup (`DictationRoute`).
+model, a failed preparation) (`DictationRoute`). From iOS 26, where the
+keyboard can't dictate (short of memory, its speech model missing twice in a
+row, or that and Hex not set up), the Hex key, Dictate and the bar's Hex mark
+say why in one line instead ("Not enough memory to dictate here", "Download
+English in Hex to dictate", "Finish setting up Hex to dictate") with **Open
+Hex** and ✕, for 8 s, and nothing opens unless Open Hex is tapped
+(`KeyboardDictationBlock`). With a warm session the bar's Hex mark dictates as
+Dictate does; VoiceOver names it for what it does.
 In-keyboard dictation listens from touch-down, so a tap's or hold's first
 words are kept; moving
 more than 10 pt first opens the style menu, dropping that capture; releasing over a row picks it, and releasing elsewhere leaves
@@ -1076,9 +1082,10 @@ keyboard's usual dictation there (the warm Hex session or in-keyboard dictation)
 words are about to insert and the field still shows the range unchanged (the same field, and
 the text around it), they replace it; otherwise they insert at the cursor as any dictation
 would, with the range left alone. Cancelling or hearing nothing leaves the range untouched.
-Where dictation would open Hex instead (no Full Access, or the keyboard can't dictate here),
-tapping Dictate dismisses the actions and opens Hex (or shows the Full Access hint) with the
-text left in place. An empty range ends like a normal
+Where the keyboard can't dictate here (no Full Access, or no warm session or in-keyboard
+dictation), tapping Dictate dismisses the actions and does what the Hex key does there (the
+Full Access hint, the line that says why with Open Hex, or before iOS 26 opening Hex) with
+the text left in place. An empty range ends like a normal
 trackpad lift. Delete and Cut ask the host to delete once per Character: in a script whose
 host removes one code point per call (some Devanagari and Thai clusters), the last code
 points of a cluster can stay behind. The dictation bar's space bar is the same trackpad along the line (the same still hold or a 10 pt slide, a
