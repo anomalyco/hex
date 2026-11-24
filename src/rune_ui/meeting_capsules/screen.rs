@@ -104,28 +104,62 @@ pub(super) struct Landing {
     pub(super) elsewhere: bool,
 }
 
+/// Every display this release may land on, and whether the pointer is on one
+/// of them.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct Displays {
+    pub(super) all: Vec<Display>,
+    /// The pointer holds the first of `all`. False when it is on no display
+    /// at all: the cursor could not be read, or it sits in a gap between
+    /// displays, which some arrangements leave.
+    pub(super) pointer: bool,
+}
+
+impl Displays {
+    /// Every display, with `pointer` first when it holds the pointer.
+    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+    fn new(mut all: Vec<Display>, pointer: Option<usize>) -> Self {
+        if let Some(index) = pointer
+            && index > 0
+        {
+            all.rotate_left(index);
+        }
+        Self {
+            all,
+            pointer: pointer.is_some(),
+        }
+    }
+}
+
 /// Where a capsule window of `size` points, let go `offset` points from
 /// `from`'s resting corner on the display `saved` names, lands: in the corner
-/// of the display under the pointer (`displays`' first) nearest where its
-/// centre would coast to rest.
+/// of the display under the pointer nearest where its centre would coast to
+/// rest, or of the display it was dragged on when the pointer is on none.
 ///
 /// `None` when there is no display to land on.
 pub(super) fn release(
-    displays: &[Display],
+    displays: &Displays,
     saved: Option<&str>,
     from: MeetingIndicatorCorner,
     offset: (f32, f32),
     velocity: (f32, f32),
     size: (f32, f32),
 ) -> Option<Landing> {
-    let landing = displays.first()?;
     // Where Rune placed the capsule: the saved display, or the primary one it
     // falls back to when that display is gone.
     let source = displays
+        .all
         .iter()
         .find(|display| Some(display.id.as_str()) == saved)
-        .or_else(|| displays.iter().find(|display| display.primary))
-        .unwrap_or(landing);
+        .or_else(|| displays.all.iter().find(|display| display.primary))
+        .or_else(|| displays.all.first())?;
+    // A pointer on no display lands where it was dragged: the same-display
+    // path, measured on that display.
+    let landing = if displays.pointer {
+        displays.all.first()?
+    } else {
+        source
+    };
     let (left, top) = throw::rest_origin(from, source.size, size);
     let (coast_x, coast_y) = throw::coast(velocity);
     let centre = source.global((
@@ -148,47 +182,71 @@ pub(super) fn release(
 /// Called when a capsule shows, so it may run off the main thread: nothing
 /// here needs the UI thread.
 pub(super) fn target(saved: Option<&str>) -> DisplayTarget {
-    let Some(saved) = saved else {
-        return DisplayTarget::Primary;
-    };
-    target_in(saved).unwrap_or(DisplayTarget::Primary)
+    match saved {
+        Some(saved) => target_in(saved),
+        None => DisplayTarget::Primary,
+    }
+}
+
+/// The target of the display `saved` names among `displays`, or the primary
+/// display when that display is gone.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn target_in_displays(displays: &[Display], saved: &str) -> DisplayTarget {
+    displays
+        .iter()
+        .find(|display| display.id == saved)
+        .map_or(DisplayTarget::Primary, |display| display.target.clone())
 }
 
 #[cfg(target_os = "windows")]
-fn target_in(saved: &str) -> Option<DisplayTarget> {
-    scrawl_capture::win::monitors()
-        .into_iter()
-        .find(|monitor| monitor.device == saved)
-        .map(|monitor| native(&monitor))
+fn target_in(saved: &str) -> DisplayTarget {
+    target_in_displays(&windows_displays(), saved)
 }
 
 /// A saved display is its own `NSScreenNumber`, which Rune matches against
 /// the screens it finds now; a display that is gone falls back to the primary.
 #[cfg(target_os = "macos")]
-fn target_in(saved: &str) -> Option<DisplayTarget> {
-    let id = saved.parse::<u32>().ok()?;
-    Some(DisplayTarget::Native(rune::NativeDisplayId::MacOS(id)))
+fn target_in(saved: &str) -> DisplayTarget {
+    saved
+        .parse::<u32>()
+        .ok()
+        .map_or(DisplayTarget::Primary, |id| {
+            DisplayTarget::Native(rune::NativeDisplayId::MacOS(id))
+        })
 }
 
 #[cfg(target_os = "linux")]
-fn target_in(_saved: &str) -> Option<DisplayTarget> {
-    None
+fn target_in(_saved: &str) -> DisplayTarget {
+    DisplayTarget::Primary
 }
 
-/// Every display, the one under the pointer first: the display a release
-/// lands on while Labs › Indicator on any display is on.
+/// Rune's target for a capsule's next show: the display saved in settings
+/// while Labs › Indicator on any display is on, and the primary display while
+/// it is off, so turning the lab off brings a capsule pinned to another
+/// display back to the primary one instead of leaving the window there while
+/// every release measures the primary display.
+pub(super) fn placed_target(anywhere: bool, saved: Option<&str>) -> DisplayTarget {
+    if anywhere {
+        target(saved)
+    } else {
+        DisplayTarget::Primary
+    }
+}
+
+/// Every display, the one under the pointer first when it is on one: the
+/// display a release lands on while Labs › Indicator on any display is on.
 ///
 /// `None` where a capsule has no display to measure: a native Wayland
 /// surface, or a call off the main thread on macOS.
 #[cfg(target_os = "macos")]
-pub(super) fn displays(_scale: f32) -> Option<Vec<Display>> {
+pub(super) fn displays(_scale: f32) -> Option<Displays> {
     let mtm = objc2::MainThreadMarker::new()?;
     let screens = objc2_app_kit::NSScreen::screens(mtm);
     let primary = screens.iter().next()?;
     // Rune's macOS space is AppKit's, flipped: points, from the primary
     // screen's top-left.
     let primary_top = primary.frame().origin.y + primary.frame().size.height;
-    let mut displays: Vec<Display> = screens
+    let all: Vec<Display> = screens
         .iter()
         .enumerate()
         .filter_map(|(index, screen)| {
@@ -212,23 +270,31 @@ pub(super) fn displays(_scale: f32) -> Option<Vec<Display>> {
         .collect();
     // The screen under the pointer first. Rune resolves the pointer's screen
     // with the same half-open rule, so both pick the same display where two
-    // share an edge.
+    // share an edge. Between two screens that leave a gap there is none, and
+    // a release then stays on the display it was dragged on.
     let pointer = objc2_app_kit::NSEvent::mouseLocation();
     let point = (pointer.x as f32, (primary_top - pointer.y) as f32);
-    if let Some(index) = displays.iter().position(|display| display.holds(point))
-        && index > 0
-    {
-        displays.rotate_left(index);
-    }
-    Some(displays)
+    let at = all.iter().position(|display| display.holds(point));
+    Some(Displays::new(all, at))
 }
 
-/// Every display, the one under the pointer first. Rune places a window's x
-/// on the whole monitor and its top or bottom edge inside that monitor's work
-/// area, so a display's point space starts at its work area's top.
+/// Every display, the one under the pointer first when it is on one. Rune
+/// places a window's x on the whole monitor and its top or bottom edge inside
+/// that monitor's work area, so a display's point space starts at its work
+/// area's top.
 #[cfg(target_os = "windows")]
-pub(super) fn displays(_scale: f32) -> Option<Vec<Display>> {
-    let mut displays: Vec<Display> = scrawl_capture::win::monitors()
+pub(super) fn displays(_scale: f32) -> Option<Displays> {
+    let all = windows_displays();
+    let at = scrawl_capture::win::cursor_position().and_then(|point| {
+        all.iter()
+            .position(|display| display.holds((point.0 as f32, point.1 as f32)))
+    });
+    Some(Displays::new(all, at))
+}
+
+#[cfg(target_os = "windows")]
+fn windows_displays() -> Vec<Display> {
+    scrawl_capture::win::monitors()
         .into_iter()
         .map(|monitor| Display {
             target: native(&monitor),
@@ -247,16 +313,7 @@ pub(super) fn displays(_scale: f32) -> Option<Vec<Display>> {
             scale: monitor.scale as f32,
             primary: monitor.primary,
         })
-        .collect();
-    if let Some(point) = scrawl_capture::win::cursor_position()
-        && let Some(index) = displays
-            .iter()
-            .position(|display| display.holds((point.0 as f32, point.1 as f32)))
-        && index > 0
-    {
-        displays.rotate_left(index);
-    }
-    Some(displays)
+        .collect()
 }
 
 #[cfg(target_os = "windows")]
@@ -268,7 +325,7 @@ fn native(monitor: &scrawl_capture::win::Monitor) -> DisplayTarget {
 /// primary RandR monitor, and a native Wayland capsule keeps returning to the
 /// corner it started in ([`primary_screen_size`]).
 #[cfg(target_os = "linux")]
-pub(super) fn displays(_scale: f32) -> Option<Vec<Display>> {
+pub(super) fn displays(_scale: f32) -> Option<Displays> {
     None
 }
 
@@ -343,11 +400,9 @@ fn points(pixels: f32, scale: f32) -> f32 {
 mod tests {
     use super::*;
 
-    /// A 1512 × 982 point laptop display at the origin, at 2x, and a
-    /// 1920 × 1080 display at 1x to its right. `pointer` names the display
-    /// the pointer is on, which [`release`] takes first.
-    fn laptop_and_monitor(pointer: &str) -> Vec<Display> {
-        let laptop = Display {
+    /// A 1512 × 982 point laptop display at the origin, at 2x.
+    fn laptop() -> Display {
+        Display {
             target: DisplayTarget::Primary,
             id: "primary".into(),
             frame: (0.0, 0.0, 3024.0, 1964.0),
@@ -355,8 +410,12 @@ mod tests {
             size: (1512.0, 982.0),
             scale: 2.0,
             primary: true,
-        };
-        let monitor = Display {
+        }
+    }
+
+    /// A 1920 × 1080 display at 1x to the laptop's right.
+    fn monitor() -> Display {
+        Display {
             target: DisplayTarget::Native(rune::NativeDisplayId::Windows(7)),
             id: r"\\.\DISPLAY2".into(),
             frame: (3024.0, 0.0, 1920.0, 1080.0),
@@ -364,17 +423,31 @@ mod tests {
             size: (1920.0, 1080.0),
             scale: 1.0,
             primary: false,
-        };
-        let mut displays = vec![laptop, monitor];
-        displays.sort_by_key(|display| display.id != pointer);
-        displays
+        }
+    }
+
+    /// Both displays, the pointer's first. `pointer` names the display the
+    /// pointer is on; `None` leaves it on neither, as a gap between two
+    /// displays does.
+    fn two_displays(pointer: Option<&str>) -> Displays {
+        let mut all = vec![laptop(), monitor()];
+        match pointer {
+            Some(pointer) => {
+                all.sort_by_key(|display| display.id != pointer);
+                Displays { all, pointer: true }
+            }
+            None => Displays {
+                all,
+                pointer: false,
+            },
+        }
     }
 
     const SIZE: (f32, f32) = (260.0, 180.0);
 
     #[test]
     fn a_release_on_the_display_it_was_dragged_on_keeps_its_corner() {
-        let displays = laptop_and_monitor("primary");
+        let displays = two_displays(Some("primary"));
         // Dragged 40 pt left and 30 down on the laptop, let go still.
         let landing = release(
             &displays,
@@ -406,8 +479,8 @@ mod tests {
 
     #[test]
     fn a_release_over_another_display_jumps_to_its_nearest_corner() {
-        let monitor = r"\\.\DISPLAY2";
-        let displays = laptop_and_monitor(monitor);
+        let monitor_id = r"\\.\DISPLAY2";
+        let displays = two_displays(Some(monitor_id));
         // The pointer is on the monitor to the right: the throw crosses the
         // laptop's right edge and lands on that display's left side.
         let landing = release(
@@ -420,10 +493,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(landing.corner, MeetingIndicatorCorner::TopLeft);
-        assert_eq!(landing.display, monitor);
+        assert_eq!(landing.display, monitor_id);
         assert_eq!(landing.size, (1920.0, 1080.0));
         assert!(landing.elsewhere);
-        assert_eq!(landing.target, displays[0].target);
+        assert_eq!(landing.target, displays.all[0].target);
         // Below the monitor's middle too: its bottom corner.
         let landing = release(
             &displays,
@@ -451,9 +524,47 @@ mod tests {
     }
 
     #[test]
+    fn a_pointer_on_no_display_lands_where_it_was_dragged() {
+        // The pointer is in the gap beside the monitor, or its read failed:
+        // the first display is not the pointer's, so a release keeps the
+        // display it was dragged on.
+        let displays = two_displays(None);
+        let landing = release(
+            &displays,
+            Some(r"\\.\DISPLAY2"),
+            MeetingIndicatorCorner::TopRight,
+            (500.0, 900.0),
+            (0.0, 0.0),
+            SIZE,
+        )
+        .unwrap();
+        assert_eq!(landing.display, r"\\.\DISPLAY2");
+        assert!(!landing.elsewhere);
+        assert_eq!(
+            landing.size,
+            (1920.0, 1080.0),
+            "measured on its own display"
+        );
+        // From its top right, let go below its middle: its bottom right.
+        assert_eq!(landing.corner, MeetingIndicatorCorner::BottomRight);
+        // A saved display that is gone still measures the primary one.
+        let landing = release(
+            &displays,
+            Some(r"\\.\DISPLAY9"),
+            MeetingIndicatorCorner::TopRight,
+            (-40.0, 30.0),
+            (0.0, 0.0),
+            SIZE,
+        )
+        .unwrap();
+        assert_eq!(landing.display, "primary");
+        assert!(!landing.elsewhere);
+    }
+
+    #[test]
     fn a_saved_display_that_is_gone_measures_the_primary_one() {
-        let monitor = r"\\.\DISPLAY2";
-        let displays = laptop_and_monitor(monitor);
+        let monitor_id = r"\\.\DISPLAY2";
+        let displays = two_displays(Some(monitor_id));
         // The display saved in settings is not connected any more: Rune puts
         // the capsule on the primary display, and the corner is measured from
         // there.
@@ -467,15 +578,18 @@ mod tests {
         )
         .unwrap();
         assert_eq!(landing.corner, MeetingIndicatorCorner::BottomLeft);
-        assert_eq!(landing.display, monitor);
+        assert_eq!(landing.display, monitor_id);
         assert!(
             landing.elsewhere,
             "the pointer's display is the landing one"
         );
-        // No pointer display either: nothing to land on.
+        // No display at all: nothing to land on.
         assert_eq!(
             release(
-                &[],
+                &Displays {
+                    all: Vec::new(),
+                    pointer: true,
+                },
                 None,
                 MeetingIndicatorCorner::TopRight,
                 (0.0, 0.0),
@@ -488,7 +602,7 @@ mod tests {
 
     #[test]
     fn the_primary_display_is_the_source_when_nothing_was_saved() {
-        let displays = laptop_and_monitor(r"\\.\DISPLAY2");
+        let displays = two_displays(Some(r"\\.\DISPLAY2"));
         let landing = release(
             &displays,
             None,
@@ -508,8 +622,8 @@ mod tests {
 
     #[test]
     fn a_display_holds_the_pointer_by_its_whole_frame() {
-        let displays = laptop_and_monitor("primary");
-        let (laptop, monitor) = (&displays[0], &displays[1]);
+        let displays = two_displays(Some("primary"));
+        let (laptop, monitor) = (&displays.all[0], &displays.all[1]);
         assert!(laptop.holds((0.0, 0.0)));
         assert!(laptop.holds((3023.0, 1963.0)));
         assert!(
@@ -518,6 +632,34 @@ mod tests {
         );
         assert!(monitor.holds((3024.0, 0.0)));
         assert!(!monitor.holds((4944.0, 0.0)));
+    }
+
+    #[test]
+    fn a_saved_display_that_is_gone_is_the_primary_target() {
+        let displays = two_displays(Some("primary")).all;
+        // Rune's target for the display saved in settings: its own native
+        // id while it is connected, and the primary display once it is gone.
+        assert_eq!(
+            target_in_displays(&displays, r"\\.\DISPLAY2"),
+            DisplayTarget::Native(rune::NativeDisplayId::Windows(7))
+        );
+        assert_eq!(
+            target_in_displays(&displays, r"\\.\DISPLAY9"),
+            DisplayTarget::Primary
+        );
+    }
+
+    #[test]
+    fn the_display_lab_off_puts_a_capsule_back_on_the_primary_display() {
+        // Off, whatever the settings saved, a capsule shows on the primary
+        // display: turning the lab off mid-session moves a pinned capsule
+        // back instead of leaving it on another display.
+        assert_eq!(
+            placed_target(false, Some(r"\\.\DISPLAY2")),
+            DisplayTarget::Primary
+        );
+        assert_eq!(placed_target(false, None), DisplayTarget::Primary);
+        assert_eq!(placed_target(true, None), DisplayTarget::Primary);
     }
 
     #[test]

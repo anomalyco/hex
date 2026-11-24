@@ -704,7 +704,7 @@ pub(super) const KEYS: &[Key] = &[
     key(
         "labs.meeting_indicator_display",
         Kind::Bool,
-        "Labs: the meeting recording indicator stays on the display it was dragged to, in the corner nearest where it was let go, instead of only the primary display (macOS)",
+        "Labs: the meeting recording indicator stays on the display it was dragged to, in the corner nearest where it was let go, instead of only the primary display (macOS and Windows)",
     ),
     key(
         "labs.output_fixes",

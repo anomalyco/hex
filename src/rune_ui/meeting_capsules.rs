@@ -73,7 +73,7 @@ use panel::{
     recording_window_size,
 };
 use placement::{place_capsule, place_on};
-use screen::{Anchor, Display, primary_screen_size};
+use screen::{Anchor, primary_screen_size};
 use state::{OfferChoices, ReadyHover, State};
 
 /// The offer, call ended, and ready capsules.
@@ -355,7 +355,7 @@ type SaveAnchor = Arc<dyn Fn(MeetingIndicatorCorner, Option<&str>) + Send + Sync
 /// The primary screen in points, given the window's pixels-per-point scale.
 type ScreenFn = fn(f32) -> Option<(f32, f32)>;
 /// Every display in points, the pointer's first, given that same scale.
-type DisplaysFn = fn(f32) -> Option<Vec<Display>>;
+type DisplaysFn = fn(f32) -> Option<screen::Displays>;
 
 impl Capsule {
     fn send(&self, command: ControllerCommand) -> bool {
@@ -644,8 +644,17 @@ impl Pill {
         };
         model.last_anchor = Some((id.clone(), anchor.clone()));
         if inherit {
-            self.handle
-                .update(move |c, tx| c.start_recording(recording, anchor, tx));
+            // The accepted offer's window is this capsule's, so it already
+            // rests in the corner and display the offer was dragged to: the
+            // pill keeps exactly that, not the saved one, in case the offer's
+            // drag has not reached settings yet.
+            self.handle.update(move |c, tx| {
+                let anchor = Anchor {
+                    corner: c.corner,
+                    display: c.display.clone(),
+                };
+                c.start_recording(recording, anchor, tx);
+            });
             return Some(id);
         }
         place_on(&self.handle, anchor.display.as_deref());
@@ -2038,8 +2047,8 @@ mod tests {
 
     /// Two displays in one point space: the 1512 × 982 primary laptop, and
     /// the 1920 × 1080 monitor to its right, the pointer's (so listed first).
-    fn two_displays() -> Vec<Display> {
-        let display = |id: &str, x: f32, size: (f32, f32), primary: bool| Display {
+    fn two_displays() -> Vec<screen::Display> {
+        let display = |id: &str, x: f32, size: (f32, f32), primary: bool| screen::Display {
             target: if primary {
                 rune::DisplayTarget::Primary
             } else {
@@ -2079,7 +2088,12 @@ mod tests {
                     .push((corner, display.map(str::to_owned)));
             });
             capsule.screen = |_| Some((1512.0, 982.0));
-            capsule.displays = |_| Some(two_displays());
+            capsule.displays = |_| {
+                Some(screen::Displays {
+                    all: two_displays(),
+                    pointer: true,
+                })
+            };
         });
         placement::force_anywhere(Some(true));
         rt.frame(0.0);
@@ -2126,7 +2140,12 @@ mod tests {
                     .push((corner, display.map(str::to_owned)));
             });
             capsule.screen = |_| Some((1512.0, 982.0));
-            capsule.displays = |_| Some(two_displays());
+            capsule.displays = |_| {
+                Some(screen::Displays {
+                    all: two_displays(),
+                    pointer: true,
+                })
+            };
         });
         rt.frame(0.0);
         let (x, y) = rt.find("pill").unwrap();

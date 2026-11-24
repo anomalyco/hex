@@ -42,8 +42,8 @@ impl Capsule {
     }
 
     /// The controller accepted the recording: the offer's handoff ends and
-    /// the recording takes the surface it left, in that surface's corner of
-    /// that display.
+    /// the recording takes the surface it left, in the corner and on the
+    /// display the caller read from that surface.
     pub(super) fn start_recording(
         &mut self,
         recording: Recording,

@@ -167,12 +167,17 @@ pub(super) fn place_capsule(
 }
 
 /// Pins a capsule's window to the display `display` names while Labs ›
-/// Indicator on any display is on; `None` is the primary display. Off, Rune
-/// keeps opening every capsule on the primary display, as it always has.
+/// Indicator on any display is on; `None` is the primary display. Off, the
+/// window is put back on the primary display explicitly, so turning the lab
+/// off mid-session moves a capsule that was pinned to another display back
+/// instead of leaving it there while releases measure the primary display. A
+/// session that never turns the lab on asks for the display the overlay
+/// opened on anyway.
 pub(super) fn place_on(handle: &OverlayHandle<Capsule>, display: Option<&str>) {
-    if crate::labs::meeting_indicator_display() {
-        handle.set_display(screen::target(display));
-    }
+    handle.set_display(screen::placed_target(
+        crate::labs::meeting_indicator_display(),
+        display,
+    ));
 }
 
 #[cfg(test)]

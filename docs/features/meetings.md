@@ -1191,11 +1191,14 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   second display jumps there instead of gliding, and every capsule
      │   shows on the saved display from then on. A display that is no longer
      │   connected places the capsule on the primary display and keeps the
-     │   saved name. Off, the primary display is measured exactly as before
-     │   and the saved display is ignored
+     │   saved name, and a pointer on no display at all keeps the one it was
+     │   dragged on. Off, every show is put back on the primary display
+     │   explicitly (a pinned capsule returns when the lab goes off), and the
+     │   saved display has no effect
      │   // checks: the tests in meeting_capsules/screen.rs (a release on its
-     │   // own display, a throw onto another, a saved display that is gone,
-     │   // which display holds a pointer, and no saved id);
+     │   // own display, a throw onto another, a pointer on no display, a saved
+     │   // display that is gone, which display holds a pointer, a saved id's
+     │   // target, and the lab off putting a capsule back on the primary);
      │   // the_display_lab_lands_a_release_on_the_pointer_s_display and
      │   // without_the_display_lab_a_release_keeps_the_primary_display
      │   // (meeting_capsules.rs); NOT verified on real multi-monitor hardware

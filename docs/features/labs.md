@@ -4299,23 +4299,37 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   display's own size, so the pill's side and the panel's edges stay right
   there. Landing on another display jumps rather than gliding, since a glide
   is measured within one display; landing on the same display glides as
-  before. `meetings.recording_indicator_display` keeps the landed display
-  as the OS names it (`\\.\DISPLAY2` from the monitor's own device name on
-  Windows, the `CGDirectDisplayID` on macOS), next to
+  before, and a pointer that is on no display at all (a failed read, or a gap
+  between two displays) keeps the display it was dragged on. An accepted
+  offer hands its own corner and display to the recording pill rather than the
+  saved anchor, so a drag that has not reached settings yet still lands the
+  pill where its window is. `meetings.recording_indicator_display` keeps the
+  landed display as the OS names it (`\\.\DISPLAY2` from the monitor's own
+  device name on Windows, the `CGDirectDisplayID` on macOS), next to
   `meetings.recording_indicator_corner`, and is left out of `settings.json`
   while it is the primary display. A saved display that is no longer
   connected places the capsule on the primary display without clearing the
   setting, which is also what Rune does with a native display id it cannot
-  find. Off, every release and every show takes exactly the primary-display
-  path it took before, and the saved display is ignored. Checks:
+  find. Off, the capsules are put back on the primary display explicitly
+  (`screen::placed_target`), so turning the lab off mid-session brings a
+  pinned capsule back instead of leaving it there while every release
+  measures the primary display, and the saved display has no effect on where
+  a capsule shows or lands; every release and every show then takes exactly
+  the primary-display path it took before. Checks:
   `the_meeting_indicator_display_lab_is_a_desktop_meetings_lab_off_by_default`
   ([labs.rs](../../src/labs.rs)),
   `a_saved_file_without_the_indicator_display_stays_on_the_primary`
-  ([meetings.rs](../../src/app_settings/meetings.rs)), the tests in
-  [screen.rs](../../src/rune_ui/meeting_capsules/screen.rs) (a release in its
-  own display's corner and cell, a throw across two displays, a saved display
-  that is gone, which display holds a pointer, and the missing saved id),
-  `the_display_lab_lands_a_release_on_the_pointer_s_display`, and
+  ([meetings.rs](../../src/app_settings/meetings.rs)), and the tests in
+  [screen.rs](../../src/rune_ui/meeting_capsules/screen.rs):
+  `a_release_on_the_display_it_was_dragged_on_keeps_its_corner`,
+  `a_release_over_another_display_jumps_to_its_nearest_corner`,
+  `a_pointer_on_no_display_lands_where_it_was_dragged`,
+  `a_saved_display_that_is_gone_measures_the_primary_one`,
+  `a_saved_display_that_is_gone_is_the_primary_target` (a saved but
+  disconnected id resolves to the primary display),
+  `the_display_lab_off_puts_a_capsule_back_on_the_primary_display`, and
+  `a_display_holds_the_pointer_by_its_whole_frame`; plus
+  `the_display_lab_lands_a_release_on_the_pointer_s_display` and
   `without_the_display_lab_a_release_keeps_the_primary_display`
   ([meeting_capsules.rs](../../src/rune_ui/meeting_capsules.rs)). **Not
   verified on real multi-monitor hardware on either OS, and the macOS and
