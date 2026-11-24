@@ -113,7 +113,11 @@ What the simulator proves and what only a physical iPhone can.
   rejects gibberish and offers the marked spelling for a word typed without å ä ö), and they
   are unit-tested (`testLetterRowsMatchApplesLayouts`, `testAccentsMatchEachLanguage`,
   `testTypesOnTheSwedishLayout`, `testSmartQuotesFollowTheKeysLanguage`,
-  `testSwedishUsesTheIPhonesDictionaryAndNeverAnotherLanguages`). Dutch's rows, Apple's holds
+  `testSwedishUsesTheIPhonesDictionaryAndNeverAnotherLanguages`). Slovak's keys, holds and typing
+  rules were read from Apple's Slovak keyboard on iOS 26.5 and 27.2 simulators (the capture
+  tool's geometry, real-touch key sequences, every key held and screenshotted), and are
+  unit-tested (`testCzechsRowsAndPagesMatchApples`, `testSlovakTypesOnCzechKeys`,
+  `testSlovakFollowsCzechAndGuessesNothingWithoutADictionary`). Dutch's rows, Apple's holds
   (from the runtime's Keyboard-nl.plist), typing ë ï and j́ through a `FullKeyboardView`
   and its diaeresis fixes are unit tests too (`testLetterRowsMatchApplesLayouts`,
   `testDutchTypesAndSwitches`, `testDutchRestoresAMissingDiaeresis`). Checked live in
