@@ -13,7 +13,8 @@
 
 use rune::{El, TextEdit, Tx, col, row, text};
 use rune_kit::{
-    IconButton, IconButtonVariant, Loader, Menu as KitMenu, MenuItem, Placement, TextInput,
+    Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant, Loader, Menu as KitMenu,
+    MenuItem, Placement, TextInput,
 };
 
 use super::controls::{
@@ -327,7 +328,7 @@ fn start_rename(ui: &mut Ui, id: String) {
     let Some(meeting) = ui.meetings.meeting(&id) else {
         return;
     };
-    ui.meetings.rename = TextEdit::new(meeting.title.clone());
+    ui.meetings.rename = TextEdit::new(shown_title(meeting).to_owned());
     ui.meetings.renaming = Some(id);
     ui.open = None;
 }
@@ -599,9 +600,47 @@ fn row_meta(pane: &MeetingsPane, meeting: &Meeting, p: Paint) -> (String, Option
     (parts.join(" · "), ink)
 }
 
+/// The title shown in the list and detail header: drops the trailing
+/// ` — <clock>` from Hex's default title (`"Zoom call — 14:05"` or
+/// `"Meeting — 09:58"`) when it repeats `meeting.clock`, since both the row
+/// and the detail meta already show the time.
+fn shown_title(meeting: &Meeting) -> &str {
+    let Some(prefix) = meeting
+        .title
+        .strip_suffix(meeting.clock.as_str())
+        .and_then(|rest| rest.strip_suffix(" — "))
+    else {
+        return &meeting.title;
+    };
+    let is_default = match meeting.app.as_deref() {
+        Some(app) => prefix
+            .strip_suffix(" call")
+            .is_some_and(|head| head.eq_ignore_ascii_case(app)),
+        None => prefix == "Meeting",
+    };
+    if is_default { prefix } else { &meeting.title }
+}
+
+/// One concise muted line under a failed meeting row's status, falling back
+/// to `"Couldn't record"` when no error text was stored.
+fn failure_reason(meeting: &Meeting) -> Option<String> {
+    if meeting.status != Status::Failed {
+        return None;
+    }
+    let reason = meeting
+        .error
+        .as_deref()
+        .and_then(|error| error.lines().map(str::trim).find(|line| !line.is_empty()))
+        .map(|line| line.strip_suffix('.').unwrap_or(line));
+    Some(match reason {
+        Some(line) if !line.is_empty() => line.to_owned(),
+        _ => tr("Couldn't record").to_owned(),
+    })
+}
+
 /// The icon before a row's title: the call service's when its app names
-/// one and a neutral one otherwise (another app, or a meeting started by
-/// hand).
+/// one and a filled generic call mark otherwise (another app, or a meeting
+/// started by hand).
 fn platform_icon(meeting: &Meeting) -> &'static rune::Icon {
     match meeting
         .app
@@ -609,7 +648,7 @@ fn platform_icon(meeting: &Meeting) -> &'static rune::Icon {
         .and_then(crate::calendar::CallProvider::from_meeting_app)
     {
         Some(provider) => super::platform_settings::provider_icon(provider),
-        None => &super::icons::CALL,
+        None => super::platform_settings::call_icon(),
     }
 }
 
@@ -690,7 +729,7 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
             p,
             "meetings-empty",
             ld::HISTORY_ICON,
-            tr("No meetings yet."),
+            tr("No meetings yet"),
             Some(tr("Record a call to see its notes and transcript here.")),
         )
     } else {
@@ -716,9 +755,10 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
                     p,
                     Item {
                         key: format!("meeting-{}", meeting.id),
-                        title: meeting.title.clone(),
+                        title: shown_title(meeting).to_owned(),
                         meta,
                         meta_ink,
+                        note: failure_reason(meeting),
                         time: meeting.clock.clone(),
                         hover: completed
                             .then(|| copy_action(p, pane, meeting, "row"))
@@ -738,14 +778,14 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
                 p,
                 "meetings-empty",
                 ld::SEARCH_ICON,
-                tr("No meetings match."),
+                tr("No meetings match"),
                 None,
             ),
             None => ld::empty_state(
                 p,
                 "meeting-detail",
                 ld::HISTORY_ICON,
-                tr("Select a meeting."),
+                tr("Select a meeting"),
                 None,
             ),
         };
@@ -868,41 +908,46 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
     }
 
     let title = if renaming {
+        let title_h = p.k.ty.body_medium.line_px();
         row()
             .key("rename")
             .w_full()
-            .gap(8.0)
+            .h(title_h)
+            .gap(6.0)
             .center_y()
             .child(
                 TextInput::new(&pane.rename)
                     .label(tr("Name"))
                     .width(Some(220.0))
+                    .height(title_h)
                     .on_edit(|ui: &mut Ui| &mut ui.meetings.rename)
                     .on_submit(|ui: &mut Ui, _| finish_rename(ui))
                     .build(p.k)
                     .key("rename-field"),
             )
-            .child(button(
-                p,
-                "meeting-save-title",
-                tr("Save"),
-                ButtonKind::Secondary,
-                |ui: &mut Ui, _| finish_rename(ui),
-            ))
-            .child(button(
-                p,
-                "meeting-cancel-title",
-                tr("Cancel"),
-                ButtonKind::Secondary,
-                |ui: &mut Ui, _| ui.meetings.renaming = None,
-            ))
+            .child(
+                Button::new(tr("Save"))
+                    .variant(ButtonVariant::Neutral)
+                    .control_size(ControlSize::Small)
+                    .on_press(|ui: &mut Ui| finish_rename(ui))
+                    .build(p.k)
+                    .key("meeting-save-title"),
+            )
+            .child(
+                Button::new(tr("Cancel"))
+                    .variant(ButtonVariant::Neutral)
+                    .control_size(ControlSize::Small)
+                    .on_press(|ui: &mut Ui| ui.meetings.renaming = None)
+                    .build(p.k)
+                    .key("meeting-cancel-title"),
+            )
     } else {
-        ld::card_title(p, &meeting.title)
+        ld::card_title(p, shown_title(meeting))
     };
     let mut meta_line = vec![
         day_label(&meeting.day).to_string(),
         meeting.clock.clone(),
-        crate::meeting::format_duration(meeting.duration_ms),
+        length(meeting.duration_ms),
     ];
     meta_line.extend(meeting.app.clone());
     let retention = meeting
@@ -976,7 +1021,7 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
             let summary = summary.trim();
             notes = notes.child(
                 text(if summary.is_empty() {
-                    tr("Nothing to summarize.")
+                    tr("Nothing to summarize")
                 } else {
                     summary
                 })
@@ -1186,8 +1231,8 @@ fn overflow(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> Option
     }
     let trigger = IconButton::new(&MORE_ICON)
         .variant(IconButtonVariant::Ghost)
-        .control_size(rune_kit::ControlSize::Small)
-        .label(tr("More"))
+        .control_size(ControlSize::Small)
+        .help(tr("More"))
         .on_press(|ui: &mut Ui| {
             ui.open = (ui.open != Some(Menu::MeetingActions)).then_some(Menu::MeetingActions);
         })
@@ -1284,11 +1329,7 @@ pub(super) fn turn_line(p: Paint, index: usize, turn: &Turn, imported: bool) -> 
                         })
                         .key("name")
                         .font(p.k.ty.small_medium)
-                        .color(if turn.mine && !imported {
-                            p.text()
-                        } else {
-                            p.faint()
-                        }),
+                        .color(p.muted()),
                     )
                     .child(
                         text(crate::meeting::format_duration(turn.start_ms))
@@ -1358,8 +1399,41 @@ mod tests {
         assert_eq!(name("preview-meet"), "hex-provider-meet");
         assert_eq!(name("preview-teams"), "hex-provider-teams");
         assert_eq!(name("preview-huddle"), "hex-provider-slack");
-        assert_eq!(name("preview-design"), "hex-row-call");
-        assert_eq!(name("preview-failed"), "hex-row-call");
+        assert_eq!(name("preview-design"), "hex-provider-call");
+        assert_eq!(name("preview-failed"), "hex-provider-call");
+    }
+
+    #[test]
+    fn default_titles_hide_the_clock_the_row_already_shows() {
+        let pane = MeetingsPane::fixture();
+        assert_eq!(
+            shown_title(pane.meeting("preview-live").unwrap()),
+            "Zoom call"
+        );
+        assert_eq!(
+            shown_title(pane.meeting("preview-failed").unwrap()),
+            "Meeting"
+        );
+        assert_eq!(
+            shown_title(pane.meeting("preview-notes").unwrap()),
+            "Arcade launch plan"
+        );
+        let mut custom = pane.meeting("preview-notes").unwrap().clone();
+        custom.title = "Standup — 11:12".into();
+        assert_eq!(shown_title(&custom), "Standup — 11:12");
+    }
+
+    #[test]
+    fn failed_rows_show_one_line_reason_or_fallback() {
+        let pane = MeetingsPane::fixture();
+        assert_eq!(
+            failure_reason(pane.meeting("preview-failed").unwrap()).as_deref(),
+            Some("ScreenCaptureKit stopped the capture")
+        );
+        let mut bare = pane.meeting("preview-failed").unwrap().clone();
+        bare.error = None;
+        assert_eq!(failure_reason(&bare).as_deref(), Some("Couldn't record"));
+        assert_eq!(failure_reason(pane.meeting("preview-notes").unwrap()), None);
     }
 
     /// Only a recording meeting's transcript follows its newest line (#1332).

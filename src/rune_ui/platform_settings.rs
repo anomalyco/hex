@@ -47,7 +47,7 @@ fn permission_copy(
         PermissionKind::SystemAudio => (
             "permission-system-audio",
             tr("Screen & System Audio Recording"),
-            tr("Required to hear the other participants."),
+            tr("Required to hear the other participants"),
         ),
         PermissionKind::ScreenRecording => (
             "permission-screen-recording",
@@ -478,7 +478,7 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
             } else if stale {
                 tr("An older Hex entry can keep this off")
             } else {
-                tr("Required to hear the other participants.")
+                tr("Required to hear the other participants")
             }),
             permission_control(
                 p,
@@ -514,7 +514,7 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
             "meeting-indicator",
             &icons::PILL,
             tr("Show recording indicator"),
-            tr("Floating pill to copy live transcript turns or stop recording"),
+            tr("Floating pill while a meeting records"),
             meetings.show_recording_indicator,
             |ui: &mut Ui| {
                 let show = !ui.settings.meetings.show_recording_indicator;
@@ -565,9 +565,7 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                 "meeting-descriptive-filenames",
                 &icons::PEN,
                 tr("Descriptive meeting file names"),
-                tr(
-                    "Rename exported meeting Markdown to the meeting's title once notes or a rename provide one, keeping the date and time",
-                ),
+                tr("Rename exported Markdown to the meeting's title"),
                 meetings.export.descriptive_filenames,
                 |ui: &mut Ui| {
                     let on = !ui.settings.meetings.export.descriptive_filenames;
@@ -582,9 +580,7 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                 "meeting-notes-file",
                 &icons::BOOK,
                 tr("Separate notes file"),
-                tr(
-                    "Write the meeting's notes to their own file next to the transcript, sharing its name, with a link back to the transcript",
-                ),
+                tr("Save notes in a separate file beside the transcript"),
                 meetings.export.notes_file,
                 |ui: &mut Ui| {
                     let on = !ui.settings.meetings.export.notes_file;
@@ -636,12 +632,10 @@ fn retention_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         tr("Keep meetings"),
         match chosen {
             None => Some(tr(
-                "Audio, transcripts, notes, and Hex's Markdown copy move to the Trash. Meetings from before this setting stay until you choose",
+                "Moves new meetings' audio, transcripts, and notes to the Trash",
             )),
             Some(MeetingRetention::Forever) => None,
-            Some(_) => Some(tr(
-                "Audio, transcripts, notes, and Hex's Markdown copy move to the Trash",
-            )),
+            Some(_) => Some(tr("Moves audio, transcripts, and notes to the Trash")),
         },
         control,
     )
@@ -689,11 +683,11 @@ fn audio_retention_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         tr("Keep audio"),
         match chosen {
             None => Some(tr(
-                "Audio follows Keep meetings. Choose a time to delete only meeting audio first",
+                "Follows Keep meetings unless you choose a shorter window",
             )),
             Some(MeetingRetention::Forever) => None,
             Some(_) => Some(tr(
-                "Finished meetings keep their transcript, notes, summary, and Markdown after their audio moves to the Trash",
+                "Moves audio to the Trash and keeps transcripts and notes",
             )),
         },
         control,
@@ -746,6 +740,11 @@ static WEBEX_ICON: Icon = Icon {
     view: 16.0,
     body: include_str!("../../assets/icons/providers/webex.svg"),
 };
+static CALL_ICON: Icon = Icon {
+    name: "hex-provider-call",
+    view: 16.0,
+    body: include_str!("../../assets/icons/providers/call.svg"),
+};
 
 /// A call service's icon, as the calendar list and the Meetings list show it.
 pub(super) fn provider_icon(provider: CallProvider) -> &'static Icon {
@@ -756,6 +755,12 @@ pub(super) fn provider_icon(provider: CallProvider) -> &'static Icon {
         CallProvider::Slack => &SLACK_ICON,
         CallProvider::Webex => &WEBEX_ICON,
     }
+}
+
+/// The filled generic call icon for apps without a dedicated service mark,
+/// matching the brand icons' filled style.
+pub(super) fn call_icon() -> &'static Icon {
+    &CALL_ICON
 }
 
 /// When a call starts: the Calls row, then, where calendars are read,

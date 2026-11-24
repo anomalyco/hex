@@ -1655,7 +1655,7 @@ fn recording_starts_and_stops_from_the_header() {
     assert!(rt.find("stop-meeting").is_none(), "finalizing");
 
     let mut rt = runtime("meetings-empty", true, PANE_SIZE);
-    assert!(texts(&rt).iter().any(|text| text == "No meetings yet."));
+    assert!(texts(&rt).iter().any(|text| text == "No meetings yet"));
     tap(&mut rt, "start-meeting");
     assert_eq!(
         asked(&rt),

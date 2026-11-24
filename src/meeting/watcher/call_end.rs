@@ -326,7 +326,7 @@ mod tests {
                 microphone("com.tinyspeck.slackmacgap.helper", "Slack Helper"),
                 microphone("com.tinyspeck.slackmacgap", "Slack"),
             ]),
-            Some(("com.tinyspeck.slackmacgap".into(), "Slack Huddle".into()))
+            Some(("com.tinyspeck.slackmacgap".into(), "Slack huddle".into()))
         );
         // Two calls Hex can't tell apart: neither is watched.
         assert_eq!(

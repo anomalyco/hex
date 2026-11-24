@@ -542,6 +542,7 @@ pub(super) fn view(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (
                         title: e.title(),
                         meta: captures::meta(e),
                         meta_ink: None,
+                        note: None,
                         time: event_age(e.at_ms()),
                         hover: vec![captures::copy_action(ui, p, id, true)],
                         selected: picked,
@@ -573,6 +574,7 @@ pub(super) fn view(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (
                         // A cancelled dictation is History-only; its kind
                         // line says so, faint, under the words it kept.
                         meta_ink: e.cancelled.then(|| p.faint()),
+                        note: None,
                         time: event_age(e.timestamp_ms),
                         hover: vec![copy_action(ui, p, id, true)],
                         selected: ui.history.is_selected(id),
