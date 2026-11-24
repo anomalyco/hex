@@ -1,6 +1,7 @@
 package ly.anoma.hex.keyboard
 
 import android.content.Context
+import android.util.TypedValue
 import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -91,7 +92,7 @@ internal class SpeechMenu(context: Context, private val ime: HexKeyboard,
             setOnClickListener { click() }
         }
         fun text(s: String, weight: Int, color: Int) = TextView(context).apply {
-            text = s; textSize = 15f; useInter(weight); includeFontPadding = false
+            text = s; setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15f); useInter(weight); includeFontPadding = false
             setTextColor(context.getColor(color)); importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         }
         line.addView(text(label, 500, R.color.ink), LinearLayout.LayoutParams(0, -2, 1f))
