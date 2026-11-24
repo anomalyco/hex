@@ -358,7 +358,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                     smartQuotes) { typing.smartQuotes = it }
                                 Rule()
                                 Toggle(stringResource(R.string.voice_only_mode), stringResource(R.string.voice_only_detail),
-                                    voiceOnly) { typing.voiceOnly = it; VoiceOnly.setEnabled(context, it) }
+                                    voiceOnly) { typing.voiceOnly = it; VoiceOnly.setEnabledFromSettings(context, it) }
                             }
                         }
                     }

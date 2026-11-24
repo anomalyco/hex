@@ -19,8 +19,8 @@ import kotlin.math.roundToInt
 
 /** Labs › Keyboard › Voice-only mode: the whole keyboard while its voice subtype is current. The well,
  * waveform and round keys are the strip's, so dictating from another keyboard's voice key looks the same:
- * the status and level while it records, ✓ to insert the text, ✕ to go back without it. */
-internal class VoiceBarView(context: Context, private val finish: () -> Unit, private val cancel: () -> Unit) :
+ * the status and level while it records, ✓ to finish (or to start again), ✕ to go back without it. */
+internal class VoiceBarView(context: Context, private val tap: () -> Unit, private val cancel: () -> Unit) :
     LinearLayout(context) {
     private val density = resources.displayMetrics.density
     private fun dp(value: Int) = (value * density).roundToInt()
@@ -48,7 +48,7 @@ internal class VoiceBarView(context: Context, private val finish: () -> Unit, pr
         spinner.importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         spinner.visibility = GONE
         addView(spinner, FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER))
-        setOnClickListener { finish() }
+        setOnClickListener { tap() }
     }
 
     init {
@@ -85,14 +85,20 @@ internal class VoiceBarView(context: Context, private val finish: () -> Unit, pr
         status(SpeechPhase.Idle, context.getString(R.string.voice_only_hint))
     }
 
-    /** [message] in the well, with the level while [phase] records and a spinner while it transcribes. */
+    /** [message] in the well, with the level while [phase] records and a spinner while it transcribes.
+     * ✓ waits only while transcribing: idle it starts a dictation, so a blocked or failed start can retry. */
     fun status(phase: SpeechPhase, message: String) {
         statusText.text = message
         statusText.contentDescription = message
         val recording = phase == SpeechPhase.Opening || phase == SpeechPhase.Listening
         scope.visibility = if (recording) VISIBLE else GONE
         if (!recording) scope.clear()
-        check.visibility = if (recording) VISIBLE else GONE
+        check.visibility = if (phase == SpeechPhase.Transcribing) GONE else VISIBLE
+        doneKey.contentDescription = context.getString(when {
+            recording -> R.string.keyboard_finish_dictation
+            phase == SpeechPhase.Transcribing -> R.string.keyboard_transcribing
+            else -> R.string.keyboard_hex
+        })
         spinner.visibility = if (phase == SpeechPhase.Transcribing) VISIBLE else GONE
     }
 

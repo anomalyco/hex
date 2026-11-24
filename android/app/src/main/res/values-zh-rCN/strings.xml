@@ -122,5 +122,5 @@
     <string name="smart_quotes">智能引号</string>
     <string name="smart_quotes_detail">用 ’ ‘ “ ” 代替 \' 和 \"</string>
     <string name="voice_only_mode">仅语音模式</string>
-    <string name="voice_only_detail">添加一个可从其他键盘切换到的 Hex 语音输入。它录音、输入你说的话，然后切换回去。</string>
+    <string name="voice_only_detail">让你从其他键盘切换到 Hex 只做听写，说完再切换回去。</string>
 </resources>
