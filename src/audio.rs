@@ -5,6 +5,8 @@
 #[cfg(target_os = "macos")]
 pub(crate) mod browser_media;
 mod call_input;
+#[cfg(target_os = "windows")]
+mod default_endpoint;
 mod devices;
 pub(crate) mod effect_holds;
 mod fixture;
@@ -65,6 +67,74 @@ pub(crate) use stream::STREAM_STALL_TIMEOUT;
 pub use stream::{AudioInput, AudioInputEvent, Opened, Selection};
 
 pub use instant::{CaptureInstant, duration_for_frames};
+
+/// The outputs the tone and playback paths try on Windows, best first: the
+/// default endpoint's listed device, then every other listed output. Never
+/// cpal's default handle, whose monitor leaves thread-pool threads STA
+/// (`default_endpoint`).
+#[cfg(target_os = "windows")]
+pub(crate) fn default_output_candidates() -> Vec<cpal::Device> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+
+    let host = cpal::default_host();
+    let mut devices = Vec::new();
+    if let Some(device) = default_endpoint::default_output(&host) {
+        devices.push(device);
+    }
+    let Ok(listed) = host.output_devices() else {
+        return devices;
+    };
+    for device in listed {
+        let id = device.id().ok().map(|id| id.id().to_owned());
+        let duplicate = id.as_deref().is_some_and(|id| {
+            devices
+                .iter()
+                .any(|chosen| chosen.id().is_ok_and(|chosen| chosen.id() == id))
+        });
+        if !duplicate {
+            devices.push(device);
+        }
+    }
+    devices
+}
+
+/// Opens the system default output as a rodio sink. Windows tries the
+/// endpoint's listed device and then every other listed output, never cpal's
+/// default handle, whose monitor leaves thread-pool threads STA; every other
+/// OS asks the default device for its own buffer size before rodio's default
+/// handle and fallback.
+///
+/// Rodio's default handle always asks for a fixed 50 ms buffer rounded to a
+/// power of two (2048 frames at 44.1 kHz). A device with a smaller supported
+/// range, such as a Bluetooth headset that takes 14..=1024 frames, rejects
+/// that configuration and the handle cannot fall back. The device's own
+/// default buffer size is always within its range.
+pub(crate) fn open_default_output_sink()
+-> std::result::Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut last_error = None;
+        for device in default_output_candidates() {
+            match rodio::DeviceSinkBuilder::from_device(device)
+                .and_then(|builder| builder.open_stream())
+            {
+                Ok(sink) => return Ok(sink),
+                Err(error) => last_error = Some(error),
+            }
+        }
+        Err(last_error.unwrap_or(rodio::DeviceSinkError::NoDevice))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        rodio::DeviceSinkBuilder::from_default_device()
+            .and_then(|builder| {
+                builder
+                    .with_buffer_size(cpal::BufferSize::Default)
+                    .open_sink_or_fallback()
+            })
+            .or_else(|_| rodio::DeviceSinkBuilder::open_default_sink())
+    }
+}
 
 /// Whether `HEX_AUDIO_FIXTURE` names a WAV file that stands in for every
 /// microphone (benchmarks and tests; see `audio/fixture.rs`).

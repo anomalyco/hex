@@ -1,0 +1,2 @@
+# A unified diff's context line for a blank source line is a single space.
+*.patch -whitespace

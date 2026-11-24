@@ -1,8 +1,9 @@
 //! What a staged dev build changed: the dev channel's notes
 //! (`dev-notes.json`, published by the Release workflow's dev-notes job) from
 //! the offered build back to the running one, shown with Restart to update.
-//! What's new opens the changelog at those builds (`?since=<running>`).
-//! Notes are a nicety: any failure leaves the update without them.
+//! What's new and the sidebar's version link open the changelog since the
+//! running build (`?since=<running>`). Notes are a nicety: any failure leaves
+//! the update without them.
 
 use std::path::Path;
 use std::time::Duration;
@@ -54,13 +55,13 @@ fn is_stable_version(version: &str) -> bool {
     digits(parts.next()) && digits(parts.next()) && digits(parts.next()) && parts.next().is_none()
 }
 
-/// Where the release notes for a running version are: the dev changelog for a
-/// dev version, GitHub's release for a stable one, and nothing for an odd one.
-/// The sidebar asks only on a release build, so a local or test build with a
-/// plain version still shows no link.
+/// Where the release notes for a running version are: the dev changelog
+/// since that build for a dev version, GitHub's release for a stable one, and
+/// nothing for an odd one. The sidebar asks only on a release build, so a
+/// local or test build with a plain version still shows no link.
 pub fn release_notes_url(running: &str) -> Option<String> {
     if is_dev_version(running) {
-        Some(format!("{PAGE}#{running}"))
+        Some(format!("{PAGE}?since={running}"))
     } else if is_stable_version(running) {
         Some(format!("{RELEASES}/v{running}"))
     } else {
@@ -149,10 +150,10 @@ mod tests {
     }
 
     #[test]
-    fn a_dev_build_opens_the_changelog_at_itself() {
+    fn a_dev_build_opens_the_changelog_since_itself() {
         assert_eq!(
             release_notes_url("0.0.0-dev-12").as_deref(),
-            Some("https://anoma.ly/hex/dev#0.0.0-dev-12")
+            Some("https://anoma.ly/hex/dev?since=0.0.0-dev-12")
         );
     }
 

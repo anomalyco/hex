@@ -17,8 +17,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use hound::WavReader;
+use rodio::Player;
 use rodio::buffer::SamplesBuffer;
-use rodio::{DeviceSinkBuilder, Player};
 
 /// How often a playing clip checks whether it was replaced or stopped.
 const CHECK_INTERVAL: Duration = Duration::from_millis(16);
@@ -165,8 +165,15 @@ fn play(path: &Path, generation: u64) -> Result<(), &'static str> {
     if GENERATION.load(Ordering::Acquire) != generation {
         return Ok(());
     }
-    let mut sink =
-        DeviceSinkBuilder::open_default_sink().map_err(|_| "No audio output is available.")?;
+    let mut sink = crate::audio::open_default_output_sink().map_err(|error| {
+        tracing::warn!(
+            %error,
+            source = ?std::error::Error::source(&error),
+            path = %path.display(),
+            "could not open the audio output for history playback"
+        );
+        "No audio output is available."
+    })?;
     sink.log_on_drop(false);
     if GENERATION.load(Ordering::Acquire) != generation {
         return Ok(());

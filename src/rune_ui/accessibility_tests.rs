@@ -154,6 +154,26 @@ fn the_pane_title_is_its_heading() {
     assert_eq!(name(&title), "History");
 }
 
+#[test]
+fn the_local_build_footer_keeps_its_commit_in_the_description() {
+    let rt = runtime("mac-local-build");
+    let version = node(&rt, "version");
+    assert_eq!(name(&version), "3.4.0 · Local build");
+    assert_eq!(
+        version["description"],
+        "Local build · updates off\nfc837db2a56858eeef61411c97737d2435e60a88"
+    );
+    assert!(rt.find("update-status").is_none());
+    assert!(rt.find("build-badge").is_none());
+    if host::QUIT_IN_WINDOW {
+        let [x, y, w, _] = rt.presented("version").unwrap().0;
+        let [qx, qy, qw, _] = rt.presented("quit").unwrap().0;
+        let [sx, _, sw, _] = rt.presented("sidebar").unwrap().0;
+        assert_eq!(y, qy, "the English version and Quit fit on one line");
+        assert!(sx <= x && x + w <= qx && qx + qw <= sx + sw);
+    }
+}
+
 /// The stats dialog's daily chart is one image, and its name carries today's
 /// count and the busiest day's.
 #[test]

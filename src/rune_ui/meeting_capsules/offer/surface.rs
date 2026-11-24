@@ -187,6 +187,10 @@ fn web(c: &MeetingCandidate) -> bool {
 }
 
 pub(super) fn native_icon(id: &str) -> Option<rune::Pixels> {
+    native_icon_sized(id, ICON)
+}
+
+pub(super) fn native_icon_sized(id: &str, size: f32) -> Option<rune::Pixels> {
     static CACHE: std::sync::OnceLock<rune::ImageCache> = std::sync::OnceLock::new();
     let apps = crate::application_catalog::discover();
     let entry = crate::application_catalog::find(&apps, id)?;
@@ -195,7 +199,7 @@ pub(super) fn native_icon(id: &str) -> Option<rune::Pixels> {
     }
     let image = CACHE
         .get_or_init(|| rune::ImageCache::new(Arc::new(|| {})))
-        .app_icon(&entry.path, ICON);
+        .app_icon(&entry.path, size);
     image.wait().ok()?;
     Some(image.pixels().clone())
 }
@@ -333,7 +337,7 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
             if top_corner { 0.0 } else { h - height },
         )
     };
-    let (_, title, sub, actions) = offer::actions(p, id, candidate, rules);
+    let (title, sub, actions) = offer::actions(p, id, candidate, rules);
     let lines = col()
         .w(a.lines[i])
         .items_start()

@@ -33,7 +33,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{BOOL, PWSTR};
 
 /// A display: its handle, bounds and work area (without the taskbar) in global pixels, and its
-/// scale (1.0 at 96 DPI).
+/// scale (1.0 at 96 DPI). Its device name is what Windows keeps for the monitor itself across
+/// sessions (`\\.\DISPLAY2`), where the handle is this session's.
 #[derive(Clone, Debug)]
 pub struct Monitor {
     pub handle: isize,
@@ -41,6 +42,7 @@ pub struct Monitor {
     pub work: [f64; 4],
     pub scale: f64,
     pub primary: bool,
+    pub device: String,
 }
 
 fn rect_xywh(r: RECT) -> [f64; 4] {
@@ -61,6 +63,11 @@ fn monitor_info(handle: HMONITOR) -> Option<Monitor> {
     }
     let (mut dpi_x, mut dpi_y) = (96_u32, 96_u32);
     let _ = unsafe { GetDpiForMonitor(handle, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) };
+    let name_len = info
+        .szDevice
+        .iter()
+        .position(|&unit| unit == 0)
+        .unwrap_or(info.szDevice.len());
     Some(Monitor {
         handle: handle.0 as isize,
         rect: rect_xywh(info.monitorInfo.rcMonitor),
@@ -68,6 +75,7 @@ fn monitor_info(handle: HMONITOR) -> Option<Monitor> {
         scale: f64::from(dpi_x.max(1)) / 96.0,
         // MONITORINFOF_PRIMARY
         primary: info.monitorInfo.dwFlags & 1 != 0,
+        device: String::from_utf16_lossy(&info.szDevice[..name_len]),
     })
 }
 

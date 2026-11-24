@@ -1,5 +1,6 @@
 // Android/arm64 benchmark. Corpus labels are used only for choosing the input language.
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -12,6 +13,8 @@
 #include <vector>
 #ifdef PARAKEET
 #include "sherpa-onnx/c-api/c-api.h"
+#elif defined(TRANSCRIBE)
+#include "transcribe.h"
 #else
 #include <whisper.h>
 #endif
@@ -31,6 +34,12 @@ int main(int argc, char **argv) {
     cfg.model_config.tokens=tokens.c_str(); cfg.model_config.provider="cpu"; cfg.model_config.num_threads=threads;
     cfg.decoding_method="greedy_search";
     auto ctx=SherpaOnnxCreateOfflineRecognizer(&cfg);
+#elif defined(TRANSCRIBE)
+    // Faster English dictation's settings (app/src/main/cpp/hexenglish.cpp): CPU only, the app's thread count.
+    transcribe_model_load_params lp; transcribe_model_load_params_init(&lp); lp.backend=TRANSCRIBE_BACKEND_CPU;
+    transcribe_session_params sp; transcribe_session_params_init(&sp); sp.n_threads=threads;
+    transcribe_session *ctx=nullptr;
+    if (transcribe_open(model.c_str(),&lp,&sp,&ctx)!=TRANSCRIBE_OK) ctx=nullptr;
 #else
     auto opts=whisper_context_default_params();opts.use_gpu=false;
     auto ctx=whisper_init_from_file_with_params(model.c_str(),opts);
@@ -58,13 +67,31 @@ int main(int argc, char **argv) {
         SherpaOnnxDecodeOfflineStream(ctx,stream);
         auto result=SherpaOnnxGetOfflineStreamResult(stream); if (result) text=result->text;
         SherpaOnnxDestroyOfflineRecognizerResult(result);SherpaOnnxDestroyOfflineStream(stream);
+#elif defined(TRANSCRIBE)
+        transcribe_run_params rp; transcribe_run_params_init(&rp);
+        if (transcribe_run(ctx,audio.data(),(int)audio.size(),&rp)!=TRANSCRIBE_OK) return 6;
+        text=transcribe_full_text(ctx);
 #else
         auto p=whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
         if (getenv("HEX_SHORT_WINDOW") && audio.size() <= 8*16000) p.audio_ctx=512;
         p.n_threads=threads;p.language=lang.c_str();p.no_context=true;p.no_timestamps=true;p.suppress_nst=true;
+        if (getenv("HEX_APP") && audio.size()>30*16000) p.no_timestamps=false; // the app's long-audio decode
         p.print_progress=p.print_special=p.print_timestamps=p.print_realtime=false;
-        if (whisper_full(ctx,p,audio.data(),audio.size())!=0) return 6;
-        for(int i=0;i<whisper_full_n_segments(ctx);i++) text+=whisper_full_get_segment_text(ctx,i);
+        // HEX_APP: the downloaded model exactly as app/src/main/cpp/hexspeech.cpp decodes it (the window sized to the
+        // speech: up to 8 s plus 192 frames, at most 512, longer plus 640 until the full 1500; the token cap, one retry
+        // at 0.2, a fresh state per clip). HEX_APP=full keeps Whisper's full window past 8 s, for the long-clip check.
+        const char *appv=getenv("HEX_APP"); const bool app=appv!=nullptr; const int count=(int)audio.size();
+        if (app) {
+            const int speech=(int)std::ceil(count*50.0/16000);
+            const int frames=count<=8*16000?std::min(512,(speech+192+63)/64*64):std::strcmp(appv,"full")?(speech+640+63)/64*64:1500;
+            if (frames<1500) p.audio_ctx=frames;
+            p.max_tokens=std::min(220,(int)std::ceil(std::min(count,30*16000)*15.0/16000)+16);
+            p.greedy.best_of=1;p.temperature=-0.8f;p.temperature_inc=1.0f;
+        }
+        whisper_state *state=app?whisper_init_state(ctx):nullptr;
+        if (app?whisper_full_with_state(ctx,state,p,audio.data(),count)!=0:whisper_full(ctx,p,audio.data(),count)!=0) return 6;
+        if (app) { for(int i=0;i<whisper_full_n_segments_from_state(state);i++) text+=whisper_full_get_segment_text_from_state(state,i); whisper_free_state(state); }
+        else for(int i=0;i<whisper_full_n_segments(ctx);i++) text+=whisper_full_get_segment_text(ctx,i);
 #endif
         for(char &c:text) if(c=='\t'||c=='\n'||c=='\r') c=' ';
         rusage u{};getrusage(RUSAGE_SELF,&u);
@@ -72,6 +99,8 @@ int main(int argc, char **argv) {
     }
 #ifdef PARAKEET
     SherpaOnnxDestroyOfflineRecognizer(ctx);
+#elif defined(TRANSCRIBE)
+    transcribe_close(ctx);
 #else
     whisper_free(ctx);
 #endif

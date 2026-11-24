@@ -1,7 +1,7 @@
 //! The input and output routes Hex follows: the counters that advance when the
-//! OS's devices or its default input change, the CoreAudio and lid listeners
-//! that advance them, and the Bluetooth-avoidance setting that moves the input
-//! route.
+//! OS's devices or its default input or output changes, the CoreAudio, lid, and
+//! Windows endpoint listeners that advance them, and the Bluetooth-avoidance
+//! setting that moves the input route.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -37,8 +37,11 @@ pub fn audio_service_restart_generation() -> u64 {
 /// a MacBook's lid opens or closes, so an input following the system
 /// default, or standing in for a missing saved microphone, resolves again.
 /// macOS reports these through CoreAudio listeners and an IOKit interest
-/// notification; Windows reports a default change through its stream.
+/// notification; Windows through its default endpoint's notification client
+/// (`default_endpoint`), started here on first read.
 pub fn input_route_generation() -> u64 {
+    #[cfg(target_os = "windows")]
+    super::default_endpoint::watch();
     INPUT_ROUTE_GENERATION.load(Ordering::Acquire)
 }
 
@@ -51,16 +54,20 @@ static OUTPUT_ROUTE_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 /// Advances when the OS's default output or its list of devices changes, or
 /// the audio service restarts, so a warm feedback output opened on an older
-/// route reopens on the current default before its next tone. Only macOS
-/// reports these, through the same CoreAudio listeners as the input route.
+/// route reopens on the current default before its next tone. macOS reports
+/// these through the same CoreAudio listeners as the input route; Windows
+/// through its default endpoint's notification client, started here on first
+/// read.
 pub fn output_route_generation() -> u64 {
+    #[cfg(target_os = "windows")]
+    super::default_endpoint::watch();
     OUTPUT_ROUTE_GENERATION
         .load(Ordering::Acquire)
         .wrapping_add(audio_service_restart_generation())
 }
 
-#[cfg(target_os = "macos")]
-fn notify_output_route_changed() {
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(super) fn notify_output_route_changed() {
     OUTPUT_ROUTE_GENERATION.fetch_add(1, Ordering::AcqRel);
 }
 

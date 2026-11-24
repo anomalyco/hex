@@ -342,7 +342,11 @@ impl MeetingCandidate {
 /// microphone, so the user can choose to stop. It never stops anything.
 #[derive(Default)]
 pub struct CallPresence {
-    absent: Option<Run>,
+    /// When the current absence was first seen. Unlike a [`Run`], a gap
+    /// between observations never starts it over: a sleeping Mac can stall
+    /// the loop past [`MAX_OBSERVATION_GAP`], and the call is gone either way
+    /// (#2685).
+    absent_since: Option<Instant>,
     prompted: bool,
 }
 
@@ -354,12 +358,12 @@ impl CallPresence {
 
     fn observe_at(&mut self, present: bool, now: Instant) -> bool {
         if present {
-            self.absent = None;
+            self.absent_since = None;
             self.prompted = false;
             return false;
         }
-        let absent = self.absent.get_or_insert_with(|| Run::start(now));
-        if absent.extend(now) >= CALL_ENDED_AFTER && !self.prompted {
+        let since = *self.absent_since.get_or_insert(now);
+        if now.saturating_duration_since(since) >= CALL_ENDED_AFTER && !self.prompted {
             self.prompted = true;
             return true;
         }
@@ -391,13 +395,15 @@ pub struct AutoStop {
 }
 
 impl AutoStop {
-    /// The call ended: stop after the grace.
-    pub fn arm(&mut self) {
-        self.arm_at(Instant::now());
+    /// The call ended: stop after the grace. Returns when.
+    pub fn arm(&mut self) -> Instant {
+        self.arm_at(Instant::now())
     }
 
-    fn arm_at(&mut self, now: Instant) {
-        self.deadline = Some(now + AUTO_STOP_GRACE);
+    fn arm_at(&mut self, now: Instant) -> Instant {
+        let deadline = now + AUTO_STOP_GRACE;
+        self.deadline = Some(deadline);
+        deadline
     }
 
     /// Whether a stop is counting: armed, and its grace has not run out.
@@ -578,7 +584,7 @@ impl MeetingSource {
             Self::Banshee => "Banshee",
             Self::Zoom => "Zoom",
             Self::Teams => "Microsoft Teams",
-            Self::SlackHuddle => "Slack Huddle",
+            Self::SlackHuddle => "Slack huddle",
             Self::FaceTime => "FaceTime",
             Self::WhatsApp => "WhatsApp",
             Self::Gather => "Gather",
@@ -1698,6 +1704,26 @@ mod tests {
         assert!(!presence.observe_at(false, at(5_500)));
         assert!(!presence.observe_at(false, at(8_000)));
         assert!(presence.observe_at(false, at(8_500)));
+    }
+
+    #[test]
+    fn a_gap_between_observations_never_restarts_a_call_ended_absence() {
+        let base = Instant::now();
+        let at = |s: u64| base + Duration::from_secs(s);
+        let mut presence = CallPresence::default();
+        // The call leaves and the Mac locks a moment later, and the
+        // controller's next pass comes 20 s on: the call still ended.
+        assert!(!presence.observe_at(false, at(0)));
+        assert!(presence.observe_at(false, at(20)));
+        // Once per absence, however long it runs.
+        assert!(!presence.observe_at(false, at(21)));
+        assert!(!presence.observe_at(false, at(60)));
+        // Back on the microphone: the next absence asks again on its own
+        // clock.
+        assert!(!presence.observe_at(true, at(61)));
+        assert!(!presence.observe_at(false, at(62)));
+        assert!(!presence.observe_at(false, at(64)));
+        assert!(presence.observe_at(false, at(65)));
     }
 
     #[test]
@@ -3346,9 +3372,8 @@ mod tests {
         let first = watch.detector.open_offer().unwrap();
         assert!(watch.detector.take_withdrawn_offers().is_empty());
 
-        // Minting two OfferIds at the exact same Instant produces distinct IDs.
-        let now = watch.now();
-        assert_ne!(OfferId::at(now), OfferId::at(now));
+        // Consecutive OfferIds are distinct.
+        assert_ne!(OfferId::next(), OfferId::next());
 
         assert_eq!(watch.stable(&zoom, &[]), Some(Detection::Offer(zoom)));
         let second = watch.detector.open_offer().unwrap();

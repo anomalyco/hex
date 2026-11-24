@@ -2,7 +2,7 @@ import Foundation
 
 /// Settings › Dictation › Speech model in keyboard, in the App Group so the keyboard reads it. On unless
 /// the person turned it off. While it's on, the keyboard's own dictation transcribes with Hex's
-/// speech model (Parakeet V2 for English, Parakeet Ultra where Experiments › Multilingual model
+/// speech model (Parakeet V2 for English, Parakeet Ultra where Settings › Dictation › Model: Multilingual
 /// dictates) on the Neural Engine, without opening Hex, once the files are in the App Group and
 /// the keyboard has compiled the model. Whenever that isn't so, or isn't safe, it uses Apple's
 /// speech recognition exactly as with the switch off. Hex downloads the model by itself only
@@ -63,16 +63,38 @@ nonisolated struct KeyboardParakeetSettings {
         return (state, Date(timeIntervalSince1970: at))
     }
 
+    /// Settings › Dictation › Model keeps only the picked model: the other goes once the
+    /// picked one has loaded once, here (the keyboard) or in Hex (`SpeechModelChoice.unpicked`).
+    func hasLoadedOnce(multilingual: Bool) -> Bool {
+        defaults?.bool(forKey: Self.loadedOnceKey(multilingual)) == true
+    }
+
+    func setLoadedOnce(_ loaded: Bool, multilingual: Bool) {
+        defaults?.set(loaded, forKey: Self.loadedOnceKey(multilingual))
+    }
+
+    private static func loadedOnceKey(_ multilingual: Bool) -> String {
+        multilingual ? "experiments.keyboardParakeet.loadedOnce.ultra" : "experiments.keyboardParakeet.loadedOnce.v2"
+    }
+
+    /// Hex removed a model the keyboard may have compiled: the keyboard clears its compiled
+    /// copies the next time it starts, before it loads the picked one (`KeyboardParakeet`).
+    static let purgeCompiledKey = "experiments.keyboardParakeet.purgeCompiled"
+
+    var purgesCompiled: Bool {
+        get { defaults?.bool(forKey: Self.purgeCompiledKey) == true }
+        nonmutating set { defaults?.set(newValue, forKey: Self.purgeCompiledKey) }
+    }
+
+    /// Whether `keyboardState` is about the multilingual model rather than English's.
+    var keyboardStateIsMultilingual: Bool {
+        defaults?.bool(forKey: Self.keyboardStateMultilingualKey) == true
+    }
+
     func setKeyboardState(_ state: KeyboardState?, multilingual: Bool = false, now: Date = Date()) {
         defaults?.set(state?.rawValue, forKey: Self.keyboardStateKey)
         defaults?.set(multilingual, forKey: Self.keyboardStateMultilingualKey)
         defaults?.set(now.timeIntervalSince1970, forKey: Self.keyboardStateAtKey)
-    }
-
-    /// The keyboard has the multilingual model loaded, so it dictates that model's language
-    /// itself instead of opening Hex (`KeyboardSelfDictation`).
-    var keyboardHasMultilingualModel: Bool {
-        isEnabled && keyboardState?.state == .ready && defaults?.bool(forKey: Self.keyboardStateMultilingualKey) == true
     }
 
     /// The keyboard's memory limit (bytes), nil until the keyboard first opened on this iPhone.
@@ -127,33 +149,6 @@ nonisolated struct KeyboardParakeetNotice {
 
     init(defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) {
         self.defaults = defaults
-    }
-
-    /// The keyboard would dictate with Hex's model, as `KeyboardParakeet.choice` and Hex's own
-    /// download decide (`KeyboardParakeetDownload.hold`): the switch on, an iPhone with the
-    /// memory, the keyboard's limit measured and enough, English, not Two-language dictation or
-    /// the multilingual model. And the model isn't downloaded yet.
-    static func modelAwaitsDownload(
-        settings: KeyboardParakeetSettings = KeyboardParakeetSettings(),
-        english: Bool = Self.dictatesEnglish(),
-        otherEngine: Bool = TwoLanguageDictationSettings().isEnabled || MultilingualParakeetSettings().language() != nil,
-        downloaded: Bool = SpeechModelStore.isComplete(SpeechModelStore.parakeetV2)
-    ) -> Bool {
-        KeyboardParakeetPlan.resolve(
-            isEnabled: settings.isEnabled,
-            fitsDevice: KeyboardParakeetSettings.fits(),
-            twoLanguageEnabled: otherEngine,
-            multilingualLanguage: nil,
-            wantedLanguage: english ? "en-US" : "fr-FR",
-            keyboardLimit: settings.keyboardLimit,
-            v2Downloaded: downloaded,
-            ultraDownloaded: false
-        ).awaitsV2Download
-    }
-
-    static func dictatesEnglish(_ languages: LanguageSettings = LanguageSettings()) -> Bool {
-        guard let wanted = languages.wantedDictationLanguage() else { return false }
-        return SpeechLanguagePicker.isEnglish(wanted)
     }
 
     /// Not opened from or dismissed, under three showings, and not shown today.

@@ -91,9 +91,10 @@ struct KeyboardSettingsPage: View {
         return settings.haptics
     }
 
+    /// The emoji key or the strip's emoji suggestions: either keeps the emoji history.
     private var emoji: Bool {
         _ = revision
-        return settings.emoji
+        return settings.emojiKey || (fullKeyboard && settings.emojiSuggestions)
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<FullKeyboardSettings, T>) -> Binding<T> {
@@ -316,12 +317,23 @@ struct KeyboardSettingsPage: View {
                 SettingsDivider()
 
                 SettingsToggleRow(
-                    title: String(localized: "Emoji"),
+                    title: String(localized: "Emoji key"),
                     detail: fullKeyboard
-                        ? String(localized: "Emoji key and suggestions")
+                        ? String(localized: "Opens all emoji from the keyboard")
                         : String(localized: "An emoji key on the dictation bar"),
-                    isOn: binding(\.emoji)
+                    isOn: binding(\.emojiKey)
                 )
+
+                // The dictation bar has no strip to suggest in.
+                if fullKeyboard {
+                    SettingsDivider()
+
+                    SettingsToggleRow(
+                        title: String(localized: "Emoji suggestions"),
+                        detail: String(localized: "Suggests 😭 as you type cry"),
+                        isOn: binding(\.emojiSuggestions)
+                    )
+                }
 
                 if emoji {
                     SettingsDivider()

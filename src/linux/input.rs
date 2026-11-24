@@ -24,6 +24,9 @@ use crate::linux::session::LinuxSession;
 
 #[path = "input/activity.rs"]
 pub(crate) mod activity;
+#[path = "input/shortcut.rs"]
+mod shortcut;
+use self::shortcut::Shortcut;
 #[path = "input/keys.rs"]
 mod keys;
 #[path = "input/route.rs"]
@@ -261,6 +264,9 @@ pub(crate) enum HotkeyEvent {
     /// Labs › Transform typed text: the focused field's text is processed
     /// and replaced, while nothing records.
     TypedText,
+    /// Labs › Model switch shortcut: swap the dictation model with the saved
+    /// other one, while nothing records.
+    ModelSwitch,
     /// The Annotate key went down: nothing recording, a capture starts;
     /// recording, the capture host waits to tell a tap from a hold.
     Capture,
@@ -324,6 +330,9 @@ pub(crate) struct HotkeyOptions {
     /// Labs › Second dictation shortcut, while the lab is on and it is bound:
     /// another key that dictates exactly like the dictation shortcut.
     pub(crate) second_dictation: Option<LinuxHotkey>,
+    /// Labs › Model switch shortcut, while the lab is on, a model is saved,
+    /// and it is bound: one key that swaps the dictation model.
+    pub(crate) model_switch: Option<LinuxHotkey>,
     /// Annotate's one key, while Annotate is on: tap to start and stop,
     /// hold to draw.
     pub(crate) capture: Option<LinuxHotkey>,
@@ -557,74 +566,6 @@ fn project_grants(
             }
         })
         .collect()
-}
-
-/// A shortcut a backend reports pressed or released.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Shortcut {
-    Dictation,
-    PasteLast,
-    TypedText,
-    Capture,
-    RawDictation,
-    TerminalPaste,
-    /// Labs › Second dictation shortcut.
-    SecondDictation,
-}
-
-// `HeldKeys` keeps one bit per shortcut.
-const _: () = assert!(Shortcut::ALL.len() <= u8::BITS as usize);
-
-impl Shortcut {
-    /// Every shortcut, in declaration order: `index` is its place here.
-    const ALL: [Self; 7] = [
-        Self::Dictation,
-        Self::PasteLast,
-        Self::TypedText,
-        Self::Capture,
-        Self::RawDictation,
-        Self::TerminalPaste,
-        Self::SecondDictation,
-    ];
-
-    fn index(self) -> usize {
-        self as usize
-    }
-
-    /// The dictation flavour a shortcut starts captures with; `None` for
-    /// the shortcuts that start no dictation.
-    fn flavour(self) -> Option<DictationFlavour> {
-        match self {
-            Self::Dictation => Some(DictationFlavour::Normal),
-            Self::RawDictation => Some(DictationFlavour::Raw),
-            Self::TerminalPaste => Some(DictationFlavour::TerminalPaste),
-            Self::SecondDictation => Some(DictationFlavour::Second),
-            Self::PasteLast | Self::TypedText | Self::Capture => None,
-        }
-    }
-
-    /// The dictation shortcut that starts captures with `flavour`.
-    fn for_flavour(flavour: DictationFlavour) -> Self {
-        match flavour {
-            DictationFlavour::Normal => Self::Dictation,
-            DictationFlavour::Raw => Self::RawDictation,
-            DictationFlavour::TerminalPaste => Self::TerminalPaste,
-            DictationFlavour::Second => Self::SecondDictation,
-        }
-    }
-
-    /// The portal's stable id and the description desktops show.
-    fn portal_id(self) -> (&'static str, &'static str) {
-        match self {
-            Self::Dictation => ("dictation", "Dictation"),
-            Self::PasteLast => ("paste-last", "Paste last dictation"),
-            Self::TypedText => ("typed-text", "Transform typed text"),
-            Self::Capture => ("capture", "Annotate"),
-            Self::RawDictation => ("raw-dictation", "Dictate without processing"),
-            Self::TerminalPaste => ("terminal-paste", "Terminal paste shortcut"),
-            Self::SecondDictation => ("second-dictation", "Second dictation shortcut"),
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -928,6 +869,14 @@ impl ShortcutState {
                 self.idle().then_some(HotkeyEvent::TypedText)
             }
             Input::Released(Shortcut::TypedText) => None,
+            // The model switch owns no capture state: pressing its shortcut
+            // while idle asks for one swap, and while recording it does
+            // nothing at all. `hex model switch` writes the settings instead,
+            // which the listener already follows.
+            Input::Pressed(Shortcut::ModelSwitch) => {
+                self.idle().then_some(HotkeyEvent::ModelSwitch)
+            }
+            Input::Released(Shortcut::ModelSwitch) => None,
             Input::Pressed(Shortcut::Capture) => Some(HotkeyEvent::Capture),
             Input::Released(Shortcut::Capture) => Some(HotkeyEvent::CaptureUp),
             Input::Command(command) => match command {
@@ -1308,6 +1257,10 @@ impl Backend {
                 .second_dictation
                 .as_ref()
                 .map(|key| (Shortcut::SecondDictation, key)),
+            options
+                .model_switch
+                .as_ref()
+                .map(|key| (Shortcut::ModelSwitch, key)),
         ];
         let desktop_assigns = crate::linux::portal::desktop_assigns_triggers();
         let mut shortcuts = Vec::new();
@@ -1703,6 +1656,29 @@ mod tests {
         test.press(Shortcut::SecondDictation);
         test.release(Shortcut::SecondDictation);
         assert_eq!(test.events, [SECOND, Finish, START, Finish, SECOND, Finish]);
+    }
+
+    /// Labs › Model switch shortcut: its press asks for one swap while idle,
+    /// and while a capture records it neither swaps nor ends the capture.
+    #[test]
+    fn the_model_switch_shortcut_switches_only_while_idle() {
+        let mut idle = Test::new(true);
+        idle.press(Shortcut::ModelSwitch);
+        idle.release(Shortcut::ModelSwitch);
+        assert_eq!(idle.events, [HotkeyEvent::ModelSwitch]);
+        assert_eq!(
+            Shortcut::ModelSwitch.portal_id(),
+            ("model-switch", "Model switch shortcut")
+        );
+
+        let mut recording = Test::new(true);
+        recording.press(Shortcut::Dictation);
+        recording.press(Shortcut::ModelSwitch);
+        recording.release(Shortcut::ModelSwitch);
+        assert_eq!(recording.events, [START], "the capture keeps recording");
+        assert!(matches!(recording.state.capture, Capture::Held { .. }));
+        recording.release(Shortcut::Dictation);
+        assert_eq!(recording.events, [START, Finish]);
     }
 
     /// #786: only the shortcuts Hex asked for show; a key the desktop still

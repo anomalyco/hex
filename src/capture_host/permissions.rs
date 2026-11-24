@@ -153,7 +153,14 @@ pub fn allow(need: CaptureNeed) {
         }
         // Granted since the helper opened: the next poll shows it.
         CaptureNeed::ScreenRecording if super::screen_access() != super::ScreenAccess::Off => {}
-        need => crate::desktop::permission_guide::show(need.kind()),
+        need => {
+            if need.kind() == PermissionKind::Accessibility {
+                // macOS 27.3 adds an app to System & App Protection Override
+                // only after it asks to post key events.
+                crate::desktop::permission_guide::request_post_event_access();
+            }
+            crate::desktop::permission_guide::show(need.kind());
+        }
     }
 }
 

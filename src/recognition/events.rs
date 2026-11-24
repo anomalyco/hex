@@ -92,6 +92,14 @@ pub(super) fn handle_dictation_event(
             result: Err(error), ..
         } => {
             feedback::play(Tone::Error);
+            if crate::paste::refused_by_macos(&error) {
+                // The same notice a refused dictation paste shows: Paste Last
+                // has no job, so it goes out as a capture-level failure. Other
+                // Paste Last failures keep the tone and the log alone.
+                indicator.send(DictationIndicatorEvent::Failed {
+                    message: Some(error.clone()),
+                });
+            }
             events.dictation(DictationPhase::Failed(error), "")?;
         }
     }

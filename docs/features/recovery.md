@@ -295,7 +295,22 @@ device reports no default format at all               // #1845, Windows default 
   -> log the driver's reason and kind, not just the wrap // audio/input_format
   -> try the direct WASAPI paths, then the formats it lists
      (48 kHz, else 44.1 kHz, else the range's top) // unverified on real Windows
-  -> none opens -> the read error, with its cause, goes to recovery
+  -> none opens -> the read error, with its cause, and the direct path's
+     failure, go to recovery
+Windows System default input or output                       // audio::default_endpoint
+  -> resolve the default endpoint id on one MTA thread       // the endpoint thread
+     initializes MTA; callers need no COM of their own
+  -> open the listed cpal device with that id                // never cpal's default handle:
+     cpal's default-handle monitor initializes COM as STA on Windows thread-pool
+     threads, so ActivateAudioInterfaceAsync later fails with RPC_E_CHANGED_MODE
+  ├── input: no default endpoint resolves -> a listed stand-in microphone
+  │   (built-in first); the next route change resolves the default again,
+  │   and only nothing usable being listed is an error
+  ├── output: a listed device will not open -> try the next listed output
+  │   -> none opens -> the tone is dropped                   // never the default handle
+  └── default endpoint changes -> an IMMNotificationClient bumps the input or
+      output route generation                                // no COM calls in the callback
+      -> input switches once capture is idle; a warm feedback output reopens
 no input device at all (macOS)
   -> devices whose name can't be read are skipped     // audio::device_name, never Display
   -> bounded recovery; `hex status` listener: "No microphone"

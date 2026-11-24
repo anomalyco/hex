@@ -20,6 +20,7 @@ impl Feature {
             Self::LearnFromCorrections => "Learn from corrections",
             Self::TerminalPaste => "Terminal paste",
             Self::KeyboardModelSwitching => "Switch model with keyboard language",
+            Self::ModelSwitchShortcut => "Model switch shortcut",
             Self::MouseShortcuts => "Mouse shortcuts",
             Self::PauseBrowser => "Also pause the browser",
             Self::ShareShortcut => "Share dictation shortcut with other apps",
@@ -65,6 +66,7 @@ impl Feature {
             Self::Screenshots => "Screenshots",
             Self::AnnotateReplay => "Annotate last 15 seconds",
             Self::MeetingImport => "Import audio",
+            Self::TranscriptEdits => "Delete transcript lines",
             Self::CapsLockDictation => "Caps Lock dictation",
             Self::OpenCodeInWsl => "OpenCode in WSL",
             Self::ApiProcessing => "Process API transcripts",
@@ -85,6 +87,7 @@ impl Feature {
             Self::DropTranscribe => "Transcribe dropped audio",
             Self::PasteLastPicker => "Paste Last picker",
             Self::VocabularyFiles => "Vocabulary files",
+            Self::VocabularyMenu => "Vocabulary menu",
             Self::AnnotateAgentTools => "Agent tools for captures",
             Self::AnnotateAgentInstall => "Install agent skill from Annotate",
             Self::Signature => "Signature",
@@ -92,6 +95,11 @@ impl Feature {
             Self::HudHeight => "HUD height",
             Self::VoiceIsolation => "Voice isolation",
             Self::DictateWhileAnnotating => "Dictate while annotating",
+            Self::StopAnyCallRecording => "Stop every call recording when the call ends",
+            Self::ClipboardPhrase => "Clipboard phrase",
+            Self::MeetingMicrophoneMute => "Mute the microphone while recording",
+            Self::MeetingIndicatorDisplay => "Indicator on any display",
+            Self::MeetingAudioSource => "Choose meeting audio",
         }
     }
 
@@ -123,6 +131,9 @@ impl Feature {
             Self::TerminalPaste => "Paste with Ctrl+Shift+V so terminals accept it",
             Self::KeyboardModelSwitching => {
                 "When you switch keyboard language, Hex switches to the speech model you picked for it"
+            }
+            Self::ModelSwitchShortcut => {
+                "One shortcut swaps dictation to another model and language, and pressing it again swaps back"
             }
             Self::MouseShortcuts => "Use a mouse button, such as a side button, as a shortcut",
             Self::PauseBrowser => {
@@ -254,6 +265,9 @@ impl Feature {
             Self::MeetingImport => {
                 "Add an audio file to Meetings and turn it into text on this Mac"
             }
+            Self::TranscriptEdits => {
+                "Select lines in a saved meeting transcript and delete them. Summaries, copies, and the Markdown file use what's left"
+            }
             Self::CapsLockDictation => {
                 "Press Caps Lock to start dictating and again to finish. Hex keeps Caps Lock off and uses its light while it records and writes the text"
             }
@@ -317,6 +331,9 @@ impl Feature {
             Self::VocabularyFiles => {
                 "Import terms from a CSV file in the Vocabulary sheet, or save the whole list as one"
             }
+            Self::VocabularyMenu => {
+                "Add terms to Vocabulary from the menu bar, or open the Vocabulary sheet"
+            }
             Self::AnnotateAgentTools => {
                 "Adds hex annotate zoom, inspect, frames, and skill so coding agents can read a capture closely"
             }
@@ -335,6 +352,24 @@ impl Feature {
             }
             Self::DictateWhileAnnotating => {
                 "Dictate while a capture records: the text pastes as usual, and the capture keeps going"
+            }
+            Self::StopAnyCallRecording if !cfg!(target_os = "macos") => {
+                "Also stop an offered or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off"
+            }
+            Self::StopAnyCallRecording => {
+                "Also stop an offered, calendar, or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off"
+            }
+            Self::ClipboardPhrase => {
+                "Say \"my clipboard\" while dictating and Hex pastes what you copied there, in quotes"
+            }
+            Self::MeetingMicrophoneMute => {
+                "Adds a mute button to meeting recordings. Hex keeps recording the call's audio but leaves out your microphone until you unmute."
+            }
+            Self::MeetingIndicatorDisplay => {
+                "Drag the meeting recording indicator to another display and it stays there"
+            }
+            Self::MeetingAudioSource => {
+                "Record one app or one output device in meetings instead of all computer audio"
             }
         }
     }

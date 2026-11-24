@@ -64,6 +64,9 @@ impl Feature {
             Self::NeutralVoice => {
                 "Rewrite dictations in chosen modes into plain, neutral wording on this Mac, so your writing style doesn't show"
             }
+            Self::ModelSwitchShortcut => {
+                "One shortcut that swaps dictation to another model and language (model_switch_other), and back"
+            }
             Self::SecondDictationShortcut => {
                 "Another shortcut that dictates like the main one (second_dictation_hotkey), such as a key on an external keyboard"
             }
@@ -168,6 +171,9 @@ impl Feature {
             Self::MeetingImport => {
                 "Add an audio file to Meetings and turn it into text on this Mac"
             }
+            Self::TranscriptEdits => {
+                "Select lines in a saved meeting transcript and delete them; summaries, copies, and the Markdown file use what's left"
+            }
             Self::CapsLockDictation => {
                 "Press Caps Lock to start and stop dictation; its light shows when Hex records and writes the text"
             }
@@ -225,6 +231,9 @@ impl Feature {
             Self::VocabularyFiles => {
                 "Import terms from a CSV file into the vocabulary sheet, merging them into the list, and export the list as a CSV file"
             }
+            Self::VocabularyMenu => {
+                "Add a Vocabulary submenu to the menu bar, right under Speech Model: add a term or open the Vocabulary sheet, with the last five saved terms listed (macOS)"
+            }
             Self::AnnotateAgentTools => {
                 "Adds hex annotate zoom, inspect, frames, and skill so coding agents can read a capture closely"
             }
@@ -245,6 +254,24 @@ impl Feature {
             }
             Self::DictateWhileAnnotating => {
                 "While an Annotate capture records, the dictation shortcut dictates as usual: the text pastes into the app in front, History and Paste Last keep it, and the capture goes on recording, hearing the words too"
+            }
+            Self::StopAnyCallRecording if !cfg!(target_os = "macos") => {
+                "An offered or by-hand call recording stops on its own 30 s after its call app leaves the microphone, as Always record's Stop when the call ends does, which still governs Always record; a recording started by hand watches the one call app holding the microphone when it starts"
+            }
+            Self::StopAnyCallRecording => {
+                "An offered, calendar, or by-hand call recording stops on its own 30 s after its call app leaves the microphone, as Always record's Stop when the call ends does, which still governs Always record; a recording started by hand watches the one call app holding the microphone when it starts"
+            }
+            Self::ClipboardPhrase => {
+                "Each time you say the phrase in a normal dictation (\"my clipboard\" by default, at least two words), Hex puts the clipboard's text there in double quotes after processing and before it pastes, and Paste Last and History keep the same text. An empty clipboard leaves the words as spoken; raw and API output are left alone"
+            }
+            Self::MeetingMicrophoneMute => {
+                "Mute Hex's microphone while a meeting records: the call's audio keeps recording and transcribing, and the microphone's packets stay in place as silence until you unmute (macOS)"
+            }
+            Self::MeetingIndicatorDisplay => {
+                "Drag the meeting recording indicator to another display and it stays there, in the corner nearest where you let go. Off, it stays on the primary display (macOS and Windows)"
+            }
+            Self::MeetingAudioSource => {
+                "Record one app or one output device in a meeting instead of all computer audio (labs.meeting_audio_source_choice); a chosen source that isn't playing records silence until it returns"
             }
         }
     }

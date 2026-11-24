@@ -232,7 +232,7 @@ struct ContentView: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }
 
-                // Experiments › Multilingual model: its download or load, beside dictation.
+                // Settings › Dictation › Model: Multilingual: its download or load, beside dictation.
                 MultilingualModelStatus(
                     download: dictation.multilingualDownload,
                     retry: { dictation.retryMultilingualParakeet() },
@@ -308,6 +308,9 @@ struct ContentView: View {
                         SettingsLinkLabel(title: String(localized: "Support"), icon: "questionmark.circle", trailingIcon: "arrow.up.right")
                     }
                     .buttonStyle(.plain)
+
+                    // Absent in a build without a report key (FeedbackRow).
+                    FeedbackRow(screen: "Home", dictation: dictation, divider: true)
 
                     SettingsDivider(leading: 50)
 

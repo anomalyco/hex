@@ -13,8 +13,8 @@ use rune::{El, col, el, row, text};
 use rune_kit::RadioItem;
 
 use super::controls::{
-    ButtonKind, CardRow, METRICS, Paint, button, card, icon_row, modal_scrim_transition,
-    modal_transition, nested, note, toggle_row,
+    ButtonKind, CardRow, METRICS, Paint, button, card, icon_row, modal_sheet, nested, note,
+    toggle_row,
 };
 use super::platform::Os;
 use super::{Menu, Modal, Pane, Ui, icons};
@@ -27,10 +27,9 @@ use crate::meeting::seen_calls::{self, SeenCall};
 const MODAL_WIDTH: f32 = 560.0;
 const PADDING: f32 = 18.0;
 const ICON: f32 = 20.0;
-/// The last-seen column, right-aligned.
-const WHEN_WIDTH: f32 = 92.0;
-/// The answer column, wide enough for the longest answer.
-const ANSWER_WIDTH: f32 = 180.0;
+/// Minimum width of the answer column so last-seen dates align while leaving
+/// a clean gap beside the dropdown.
+const ANSWER_MIN_WIDTH: f32 = 116.0;
 /// How dim an answer that follows the default reads.
 const FOLLOWING: f32 = 0.55;
 /// The Calls row's icons before the rest become "+N".
@@ -109,7 +108,7 @@ pub(crate) fn glyph(web: bool, key: &str) -> &'static rune::Icon {
     match CallProvider::from_meeting_app(key) {
         Some(provider) => super::platform_settings::provider_icon(provider),
         None if web => &icons::GLOBE,
-        None => &icons::CALL,
+        None => super::platform_settings::call_icon(),
     }
 }
 
@@ -133,7 +132,6 @@ fn row_icon(ui: &Ui, p: Paint, call: &CallRow, size: f32) -> El {
 /// Opens the sheet, alone: it ends a shortcut recording and closes the
 /// other sheets and any menu, and reads the seen list at once.
 pub(super) fn open(ui: &mut Ui) {
-    super::settings::cancel_capture(ui);
     ui.open_modal(Modal::Calls);
     ui.calls.read_at = None;
 }
@@ -330,7 +328,7 @@ fn set_default(ui: &mut Ui, policy: MeetingPolicy) {
 }
 
 /// The default's radios, with Stop when the call ends under Record
-/// automatically while anything records on its own (macOS).
+/// automatically while anything records on its own.
 fn answers(ui: &Ui, p: Paint) -> Vec<CardRow> {
     let meetings = &ui.settings.meetings;
     let default = meetings.default_policy;
@@ -363,7 +361,7 @@ fn answers(ui: &Ui, p: Paint) -> Vec<CardRow> {
                 )
                 .into(),
         );
-        if policy == MeetingPolicy::AlwaysRecord && records && mac {
+        if policy == MeetingPolicy::AlwaysRecord && records {
             let grace = crate::meeting::detection::AUTO_STOP_GRACE.as_secs();
             answers.push(
                 nested(toggle_row(
@@ -452,18 +450,17 @@ fn call_row(
                 .truncate()
                 .a11y_hidden(),
         )
-        .child(
-            row().key("when").w(WHEN_WIDTH).justify_end().child(
-                text(when)
-                    .key("when-text")
-                    .font(p.k.ty.small)
-                    .color(p.faint()),
-            ),
-        )
+        .children((!when.is_empty()).then(|| {
+            text(when)
+                .key("when-text")
+                .font(p.k.ty.small)
+                .color(p.faint())
+                .mr(4.0)
+        }))
         .child(
             row()
                 .key("answer")
-                .w(ANSWER_WIDTH)
+                .min_w(ANSWER_MIN_WIDTH)
                 .justify_end()
                 .opacity(if following { FOLLOWING } else { 1.0 })
                 .child(select),
@@ -510,7 +507,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Vec<El> {
         )
         .default_button(),
     );
-    let mut panel = col()
+    let panel = col()
         .key("calls-sheet")
         .role("dialog")
         .label(tr("Calls"))
@@ -537,28 +534,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Vec<El> {
         ))
         .child(list)
         .child(footer);
-    for shadow in &p.k.elevation.overlay {
-        panel = panel.box_shadow(*shadow);
-    }
-    let layer = |key: &str| {
-        el().key(key)
-            .role("none")
-            .absolute(0.0, 0.0)
-            .w_full()
-            .h_full()
-    };
-    let mut layers = vec![
-        layer("calls-scrim")
-            .fill(c.scrim)
-            .on_press(close)
-            .transition(modal_scrim_transition(p)),
-        layer("calls-layer")
-            .center()
-            .transition(modal_transition(p))
-            // Keys stay inside, Escape or a press outside closes, and focus
-            // returns to the row that opened it.
-            .child(panel.modal(true, close)),
-    ];
+    let mut layers = Vec::from(modal_sheet(p, "calls", panel, close));
     // A row's menu opens above the sheet.
     layers.extend(menus);
     layers

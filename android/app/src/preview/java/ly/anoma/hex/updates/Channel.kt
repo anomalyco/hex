@@ -1,16 +1,13 @@
 package ly.anoma.hex.updates
 
 import android.content.Context
-import android.content.pm.PackageManager
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
-import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
-import java.security.MessageDigest
 import javax.net.ssl.HttpsURLConnection
 import ly.anoma.hex.R
 
@@ -21,8 +18,8 @@ internal data class Release(val code: Long, val name: String, val version: Strin
         .put("minSdk", minSdk).put("published", date).put("notes", JSONArray(notes))
         .put("apk", JSONObject().put("url", url).put("size", size).put("sha256", sha256)).toString()
     companion object {
-        /** Null for anything that isn't a sane Hex Preview release: a GitHub HTTPS address, a SHA-256, a size. */
-        fun parse(text: String): Release? = runCatching {
+        /** Null for anything that isn't a sane release from [channel]: one of its release files, a SHA-256, a size. */
+        fun parse(text: String, channel: String): Release? = runCatching {
             val o = JSONObject(text)
             val apk = o.getJSONObject("apk")
             val notes = o.optJSONArray("notes")
@@ -30,83 +27,25 @@ internal data class Release(val code: Long, val name: String, val version: Strin
                 apk.getString("url"), apk.getLong("size"), apk.getString("sha256").lowercase(), o.optInt("minSdk", 31),
                 o.optString("published"), List(minOf(notes?.length() ?: 0, 8)) { notes!!.getString(it).take(200) })
         }.getOrNull()?.takeIf {
-            it.code > 0 && it.size in 1..400_000_000 && it.sha256.matches(Regex("[0-9a-f]{64}")) && allowed(URL(it.url))
+            it.code > 0 && it.size in 1..400_000_000 && it.sha256.matches(Regex("[0-9a-f]{64}")) && releaseFile(it.url, channel)
         }
     }
 }
 
-/** What Hex Preview fetches: latest.json from its channel and the APK it names, only from GitHub over HTTPS.
+/** What Hex Preview fetches: latest.json from its channel, only from GitHub over HTTPS (the browser downloads the
+ * APK it names).
  * The requests carry nothing about the person: no identifiers, no settings, a fixed user agent. */
 internal object Channel {
     class Failure(val problem: Updates.Problem) : Exception()
 
     fun latest(context: Context): Release {
-        val text = open(URL(context.getString(R.string.update_channel))).use { http ->
-            http.inputStream.use { it.readLimited(64 * 1024) }
-        }
-        return Release.parse(text) ?: throw Failure(Updates.Problem.Server)
+        val channel = context.getString(R.string.update_channel)
+        // The body read (a connection dropped after the 200) and openConnection() are outside open()'s try: their
+        // IOException is a failed check too, never an exception that ends the app and the keyboard with it.
+        val text = try { open(URL(channel)).use { http -> http.inputStream.use { it.readLimited(64 * 1024) } } }
+            catch (e: IOException) { throw Failure(Updates.Problem.Connection) }
+        return Release.parse(text, channel) ?: throw Failure(Updates.Problem.Server)
     }
-
-    /** Downloads [release] into the cache, checking its size and SHA-256 as it arrives; anything else is deleted. */
-    fun download(context: Context, release: Release, progress: (Int) -> Unit): File {
-        val dir = File(context.cacheDir, "updates").apply { mkdirs() }
-        val done = File(dir, "${release.code}.apk")
-        dir.listFiles()?.forEach { if (it != done) it.delete() }
-        if (done.length() == release.size && sha256(done) == release.sha256) return done
-        val part = File(dir, "${release.code}.part")
-        try {
-            if (dir.usableSpace < release.size + 20_000_000) throw Failure(Updates.Problem.Space)
-            val digest = MessageDigest.getInstance("SHA-256")
-            var total = 0L
-            open(URL(release.url)).use { http ->
-                http.inputStream.use { input ->
-                    part.outputStream().use { out ->
-                        val buffer = ByteArray(128 * 1024)
-                        while (true) {
-                            val n = input.read(buffer)
-                            if (n < 0) break
-                            total += n
-                            if (total > release.size) throw Failure(Updates.Problem.Mismatch)
-                            digest.update(buffer, 0, n); out.write(buffer, 0, n)
-                            progress((total * 100 / release.size).toInt())
-                        }
-                        out.fd.sync()
-                    }
-                }
-            }
-            if (total != release.size || hex(digest.digest()) != release.sha256) throw Failure(Updates.Problem.Mismatch)
-            if (!part.renameTo(done)) throw Failure(Updates.Problem.Space)
-            return done
-        } catch (e: Failure) { part.delete(); throw e
-        } catch (e: IOException) { part.delete(); throw Failure(Updates.Problem.Connection) }
-    }
-
-    /** The APK must be Hex Preview itself, the build latest.json named, newer than what runs, and signed with
-     * exactly the running app's key. */
-    fun verify(context: Context, file: File, release: Release) {
-        val pm = context.packageManager
-        val flags = PackageManager.GET_SIGNING_CERTIFICATES
-        val archive = pm.getPackageArchiveInfo(file.path, flags) ?: throw Failure(Updates.Problem.Mismatch)
-        val running = pm.getPackageInfo(context.packageName, flags)
-        if (archive.packageName != context.packageName || archive.longVersionCode != release.code ||
-            archive.longVersionCode <= running.longVersionCode) throw Failure(Updates.Problem.Mismatch)
-        val theirs = signers(archive.signingInfo)
-        if (theirs.isEmpty() || theirs != signers(running.signingInfo)) throw Failure(Updates.Problem.Signature)
-    }
-
-    private fun signers(info: android.content.pm.SigningInfo?): Set<String> {
-        info ?: return emptySet()
-        val certs = if (info.hasMultipleSigners()) info.apkContentsSigners.toList() else info.signingCertificateHistory.orEmpty().takeLast(1)
-        return certs.map { hex(MessageDigest.getInstance("SHA-256").digest(it.toByteArray())) }.toSet()
-    }
-
-    private fun sha256(file: File): String = file.inputStream().use { input ->
-        val digest = MessageDigest.getInstance("SHA-256")
-        val buffer = ByteArray(128 * 1024)
-        while (true) { val n = input.read(buffer); if (n < 0) break; digest.update(buffer, 0, n) }
-        hex(digest.digest())
-    }
-    private fun hex(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it) }
 
     private fun open(start: URL): HttpsURLConnection {
         var target = start
@@ -145,5 +84,15 @@ internal object Channel {
 
 private val hosts = setOf("github.com", "raw.githubusercontent.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com")
 private fun allowed(url: URL) = url.protocol == "https" && url.userInfo == null && url.port in listOf(-1, 443) && url.host.lowercase() in hosts
+/** Update opens apk.url in the browser and nothing checks the download, so it must be one of the channel's own release
+ * files, https://github.com/<owner>/<repo>/releases/download/<tag>/<name>.apk, <owner>/<repo> as in the channel's
+ * https://raw.githubusercontent.com/<owner>/<repo>/<branch>/latest.json. */
+private fun releaseFile(address: String, channel: String) = runCatching {
+    val url = URL(address); val from = URL(channel)
+    val repo = Regex("/([^/]+/[^/]+)/").find(from.path)!!.groupValues[1]
+    from.host.lowercase() == "raw.githubusercontent.com" && url.protocol == "https" && url.host.lowercase() == "github.com" &&
+        url.port in listOf(-1, 443) && url.userInfo == null && url.query == null && url.ref == null &&
+        Regex("/" + Regex.escape(repo) + "/releases/download/[A-Za-z0-9][\\w.-]*/[A-Za-z0-9][\\w.-]*\\.apk").matches(url.path)
+}.getOrDefault(false)
 
 private inline fun <T : HttpURLConnection, R> T.use(block: (T) -> R): R = try { block(this) } finally { disconnect() }

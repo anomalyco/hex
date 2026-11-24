@@ -38,3 +38,16 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
     ("Lower", "Ниже"),
     ("Raise", "Выше"),
 ];
+
+/// Hungarian, for the strings above.
+pub(super) const HUNGARIAN: &[(&str, &str)] = &[
+    ("HUD height", "Kijelző magassága"),
+    (
+        "Choose how high the dictation HUD sits above the Dock when it's at the bottom",
+        "Válassza ki, milyen magasan legyen a diktálás kijelzője a Dock felett, amikor alul van",
+    ),
+    ("Height", "Magasság"),
+    ("{} pt", "{} pt"),
+    ("Lower", "Lejjebb"),
+    ("Raise", "Feljebb"),
+];

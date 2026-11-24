@@ -7,7 +7,7 @@ use std::sync::mpsc::SyncSender;
 
 use crate::meeting::detection::{AutoStop, CallSwitch, MeetingDetector};
 
-use super::{ActiveRecording, ControllerEvent, stops_when_call_ends, withdraw_stop};
+use super::{ActiveRecording, ControllerEvent, withdraw_stop};
 
 /// The page names the recorded call again (or one the user kept): whatever
 /// change was counting is over, so its stop never fires and its notice goes.
@@ -29,12 +29,12 @@ pub(super) fn withdraw_call_switch_stop(
 /// counted under a setting that is now off must not carry over.
 pub(super) fn disarm_call_stop_unless_watching(
     recording: &mut Option<ActiveRecording>,
-    lab_on: bool,
+    stop_on_end: bool,
     detector: &mut MeetingDetector,
     events: &SyncSender<ControllerEvent>,
 ) {
     if let Some(active) = recording.as_mut()
-        && !watching_call_switch(Some(active), lab_on)
+        && !watching_call_switch(Some(active), stop_on_end)
         && withdraw_stop(&mut active.call_stop, &active.auto_stop, events)
     {
         // A recording already stopping (Stop, or the worker transcribing)
@@ -50,14 +50,16 @@ pub(super) fn disarm_call_stop_unless_watching(
 /// when the call ends) instead of dropping the page while it records:
 /// only one Hex started on its own, for a call whose page named its code, in
 /// a browser, and that has not been told to stop yet. Every other recording
-/// keeps the browser watch reset.
-pub(super) fn watching_call_switch(recording: Option<&ActiveRecording>, lab_on: bool) -> bool {
+/// keeps the browser watch reset, offered and by-hand ones included: the lab
+/// stops those on their call app leaving the microphone alone.
+pub(super) fn watching_call_switch(recording: Option<&ActiveRecording>, stop_on_end: bool) -> bool {
     recording.is_some_and(|active| {
         !active.stop.load(Ordering::Relaxed)
             && active.call_switch.recorded().is_some()
             && active.application.as_deref().is_some_and(|application| {
                 crate::microphone_activity::is_browser_id(Some(application))
             })
-            && stops_when_call_ends(active.automatic, lab_on)
+            && active.automatic
+            && stop_on_end
     })
 }

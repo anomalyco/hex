@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="labs_troubleshooting">排查问题</string>
+    <string name="diagnostics">诊断</string>
+    <string name="diagnostics_detail">关于 Hex 在这台手机上运行情况的报告</string>
+    <string name="diagnostics_contents">报告包含这台手机的型号、Android 版本、内存、处理器和振动支持，以及 Hex 的版本、设置、测试用时和上一次听写的用时。不含你输入或说过的内容，也不会发送。</string>
+    <string name="diagnostics_check">检查这台手机</string>
+    <string name="diagnostics_none">点按“检查这台手机”或运行一项测试来生成报告。</string>
+    <string name="diagnostics_copy">复制报告</string>
+    <string name="diagnostics_speed">速度测试</string>
+    <string name="diagnostics_speed_detail">用 Hex 的每种运行方式将内置的一段 11 秒英文音频各转写两次，可能需要几分钟。</string>
+    <string name="diagnostics_run_app">在应用中运行</string>
+    <string name="diagnostics_run_keyboard">在键盘中运行</string>
+    <string name="diagnostics_run_keyboard_detail">然后在其他应用中打开一个文本框</string>
+    <string name="diagnostics_waiting">在其他应用中打开一个文本框即可开始</string>
+    <string name="diagnostics_running">正在运行第 %1$d 项，共 %2$d 项</string>
+    <string name="diagnostics_done">已完成，用时已写入报告。</string>
+    <string name="diagnostics_failed">语音模型未能加载</string>
+    <string name="diagnostics_haptics">触感反馈</string>
+    <string name="diagnostics_haptics_detail">先在其他应用（例如“信息”）中输入几个字母，再回到这里。</string>
+    <string name="diagnostics_tick">通过振动器轻触</string>
+    <string name="diagnostics_tick_detail">按键时播放的触感，遵循 Hex 的开关</string>
+    <string name="diagnostics_android_tap">按 Android 键盘的方式轻触</string>
+    <string name="diagnostics_android_tap_detail">Android 自己的键盘触感，由系统设置控制</string>
+    <string name="diagnostics_tap_press">按下按键</string>
+    <string name="diagnostics_tap_release">长按后松开</string>
+    <string name="diagnostics_tap_start">听写开始</string>
+    <string name="diagnostics_tap_end">听写结束</string>
+    <string name="diagnostics_tap_click">点击</string>
+    <string name="diagnostics_tap_tick">轻触</string>
+    <string name="diagnostics_tap_predefined" formatted="false">%1$s：Android 的%2$s效果</string>
+    <string name="diagnostics_tap_pulse" formatted="false">%1$s：以%3$s振动 %2$d 毫秒，因为这台手机不提供 Android 的%4$s效果</string>
+    <string name="diagnostics_tap_default_strength">手机默认强度</string>
+    <string name="diagnostics_tap_strength" formatted="false">%1$d%% 的强度</string>
+    <string name="diagnostics_pulse">更强的振动</string>
+    <string name="diagnostics_pulse_detail">一次较长的全强度振动，不受开关影响</string>
+    <string name="diagnostics_strip_running">正在运行 Hex 速度测试…</string>
+    <string name="diagnostics_strip_done">速度测试已完成，点按查看</string>
+    <string name="diagnostics_dismiss">关闭</string>
+</resources>

@@ -15,8 +15,8 @@ use crate::transcription::models::{CustomModelId, TranscriptionModelId, Transcri
 
 #[derive(Default)]
 pub(super) struct FoundState {
-    /// Compatible models from the last hub-cache scan, which the picker and
-    /// onboarding start when they open.
+    /// The last hub-cache scan's compatible models this build can run, which
+    /// the picker and onboarding start when they open.
     pub(super) models: Vec<Found>,
     /// The model onboarding's choice asked for, which the next model
     /// download prepares instead of the saved selection.
@@ -79,13 +79,28 @@ pub(super) fn scan_for_setup(ui: &mut Ui) {
     }
 }
 
+/// Whether this build can run `found`: a file naming a catalog model must
+/// name one the catalog offers here (Parakeet Ultra with its Labs switch off
+/// does not), while a file Hex hasn't tested has no catalog entry to check.
+fn usable(found: &Found) -> bool {
+    found
+        .catalog
+        .is_none_or(|id| crate::transcription::models::definition(id).available())
+}
+
+/// The scan's answer without the files this build can't run, so the model
+/// step, the picker's found section, and the download they hold all agree.
+pub(super) fn keep_usable(models: Vec<Found>) -> Vec<Found> {
+    models.into_iter().filter(usable).collect()
+}
+
 /// The scan's and the chosen file's results; true when they changed what shows.
 pub(super) fn poll(ui: &mut Ui) -> bool {
     let mut changed = false;
     match ui.found.scan.as_ref().map(Receiver::try_recv) {
         Some(Ok(found)) => {
             ui.found.scan = None;
-            ui.found.models = found;
+            ui.found.models = keep_usable(found);
             changed = true;
         }
         Some(Err(TryRecvError::Disconnected)) => ui.found.scan = None,
@@ -374,4 +389,53 @@ pub(super) fn chosen(ui: &mut Ui) {
     onboarding_scene(ui, false, true);
     super::onboarding_kit::live::continue_model(ui);
     super::onboarding_kit::live::fixture_resume(ui, super::Page::Demo);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc::channel;
+
+    /// The scan's answer is filtered as it arrives, so a file naming a model
+    /// this build can't run (an import that isn't here, as a Labs-off
+    /// Parakeet Ultra is) never reaches the model step, while a usable one
+    /// still does.
+    #[test]
+    fn a_scan_keeps_only_the_models_this_build_can_run() {
+        let models = std::env::temp_dir().join(format!("hex-found-poll-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&models);
+        std::fs::create_dir_all(&models).unwrap();
+        crate::transcription::models::set_test_models_dir(Some(models.clone()));
+
+        let mut unavailable = fixture_catalog(TranscriptionModelId::ParakeetV3);
+        unavailable.catalog = Some(TranscriptionModelId::Custom(
+            CustomModelId::parse("custom-0123456789abcdef").expect("a custom id"),
+        ));
+        let mut ui = crate::rune_ui::Ui::with(
+            crate::app_settings::AppSettings::default(),
+            crate::rune_ui::Service::Fixture(Vec::new()),
+        );
+        let (sender, receiver) = channel();
+        sender
+            .send(vec![
+                unavailable,
+                fixture_catalog(TranscriptionModelId::ParakeetV3),
+            ])
+            .unwrap();
+        ui.found.scan = Some(receiver);
+
+        assert!(poll(&mut ui), "the scan's answer changed what shows");
+        assert_eq!(
+            ui.found
+                .models
+                .iter()
+                .map(|found| found.catalog)
+                .collect::<Vec<_>>(),
+            vec![Some(TranscriptionModelId::ParakeetV3)],
+            "only the model this build offers is kept"
+        );
+
+        crate::transcription::models::set_test_models_dir(None);
+        std::fs::remove_dir_all(models).unwrap();
+    }
 }

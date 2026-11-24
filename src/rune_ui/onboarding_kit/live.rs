@@ -70,8 +70,12 @@ pub(crate) struct Live {
     /// macOS asks for Microphone and Accessibility; Windows only shows the
     /// Microphone row while its privacy switch is off.
     pub(crate) accessibility_row: bool,
-    /// macOS 27 calls Accessibility "Device Control and Data Access".
+    /// macOS 27 calls Accessibility "Device Control and Data Access", and
+    /// 27.3 calls it "System & App Protection Override".
     pub(crate) accessibility_renamed: bool,
+    /// Whether System Settings takes a tile dragged into the Accessibility
+    /// list; macOS 27.3 adds Hex with + instead.
+    pub(crate) accessibility_drag_supported: bool,
     /// The shortcut listener failed after setup and Hex won't relaunch by
     /// itself again: Reopen Hex.
     pub(crate) reopen: bool,
@@ -385,6 +389,7 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
         restart: false,
         accessibility_row: ui.platform.caps.permissions,
         accessibility_renamed: ui.platform.accessibility_renamed,
+        accessibility_drag_supported: ui.platform.accessibility_drag_supported,
         reopen: false,
         relaunch_failed: false,
         paste: ui.platform.paste,
@@ -559,7 +564,22 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
                 t.error.is_some(),
             )
         });
-    let failure = super::super::model_import::download_failure(ui);
+    // A chosen file's failure names itself first; then a pick the window
+    // refused, while the tour still reports that pick and nothing else is
+    // being prepared (an import the person chose replaces it); then the
+    // service's.
+    let preparing_any = ui
+        .view
+        .as_ref()
+        .is_some_and(|view| view.transcription.preparing.is_some());
+    let picked_failed =
+        !preparing_any && ui.tour.as_ref().is_some_and(|tour| tour.flow.pick_failed());
+    let failure = super::super::model_import::import_failure(ui)
+        .or_else(|| match picked_failed {
+            true => super::super::model_import::pick_failure(ui),
+            false => None,
+        })
+        .or_else(|| super::super::model_import::download_failure(ui));
     let using_file = super::super::model_import::using_file(ui);
     // The disk and macOS checks run a few times a second, not every frame.
     let checked = ui
@@ -600,6 +620,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     let asks_permissions = ui.platform.caps.permissions;
     let login = super::login::of(&ui.platform);
     let accessibility_renamed = ui.platform.accessibility_renamed;
+    let accessibility_drag_supported = ui.platform.accessibility_drag_supported;
     let relaunch_failed = ui.platform.relaunch_failed;
     let paste = ui.platform.paste;
     let live_window = !ui.is_fixture();
@@ -624,18 +645,14 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
 
     // Permissions, as the tour's setup rows show them.
     if let Some(view) = &view {
-        for row in &view.rows {
-            match row.item {
-                SetupItem::Microphone => live.microphone = row.status,
-                SetupItem::Accessibility => live.accessibility = row.status,
-                _ => {}
-            }
-        }
+        live.microphone = view.microphone;
+        live.accessibility = view.accessibility;
         live.restart = view.restart;
         if view.practice == Practice::TooShort && live.practice != Practice::TooShort {
             s.taps = s.taps.saturating_add(1);
         }
         live.accessibility_renamed = accessibility_renamed;
+        live.accessibility_drag_supported = accessibility_drag_supported;
         live.relaunch_failed = relaunch_failed;
         live.reopen = view.reopen;
         live.practice = view.practice;
@@ -671,8 +688,10 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     }
     live.listening = live.practice == Practice::Listening;
 
-    // The model download.
-    live.failed = !choice_installed && !preparing && (errored || failure.is_some());
+    // The model download. A pick the tour still reports failed fills the
+    // page even when its own reason is gone, so its actions never vanish.
+    live.failed =
+        !choice_installed && !preparing && (errored || failure.is_some() || picked_failed);
     live.progress = (preparing && !choice_installed).then_some(match live.progress {
         Some((bytes, since)) if bytes == downloaded_bytes => (bytes, since),
         _ => (downloaded_bytes, now),
@@ -883,7 +902,8 @@ pub(super) fn use_file(ui: &mut Ui) {
 }
 
 /// "Try again": retries the model the person picked from the list, else the
-/// language capsule's choice.
+/// language capsule's choice. A refused pick's reason goes with it, so the
+/// next failure is the one this attempt earned.
 pub(super) fn retry_download(ui: &mut Ui) {
     let Some(live) = ui.first_run.as_mut().and_then(|s| s.live.as_mut()) else {
         return;
@@ -891,10 +911,15 @@ pub(super) fn retry_download(ui: &mut Ui) {
     live.failed = false;
     live.stalled = false;
     live.progress = None;
+    // A retry starts a fresh attempt: an old import's error must not name it.
+    ui.picker.import.error = None;
     let choice = live.choice.clone();
     match ui.found.picked {
         Some(index) => found_choice::pick(ui, index),
-        None => choose(ui, &choice),
+        None => {
+            ui.found.error = None;
+            found_choice::prepare(ui, choice);
+        }
     }
 }
 
@@ -917,8 +942,17 @@ pub(super) fn paste_later(ui: &mut Ui) {
     }
 }
 
-/// "Restart Hex" once macOS applies a grant only after a restart.
+/// "Restart Hex" once macOS applies a grant only after a restart. On macOS
+/// 27.3 this spends the one restart offered for the keystroke grant, so a row
+/// that stays untrusted afterward takes the reset flow instead.
 pub(super) fn restart_hex(ui: &mut Ui) {
+    if ui
+        .tour
+        .as_ref()
+        .is_some_and(|tour| tour.flow.restarts_for_post_event())
+    {
+        crate::desktop::onboarding::record_post_event_restart();
+    }
     onboarding::input(ui, Input::Restart);
 }
 

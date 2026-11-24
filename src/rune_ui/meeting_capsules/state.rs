@@ -48,7 +48,8 @@ pub(super) enum State {
     },
     CallEnded {
         app: String,
-        auto_stop: bool,
+        stops: Option<(Instant, call_ended::Countdown)>,
+        icon: Option<rune::Pixels>,
     },
     AutoStarted {
         title: String,
@@ -85,7 +86,11 @@ impl State {
                 },
                 rearm,
             },
-            Kind::CallEnded { app, auto_stop } => Self::CallEnded { app, auto_stop },
+            Kind::CallEnded { app, stops, .. } => Self::CallEnded {
+                app,
+                stops,
+                icon: None,
+            },
             Kind::AutoStarted { title } => Self::AutoStarted { title },
             #[cfg(test)]
             Kind::Recording(recording) => Self::Recording {

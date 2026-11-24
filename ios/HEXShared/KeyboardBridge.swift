@@ -380,6 +380,8 @@ nonisolated struct KeyboardHeldDictation: Codable, Equatable, Sendable {
     /// The field it was started in (`UITextDocumentProxy.documentIdentifier`), when UIKit named it.
     let document: UUID?
     let finishedAt: TimeInterval
+    /// Where its recording stopped when the keyboard closed during it (`KeyboardInterruptedRecording`).
+    var stoppedAfter: TimeInterval? = nil
 
     /// How long after it finished it still goes straight into its own field.
     static let insertWindow: TimeInterval = 30

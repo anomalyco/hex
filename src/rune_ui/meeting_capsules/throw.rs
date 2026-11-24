@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 
 use rune::Spring;
 
-use super::corner_placement;
+use super::placement::corner_placement;
 use crate::app_settings::MeetingIndicatorCorner;
 
 /// The kit-motion `GLIDE` token: travel to a new place, no overshoot.
@@ -137,14 +137,8 @@ pub(super) fn land(
     screen: (f32, f32),
     size: (f32, f32),
 ) -> Landing {
-    let coast = DECELERATION / (1.0 - DECELERATION) / 1000.0;
-    let corner = nearest_corner(
-        from,
-        offset.0 + velocity.0 * coast,
-        offset.1 + velocity.1 * coast,
-        screen,
-        size,
-    );
+    let (coast_x, coast_y) = coast(velocity);
+    let corner = nearest_corner(from, offset.0 + coast_x, offset.1 + coast_y, screen, size);
     let (fx, fy) = rest_origin(from, screen, size);
     let (tx, ty) = rest_origin(corner, screen, size);
     Landing {
@@ -152,6 +146,15 @@ pub(super) fn land(
         offset: (offset.0 + fx - tx, offset.1 + fy - ty),
         velocity,
     }
+}
+
+/// Where a throw of `velocity` points a second comes to rest, in points: the
+/// coast UIScrollView's deceleration covers, shared by the corner a release
+/// picks within one display (`nearest_corner`) and across displays
+/// (`screen::release`).
+pub(super) fn coast(velocity: (f32, f32)) -> (f32, f32) {
+    let coast = DECELERATION / (1.0 - DECELERATION) / 1000.0;
+    (velocity.0 * coast, velocity.1 * coast)
 }
 
 /// The top-left of a capsule window of `size` points resting in `corner`

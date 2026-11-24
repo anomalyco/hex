@@ -6,34 +6,36 @@
 // their social cards at build, in the Labs pages' look (src/labs.ts).
 //
 // Every claim here is checked against ios/: Hex makes no network request of
-// its own except FluidAudio's English model download (ParakeetTranscriber),
-// Hex Keyboard makes none, and the Experiments that keep data are off by
+// its own except FluidAudio's English model download (ParakeetTranscriber)
+// and Send feedback's one POST to Bellhop, made only when the person taps Send
+// (HEXMobile/Feedback; Android's form says the same), Hex Keyboard makes none, and the Experiments that keep data are off by
 // default and write only to the App Group. The Android page is checked
 // against android/ the same way (the setup's labels, the 190 MB model,
 // Android 12, and Hex Preview's update check in src/preview).
-import { ANDROID_DOWNLOAD_PATH, withBase } from "./base"
+import { ANDROID_DOWNLOAD_PATH, ANDROID_PATH, withBase } from "./base"
 import { shell } from "./labs"
 
+export { ANDROID_PATH }
 export const IPHONE_PATH = withBase("/iphone")
 export const PRIVACY_PATH = withBase("/privacy")
-export const ANDROID_PATH = withBase("/android")
 // What each page's social card says (scripts/iphone.ts draws them). Bump CARD_VERSION
 // when a card changes, so link previews that cached the old one fetch it again.
 export const CARDS = {
   iphone: { title: "A keyboard you talk to", line: "Dictate right inside the keyboard, in any app. Free, private, and on your iPhone." },
-  privacy: { title: "Privacy policy", line: "Hex doesn't collect any data. What you say and type stays on your iPhone." },
+  privacy: { title: "Privacy policy", line: "What you say and type stays on your iPhone. Hex sends only the feedback you choose to send." },
   android: { title: "A keyboard you talk to", line: "Dictate right inside the keyboard, in any app. Free, private, and on your phone." },
 }
-const CARD_VERSION = 1
+const CARD_VERSION = 2
 export const IPHONE_CARD_PATH = withBase(`/iphone.png?v=${CARD_VERSION}`)
 export const PRIVACY_CARD_PATH = withBase(`/privacy.png?v=${CARD_VERSION}`)
 export const ANDROID_CARD_PATH = withBase(`/android.png?v=${CARD_VERSION}`)
 // The date the privacy policy last changed in substance; change it with the policy.
-export const PRIVACY_UPDATED = "November 23, 2026"
+export const PRIVACY_UPDATED = "November 24, 2026"
 const ISSUES = "https://github.com/anomalyco/hex/issues"
 // Each Hex Preview build's SHA-256 and signing certificate, beside its download.
 const ANDROID_BUILDS = "https://github.com/anomalyco/hex/blob/android-preview/README.md"
 const SECURITY = "https://github.com/anomalyco/hex/security/advisories/new"
+const SOURCE = "https://github.com/anomalyco/hex/tree/dev/android"
 
 const IPHONE = { crumb: { href: IPHONE_PATH, label: "iPhone" } }
 const ANDROID = { crumb: { href: ANDROID_PATH, label: "Android" } }
@@ -123,7 +125,8 @@ export function renderAndroid(origin: string): string {
 <h1>A keyboard you talk to</h1>
 <p class="summary">Dictate right inside the keyboard, in any app. Free, private, and on your phone.</p>
 <div class="actions"><a class="button button--primary" href="${ANDROID_DOWNLOAD_PATH}">Download Hex Preview</a></div>
-<p class="note">An APK for Android 12 or later, about 70 MB. Hex Preview is Hex for Android before it reaches Google Play. It installs as its own app and updates itself.</p>
+<p class="note">An APK for Android 12 or later, about 70 MB. Hex Preview is Hex for Android before it reaches Google Play. It installs as its own app and tells you when there's an update.</p>
+<p class="note">Google Play Protect flagged earlier builds of Hex Preview as harmful. The current build fixes that. <a href="#play-protect">What happened</a>.</p>
 <p class="note">On a computer? Open ${address} on your Android phone.</p>
 <div class="prose">
 <section>
@@ -131,6 +134,7 @@ export function renderAndroid(origin: string): string {
 <ol>
 <li>On your phone, tap <strong>Download Hex Preview</strong> above and open the file when it has downloaded.</li>
 <li>Android asks whether your browser or Files app may install apps. Tap <strong>Settings</strong>, turn on <strong>Allow from this source</strong>, then go back and tap <strong>Install</strong>.</li>
+<li>If Google Play Protect says <strong>App scan recommended</strong>, tap <strong>Scan app</strong>, then <strong>Install</strong> when it says the app looks safe.</li>
 <li>Open Hex Preview and tap <strong>Get started</strong>.</li>
 <li>Allow the microphone, then turn on <strong>Hex Preview</strong> in Android's keyboard list and choose it as your keyboard. Hex downloads its speech model (190 MB) once.</li>
 <li>Try it: tap a text field, hold the Hex key, say a few words, then let go.</li>
@@ -138,7 +142,8 @@ export function renderAndroid(origin: string): string {
 </section>
 <section>
 <h2>Updates</h2>
-<p>Hex Preview looks for a newer build when you open it and at most once a day from the keyboard. It shows what changed, and installs only when you tap <strong>Update</strong>. The first update asks you once to let Hex Preview install apps.</p>
+<p>Hex Preview looks for a newer build when you open it and at most once a day from the keyboard, and shows what changed. Tap <strong>Download update</strong> and your browser downloads the new build from GitHub. Open the download and tap <strong>Update</strong> when Android asks. The first time, Android asks you to allow your browser to install apps: allow it, go back, and tap the download again.</p>
+<p>On a build before 2348, the button says <strong>Update</strong> and Hex Preview installs that one update itself. If Google Play Protect asks to scan it, tap <strong>Scan app</strong>, then <strong>Install</strong>.</p>
 <p>Updating closes the keyboard for a moment. Tap a text field to bring it back.</p>
 </section>
 <section>
@@ -149,6 +154,9 @@ export function renderAndroid(origin: string): string {
 <p>Yes. No subscription, no ads, and nothing to buy in the app.</p>
 <h3>Why does Android warn me before installing?</h3>
 <p>Android asks before installing any app that doesn't come from an app store. Anomaly builds and signs Hex Preview, and each build's SHA-256 is <a href="${ANDROID_BUILDS}">listed on GitHub</a> if you want to check a download.</p>
+<h3 id="play-protect">Why did Google Play Protect say Hex Preview was harmful?</h3>
+<p>Builds before 2348 could install their own updates. Google Play Protect flags any app from outside Google Play that asks for permission to install apps, so it blocked those builds, or showed <strong>Harmful app found</strong> once they were installed. Nothing in them was harmful, and <a href="${SOURCE}">the code is public</a>.</p>
+<p>From build 2348, Hex Preview asks for the microphone and the internet and nothing else, and Play Protect no longer flags it. If you have an older build, update it from Hex Preview's Home screen.</p>
 <h3>Can I keep Hex from Google Play too?</h3>
 <p>Yes. Hex Preview is its own app, with its own keyboard, settings, and speech model, so the two sit side by side.</p>
 <h3>What does Hex Preview send when it looks for an update?</h3>
@@ -182,13 +190,13 @@ export function renderAndroid(origin: string): string {
 export function renderPrivacy(origin: string): string {
   const body = `<p class="eyebrow">Hex for iPhone and Android</p>
 <h1>Privacy policy</h1>
-<p class="summary">Hex doesn't collect any data. What you say and type stays on your iPhone.</p>
+<p class="summary">What you say and type stays on your iPhone. Hex sends only the feedback you choose to send.</p>
 <p class="updated">Last updated ${PRIVACY_UPDATED}</p>
 <div class="prose">
 <section>
 <h2>The short version</h2>
 <p>Hex for iPhone and Android is made by Anomaly Innovations, Inc. This policy covers the Hex app for iPhone, Hex Keyboard, and Hex's widgets and Live Activities, and <a href="#android">Hex for Android</a> and its keyboard.</p>
-<p>There's no account, no analytics, no advertising, and no tracking. Hex has no servers your words could be sent to.</p>
+<p>There's no account, no analytics, no advertising, and no tracking. Nothing you dictate or type is ever sent anywhere. The only thing Hex sends about you is feedback, and only when you write it and tap Send.</p>
 </section>
 <section>
 <h2>What happens on your iPhone</h2>
@@ -208,6 +216,17 @@ export function renderPrivacy(origin: string): string {
 <li><strong>Record typing logs</strong> keeps a detailed log of your typing in Hex Keyboard, including the text around your cursor, for 14 days, for testing the keyboard. It never logs password, one-time code, or card fields. The logs leave your iPhone only if you share them yourself, and you can delete them at any time.</li>
 </ul>
 </section>
+<section id="feedback">
+<h2>Feedback you send</h2>
+<p>Hex on iPhone and on Android has a Send feedback form. Nothing is sent until you tap Send. Then Hex sends, to Anomaly's feedback inbox (Bellhop, run by Anomaly):</p>
+<ul>
+<li>What you wrote: your message, and a subject and kind if you chose them.</li>
+<li>The pictures shown in the form: a picture of Hex's own screen taken when you opened the form (never the rest of your phone's screen), and any photos you add. You can remove each one before sending.</li>
+<li>Hex's version, your phone's model, its system version and language, which screen of Hex you opened the form from, and the language and speech model Hex dictates with.</li>
+<li>Your email, only if you type one in, so Anomaly can reply. Nothing is emailed when you send: if Anomaly replies, you'll get an email and confirm your address once. With an email, Hex also sends a random install ID, made the first time you send feedback with one, so your reports can be kept together. It isn't tied to your phone or your Apple or Google account, and deleting Hex deletes it.</li>
+</ul>
+<p>Without an email, your feedback is anonymous: Hex sends no email and no install ID, so it can't be answered. Feedback never includes your dictations, what you type, your vocabulary, what Hex learned about your typing, typing logs, or recordings, and Hex Keyboard never sends it. Anomaly uses feedback only to answer you and improve Hex. Like any request, the server sees your IP address.</p>
+</section>
 <section>
 <h2>Downloads</h2>
 <p>Hex downloads a speech model the first time you use a language: Apple's, through iOS, or, where Apple's isn't available (such as before iOS 26), Hex's own English model from Hugging Face. Apple Intelligence and translation languages also download through iOS.</p>
@@ -219,7 +238,7 @@ export function renderPrivacy(origin: string): string {
 </section>
 <section>
 <h2>Children</h2>
-<p>Hex is suitable for all ages and collects no data from anyone, including children.</p>
+<p>Hex is suitable for all ages and collects no data from anyone, including children, except feedback someone chooses to send.</p>
 </section>
 <section id="android">
 <h2>Hex for Android</h2>
@@ -227,9 +246,9 @@ export function renderPrivacy(origin: string): string {
 <ul>
 <li><strong>Typing.</strong> Hex Keyboard uses the text around your cursor and where you tap to suggest and correct words on your phone, and keeps no log of what you type. In password and PIN fields it types exactly what you press, without reading the field, suggesting words, or dictating.</li>
 <li><strong>Dictation.</strong> Hex uses the microphone only while you dictate. It turns speech into text in memory on your phone, never saves a recording, and keeps no history of what you said. Clean up and translation also run on your phone.</li>
-<li><strong>The speech model.</strong> During setup, Hex downloads one public speech model (190 MB) from Hugging Face over HTTPS. The request carries none of your words, audio, or device identifiers; like any download, the server sees your IP address. If it fails, Hex uses the smaller model it comes with.</li>
-<li><strong>What Hex keeps.</strong> Your settings, setup progress, and the speech model, in Hex's private storage. When you undo an autocorrection, Hex keeps a count against a hash of that word pair, never the words, so it doesn't make the same correction again. Clearing Hex's storage or uninstalling Hex removes all of it, and you can turn off microphone access in Android's settings.</li>
-<li><strong>Hex Preview.</strong> <a href="${ANDROID_PATH}">Hex Preview</a>, the build you install outside Google Play, also asks GitHub for its latest version when you open it and at most once a day from the keyboard, and downloads an update from GitHub when you tap Update. Those requests carry nothing about you or what you type; like any download, the server sees your IP address. Turn the check off with Check for updates automatically.</li>
+<li><strong>Speech models.</strong> During setup, Hex downloads one public speech model (190 MB) from Hugging Face over HTTPS, and a second one (135 MB) only if you turn on Faster English dictation in Labs and tap Download. Neither request carries your words, audio, or device identifiers; like any download, the server sees your IP address. If the first fails, Hex uses the smaller model it comes with.</li>
+<li><strong>What Hex keeps.</strong> Your settings, setup progress, and the speech models you downloaded, in Hex's private storage; Delete download in Labs removes the second one. When you undo an autocorrection, Hex keeps a count against a hash of that word pair, never the words, so it doesn't make the same correction again. If you turn on Learn from my fixes in Labs, Hex keeps the word pairs you corrected right after dictating, how often and when you last corrected each, on your phone only; it never sends them, and it learns nothing from password fields. Turning it off stops the learning but keeps the pairs until you tap Delete what Hex learned, which removes them. Clearing Hex's storage or uninstalling Hex removes all of it, and you can turn off microphone access in Android's settings.</li>
+<li><strong>Hex Preview.</strong> <a href="${ANDROID_PATH}">Hex Preview</a>, the build you install outside Google Play, also asks GitHub for its latest version when you open it and at most once a day from the keyboard. When you tap Download update, your browser downloads the new build from GitHub. Those requests carry nothing about you or what you type; like any download, the server sees your IP address. Turn the check off with Check for updates automatically.</li>
 </ul>
 </section>
 <section>
@@ -252,7 +271,7 @@ export function renderPrivacy(origin: string): string {
     origin,
     {
       title: "Privacy policy · Hex for iPhone",
-      description: "Hex doesn't collect any data. What you say and type stays on your iPhone: no account, no analytics, no tracking.",
+      description: "What you say and type stays on your iPhone: no account, no analytics, no tracking. Hex sends only the feedback you choose to send.",
       url: PRIVACY_PATH,
       image: PRIVACY_CARD_PATH,
       imageAlt: "Hex for iPhone privacy policy: what you say and type stays on your iPhone.",

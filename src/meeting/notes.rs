@@ -252,8 +252,20 @@ pub(super) fn summarize_entries(
     max_chars: usize,
     deadline: Instant,
     generate: impl FnMut(&str, &str, Duration) -> Result<GeneratedNotes, GenerationError>,
-) -> Result<Summary> {
+) -> Result<Option<Summary>> {
     summarize_with_calendar(entries, None, &[], max_chars, deadline, generate)
+}
+
+/// The published lines a summary is generated from, read fresh so an edit
+/// that landed first is what the prompt sees.
+pub(super) fn summary_entries(directory: &Path) -> Result<Vec<TranscriptEntry>> {
+    super::read_ndjson(&directory.join("transcript.ndjson"))
+}
+
+/// Whether these entries hold any speech worth summarizing. An empty
+/// transcript is not a notes failure: there is simply nothing to write.
+fn has_speech(entries: &[TranscriptEntry]) -> bool {
+    entries.iter().any(|entry| !entry.text.trim().is_empty())
 }
 
 /// The most attendee names a notes prompt lists.
@@ -297,7 +309,7 @@ pub(super) fn summarize_with_calendar(
     max_chars: usize,
     deadline: Instant,
     mut generate: impl FnMut(&str, &str, Duration) -> Result<GeneratedNotes, GenerationError>,
-) -> Result<Summary> {
+) -> Result<Option<Summary>> {
     let preamble = format!(
         "{}{}",
         super::chapters::vocabulary_line(terms),
@@ -308,7 +320,7 @@ pub(super) fn summarize_with_calendar(
     loop {
         let excerpt = excerpt(entries, max_chars);
         if excerpt.text.is_empty() {
-            return Err(eyre!("the transcript has no speech to summarize"));
+            return Ok(None);
         }
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
@@ -318,7 +330,7 @@ pub(super) fn summarize_with_calendar(
         let prompt = format!("{preamble}Meeting transcript:\n\n{}", excerpt.text);
         match generate(NOTES_INSTRUCTIONS, &prompt, remaining.min(CALL_TIMEOUT)) {
             Ok(notes) => {
-                return Ok(Summary {
+                return Ok(Some(Summary {
                     notes: GeneratedNotes {
                         title: clean_title(&notes.title),
                         summary: clean_summary(&notes.summary),
@@ -327,7 +339,7 @@ pub(super) fn summarize_with_calendar(
                     excerpt_chars: excerpt.text.len(),
                     transcript_chars: excerpt.transcript_chars,
                     calls,
-                });
+                }));
             }
             Err(GenerationError::ContextWindow) if calls == 1 => max_chars /= 2,
             Err(error) => return Err(eyre!("{error}")),
@@ -778,6 +790,28 @@ fn apply_notes_to_export(
     Ok(())
 }
 
+/// Rewrites the whole user-facing Markdown copy from the current manifest
+/// and `entries` after transcript lines were deleted. Only a copy Hex still
+/// wrote is touched: a file the user edited, or one with no recorded hash,
+/// is left alone. The transcript edit clears notes and chapters first, so
+/// the new document has none of their old text.
+pub(super) fn rewrite_export_transcript(
+    manifest: &mut MeetingManifest,
+    entries: &[TranscriptEntry],
+) -> Result<()> {
+    let Some(path) = manifest.export_path.clone().filter(|path| path.exists()) else {
+        return Ok(());
+    };
+    let original =
+        fs::read_to_string(&path).wrap_err_with(|| format!("could not read {}", path.display()))?;
+    if manifest.export_sha256.as_deref() != Some(super::text_sha256(original.as_bytes()).as_str()) {
+        return Ok(());
+    }
+    let rendered = super::markdown::render_document(manifest, entries);
+    rewrite_markdown_file(&path, &mut manifest.export_sha256, |_| rendered)?;
+    Ok(())
+}
+
 /// The file is replaced atomically, and only if nothing changed it meanwhile.
 /// `written` is the SHA-256 of the copy Hex last wrote; it follows the
 /// rewrite only while the file was still that copy, so a file the user
@@ -820,10 +854,12 @@ fn rewrite_markdown_file(
 
 static IN_PROGRESS: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 
-struct InProgress(String);
+pub(super) struct InProgress(String);
 
 impl InProgress {
-    fn claim(id: &str) -> Option<Self> {
+    /// Claims the one writer slot for `id`: notes, or a transcript edit
+    /// (`super::edit`) that must not race a summary.
+    pub(super) fn claim(id: &str) -> Option<Self> {
         IN_PROGRESS
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -876,24 +912,51 @@ pub fn summarize(id: &str) -> Result<MeetingManifest> {
 }
 
 /// Generates and records notes while holding this meeting's claim.
-fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
-    let directory = root()?.join(id);
-    let mut manifest = read_manifest(&directory)?;
+fn summarize_claimed(id: &str, claim: InProgress) -> Result<MeetingManifest> {
+    summarize_in(&root()?.join(id), id, claim)
+}
+
+/// Generates notes for the meeting in `directory`.
+fn summarize_in(directory: &Path, id: &str, claim: InProgress) -> Result<MeetingManifest> {
+    summarize_with(directory, id, claim, generator::generate_notes)
+}
+
+/// [`summarize_in`] with the notes call injected. A transcript with no speech
+/// writes no notes and clears any earlier notes error: there is nothing to
+/// summarize, so nothing failed, and the writer is never asked.
+fn summarize_with(
+    directory: &Path,
+    id: &str,
+    _claim: InProgress,
+    mut generate: impl FnMut(&str, &str, Duration) -> Result<GeneratedNotes, GenerationError>,
+) -> Result<MeetingManifest> {
+    let mut manifest = read_manifest(directory)?;
     if manifest.status != MeetingStatus::Complete {
         return Err(eyre!("only completed meetings can be summarized"));
+    }
+    let entries = summary_entries(directory)?;
+    if !has_speech(&entries) {
+        tracing::info!(
+            meeting = id,
+            "nothing to summarize: the transcript has no speech"
+        );
+        if manifest.notes_error.is_some() {
+            manifest.notes_error = None;
+            write_manifest(directory, &manifest)?;
+        }
+        return Ok(manifest);
     }
     // A writer that isn't there (OpenCode not running, Apple Intelligence
     // off) is the meeting's notes error, so the pane says why.
     if let Err(reason) = generator::available() {
         tracing::warn!(%reason, meeting = id, "could not generate meeting notes");
         manifest.notes_error = Some(reason.clone());
-        write_manifest(&directory, &manifest)?;
+        write_manifest(directory, &manifest)?;
         return Err(eyre!("{reason}"));
     }
-    let entries = super::read_ndjson(&directory.join("transcript.ndjson"))?;
     let never = AtomicBool::new(false);
     if crate::labs::live_chapters() {
-        super::chapters::refine_meeting(&directory, &entries, &never);
+        super::chapters::refine_meeting(directory, &entries, &never);
     }
     // Read at each generation, so Regenerate summary uses the current list.
     let terms = crate::dictation::vocabulary::terms();
@@ -906,13 +969,13 @@ fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
         started + TOTAL_DEADLINE,
         |instructions, prompt, timeout| {
             wait_for_dictation(&never);
-            generator::generate_notes(instructions, prompt, timeout)
+            generate(instructions, prompt, timeout)
         },
     );
     // Re-read so concurrent manifest updates are not lost.
-    let mut manifest = read_manifest(&directory)?;
+    let mut manifest = read_manifest(directory)?;
     match result {
-        Ok(summary) => {
+        Ok(Some(summary)) => {
             tracing::info!(
                 meeting = id,
                 excerpt_chars = summary.excerpt_chars,
@@ -935,13 +998,20 @@ fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
                 tracing::warn!(%error, meeting = id, "could not add notes to meeting Markdown");
                 manifest.notes_error = Some(format!("Notes not added to Markdown: {error}"));
             }
-            write_manifest(&directory, &manifest)?;
+            write_manifest(directory, &manifest)?;
+            Ok(manifest)
+        }
+        // Defensive fallback: `has_speech` returned above for a transcript
+        // with no lines, and `excerpt` yields "[…]" for any line.
+        Ok(None) => {
+            manifest.notes_error = None;
+            write_manifest(directory, &manifest)?;
             Ok(manifest)
         }
         Err(error) => {
             tracing::warn!(%error, meeting = id, "could not generate meeting notes");
             manifest.notes_error = Some(error.to_string());
-            write_manifest(&directory, &manifest)?;
+            write_manifest(directory, &manifest)?;
             Err(error)
         }
     }
@@ -1043,12 +1113,18 @@ pub fn summarize_file(path: &Path, excerpt_chars: Option<usize>) -> Result<Strin
 
     let max_chars = excerpt_chars.unwrap_or_else(|| excerpt_budget(context, FINAL_EXCERPT_CHARS));
     let started = Instant::now();
-    let summary = summarize_entries(
+    let summary = match summarize_entries(
         &entries,
         max_chars,
         started + TOTAL_DEADLINE,
         generator::generate_notes,
-    )?;
+    )? {
+        Some(summary) => summary,
+        None => {
+            report.push_str("\nthe transcript has no speech to summarize\n");
+            return Ok(report);
+        }
+    };
     let elapsed = started.elapsed();
     let calls = summary.calls;
     let notes = MeetingNotes::from_summary(summary, elapsed);
@@ -1150,6 +1226,7 @@ mod tests {
                 ))
             },
         )
+        .unwrap()
         .unwrap();
         assert_eq!(summary.calls, 1);
         assert_eq!(prompts[0].0, NOTES_INSTRUCTIONS);
@@ -1207,6 +1284,7 @@ mod tests {
                 Ok(generated("Launch", "They met."))
             },
         )
+        .unwrap()
         .unwrap();
         assert!(prompts[0].starts_with(
             "Calendar event: Q4 launch sync\nAttendees: Ana Ruiz, Ben Ito\n\nMeeting transcript:\n\n[00:00] You: Turn 0"
@@ -1232,6 +1310,7 @@ mod tests {
                 Ok(generated("Launch", "They met."))
             },
         )
+        .unwrap()
         .unwrap();
         assert!(prompts[0].starts_with(
             "Names and terms that may appear: Kubernetes, Ana Ruiz\n\nCalendar event: Q4 launch sync\nAttendees: Ana Ruiz\n\nMeeting transcript:\n\n[00:00] You: Turn 0"
@@ -1250,6 +1329,7 @@ mod tests {
                 Ok(generated("Launch", "They met."))
             },
         )
+        .unwrap()
         .unwrap();
         assert!(without[0].starts_with("Meeting transcript:\n\n[00:00] You: Turn 0"));
 
@@ -1267,6 +1347,7 @@ mod tests {
                 Instant::now() + Duration::from_secs(60),
                 |_, _, _| Ok(generated("Launch", "They met.")),
             )
+            .unwrap()
             .unwrap();
             excerpts.push(summary.excerpt_chars);
         }
@@ -1342,6 +1423,7 @@ mod tests {
                 }
             },
         )
+        .unwrap()
         .unwrap();
         assert_eq!(summary.calls, 2);
         assert!(sizes[1] < sizes[0] * 2 / 3, "{sizes:?}");
@@ -1380,7 +1462,55 @@ mod tests {
         .unwrap();
         assert!(!called);
         assert!(error.to_string().contains("in time"));
-        assert!(summarize_entries(&[], 8_000, Instant::now(), |_, _, _| unreachable!()).is_err());
+
+        // No speech is nothing to summarize, not a notes failure: the writer
+        // is never called and no summary comes back.
+        let mut summarized = false;
+        assert!(
+            summarize_entries(&[], 8_000, Instant::now(), |_, _, _| {
+                summarized = true;
+                Ok(GeneratedNotes::default())
+            })
+            .unwrap()
+            .is_none()
+        );
+        assert!(!summarized);
+    }
+
+    #[test]
+    fn a_transcript_with_no_speech_clears_notes_error_without_asking_the_writer() {
+        let id = format!("notes-empty-{}-{}", std::process::id(), now_ms());
+        let directory = std::env::temp_dir().join(&id);
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        let mut manifest: MeetingManifest = serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "id": id,
+            "title": "Design sync",
+            "status": "complete",
+            "created_at_ms": 1_760_000_000_000_u64,
+            "ended_at_ms": 1_760_000_060_000_u64,
+            "duration_ms": 60_000,
+            "system": {"file": "system.wav", "samples": 0, "dropped_packets": 0},
+            "microphone": {"file": "microphone.wav", "samples": 0, "dropped_packets": 0},
+            "error": null
+        }))
+        .unwrap();
+        manifest.notes_error = Some("the transcript has no speech to summarize".into());
+        write_manifest(&directory, &manifest).unwrap();
+        fs::write(directory.join("transcript.ndjson"), "").unwrap();
+
+        let claim = InProgress::claim(&manifest.id).unwrap();
+        let saved = summarize_with(&directory, &manifest.id, claim, |_, _, _| {
+            unreachable!("a transcript with no speech never asks the writer")
+        })
+        .unwrap();
+        assert!(saved.notes.is_none());
+        assert_eq!(saved.notes_error, None);
+        let stored = read_manifest(&directory).unwrap();
+        assert!(stored.notes.is_none());
+        assert_eq!(stored.notes_error, None);
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

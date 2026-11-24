@@ -21,6 +21,11 @@ case "${CI_TAG:-}" in
     ;;
 esac
 scripts/fetch-cleanup-model.sh
+# Send feedback's Bellhop report key is set in HEXMobile/Feedback.xcconfig. An Xcode Cloud
+# BELLHOP_REPORT_KEY secret, if one is ever set (say, mid-rotation), overrides it.
+if [ -n "${BELLHOP_REPORT_KEY:-}" ]; then
+  printf 'BELLHOP_REPORT_KEY = %s\n' "$BELLHOP_REPORT_KEY" > HEXMobile/Feedback.local.xcconfig
+fi
 xcodegen generate
 pins=HEXMobile.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
 mkdir -p "$pins"

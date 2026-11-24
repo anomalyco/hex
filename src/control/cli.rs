@@ -303,6 +303,12 @@ pub enum ModelCommand {
         #[command(flatten)]
         output: Output,
     },
+    /// Swap the dictation model with the other one Labs › Model switch
+    /// shortcut saved, and back. Never downloads.
+    Switch {
+        #[command(flatten)]
+        output: Output,
+    },
     /// Stop a download or load in progress.
     Cancel {
         #[command(flatten)]
@@ -498,6 +504,7 @@ pub fn run(command: ControlCli, top_level: impl FnOnce() -> clap::Command) -> u8
                 language,
                 output,
             } => install_model(model, language, output),
+            ModelCommand::Switch { output } => send(ControlCommand::ModelSwitch, output),
             ModelCommand::Cancel { output } => send(ControlCommand::ModelCancel, output),
             ModelCommand::Import { path, name } => report(import_model(&path, name.as_deref())),
             ModelCommand::Rename { model, name } => report(imported(&model).and_then(|id| {

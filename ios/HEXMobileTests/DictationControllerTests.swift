@@ -1248,10 +1248,11 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(languages.recentDictationLanguages, ["de-DE", "nb-NO"], "picks in Hex are recents")
     }
 
-    /// With English and Spanish on the keyboard and dictation on Automatic, a switch on the
-    /// space bar prepares the other language before the next dictation (TestFlight build 56:
-    /// Spanish speech transcribed as English was "incomprehensible"); a language picked by
-    /// hand stays put.
+    /// With English and Spanish on the keyboard, dictation on Automatic and Switch dictation too
+    /// on, a switch on the space bar prepares the other language before the next dictation
+    /// (TestFlight build 56: Spanish speech transcribed as English was "incomprehensible"); a
+    /// language picked by hand stays put. With the switch off, a switch on the space bar
+    /// prepares nothing (TestFlight build 150: English speech came out as German).
     func testAutomaticDictationFollowsTheKeyboardsLanguage() async throws {
         let transcriber = ControlledTranscriber()
         let languages = LanguageSettings(defaults: defaults)
@@ -1274,6 +1275,13 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(preparations, 1)
 
         languages.keyboardLanguages = [.english, .spanish]
+        languages.currentKeyboardLanguage = .spanish
+        controller.followDictationLanguageSetting()
+        try await settle()
+        XCTAssertEqual(preparations, 1, "Switch dictation too off: the keyboard on Español changes nothing")
+        XCTAssertEqual(languages.effectiveDictationLanguage, "en-US")
+        languages.currentKeyboardLanguage = nil
+        languages.dictationFollowsKeyboard = true
         controller.followDictationLanguageSetting()
         try await settle()
         XCTAssertEqual(preparations, 2, "now following the keyboard's English")
@@ -1686,7 +1694,7 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertNil(defaults.object(forKey: "parakeet.loadInterrupted"))
     }
 
-    // MARK: - Experiments › Multilingual model (Parakeet)
+    // MARK: - Settings › Dictation › Model: Multilingual
 
     /// 6 GB and 4 GB iPhones report about this much.
     private static let sixGB: UInt64 = 5_900_000_000
@@ -1751,16 +1759,18 @@ final class DictationControllerTests: XCTestCase {
         )
     }
 
-    func testTheKeyboardOpensHexForMultilingualParakeetOnlyOnceItIsReady() {
+    /// The multilingual model never sends a dictation to Hex: the keyboard dictates its languages
+    /// itself, loaded or not, as it does English (TestFlight, 2026-11-24).
+    func testTheKeyboardDictatesTheMultilingualModelsLanguagesItself() {
         let settings = MultilingualParakeetSettings(defaults: defaults)
-        XCTAssertFalse(settings.keyboardOpensHex(language: "nl-NL"), "off")
+        LanguageSettings(defaults: defaults).chooseDictationLanguage("nl-NL")
+        let keyboard = KeyboardSelfDictation(defaults: defaults)
+        XCTAssertNil(keyboard.handoffReason(osMajorVersion: 26, includeRecentHandoff: false), "off")
         settings.isEnabled = true
-        XCTAssertFalse(settings.keyboardOpensHex(language: "nl-NL"), "on, still downloading: the keyboard dictates itself")
-        settings.isModelReady = true
-        XCTAssertTrue(settings.keyboardOpensHex(language: "nl-NL"))
-        XCTAssertFalse(settings.keyboardOpensHex(language: nil), "a language it doesn't take")
-        settings.isEnabled = false
-        XCTAssertFalse(settings.keyboardOpensHex(language: "nl-NL"))
+        XCTAssertNil(keyboard.handoffReason(osMajorVersion: 26, includeRecentHandoff: false), "on, only Hex has it loaded")
+        KeyboardParakeetSettings(defaults: defaults).isEnabled = false
+        XCTAssertNil(keyboard.handoffReason(osMajorVersion: 26, includeRecentHandoff: false), "Speech model in keyboard off")
+        XCTAssertEqual(keyboard.handoffReason(osMajorVersion: 18, includeRecentHandoff: false), .openedHex, "before iOS 26, as before")
     }
 
     func testOnlyASwitchTurnedOffDeletesTheMultilingualModelAtLaunch() {
@@ -1857,9 +1867,17 @@ final class DictationControllerTests: XCTestCase {
             unmetered: Bool? = true,
             free: Int64? = 8_000_000_000
         ) -> KeyboardParakeetDownload.Hold? {
-            KeyboardParakeetDownload.hold(
-                otherEngine: otherEngine, english: english, keyboardLimit: limit, unmetered: unmetered, freeBytes: free
+            let plan = KeyboardParakeetPlan.resolve(
+                isEnabled: true,
+                fitsDevice: true,
+                twoLanguageEnabled: otherEngine,
+                multilingualLanguage: nil,
+                wantedLanguage: english ? "en-US" : "fr-FR",
+                keyboardLimit: limit,
+                v2Downloaded: false,
+                ultraDownloaded: false
             )
+            return KeyboardParakeetDownload.hold(plan: plan, unmetered: unmetered, freeBytes: free)
         }
         XCTAssertNil(hold(), "an iPhone 17 Pro on Wi-Fi with room")
         XCTAssertEqual(hold(english: false), .notEnglish)
@@ -2068,6 +2086,28 @@ final class DictationControllerTests: XCTestCase {
         ParakeetUltraModel.remove(from: model.folder)
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertFalse(FileManager.default.fileExists(atPath: model.folder.path), "nothing wrote after stop")
+    }
+
+    /// Settings › Dictation › Model back to English: a complete multilingual model stays, so
+    /// picking Multilingual again needs no download; one left part-way goes.
+    func testPickingEnglishKeepsACompleteMultilingualModelAndDropsAPartOne() throws {
+        let model = try UltraStubModel()
+        defer { model.remove() }
+        let first = model.files[0]
+        let partial = model.folder.appendingPathComponent(first.path).appendingPathExtension("partial")
+        try FileManager.default.createDirectory(at: partial.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try model.bodies[first.path]!.prefix(1000).write(to: partial)
+        XCTAssertTrue(ParakeetUltraModel.removeUnlessComplete(from: model.folder, files: model.files))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: model.folder.path), "a part-way download goes")
+
+        for file in model.files {
+            let destination = model.folder.appendingPathComponent(file.path)
+            try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try model.bodies[file.path]!.write(to: destination)
+        }
+        XCTAssertTrue(ParakeetUltraModel.isDownloaded(in: model.folder, files: model.files))
+        XCTAssertFalse(ParakeetUltraModel.removeUnlessComplete(from: model.folder, files: model.files))
+        XCTAssertTrue(ParakeetUltraModel.isDownloaded(in: model.folder, files: model.files), "a complete one stays")
     }
 
     func testParakeetUltrasFilesArePinnedAndComplete() throws {
@@ -3353,8 +3393,8 @@ final class SpeechModelInstallTests: XCTestCase {
             // The second in a row hands its dictations to Hex.
             let shown = SpeechModelNeedsHex.keyboardError(for: error, language: "en-US", settings: settings)
             XCTAssertEqual(shown as? SpeechModelNeedsHex, SpeechModelNeedsHex(language: "en-US"), "\(error)")
-            XCTAssertEqual(UserFacingError.message(for: shown, context: .transcription), "Open Hex to download English.")
-            XCTAssertTrue(settings.keyboardNeedsHex(), "the Hex key opens Hex, which downloads it")
+            XCTAssertEqual(UserFacingError.message(for: shown, context: .transcription), "Download English in Hex to dictate")
+            XCTAssertTrue(settings.keyboardNeedsHex(), "a dictation tap says so with Open Hex, and Hex downloads it")
         }
         // Hebrew picked by hand on an English iPhone: the keyboard's install failing names
         // English to try, but Hex set nothing aside, so Hex downloads Hebrew too.
@@ -3363,7 +3403,7 @@ final class SpeechModelInstallTests: XCTestCase {
         let first = SpeechModelNeedsHex.keyboardError(for: hebrew, language: "he-IL", settings: settings)
         XCTAssertEqual(UserFacingError.message(for: first, context: .transcription), "Hex couldn't transcribe that. Try again.")
         let shown = SpeechModelNeedsHex.keyboardError(for: hebrew, language: "he-IL", settings: settings)
-        XCTAssertEqual(UserFacingError.message(for: shown, context: .transcription), "Open Hex to download Hebrew.")
+        XCTAssertEqual(UserFacingError.message(for: shown, context: .transcription), "Download Hebrew in Hex to dictate")
         XCTAssertTrue(settings.keyboardNeedsHex())
     }
 

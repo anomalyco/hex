@@ -4,8 +4,9 @@ use std::process::Command;
 fn main() {
     check_windows_split();
     x86_baseline();
-    build_version();
-    test_build_commit();
+    let version = build_version();
+    println!("cargo:rustc-env=HEX_BUILD_VERSION={version}");
+    build_commit(&version);
     // `hex_dev_onboarding`: the first run's replay strip and its swearing
     // jokes, in debug and `HEX_TEST_BUILD=1` builds only.
     println!("cargo::rustc-check-cfg=cfg(hex_dev_onboarding)");
@@ -195,7 +196,7 @@ fn x86_baseline() {
     println!("cargo::rustc-cfg=hex_x86_ivybridge");
 }
 
-fn build_version() {
+fn build_version() -> String {
     println!("cargo:rerun-if-env-changed=HEX_VERSION");
     let version = std::env::var("CARGO_PKG_VERSION").unwrap();
     // CI builds name their version in HEX_VERSION and check `hex --version`
@@ -204,12 +205,10 @@ fn build_version() {
         .ok()
         .filter(|named| !named.is_empty())
     {
-        println!("cargo:rustc-env=HEX_BUILD_VERSION={named}");
-        return;
+        return named;
     }
     if version != "0.0.0" {
-        println!("cargo:rustc-env=HEX_BUILD_VERSION={version}");
-        return;
+        return version;
     }
     let git = |args: &[&str]| {
         Command::new("git")
@@ -241,18 +240,17 @@ fn build_version() {
             }
         }
     }
-    println!("cargo:rustc-env=HEX_BUILD_VERSION={version}");
+    version
 }
 
-/// A test or local build carries its commit (`HEX_COMMIT`), which the sidebar shows
-/// beside the version.
-fn test_build_commit() {
+/// Test builds keep their short badge label; local builds can identify the
+/// exact checkout without starting the app (`hex --version`).
+fn build_commit(version: &str) {
     println!("cargo:rerun-if-env-changed=HEX_BUILD_CHANNEL");
     println!("cargo:rerun-if-env-changed=HEX_TEST_BUILD");
     println!("cargo:rerun-if-env-changed=HEX_LOCAL_BUILD");
-    if std::env::var("HEX_TEST_BUILD").as_deref() != Ok("1")
-        && std::env::var("HEX_LOCAL_BUILD").as_deref() != Ok("1")
-    {
+    let local = std::env::var("HEX_LOCAL_BUILD").as_deref() == Ok("1");
+    if !local && std::env::var("HEX_TEST_BUILD").as_deref() != Ok("1") {
         return;
     }
     let git = |args: &[&str]| {
@@ -264,10 +262,27 @@ fn test_build_commit() {
             .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
             .filter(|value| !value.is_empty())
     };
-    let Some(commit) = git(&["rev-parse", "--short=7", "HEAD"]) else {
-        return;
+    let commit = if local {
+        // A remote build may have the source but not its Git checkout.
+        println!("cargo:rerun-if-env-changed=HEX_COMMIT");
+        let commit = std::env::var("HEX_COMMIT")
+            .ok()
+            .filter(|s| matches!(s.len(), 40 | 64) && s.bytes().all(|b| b.is_ascii_hexdigit()))
+            .or_else(|| git(&["rev-parse", "HEAD"]));
+        let detail = commit
+            .as_deref()
+            .map(|sha| format!(" · {sha}"))
+            .unwrap_or_default();
+        println!(
+            "cargo:rustc-env=HEX_LOCAL_LONG_VERSION={version} · Local build · updates off{detail}"
+        );
+        commit
+    } else {
+        git(&["rev-parse", "--short=7", "HEAD"])
     };
-    println!("cargo:rustc-env=HEX_COMMIT={commit}");
+    if let Some(commit) = commit {
+        println!("cargo:rustc-env=HEX_COMMIT={commit}");
+    }
     let reference = git(&["symbolic-ref", "-q", "HEAD"]);
     for name in ["HEAD", "packed-refs"]
         .into_iter()

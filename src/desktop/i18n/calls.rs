@@ -21,6 +21,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("{} seconds after the call app leaves the microphone", "{} secondes après que l’app d’appel a libéré le micro"),
     ("{name}: {answer}", "{name} : {answer}"),
     ("{} apps and websites answer differently", "{} apps et sites web répondent autrement"),
+    ("{} call ended", "Appel {} terminé"),
+    ("Recording stops in {} s", "L'enregistrement s'arrête dans {} s"),
+    ("Stop now", "Arrêter maintenant"),
+    ("Couldn't record", "Impossible d'enregistrer"),
 ];
 
 #[rustfmt::skip]
@@ -41,6 +45,10 @@ pub(super) const PORTUGUESE: &[(&str, &str)] = &[
     ("{} seconds after the call app leaves the microphone", "{} segundos depois que o app da chamada libera o microfone"),
     ("{name}: {answer}", "{name}: {answer}"),
     ("{} apps and websites answer differently", "{} apps e sites respondem de outra forma"),
+    ("{} call ended", "Chamada do {} encerrada"),
+    ("Recording stops in {} s", "A gravação para em {} s"),
+    ("Stop now", "Parar agora"),
+    ("Couldn't record", "Não foi possível gravar"),
 ];
 
 #[rustfmt::skip]
@@ -61,4 +69,33 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
     ("{} seconds after the call app leaves the microphone", "Через {} с после того, как приложение звонка освободит микрофон"),
     ("{name}: {answer}", "{name}: {answer}"),
     ("{} apps and websites answer differently", "Другие ответы: {}"),
+    ("{} call ended", "Звонок в {} завершён"),
+    ("Recording stops in {} s", "Запись остановится через {} с"),
+    ("Stop now", "Остановить сейчас"),
+    ("Couldn't record", "Не удалось записать"),
+];
+
+/// Hungarian, for the strings above.
+#[rustfmt::skip]
+pub(super) const HUNGARIAN: &[(&str, &str)] = &[
+    ("Ask each time", "Minden alkalommal kérdez"),
+    ("Don't offer", "Ne ajánlja fel"),
+    ("Always record", "Mindig rögzít"),
+    ("Calls", "Hívások"),
+    ("When a call starts", "Amikor egy hívás elkezdődik"),
+    ("Apps and websites", "Alkalmazások és webhelyek"),
+    ("Apps and websites show up here after Hex sees a call in them.", "Az alkalmazások és webhelyek itt jelennek meg, miután a Hex hívást észlel bennük."),
+    ("A small offer appears beside the menu bar", "A menüsor mellett megjelenik egy kis ajánlat"),
+    ("Recording starts with the call; you'll see it in the menu bar", "A felvétel a hívással együtt indul; a menüsorban láthatja"),
+    ("Start recordings yourself from the menu bar", "A felvételeket a menüsorból indíthatja el"),
+    ("A small offer appears on screen", "A képernyőn megjelenik egy kis ajánlat"),
+    ("Recording starts with the call", "A felvétel a hívással együtt indul"),
+    ("Start recordings yourself from Hex", "A felvételeket a Hexből indíthatja el"),
+    ("{} seconds after the call app leaves the microphone", "{} másodperccel azután, hogy a hívás alkalmazása elengedi a mikrofont"),
+    ("{name}: {answer}", "{name}: {answer}"),
+    ("{} apps and websites answer differently", "{} alkalmazás és webhely válaszol másként"),
+    ("{} call ended", "{}-hívás befejeződött"),
+    ("Recording stops in {} s", "A felvétel {} s múlva leáll"),
+    ("Stop now", "Leállítás most"),
+    ("Couldn't record", "Nem sikerült rögzíteni"),
 ];

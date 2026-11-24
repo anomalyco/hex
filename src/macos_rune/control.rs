@@ -18,7 +18,6 @@ use crate::control::{
 };
 use crate::desktop::host::{DesktopAction, DesktopUpdateStatus};
 use crate::desktop::onboarding::PermissionState;
-use crate::meeting::MeetingRequest;
 use crate::meeting::watcher::{ControllerEvent, MeetingMenuState};
 use crate::recognition::RecognitionControl;
 use crate::rune_ui::story_link::{self, StoryLink};
@@ -262,6 +261,48 @@ impl Pump {
                         }),
                 ))
             }
+            ControlCommand::ModelSwitch => {
+                use crate::transcription::other_model;
+                let settings = match load() {
+                    Ok(settings) => settings,
+                    Err(error) => return Some(error.into()),
+                };
+                let capture = match capture_snapshot(&runtime) {
+                    Ok(capture) => capture,
+                    Err(error) => return Some(error.into()),
+                };
+                if capture.recording.is_some() || capture.pending_jobs > 0 {
+                    return Some(ControlReply::error(
+                        "busy",
+                        "Hex is dictating; try again once it finishes",
+                    ));
+                }
+                let plan = match other_model::planned(&settings) {
+                    Ok(Some(plan)) => plan,
+                    Ok(None) => {
+                        return Some(ControlReply::unchanged(format!(
+                            "Already using {} · {}",
+                            crate::transcription::models::definition(settings.transcription.model)
+                                .name,
+                            crate::transcription::models::language_name(
+                                &settings.transcription.language
+                            )
+                        )));
+                    }
+                    Err(error) => return Some(switch_error_reply(error)),
+                };
+                if let Err(error) = other_model::installed(&plan) {
+                    return Some(switch_error_reply(error));
+                }
+                match runtime.send(Request::SwapModel) {
+                    Ok(()) => Some(ControlReply::done(format!(
+                        "Switching to {} · {}; Hex keeps the current model if it fails",
+                        crate::transcription::models::definition(plan.to.model).name,
+                        crate::transcription::models::language_name(&plan.to.language)
+                    ))),
+                    Err(error) => Some(ControlReply::error("unavailable", error.to_string())),
+                }
+            }
             ControlCommand::ModelCancel => {
                 let preparing = runtime
                     .published()
@@ -350,37 +391,9 @@ impl Pump {
                 crate::app_settings::meetings_off_reason(),
             ));
         }
-        let request = match (&self.meeting_state, stop) {
-            (MeetingMenuState::Recording { title, .. }, false) => {
-                return Some(ControlReply::unchanged(format!(
-                    "Already recording “{title}”"
-                )));
-            }
-            (MeetingMenuState::Starting, false) => {
-                return Some(ControlReply::unchanged(
-                    "A meeting recording is already starting",
-                ));
-            }
-            (MeetingMenuState::Transcribing, false) => {
-                return Some(ControlReply::error(
-                    "busy",
-                    "the last meeting is still transcribing; try again when it finishes",
-                ));
-            }
-            (MeetingMenuState::Idle, false) => MeetingRequest::Start {
-                title: title.filter(|title| !title.trim().is_empty()),
-            },
-            (MeetingMenuState::Idle, true) => {
-                return Some(ControlReply::unchanged("No meeting is recording"));
-            }
-            (MeetingMenuState::Transcribing, true) => {
-                return Some(ControlReply::unchanged(
-                    "The meeting is already transcribing",
-                ));
-            }
-            (MeetingMenuState::Starting | MeetingMenuState::Recording { .. }, true) => {
-                MeetingRequest::Stop
-            }
+        let request = match control::meetings::plan(&self.meeting_state, stop, title) {
+            Ok(request) => request,
+            Err(reply) => return Some(reply),
         };
         if let Err(error) = self.runtime.meeting(request) {
             return Some(ControlReply::error("unavailable", error));
@@ -404,8 +417,12 @@ impl Pump {
                         "Recording “{title}”; `hex meetings stop` stops and transcribes it"
                     ))
                 }
-                (Some(ControllerEvent::Stopping), true) => {
-                    ControlReply::done("Stopping the meeting recording")
+                // A stop replies once the recorder has begun transcribing,
+                // as `hex meetings stop` documents, or once it discarded a
+                // recording with no speech; Stopping only says it is on its
+                // way there.
+                (Some(ControllerEvent::Discarded(_)), true) => {
+                    ControlReply::done("Stopped recording; it had no speech and went to the Trash")
                 }
                 (Some(ControllerEvent::Transcribing | ControllerEvent::Finished(_)), true) => {
                     ControlReply::done("Stopped recording; transcribing the meeting")
@@ -653,6 +670,19 @@ fn background(
     });
 }
 
+/// A refused `hex model switch`, with the code the CLI prints.
+fn switch_error_reply(error: crate::transcription::other_model::SwitchError) -> ControlReply {
+    let code = if matches!(
+        &error,
+        crate::transcription::other_model::SwitchError::NotInstalled(_)
+    ) {
+        "not-installed"
+    } else {
+        "unavailable"
+    };
+    ControlReply::error(code, error.message())
+}
+
 fn load() -> Result<AppSettings, ControlError> {
     AppSettings::load().map_err(|error| {
         ControlError::new("internal", format!("couldn't read settings: {error:#}"))
@@ -852,25 +882,7 @@ fn wait_for_model(
 }
 
 fn meeting_report(state: &MeetingMenuState) -> MeetingReport {
-    match state {
-        MeetingMenuState::Idle => MeetingReport {
-            state: "idle".into(),
-            ..Default::default()
-        },
-        MeetingMenuState::Starting => MeetingReport {
-            state: "starting".into(),
-            ..Default::default()
-        },
-        MeetingMenuState::Recording { started, title, .. } => MeetingReport {
-            state: "recording".into(),
-            title: Some(title.clone()),
-            elapsed_seconds: Some(started.elapsed().as_secs()),
-        },
-        MeetingMenuState::Transcribing => MeetingReport {
-            state: "transcribing".into(),
-            ..Default::default()
-        },
-    }
+    control::meetings::report(state)
 }
 
 /// The pane the window shows, asked on the UI thread.
@@ -1014,6 +1026,8 @@ mod tests {
             ),
             app_switcher: crate::transcription::app_model_switching::Switcher::new(false, None),
             automatic_preparation: None,
+            pending_swap: None,
+            hud: crate::dictation::indicator::channel().0,
             preparation,
             recognition_start: None,
             listener_failure: Default::default(),

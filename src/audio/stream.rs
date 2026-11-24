@@ -243,17 +243,19 @@ impl AudioInput {
         )
     }
 
-    /// Opens `device`. `follows_default` marks cpal's default-input handle,
-    /// whose Windows stream reports a default change as invalidation while
-    /// it keeps running on the old device. `renegotiate_rate` makes the
-    /// device change its sample rate before the stream opens (#1575).
+    /// Opens `device`. `on_default_handle` marks a stream built on cpal's
+    /// default-input handle, whose Windows stream reports a default change as
+    /// invalidation while it keeps running on the old device; a resolved
+    /// specific device never gets that report, so its invalidation is a real
+    /// failure. `renegotiate_rate` makes the device change its sample rate
+    /// before the stream opens (#1575).
     /// `voice_processing` opens it through Apple's voice processing instead
     /// (Labs › Voice isolation), falling back to the raw stream when the
     /// engine refuses.
     pub(super) fn open_device(
         device: Device,
         device_name: String,
-        follows_default: bool,
+        on_default_handle: bool,
         renegotiate_rate: bool,
         voice_processing: bool,
         voice_processing_fallback: bool,
@@ -289,7 +291,7 @@ impl AudioInput {
             input_format::start_stream_with_fallback(
                 &device,
                 &device_name,
-                follows_default.then(|| device_name.clone()),
+                on_default_handle.then(|| device_name.clone()),
                 renegotiate_rate,
             )
         };
@@ -453,9 +455,11 @@ pub(super) struct StreamErrorReporter {
 
 impl StreamErrorReporter {
     fn report(&self, error: cpal::Error) {
-        // WASAPI reports a default-input change as invalidation, yet the
-        // stream keeps capturing the old device. Hex switches once capture is
-        // idle rather than failing a recording.
+        // Only a stream on cpal's default-input handle: WASAPI reports a
+        // default change as invalidation, yet the stream keeps capturing the
+        // old device. Hex switches once capture is idle rather than failing a
+        // recording. A resolved specific device gets no such report, so its
+        // invalidation falls through as the failure it is.
         #[cfg(target_os = "windows")]
         if error.kind() == cpal::ErrorKind::StreamInvalidated
             && let Some(name) = &self.default_name

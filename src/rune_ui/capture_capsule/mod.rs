@@ -14,6 +14,7 @@
 //! Ported from Scrawl's Rune capsule (`scrawl-pill-lab`, `rune_pill`); its
 //! colours are the OpenCode theme's, so it follows the system appearance.
 
+mod always_view;
 pub(crate) mod feed;
 pub(crate) mod flow;
 pub(crate) mod ink;

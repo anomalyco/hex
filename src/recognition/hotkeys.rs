@@ -403,6 +403,11 @@ impl Hotkeys {
             self.begin_capture(shortcut, raw);
             return (raw, None);
         }
+        // Labs › Model switch shortcut: it switches no capture, so it never
+        // takes the active one; its own action does the swap.
+        if action == HotkeyAction::ModelSwitch {
+            return (false, None);
+        }
         if self
             .active
             .as_ref()
@@ -421,7 +426,10 @@ impl Hotkeys {
                 }
                 (active.raw, None)
             }
-            HotkeyAction::PasteLast | HotkeyAction::Cancel | HotkeyAction::CancelShortcut => {
+            HotkeyAction::PasteLast
+            | HotkeyAction::ModelSwitch
+            | HotkeyAction::Cancel
+            | HotkeyAction::CancelShortcut => {
                 if let Some(print) = active.print {
                     print.send(PrintedTranscript::Cancelled);
                 }
@@ -467,7 +475,10 @@ impl Hotkeys {
                 Some(HotkeyAction::Start) if others_recording => {
                     machine.suspend();
                 }
-                Some(HotkeyAction::PasteLast) if shortcut != Shortcut::Dictation => {}
+                // Every machine carries the shared Paste Last and model switch
+                // keys; one action is enough.
+                Some(HotkeyAction::PasteLast | HotkeyAction::ModelSwitch)
+                    if shortcut != Shortcut::Dictation => {}
                 Some(action) => actions.push((shortcut, action)),
                 None => {}
             }

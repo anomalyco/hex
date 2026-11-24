@@ -261,6 +261,7 @@ final class KeyboardViewController: UIInputViewController {
         Self.onScreen.disappeared(keyboardID)
         launchWork.forEach { $0.cancel() }
         launchWork = []
+        viewModel.dismissDictationBlock()
         fullKeyboard?.engine.commitHangulComposition()
         closeBarEmojiPanel()
         // A dictation under way finishes without the keyboard, and the next one delivers it.
@@ -487,7 +488,8 @@ final class KeyboardViewController: UIInputViewController {
                 TypingLogField("autocorrect", .bool(FullKeyboardSettings().autocorrect)),
                 TypingLogField("spatialAutocorrect", .bool(FullKeyboardSettings().spatialAutocorrect)),
                 TypingLogField("swipeTyping", .bool(FullKeyboardSettings().swipeTyping)),
-                TypingLogField("emoji", .bool(FullKeyboardSettings().emoji)),
+                TypingLogField("emoji", .bool(FullKeyboardSettings().emojiKey)),
+                TypingLogField("emojiSuggestions", .bool(FullKeyboardSettings().emojiSuggestions)),
                 TypingLogField("key_popups", .bool(FullKeyboardSettings().keyPopups)),
                 TypingLogField("haptics", .bool(FullKeyboardSettings().haptics)),
                 TypingLogField("learnHowIType", .bool(TypingJournalSettings().isEnabled)),
@@ -826,6 +828,7 @@ final class KeyboardViewController: UIInputViewController {
             }
             ContainingAppOpener.open(url, from: self)
         }
+        viewModel.onDismissTranslationNote = { [weak self] in self?.showTranslationNote(nil) }
 
         mountSurface()
     }
@@ -1090,6 +1093,7 @@ final class KeyboardViewController: UIInputViewController {
            let id = app.resultID, let text = app.transcript, bridge.lastInsertedResultID != id {
             offer = OfferedDictation(id: id, text: text, heard: app.heard, held: false)
         }
+        if offer?.id != offeredDictation?.id { viewModel.showStoppedNote(offer?.held == true ? bridge.heldDictation?.stoppedAfter : nil) }
         offeredDictation = offer
         if viewModel.offeredDictation != offer?.text {
             viewModel.offeredDictation = offer?.text
@@ -1250,7 +1254,6 @@ final class KeyboardViewController: UIInputViewController {
         let reason: KeyboardSelfDictation.Reason? = localDictation.isActive
             ? nil
             : KeyboardSelfDictation().handoffReason(
-                hasMultilingualModelInKeyboard: KeyboardParakeet.shared.dictatesMultilingualHere,
                 hasMemoryToStart: localDictation.hasMemoryToStart,
                 includeRecentHandoff: false
             )
@@ -1263,12 +1266,12 @@ final class KeyboardViewController: UIInputViewController {
             lastAvailabilityNote = now
             let change: String = switch reason {
             case nil: "dictating in the keyboard"
-            case .multilingual: "multilingual model on, Dictate opens Hex"
-            case .speechModel: "speech model missing here, Dictate opens Hex"
-            case .memory, .openedHex: "short of memory, Dictate opens Hex"
+            case .speechModel, .languageUnavailable: "speech model missing here, Dictate says so"
+            case .memory, .openedHex: "short of memory, Dictate says so with Open Hex"
             }
             KeyboardProbeLog.shared.write("\(change) \(KeyboardProbeLog.memory())")
         }
+        let wasAvailable = localDictationAvailable
         localDictationAvailable = available
         viewModel.onLocalDictateTap = available ? { [weak self] in
             guard let self else { return }
@@ -1278,6 +1281,7 @@ final class KeyboardViewController: UIInputViewController {
                 pressedAt: self.takeHexKeyPress()
             )
         } : nil
+        viewModel.localDictationChanged(available: available, was: wasAvailable, reason: reason)
     }
 
     /// Loads in-keyboard dictation's capture page once the keyboard has shown
@@ -1430,7 +1434,7 @@ final class KeyboardViewController: UIInputViewController {
             guard case .keys(let kind, _) = KeyboardFieldRouting.route(for: textDocumentProxy.keyboardType), kind.takesWords else { return false }
             return textDocumentProxy.keyboardType != .asciiCapable
         }()
-        let showsEmoji = FullKeyboardSettings().emoji && takesEmoji
+        let showsEmoji = FullKeyboardSettings().emojiKey && takesEmoji
         if viewModel.showsEmojiKey != showsEmoji {
             viewModel.showsEmojiKey = showsEmoji
         }

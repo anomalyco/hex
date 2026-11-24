@@ -54,7 +54,9 @@ export MACOSX_DEPLOYMENT_TARGET=15.0
 # Cargo may run through a wrapper that does not forward the environment (Kit's
 # HiveMind-backed cargo), so build-time variables also travel as --config.
 env_args=()
-if [ -z "${HEX_COMMIT:-}" ] && { [ "${HEX_LOCAL_BUILD:-}" = 1 ] || [ "${HEX_TEST_BUILD:-}" = 1 ]; }; then
+if [ "${HEX_LOCAL_BUILD:-}" = 1 ]; then
+  HEX_COMMIT=$(git -C "$root" rev-parse HEAD 2>/dev/null || printf '%s' "${HEX_COMMIT:-}")
+elif [ -z "${HEX_COMMIT:-}" ] && [ "${HEX_TEST_BUILD:-}" = 1 ]; then
   HEX_COMMIT=$(git -C "$root" rev-parse --short=7 HEAD 2>/dev/null || true)
 fi
 for name in HEX_LOCAL_BUILD HEX_TEST_BUILD HEX_COMMIT HEX_BUILD_CHANNEL; do

@@ -506,7 +506,11 @@ fn play(
                     model.apply(&event, Instant::now());
                     let shown = model.pill(true).unwrap().clone();
                     rt.update(move |c, tx| {
-                        c.start_recording(shown, tx);
+                        let anchor = Anchor {
+                            corner: c.corner,
+                            display: c.display.clone(),
+                        };
+                        c.start_recording(shown, anchor, tx);
                         c.live.entries = call();
                     });
                     rt.state.waveform = Some(Box::new(waveform::Listening::new(at(frame))));
@@ -548,7 +552,7 @@ fn play(
                     let presentation = offer_surface::Presentation::for_kind(&kind, false);
                     // As `show_panel` does.
                     rt.update(move |c, tx| {
-                        c.show(kind, presentation, MeetingIndicatorCorner::TopRight, None, tx)
+                        c.show(kind, presentation, Anchor::default(), None, tx)
                     });
                 }
                 Cue::Retitled(title) => rt.update(move |c, _| {

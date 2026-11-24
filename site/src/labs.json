@@ -123,6 +123,19 @@
       "title": "Switch model with keyboard language"
     },
     {
+      "added": "2026-11-24",
+      "group": "models",
+      "groupTitle": "Models",
+      "id": "model-switch-shortcut",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "One shortcut swaps dictation to another model and language, and pressing it again swaps back",
+      "title": "Model switch shortcut"
+    },
+    {
       "added": "2026-10-30",
       "group": "shortcuts",
       "groupTitle": "Shortcuts",
@@ -625,6 +638,19 @@
       "title": "Import audio"
     },
     {
+      "added": "2026-11-23",
+      "group": "meetings",
+      "groupTitle": "Meetings",
+      "id": "transcript-edits",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "Select lines in a saved meeting transcript and delete them. Summaries, copies, and the Markdown file use what's left",
+      "title": "Delete transcript lines"
+    },
+    {
       "added": "2026-11-07",
       "group": "shortcuts",
       "groupTitle": "Shortcuts",
@@ -844,6 +870,17 @@
       "title": "Vocabulary files"
     },
     {
+      "added": "2026-11-23",
+      "group": "dictation",
+      "groupTitle": "Dictation",
+      "id": "vocabulary-menu",
+      "oses": [
+        "macos"
+      ],
+      "summary": "Add terms to Vocabulary from the menu bar, or open the Vocabulary sheet",
+      "title": "Vocabulary menu"
+    },
+    {
       "added": "2026-11-21",
       "group": "output",
       "groupTitle": "Output",
@@ -890,6 +927,68 @@
       ],
       "summary": "Record dictation through Apple's voice processing so Mic Mode can turn on Voice Isolation and cut background noise.",
       "title": "Voice isolation"
+    },
+    {
+      "added": "2026-11-23",
+      "group": "meetings",
+      "groupTitle": "Meetings",
+      "id": "stop-any-call-recording",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "Also stop an offered or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off; on macOS a calendar reminder's recording stops the same way",
+      "title": "Stop every call recording when the call ends"
+    },
+    {
+      "added": "2026-11-24",
+      "group": "output",
+      "groupTitle": "Output",
+      "id": "clipboard-phrase",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "Say \"my clipboard\" while dictating and Hex pastes what you copied there, in quotes",
+      "title": "Clipboard phrase"
+    },
+    {
+      "added": "2026-11-24",
+      "group": "meetings",
+      "groupTitle": "Meetings",
+      "id": "meeting-microphone-mute",
+      "oses": [
+        "macos"
+      ],
+      "summary": "Adds a mute button to meeting recordings. Hex keeps recording the call's audio but leaves out your microphone until you unmute.",
+      "title": "Mute the microphone while recording"
+    },
+    {
+      "added": "2026-11-24",
+      "group": "meetings",
+      "groupTitle": "Meetings",
+      "id": "meeting-indicator-display",
+      "oses": [
+        "macos",
+        "windows"
+      ],
+      "summary": "Drag the meeting recording indicator to another display and it stays there",
+      "title": "Indicator on any display"
+    },
+    {
+      "added": "2026-11-24",
+      "group": "meetings",
+      "groupTitle": "Meetings",
+      "id": "meeting-audio-source",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "Record one app or one output device in meetings instead of all computer audio",
+      "title": "Choose meeting audio"
     }
   ]
 }

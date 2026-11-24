@@ -64,6 +64,11 @@ pub(in crate::rune_ui) fn portal_grant(
         ShortcutTarget::SecondDictation => "Second dictation shortcut",
         #[cfg(not(target_os = "linux"))]
         ShortcutTarget::SecondDictation => return None,
+        // Only Linux registers it with the desktop's shortcuts portal.
+        #[cfg(target_os = "linux")]
+        ShortcutTarget::ModelSwitch => "Model switch shortcut",
+        #[cfg(not(target_os = "linux"))]
+        ShortcutTarget::ModelSwitch => return None,
         #[cfg(target_os = "macos")]
         ShortcutTarget::Screenshot
         | ShortcutTarget::ScreenshotRecord

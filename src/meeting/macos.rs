@@ -1,46 +1,37 @@
 //! The macOS side of meetings: system audio through a Core Audio process
-//! tap, with ScreenCaptureKit as the fallback when the tap is not
+//! tap (`system_audio`: every output, one app, or one output device), with
+//! ScreenCaptureKit as the fallback for every output when the tap is not
 //! authorized, its consents, and Finder and Trash.
 
 use std::ffi::{CStr, c_void};
 use std::path::Path;
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
-use std::time::Instant;
 
 use block2::RcBlock;
 use color_eyre::eyre::{Result, WrapErr, eyre};
-use objc2::AnyThread;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool};
 use objc2_core_audio::{
-    AudioDeviceCreateIOProcIDWithBlock, AudioDeviceDestroyIOProcID, AudioDeviceIOProcID,
-    AudioDeviceStart, AudioDeviceStop, AudioHardwareCreateAggregateDevice,
-    AudioHardwareCreateProcessTap, AudioHardwareDestroyAggregateDevice,
-    AudioHardwareDestroyProcessTap, AudioObjectGetPropertyData, AudioObjectID,
-    AudioObjectPropertyAddress, CATapDescription, CATapMuteBehavior,
-    kAudioAggregateDeviceIsPrivateKey, kAudioAggregateDeviceNameKey,
-    kAudioAggregateDeviceTapAutoStartKey, kAudioAggregateDeviceTapListKey,
-    kAudioAggregateDeviceUIDKey, kAudioHardwarePropertyTranslatePIDToProcessObject,
-    kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject,
-    kAudioSubTapDriftCompensationKey, kAudioSubTapUIDKey, kAudioTapPropertyFormat,
-};
-use objc2_core_audio_types::{
-    AudioBuffer, AudioBufferList, AudioStreamBasicDescription, AudioTimeStamp,
-    kAudioFormatFlagIsFloat, kAudioFormatFlagIsNonInterleaved,
+    AudioHardwareCreateAggregateDevice, AudioObjectID, kAudioAggregateDeviceClockDeviceKey,
+    kAudioAggregateDeviceIsPrivateKey, kAudioAggregateDeviceMainSubDeviceKey,
+    kAudioAggregateDeviceNameKey, kAudioAggregateDeviceTapAutoStartKey,
+    kAudioAggregateDeviceTapListKey, kAudioAggregateDeviceUIDKey, kAudioSubTapDriftCompensationKey,
+    kAudioSubTapUIDKey,
 };
 use objc2_core_foundation::{CFDictionary, CFString};
 use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString};
 use screencapturekit::prelude::*;
 use screencapturekit::stream::delegate_trait::ErrorHandler;
 
-use super::SAMPLE_RATE;
-use super::capture::{LiveSource, POLL_INTERVAL, PacketSink, STALL_TIMEOUT, To16k};
+#[path = "macos/system_audio.rs"]
+mod system_audio;
 
-const TAP_QUEUE_CAPACITY: usize = 512;
+use super::SAMPLE_RATE;
+use super::audio_source::effective;
+use super::capture::{LiveSource, POLL_INTERVAL, PacketSink, To16k};
 
 unsafe extern "C" {
     fn CGPreflightScreenCaptureAccess() -> bool;
@@ -76,8 +67,19 @@ pub(crate) fn system_audio_ready() -> bool {
     )
 }
 
-/// Fails, after asking macOS, until Hex may hear the other participants.
+/// Fails, after asking macOS, until Hex may hear the other participants. A
+/// chosen app or output records through a process tap alone, so it needs
+/// System Audio Recording consent even when Screen Recording is on.
 pub(super) fn ensure_system_audio() -> Result<()> {
+    if !effective().is_all() {
+        // One prompt per recording, here. The source's open retries check the
+        // same consent without asking again, so a recording that outlives
+        // many retries never re-prompts.
+        if system_audio_authorization() == SystemAudioAuthorization::NotDetermined {
+            request_system_audio_access();
+        }
+        return tap_consent();
+    }
     if system_audio_permitted() {
         return Ok(());
     }
@@ -128,6 +130,18 @@ pub(super) fn open_system_audio(
     sink: &PacketSink,
     _application: Option<&str>,
 ) -> Result<Box<dyn LiveSource>> {
+    // A source rereads the choice on its route check and reopens when it
+    // differs, so turning the lab off, or choosing another source, applies
+    // mid-recording.
+    let choice = effective();
+    if !choice.is_all() {
+        // A chosen app or output never falls back to ScreenCaptureKit: that
+        // records every app the display plays, not the one chosen. A tap that
+        // cannot open fails this stream, and the supervisor retries it.
+        tap_consent()?;
+        return system_audio::ProcessTapSource::start(system_audio::Scope::of(&choice))
+            .map(|source| Box::new(source) as Box<dyn LiveSource>);
+    }
     let authorization = system_audio_authorization();
     let screen_permitted = screen_recording_permitted();
     let prefer_tap = match authorization {
@@ -139,7 +153,7 @@ pub(super) fn open_system_audio(
         SystemAudioAuthorization::Denied => false,
     };
     if prefer_tap {
-        match ProcessTapSource::start() {
+        match system_audio::ProcessTapSource::start(system_audio::Scope::All) {
             Ok(source) => return Ok(Box::new(source)),
             Err(error) if screen_permitted => {
                 tracing::warn!(%error, "could not start the system audio tap; using ScreenCaptureKit");
@@ -155,174 +169,20 @@ pub(super) fn open_system_audio(
     ScreenCaptureSource::start(sink).map(|source| Box::new(source) as Box<dyn LiveSource>)
 }
 
-/// Whole-system output, minus Hex's own sounds, through a private Core Audio
-/// process tap on a private aggregate device. It has no display dependency.
-struct ProcessTapSource {
-    tap: AudioObjectID,
-    aggregate: AudioObjectID,
-    io_proc: AudioDeviceIOProcID,
-    buffers: Receiver<Vec<f32>>,
-    callbacks: Arc<AtomicU64>,
-    format_error: Arc<AtomicBool>,
-    seen_callbacks: u64,
-    last_callback: Instant,
-    resample: To16k,
-}
-
-// SAFETY: The Core Audio object IDs and IOProc handle are plain identifiers
-// used only from the owning supervisor thread.
-unsafe impl Send for ProcessTapSource {}
-
-impl ProcessTapSource {
-    fn start() -> Result<Self> {
-        let excluded = own_process_object()
-            .map(|object| vec![NSNumber::new_u32(object)])
-            .unwrap_or_default();
-        let excluded = NSArray::from_retained_slice(&excluded);
-        // SAFETY: Standard CATapDescription initialization and setters.
-        let description = unsafe {
-            let description = CATapDescription::initMonoGlobalTapButExcludeProcesses(
-                CATapDescription::alloc(),
-                &excluded,
-            );
-            description.setName(&NSString::from_str("Hex meeting system audio"));
-            description.setPrivate(true);
-            description.setMuteBehavior(CATapMuteBehavior::Unmuted);
-            description
-        };
-        let mut tap: AudioObjectID = 0;
-        // SAFETY: `description` is a valid tap description; `tap` is writable.
-        check(
-            unsafe { AudioHardwareCreateProcessTap(Some(&description), &mut tap) },
-            "could not create the system audio tap",
-        )?;
-        let (sender, buffers) = mpsc::sync_channel::<Vec<f32>>(TAP_QUEUE_CAPACITY);
-        let mut source = Self {
-            tap,
-            aggregate: 0,
-            io_proc: None,
-            buffers,
-            callbacks: Arc::new(AtomicU64::new(0)),
-            format_error: Arc::new(AtomicBool::new(false)),
-            seen_callbacks: 0,
-            last_callback: Instant::now(),
-            resample: To16k::new(SAMPLE_RATE)?,
-        };
-        let format = tap_format(tap)?;
-        if format.mFormatFlags & kAudioFormatFlagIsFloat == 0 || format.mBitsPerChannel != 32 {
-            return Err(eyre!(
-                "unsupported system audio tap format (flags {:#x}, {} bits)",
-                format.mFormatFlags,
-                format.mBitsPerChannel
-            ));
-        }
-        let rate = format.mSampleRate.round() as u32;
-        source.resample = To16k::new(rate)?;
-        // SAFETY: Reading the UUID of a live description.
-        let tap_uid = unsafe { description.UUID() }.UUIDString();
-        source.aggregate = create_tap_aggregate(
-            &tap_uid,
-            "Hex Meeting System Audio",
-            &format!("anomaly.hex.meeting-tap.{}", std::process::id()),
-        )?;
-
-        let channels = format.mChannelsPerFrame.max(1) as usize;
-        let non_interleaved = format.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0;
-        let callbacks = source.callbacks.clone();
-        let format_error = source.format_error.clone();
-        let block = RcBlock::new(
-            move |_now: NonNull<AudioTimeStamp>,
-                  input: NonNull<AudioBufferList>,
-                  _input_time: NonNull<AudioTimeStamp>,
-                  _output: NonNull<AudioBufferList>,
-                  _output_time: NonNull<AudioTimeStamp>| {
-                callbacks.fetch_add(1, Ordering::Relaxed);
-                // SAFETY: Core Audio passes a valid buffer list for this cycle.
-                match unsafe { mono_samples(input, channels, non_interleaved) } {
-                    Some(samples) => {
-                        let _ = sender.try_send(samples);
-                    }
-                    None => format_error.store(true, Ordering::Relaxed),
-                }
-            },
-        );
-        let mut io_proc: AudioDeviceIOProcID = None;
-        // SAFETY: The aggregate exists; Core Audio copies the block.
-        check(
-            unsafe {
-                AudioDeviceCreateIOProcIDWithBlock(
-                    NonNull::from(&mut io_proc),
-                    source.aggregate,
-                    None,
-                    RcBlock::as_ptr(&block),
-                )
-            },
-            "could not attach to the system audio tap",
-        )?;
-        source.io_proc = io_proc;
-        // SAFETY: Starting the IOProc created above.
-        check(
-            unsafe { AudioDeviceStart(source.aggregate, source.io_proc) },
-            "could not start the system audio tap",
-        )?;
-        source.last_callback = Instant::now();
-        tracing::info!(rate, channels, "system audio tap started");
-        Ok(source)
-    }
-}
-
-impl LiveSource for ProcessTapSource {
-    fn poll(&mut self, sink: &PacketSink) -> std::result::Result<(), String> {
-        let mut samples = Vec::new();
-        match self.buffers.recv_timeout(POLL_INTERVAL) {
-            Ok(first) => {
-                samples.extend(first);
-                while let Ok(next) = self.buffers.try_recv() {
-                    samples.extend(next);
-                }
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                return Err("system audio tap disconnected".into());
-            }
-        }
-        if !samples.is_empty() {
-            sink.send(SAMPLE_RATE, self.resample.push(&samples), None);
-        }
-        if self.format_error.load(Ordering::Relaxed) {
-            return Err("system audio tap delivered an unsupported buffer".into());
-        }
-        let callbacks = self.callbacks.load(Ordering::Relaxed);
-        if callbacks != self.seen_callbacks {
-            self.seen_callbacks = callbacks;
-            self.last_callback = Instant::now();
-        } else if self.last_callback.elapsed() > STALL_TIMEOUT {
-            return Err("system audio tap stopped delivering audio".into());
-        }
-        Ok(())
-    }
-
-    fn describe(&self) -> &'static str {
-        "core-audio-tap"
-    }
-}
-
-impl Drop for ProcessTapSource {
-    fn drop(&mut self) {
-        // SAFETY: Each identifier was created by this source and is torn down
-        // once, in reverse order of creation.
-        unsafe {
-            if self.aggregate != 0 {
-                if self.io_proc.is_some() {
-                    AudioDeviceStop(self.aggregate, self.io_proc);
-                    AudioDeviceDestroyIOProcID(self.aggregate, self.io_proc);
-                }
-                AudioHardwareDestroyAggregateDevice(self.aggregate);
-            }
-            if self.tap != 0 {
-                AudioHardwareDestroyProcessTap(self.tap);
-            }
-        }
+/// Fails until Hex may tap a chosen app's or output's audio, without asking:
+/// only a process tap records just that source, and Screen Recording consent
+/// cannot replace it. The recording asked for System Audio Recording once
+/// when it started ([ensure_system_audio]), so a retry that finds the prompt
+/// unanswered reports it and tries again after the answer.
+fn tap_consent() -> Result<()> {
+    match system_audio_authorization() {
+        SystemAudioAuthorization::Granted | SystemAudioAuthorization::Unknown => Ok(()),
+        SystemAudioAuthorization::NotDetermined => Err(eyre!(
+            "Allow Hex in System Settings › Privacy & Security › Screen & System Audio Recording, then try again"
+        )),
+        SystemAudioAuthorization::Denied => Err(eyre!(
+            "Allow Hex under System Settings › Privacy & Security › Screen & System Audio Recording"
+        )),
     }
 }
 
@@ -334,67 +194,6 @@ fn check(status: i32, context: &str) -> Result<()> {
     }
 }
 
-fn own_process_object() -> Option<AudioObjectID> {
-    let pid = std::process::id() as i32;
-    let mut object: AudioObjectID = 0;
-    let mut size = size_of::<AudioObjectID>() as u32;
-    let address = AudioObjectPropertyAddress {
-        mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
-        mScope: kAudioObjectPropertyScopeGlobal,
-        mElement: kAudioObjectPropertyElementMain,
-    };
-    // SAFETY: The qualifier is a pid and the output is one AudioObjectID.
-    let status = unsafe {
-        AudioObjectGetPropertyData(
-            kAudioObjectSystemObject as AudioObjectID,
-            NonNull::from(&address),
-            size_of::<i32>() as u32,
-            (&pid as *const i32).cast(),
-            NonNull::from(&mut size),
-            NonNull::from(&mut object).cast(),
-        )
-    };
-    (status == 0 && object != 0).then_some(object)
-}
-
-fn tap_format(tap: AudioObjectID) -> Result<AudioStreamBasicDescription> {
-    let mut format = AudioStreamBasicDescription {
-        mSampleRate: 0.0,
-        mFormatID: 0,
-        mFormatFlags: 0,
-        mBytesPerPacket: 0,
-        mFramesPerPacket: 0,
-        mBytesPerFrame: 0,
-        mChannelsPerFrame: 0,
-        mBitsPerChannel: 0,
-        mReserved: 0,
-    };
-    let mut size = size_of::<AudioStreamBasicDescription>() as u32;
-    let address = AudioObjectPropertyAddress {
-        mSelector: kAudioTapPropertyFormat,
-        mScope: kAudioObjectPropertyScopeGlobal,
-        mElement: kAudioObjectPropertyElementMain,
-    };
-    // SAFETY: The output buffer is one AudioStreamBasicDescription.
-    check(
-        unsafe {
-            AudioObjectGetPropertyData(
-                tap,
-                NonNull::from(&address),
-                0,
-                std::ptr::null(),
-                NonNull::from(&mut size),
-                NonNull::from(&mut format).cast(),
-            )
-        },
-        "could not read the system audio tap format",
-    )?;
-    if format.mSampleRate <= 0.0 {
-        return Err(eyre!("system audio tap reported no sample rate"));
-    }
-    Ok(format)
-}
-
 fn object<T: objc2::Message>(value: Retained<T>) -> Retained<AnyObject> {
     // SAFETY: Every Objective-C object is an `AnyObject`.
     unsafe { Retained::cast_unchecked(value) }
@@ -404,6 +203,20 @@ fn object<T: objc2::Message>(value: Retained<T>) -> Retained<AnyObject> {
 /// for each concurrent tap of this process.
 pub(crate) fn create_tap_aggregate(
     tap_uid: &NSString,
+    name: &str,
+    uid: &str,
+) -> Result<AudioObjectID> {
+    create_tap_aggregate_at(tap_uid, None, name, uid)
+}
+
+/// [`create_tap_aggregate`] clocked by `device_uid`: the device a tap of one
+/// output records is the aggregate's main and clock device, so that tap runs
+/// on its device's clock rather than the default output's. The device is not
+/// a sub-device: a real sub-device stops USB interfaces from delivering to
+/// the IOProc, and the tap is already pinned to the device by its UID.
+pub(super) fn create_tap_aggregate_at(
+    tap_uid: &NSString,
+    device_uid: Option<&NSString>,
     name: &str,
     uid: &str,
 ) -> Result<AudioObjectID> {
@@ -421,8 +234,28 @@ pub(crate) fn create_tap_aggregate(
         ],
     );
     let taps = NSArray::from_retained_slice(&[sub_tap]);
-    let description: Retained<NSDictionary<NSString, AnyObject>> =
-        NSDictionary::from_retained_objects(
+    let description: Retained<NSDictionary<NSString, AnyObject>> = match device_uid {
+        Some(device_uid) => NSDictionary::from_retained_objects(
+            &[
+                &*key(kAudioAggregateDeviceNameKey),
+                &*key(kAudioAggregateDeviceUIDKey),
+                &*key(kAudioAggregateDeviceIsPrivateKey),
+                &*key(kAudioAggregateDeviceTapAutoStartKey),
+                &*key(kAudioAggregateDeviceMainSubDeviceKey),
+                &*key(kAudioAggregateDeviceClockDeviceKey),
+                &*key(kAudioAggregateDeviceTapListKey),
+            ],
+            &[
+                object(NSString::from_str(name)),
+                object(NSString::from_str(uid)),
+                object(NSNumber::new_bool(true)),
+                object(NSNumber::new_bool(true)),
+                object(NSString::from_str(&device_uid.to_string())),
+                object(NSString::from_str(&device_uid.to_string())),
+                object(taps),
+            ],
+        ),
+        None => NSDictionary::from_retained_objects(
             &[
                 &*key(kAudioAggregateDeviceNameKey),
                 &*key(kAudioAggregateDeviceUIDKey),
@@ -437,7 +270,8 @@ pub(crate) fn create_tap_aggregate(
                 object(NSNumber::new_bool(true)),
                 object(taps),
             ],
-        );
+        ),
+    };
     let mut aggregate: AudioObjectID = 0;
     // SAFETY: NSDictionary is toll-free bridged to CFDictionary.
     let dictionary: &CFDictionary =
@@ -447,56 +281,6 @@ pub(crate) fn create_tap_aggregate(
         "could not create the system audio device",
     )?;
     Ok(aggregate)
-}
-
-/// Mixes one IO cycle's float buffers to mono.
-///
-/// # Safety
-/// `list` must point at a valid `AudioBufferList` of 32-bit float samples.
-unsafe fn mono_samples(
-    list: NonNull<AudioBufferList>,
-    channels: usize,
-    non_interleaved: bool,
-) -> Option<Vec<f32>> {
-    let list = unsafe { list.as_ref() };
-    let count = list.mNumberBuffers as usize;
-    let buffers: &[AudioBuffer] =
-        unsafe { std::slice::from_raw_parts(list.mBuffers.as_ptr(), count) };
-    let float_slice = |buffer: &AudioBuffer| -> Option<&[f32]> {
-        if buffer.mData.is_null() {
-            return Some(&[]);
-        }
-        let len = buffer.mDataByteSize as usize / size_of::<f32>();
-        Some(unsafe { std::slice::from_raw_parts(buffer.mData.cast::<f32>(), len) })
-    };
-    match buffers {
-        [] => Some(Vec::new()),
-        [buffer] => {
-            let interleaved = (buffer.mNumberChannels as usize).max(1);
-            let samples = float_slice(buffer)?;
-            if interleaved == 1 {
-                return Some(samples.to_vec());
-            }
-            Some(
-                samples
-                    .chunks_exact(interleaved)
-                    .map(|frame| frame.iter().sum::<f32>() / interleaved as f32)
-                    .collect(),
-            )
-        }
-        many if non_interleaved || many.len() == channels => {
-            let planes: Vec<&[f32]> = many.iter().map(float_slice).collect::<Option<_>>()?;
-            let frames = planes.iter().map(|plane| plane.len()).min().unwrap_or(0);
-            Some(
-                (0..frames)
-                    .map(|frame| {
-                        planes.iter().map(|plane| plane[frame]).sum::<f32>() / planes.len() as f32
-                    })
-                    .collect(),
-            )
-        }
-        _ => None,
-    }
 }
 
 /// ScreenCaptureKit system audio, used only when the tap is unavailable.
@@ -584,6 +368,11 @@ impl ScreenCaptureSource {
 impl LiveSource for ScreenCaptureSource {
     fn poll(&mut self, _sink: &PacketSink) -> std::result::Result<(), String> {
         thread::sleep(POLL_INTERVAL);
+        // Only every-output capture falls back to this; another choice
+        // reopens the source into it, even mid-recording.
+        if !effective().is_all() {
+            return Err("the meeting audio choice changed".into());
+        }
         match self
             .error
             .lock()
