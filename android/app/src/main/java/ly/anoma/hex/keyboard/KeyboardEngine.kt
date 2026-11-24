@@ -227,7 +227,7 @@ internal class KeyboardEngine(
     private fun showPlane() {
         surface?.showPage(KeyboardPage(layoutLanguage(), symbols, more, shift.uppercase, shift.locked, EnterKey.from(editor),
             FieldKind.of(editor?.inputType ?: 0), pad, feedback.numberRow,
-            if (feedback.localCurrency) LocalCurrency.local() else null))
+            if (feedback.localCurrency && symbols) LocalCurrency.local() else null))
         // The strip's Emoji tool follows the page (Labs › Keyboard › Keyboard tools): the keys' emoji key is
         // on the letters only, never on a symbol page or a pad.
         val emoji = emojiAvailable

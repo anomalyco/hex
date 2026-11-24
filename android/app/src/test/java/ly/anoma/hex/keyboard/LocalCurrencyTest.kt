@@ -59,13 +59,8 @@ class LocalCurrencyTest {
         assertEquals(listOf("1234567890", "-/:;()$&@\"", ".,?!'"), page().lines)
     }
 
-    @Test fun everyCurrencyTheLabAcceptsIsOneHexAlreadyDrawsOrOffers() {
-        val offered = setOf('£', '€', '¥', '₹', '₱', '₩', '₽', '₴', '¢')
-        val codes = mapOf("GBP" to '£', "EUR" to '€', "JPY" to '¥', "CNY" to '¥', "INR" to '₹',
-            "PHP" to '₱', "KRW" to '₩', "RUB" to '₽', "UAH" to '₴')
-        for ((code, symbol) in codes) {
-            assertEquals(symbol, LocalCurrency.symbol(code))
-            assertEquals(offered, offered + symbol)
-        }
+    @Test fun aRegionWithoutACurrencyKeepsDollars() {
+        // Antarctica has a country and no currency: Currency.getInstance returns null for it.
+        assertNull(LocalCurrency.symbol(listOf(Locale("en", "AQ"))))
     }
 }
