@@ -3583,6 +3583,27 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   --no-daemon --offline :app:testDebugUnitTest -x prepareSpeechModel` passed 299 tests on
 │   2026-11-24 on anomastudio (OpenJDK 21, Android SDK 36). Nothing was tried on a device or emulator
 │   yet; the repo has no Android CI.
+├── Labs > Dictation > Automatic listens for the language (off) -> with Dictation language on
+│   Automatic, the dictation is written in the language spoken, chosen among up to three: the
+│   keyboard's language (Automatic's own pick, kept unless the speech is clearly another), then the
+│   phone's other languages Hex dictates, then the last one picked by hand. Bokmål and Nynorsk count
+│   as one; Danish and Swedish never count. whisper-language-choice.patch reads the language from
+│   the first window the decode encodes anyway (one decoder step, about 3 ms on the host), and a
+│   switch takes 0.99 among the candidates under 4 s of audio, 0.95 from 4 s. The text is formatted
+│   and inserted in the language chosen. Translate what I say is offered while Spanish is a candidate,
+│   and only Spanish heard is translated. Faster English dictation is not used while Automatic
+│   chooses among several languages, and Dictation stops saying English uses it. With one language,
+│   or the lab off, nothing is chosen and dictation is unchanged. The Hex menu and Settings then say
+│   "Automatic", and its entry in the list names the candidates ("Automatic · English, Español").
+│   Diagnostics' Last dictation adds the language, kept or switched, each candidate's probability and
+│   the choice's time. Checks: on 2026-11-24, with OpenJDK 21 and NDK 27.2.12479018,
+│   `./gradlew --max-workers=2 :app:testDebugUnitTest :app:assembleDebug` passed 282 tests
+│   (InsertionTest's candidates, SignatureTest's engine and written language, StripTextTest's
+│   Diagnostics line). On the host, the build with the patch decoded the benchmark's 70 clips and 30
+│   long ones byte for byte as one without it. The benchmark's `HEX_LANGS` guard kept the clip's
+│   language in 630 of 630 pairs. The 2,466-cut table, from the built library, had no wrong switch
+│   (android/benchmark/README.md, Automatic listens for the language). All voices are synthetic;
+│   nothing was tried on a device or emulator yet.
 └── Labs > Dictation > Learn from my fixes (off) -> an Android-only port of iPhone Hex's dictation
     correction learning, with no typing side. Off, the keyboard tracks nothing, applies nothing and
     adds no hints. On, each keyboard dictation in a non-secure words field that the field lets Hex

@@ -73,6 +73,8 @@
     <string name="settings_automatic">Automatic</string>
     <string name="settings_dictation_language">Dictation language</string>
     <string name="dictation_language_automatic_detail">Follows the keyboard layout, else the phone’s language</string>
+    <!-- Between language names in a list, each in its own language: "English, Español". -->
+    <string name="language_list_separator">", "</string>
     <string name="dictation_lowercase">Lowercase</string>
     <string name="dictation_lowercase_detail">Lowercases everything</string>
     <string name="dictation_format_lists">Format lists</string>
@@ -125,6 +127,8 @@
     <string name="fast_english_no_space">Not enough storage</string>
     <!-- Dictation › Speech model, while Faster English dictation is on and downloaded. -->
     <string name="fast_english_in_use">English uses faster dictation (Labs).</string>
+    <string name="listen_for_language">Automatic listens for the language</string>
+    <string name="listen_for_language_detail">Dictates in the language you speak, out of your keyboard’s and phone’s languages.</string>
     <!-- Labs › Dictation › Learn from my fixes: word pairs, counts and when each fix was last made, never
          the dictation. -->
     <string name="learn_fixes">Learn from my fixes</string>

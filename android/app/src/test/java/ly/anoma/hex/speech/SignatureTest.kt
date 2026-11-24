@@ -76,8 +76,10 @@ class SignatureTest {
 // Kept here, in one class, until it has a file of its own.
 class FastEnglishRoutingTest {
     private fun options(spoken: DictationLanguage = DictationLanguage.English, fastEnglish: Boolean = true,
-                        translate: Boolean = false, vocabulary: List<String> = emptyList()) =
-        SpeechOptions(Style.Polished, spoken, clean = false, translate = translate, vocabulary = vocabulary, fastEnglish = fastEnglish)
+                        translate: Boolean = false, vocabulary: List<String> = emptyList(),
+                        candidates: List<DictationLanguage> = emptyList()) =
+        SpeechOptions(Style.Polished, spoken, clean = false, translate = translate, vocabulary = vocabulary, fastEnglish = fastEnglish,
+            candidates = candidates)
 
     /** Records what each model was given, and answers as told. */
     private class Models(val english: EnglishResult, val standard: String? = "standard text") {
@@ -109,6 +111,29 @@ class FastEnglishRoutingTest {
         // Translation is Spanish spoken, English written: today's model translates, the faster one can't.
         assertEquals(Engine.Standard, engineFor(options(spoken = DictationLanguage.Spanish, translate = true)))
         assertEquals(Engine.Standard, engineFor(options(translate = true)))
+    }
+    @Test fun automaticChoosingAmongSeveralLanguagesStaysWithTodaysModel() {
+        // Labs › Automatic listens for the language: which one is spoken is known only once today's model heard it.
+        assertEquals(Engine.Standard, engineFor(options(candidates = listOf(DictationLanguage.English, DictationLanguage.Spanish))))
+        // With one candidate nothing is chosen: the dictation is today's, the faster model included.
+        val one = options(candidates = listOf(DictationLanguage.English))
+        assertEquals(Engine.English, engineFor(one))
+        assertEquals(listOf(DictationLanguage.English), one.languages)
+        assertEquals(options().languages, one.languages)
+    }
+    @Test fun aDictationIsWrittenInTheLanguageAutomaticChose() {
+        val both = options(candidates = listOf(DictationLanguage.English, DictationLanguage.Spanish), translate = true)
+        // Spanish heard with Paste in English: translated, so written (and formatted) as English.
+        val spanish = both.writtenIn(DictationLanguage.Spanish)
+        assertEquals(DictationLanguage.Spanish, spanish.spoken)
+        assertTrue(spanish.translate)
+        // English heard: never translated, only transcribed.
+        val english = both.writtenIn(DictationLanguage.English)
+        assertEquals(DictationLanguage.English, english.spoken)
+        assertFalse(english.translate)
+        // Another language heard without translation keeps everything else.
+        val german = options(candidates = listOf(DictationLanguage.English, DictationLanguage.German)).writtenIn(DictationLanguage.German)
+        assertEquals(options(candidates = listOf(DictationLanguage.English, DictationLanguage.German)).copy(spoken = DictationLanguage.German), german)
     }
     @Test fun theLanguageWhenTheDictationStartedDecides() {
         // MicCapture keeps the options a dictation started with; a language picked while it transcribes is the next one's.

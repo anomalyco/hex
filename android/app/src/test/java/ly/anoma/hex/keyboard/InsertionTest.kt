@@ -495,6 +495,25 @@ class InsertionTest {
         assertEquals(DictationLanguage.Norwegian, DictationLanguage.automatic(null, listOf("nb")))
         assertEquals(DictationLanguage.English, DictationLanguage.automatic(null, listOf("ja")))
     }
+    @Test fun automaticListensForTheKeyboardsAndThePhonesLanguages() {
+        // The keyboard's language first, then the phone's other languages Hex dictates, then the last one picked by hand.
+        assertEquals(listOf(DictationLanguage.English, DictationLanguage.Spanish),
+            DictationLanguage.candidates(DictationLanguage.English, listOf("en", "es"), null))
+        assertEquals(listOf(DictationLanguage.Spanish, DictationLanguage.English),
+            DictationLanguage.candidates(DictationLanguage.Spanish, listOf("en", "es"), null))
+        assertEquals(listOf(DictationLanguage.German, DictationLanguage.English, DictationLanguage.Italian),
+            DictationLanguage.candidates(DictationLanguage.German, listOf("en"), DictationLanguage.Italian))
+        // At most three, the pick last.
+        assertEquals(listOf(DictationLanguage.English, DictationLanguage.Spanish, DictationLanguage.German),
+            DictationLanguage.candidates(DictationLanguage.English, listOf("es", "de", "fr"), DictationLanguage.Italian))
+        // Bokmål and Nynorsk are one; Danish, Swedish and languages Hex doesn't dictate never count.
+        assertEquals(listOf(DictationLanguage.English, DictationLanguage.Norwegian),
+            DictationLanguage.candidates(DictationLanguage.English, listOf("nb", "nn", "da", "sv", "ja"), null))
+        // One language: nothing to choose among, so dictation runs as it does with the lab off.
+        assertEquals(listOf(DictationLanguage.English), DictationLanguage.candidates(DictationLanguage.English, listOf("en", "zh"), null))
+        assertEquals(listOf(DictationLanguage.English),
+            DictationLanguage.candidates(DictationLanguage.English, listOf("en"), DictationLanguage.English))
+    }
     @Test fun whisperHearsTheSpeechAndAMarginNotTheQuietAround() {
         val second = 16_000
         // A tap, 3 s of speech from 1 s, then quiet to the 60 s limit: 0.3 s before it to 0.5 s after it.

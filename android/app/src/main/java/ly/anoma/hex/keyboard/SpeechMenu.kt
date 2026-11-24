@@ -36,8 +36,14 @@ internal class SpeechMenu(context: Context, private val ime: HexKeyboard,
         values.forEach { v -> row(v, "") { pick(v) } }
     }
     /** Automatic with the language it dictates in now, in that language's own name ("Automatic · English"): it
-     * follows the keyboard layout or the phone, never the speech, so the menu says which one it is. */
-    private fun automatic() = s(R.string.keyboard_menu_automatic) + " · " + prefs.spoken.label
+     * follows the keyboard layout or the phone, never the speech, so the menu says which one it is. With Labs › Automatic
+     * listens for the language choosing among several, it names none ("Automatic"), and its entry in the list names
+     * them all ([choices]: "Automatic · English, Español"). */
+    private fun automatic(choices: Boolean = false): String {
+        val among = prefs.automaticCandidates
+        if (among.size <= 1) return s(R.string.keyboard_menu_automatic) + " · " + among.first().label
+        return s(R.string.keyboard_menu_automatic) + if (choices) " · " + among.joinToString(s(R.string.language_list_separator)) { it.label } else ""
+    }
     /** More characters came from a key, so going back leaves the menu. */
     fun back() { if (page == Page.Home || page == Page.Accents) close() else home() }
 
@@ -47,7 +53,7 @@ internal class SpeechMenu(context: Context, private val ime: HexKeyboard,
             Page.Home -> {
                 row(s(R.string.keyboard_menu_style), more(s(prefs.style.label))) { show(Page.Style) }
                 row(s(R.string.keyboard_menu_language), more(prefs.language?.label ?: automatic())) { show(Page.Language) }
-                if (prefs.translation && prefs.spoken == DictationLanguage.Spanish)
+                if (prefs.translation && prefs.translatable)
                     row(s(R.string.keyboard_menu_next_dictation),
                         more(s(if (ime.nextEnglish != false) R.string.keyboard_paste_english else R.string.keyboard_paste_spoken))) {
                         show(Page.NextDictation)
@@ -69,7 +75,7 @@ internal class SpeechMenu(context: Context, private val ime: HexKeyboard,
                 prefs.style = value; home()
             } }
             Page.Language -> (listOf(null) + DictationLanguage.entries).forEach { value ->
-                row(value?.label ?: automatic(), if (prefs.language == value) chosen else "") {
+                row(value?.label ?: automatic(choices = true), if (prefs.language == value) chosen else "") {
                     prefs.language = value; ime.nextEnglish = null; close()
                 }
             }
