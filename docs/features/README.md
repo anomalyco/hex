@@ -3168,7 +3168,7 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   Apple documents them only for DictationTranscriber, and Parakeet's batch
 │   path receives none
 └── Proof limits: unit tests only; no CI compiles the iOS targets
-Android keyboard -> English, Spanish, German and Bokmål typing assistance
+Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing assistance
 ├── Hands-free dictation keeps the screen on -> the keyboard's window and Home's add Android's
 │   `FLAG_KEEP_SCREEN_ON` (no permission) while a dictation is opening, listening or transcribing,
 │   and clear it once idle, so the display timing out can't hide the IME, whose leave cancels the
@@ -3200,6 +3200,35 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 │   tried on a device.
 ├── Keyboard > Suggest swear words (off) -> opt in to profanity; listed slurs never offered
 ├── Type a listed word in full -> keep its spelling on space or tap its literal chip
+├── An Italian or French elision typed without its apostrophe -> while Autocorrect is on, in a word
+│   field with the it or fr model, and with no whole-word fix already reading the token ("diro" ->
+│   "dirò", so no "d'iro"; a fix that splits the token counts only when it is the elision's own two
+│   words, "l ho" for "l'ho", never "non c'è" for "nonce" or "la e" for "lae"), the strip offers the
+│   article and the word after it joined up: "laltro" -> "l'altro", "dellanno" -> "dell'anno",
+│   "unaltra" -> "un'altra", "lho" -> "l'ho", "lheure" -> "l'heure", "daccord" -> "d'accord". The
+│   longest elision the language has wins ("dell'anno", never "d'ellanno"), and the word after it
+│   must be one of the model's own starting with a vowel (accents and ligatures included) or an h,
+│   with a unigram cost of at most 98 eighths of a nat ("insalata" 98 and "uva" 93 fit; "om" 99,
+│   "ae" 100, "ol" 104 and the rest of the reported junk 114 to 120 do not). Italian elides the h
+│   of ho, hai, ha and hanno alone (l'ho, l'hai, l'ha, l'hanno, never l'hotel); French elides its h
+│   generally (l'homme, l'heure). A word of the model's own list is no elision ("lago", "della",
+│   "dove", "sanno"), and a spelling only the books have as typed ("laltro", "lanno", "larte",
+│   "lheure") is read as one only when the word after it is likelier by at least 8.2 nats (about
+│   1,450 times, since a books cost already includes a 0.92-nat backoff): "allodio" ("all'odio"),
+│   "sensei", "couvres", "terrance", "quantico", "noh" and "dok" are not, while a run-together
+│   spelling the books lack ("lestate", "lospedale") is read as one by the commonness rule alone.
+│   A suggestion only, never a fix of its own: space leaves the word as typed, and a decoder fix of
+│   its own ("dell'anno", "un'altra") is unchanged. With Labs > Keyboard > Smart quotes on, the
+│   strip shows the ’ and a pick inserts it.
+│   Checks: `ElisionSuggestionTest` (10: both languages' elisions, the longest prefix, the model's
+│   own words, the books' words, an accentless word the decoder fixes, junk remainders, a split fix
+│   that is not the elision, the Italian h, English unchanged and a picked elision left as it is)
+│   and `./gradlew :app:testDebugUnitTest -x prepareSpeechModel`: 205 tests pass on 2026-11-24 on
+│   OpenJDK 21 and Android SDK 36 (platform 36, build-tools 35.0.0, NDK 27.2.12479018). A throwaway
+│   scan of the shipped lists reads 63 of the 80,990 Italian and 127 of the 108,519 French
+│   .valid-only words as an elision, where the first cut read 1,809 and 2,869; the rest are mostly
+│   the books' run-together spellings of real elisions ("larte", "l'opera", "d'histoire"). The repo
+│   has no Android CI, and nothing was tried on a device or emulator.
 ├── Fields that ask for no suggestions, completions or filtering (a search box; the Google app's
 │   TEXT|MULTI_LINE|NO_SUGGESTIONS is 0xa0001) -> suggestions, next words, emoji suggestions, swipe
 │   typing, tap correction, text replacements and double-space period stay; only an automatic
@@ -3324,13 +3353,14 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
     "don’t"), your own text replacements get ’ for each straight apostrophe they contain (a " in
     one stays straight), and a dictation's straight quotes are placed by the same rules, after its
     spacing is decided, in the same plain-text fields as the keys. The strip shows the ’ a
-    suggestion will insert. A quote key's held alternates still type exactly the character they
-    show. Off, keys, picks and dictation insert the straight characters they did before, and
-    existing ’ and ” are treated like ' and " for word boundaries, spacing and lookups. Checks:
-    `./gradlew :app:compileDebugKotlin :app:testDebugUnitTest` passed with 150 tests (including
-    `SmartQuotesTest`'s 12) on 2026-11-24, on Temurin JDK 21 and Android SDK 36 (platform 36,
-    build-tools 35/36, NDK 27.2.12479018); the repo has no Android CI, and nothing was tried on a
-    device or emulator. `python3 scripts/code-shape.py --check` passes.
+    suggestion will insert. The Italian and French elisions the typing part above describes
+    ("laltro" -> "l’altro") show and go in with ’ too. A quote key's held alternates still type
+    exactly the character they show. Off, keys, picks and dictation insert the straight characters
+    they did before, and existing ’ and ” are treated like ' and " for word boundaries, spacing and
+    lookups. Checks: `./gradlew :app:compileDebugKotlin :app:testDebugUnitTest` passed with 205
+    tests (including `SmartQuotesTest`'s 12) on 2026-11-24, on OpenJDK 21 and Android SDK 36
+    (platform 36, build-tools 35/36, NDK 27.2.12479018); the repo has no Android CI, and nothing was
+    tried on a device or emulator. `python3 scripts/code-shape.py --check` passes.
 ├── Labs > Keyboard > Password manager suggestions (off) -> while Android's autofill service —
     Bitwarden, 1Password or Google Password Manager, which must itself support Android 11's inline
     suggestions — offers logins, one-time codes or cards for the focused field, its own chips take
