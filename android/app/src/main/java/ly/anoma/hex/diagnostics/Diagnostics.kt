@@ -29,6 +29,7 @@ import ly.anoma.hex.keyboard.StripNotice
 import ly.anoma.hex.keyboard.Tap
 import ly.anoma.hex.keyboard.TapCounts
 import ly.anoma.hex.keyboard.TapPlay
+import ly.anoma.hex.keyboard.keyboardVibrationAllows
 import ly.anoma.hex.keyboard.tap
 import ly.anoma.hex.keyboard.vibrates
 import ly.anoma.hex.speech.ModelStore
@@ -203,7 +204,7 @@ internal object Diagnostics {
             AudioManager.RINGER_MODE_NORMAL -> "sound"; AudioManager.RINGER_MODE_VIBRATE -> "vibrate"
             AudioManager.RINGER_MODE_SILENT -> "silent"; else -> "unknown"
         }
-        return hapticsLines(HapticsFacts(haptics, vibrates(c, haptics), declared == "yes", system("keyboard_vibration_enabled"),
+        return hapticsLines(HapticsFacts(haptics, declared == "yes", system("keyboard_vibration_enabled"),
             system(Settings.System.HAPTIC_FEEDBACK_ENABLED), system("haptic_feedback_intensity"), ringer,
             vibrator?.hasVibrator() == true, support(VibrationEffect.EFFECT_CLICK), support(VibrationEffect.EFFECT_TICK),
             vibrator?.hasAmplitudeControl() == true)) + tapLines(TapWords.English, tapPlays(c))
@@ -308,16 +309,28 @@ internal fun fastCores(capacities: List<Int?>): Int {
 }
 
 /** What the report says about haptics: Hex's switch and gate, Android's settings and what the vibrator says it plays. */
-internal class HapticsFacts(val hex: Boolean, val ticksPlay: Boolean, val keyboardSettingHere: Boolean, val keyboardValue: String,
+internal class HapticsFacts(val hex: Boolean, val keyboardSettingHere: Boolean, val keyboardValue: String,
                             val touchFeedback: String, val touchStrength: String, val soundMode: String, val vibrator: Boolean,
                             val click: String, val tick: String, val strength: Boolean)
 
 internal fun hapticsLines(h: HapticsFacts): List<String> {
     fun yes(value: Boolean) = if (value) "yes" else "no"
+    fun onOff(stored: String) = when (stored) { "1" -> "on"; "0" -> "off"; else -> stored }
+    val keyboard = if (h.keyboardSettingHere) onOff(h.keyboardValue)
+        else "this phone has none (stored value ${h.keyboardValue}" + if (h.keyboardValue == "not set") ")" else ", ignored)"
+    val ringer = when (h.soundMode) { "sound" -> "sound on"; "vibrate" -> "vibrate only"; else -> h.soundMode }
+    // The same rule as KeyHaptics' vibrates(): Hex's switch, then the keyboard switch where the phone has one (an
+    // unset value counts as on, as Settings.System.getInt's default there).
+    val stopper = when {
+        !h.hex -> "Hex's Haptics switch is off"
+        !keyboardVibrationAllows(h.keyboardSettingHere, h.keyboardValue.toIntOrNull() ?: 1) -> "the keyboard vibration switch is off"
+        else -> null
+    }
     return listOf(
-        "Hex Haptics: ${if (h.hex) "on" else "off"}, so key presses ask to vibrate: ${yes(h.ticksPlay)}",
-        "Keyboard vibration setting: on this phone ${yes(h.keyboardSettingHere)}, value ${h.keyboardValue}",
-        "Touch feedback: ${h.touchFeedback}, strength ${h.touchStrength}, sound mode ${h.soundMode}",
+        "Hex's Haptics switch: ${if (h.hex) "on" else "off"}",
+        "Keyboard vibration switch: $keyboard",
+        "Touch feedback: ${onOff(h.touchFeedback)}, strength ${h.touchStrength}; ringer: $ringer",
+        "So Hex asks the phone to vibrate on a key press: " + if (stopper == null) "yes" else "no, because $stopper",
         "Your phone says it can play: click ${h.click}, tick ${h.tick}, strength control ${yes(h.strength)}" +
             if (h.vibrator) "" else " (it reports no vibrator)",
     )
