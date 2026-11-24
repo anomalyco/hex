@@ -2620,7 +2620,10 @@ fn labs_lists_every_toggle_off_by_default() {
     tap(&mut rt, "lab-cursor-context");
     assert!(rt.state.settings.labs.cursor_context);
     tap(&mut rt, "lab-meetings");
-    assert!(rt.find("nav-meetings").is_none(), "hidden while off");
+    assert!(
+        rt.find("nav-meetings").is_some(),
+        "a Mac keeps it while off, to offer itself"
+    );
 
     // Windows lists Terminal paste in Labs, not General. Labs is tall enough
     // that its last row needs the macOS half's height to be on screen.
