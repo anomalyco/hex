@@ -107,7 +107,10 @@ What the simulator proves and what only a physical iPhone can.
   QWERTZ rows and held vowels, typing through them in a `FullKeyboardView`, and its accent
   fixes are unit tests too (`testHungariansRowsAndHoldMatchItsLayout`,
   `testHungarianTypesAndSwitches`, `testHungarianRestoresMissingDiacritics`); no
-  simulator or iPhone typed on its keys for this change. Checked live in
+  simulator or iPhone typed on its keys for this change. Dutch's rows, Apple's holds
+  (from the runtime's Keyboard-nl.plist), typing ë ï and j́ through a `FullKeyboardView`
+  and its diaeresis fixes are unit tests too (`testLetterRowsMatchApplesLayouts`,
+  `testDutchTypesAndSwitches`, `testDutchRestoresAMissingDiaeresis`). Checked live in
   Messages in the simulator (English, Français, Русский). Memory (Release, iPhone 17 Pro
   simulator, iOS 27.2, Full Access, three runs, `footprint` after typing a sentence): Français
   alone 28.7–28.8 MB, with English beside it 29.7–29.9 MB; English alone 28.9–29.9 MB, with

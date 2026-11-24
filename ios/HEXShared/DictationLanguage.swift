@@ -20,6 +20,9 @@ nonisolated struct LanguageSettings {
         static let speechModuleFailed = "settings.dictationLanguage.speechModuleFailed"
         static let unavailable = "settings.dictationLanguage.unavailable"
         static let keyboardNeedsHex = "settings.dictationLanguage.keyboardNeedsHex"
+        /// Set with `keyboardNeedsHex` when Hex found Apple has no speech model for the
+        /// language on this iPhone, rather than one the keyboard couldn't get.
+        static let keyboardLanguageUnavailable = "settings.dictationLanguage.keyboardNeedsHex.unavailable"
         /// First failures, which set nothing aside until a second in a row.
         static let speechModuleStrikes = "settings.dictationLanguage.speechModuleStrikes"
         static let unavailableStrikes = "settings.dictationLanguage.unavailableStrikes"
@@ -255,11 +258,19 @@ nonisolated struct LanguageSettings {
     static let keyboardNeedsHexDuration: TimeInterval = 24 * 60 * 60
 
     /// In-keyboard dictation couldn't get its speech model ready (an asset released or
-    /// removed since Hex downloaded it, a download the keyboard couldn't finish), so the Hex
-    /// key opens Hex, which downloads it in the foreground. Until a model installs
-    /// (`SpeechModelInstall`), a language is chosen, or a day passes.
-    func markKeyboardNeedsHex(at now: Date = Date()) {
+    /// removed since Hex downloaded it, a download the keyboard couldn't finish), so a
+    /// dictation tap says so with Open Hex, which downloads it in the foreground; or, with
+    /// `unavailable`, Hex found Apple has no model for the language on this iPhone, which
+    /// the tap says without Open Hex. Until a model installs (`SpeechModelInstall`), a
+    /// language is chosen, or a day passes.
+    func markKeyboardNeedsHex(at now: Date = Date(), unavailable: Bool = false) {
         defaults?.set(now.timeIntervalSince1970, forKey: Key.keyboardNeedsHex)
+        defaults?.set(unavailable, forKey: Key.keyboardLanguageUnavailable)
+    }
+
+    /// `keyboardNeedsHex` is because Apple has no speech model for the language here.
+    var keyboardLanguageUnavailable: Bool {
+        defaults?.bool(forKey: Key.keyboardLanguageUnavailable) ?? false
     }
 
     func keyboardNeedsHex(now: Date = Date()) -> Bool {
@@ -273,6 +284,7 @@ nonisolated struct LanguageSettings {
         }
         guard defaults?.object(forKey: Key.keyboardNeedsHex) != nil else { return }
         defaults?.removeObject(forKey: Key.keyboardNeedsHex)
+        defaults?.removeObject(forKey: Key.keyboardLanguageUnavailable)
     }
 
     /// How long a first failure waits for a second before it no longer counts.

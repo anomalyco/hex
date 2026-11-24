@@ -15,6 +15,7 @@ struct DictationTranslationSettings {
         /// switch removes it.
         static let pastesTranslation = "experiments.translateDictation.pastesTranslation"
         static let lastFailure = "experiments.translateDictation.lastFailure"
+        static let keyboardAutomaticLanguage = "experiments.translateDictation.keyboardAutomaticLanguage"
     }
 
     private let defaults: UserDefaults?
@@ -51,6 +52,59 @@ struct DictationTranslationSettings {
         nonmutating set {
             defaults?.set(newValue.flatMap { try? JSONEncoder().encode($0) }, forKey: Key.lastFailure)
         }
+    }
+
+    /// The language the keyboard last dictated in on Automatic (BCP 47, `zh-CN`) and when, which
+    /// the keyboard writes so Settings checks and downloads the pair it translates. Only the
+    /// language: never what was said.
+    var keyboardAutomaticLanguage: (language: String, at: TimeInterval)? {
+        guard let value = defaults?.dictionary(forKey: Key.keyboardAutomaticLanguage),
+              let language = value["language"] as? String,
+              let at = value["at"] as? TimeInterval else { return nil }
+        return (language, at)
+    }
+
+    /// The keyboard dictated in `language`: kept while the dictation language is Automatic,
+    /// the only time the keyboard's language can differ from what Settings knows.
+    func noteKeyboardDictation(in language: String, languages: LanguageSettings, at now: Date = Date()) {
+        guard languages.dictationLanguage == nil, languages.keyboardDictationLanguage() == nil else { return }
+        defaults?.set(["language": language, "at": now.timeIntervalSince1970], forKey: Key.keyboardAutomaticLanguage)
+    }
+
+    /// The language the keyboard dictates in, for the pair Settings checks and downloads:
+    /// Settings › Dictation language, else the keyboard's language Automatic follows, else what
+    /// the keyboard last dictated in on Automatic, else what the keyboard's Automatic picks: the
+    /// first of the iPhone's languages Hex dictates, then US English
+    /// (`SpeechLanguagePicker.automaticCandidates`). Nil until Hex has listed Apple's languages
+    /// and the keyboard hasn't dictated. Never
+    /// Hex's own Automatic pick: Hex can be set to another language than the iPhone in iOS
+    /// Settings, and the keyboard follows the iPhone.
+    func keyboardSpokenLanguage(languages: LanguageSettings, iPhoneLanguages: [String]) -> String? {
+        if let explicit = languages.dictationLanguage { return explicit }
+        if let following = languages.keyboardDictationLanguage(preferred: iPhoneLanguages) { return following }
+        if let spoken = keyboardAutomaticLanguage?.language { return spoken }
+        let supported = languages.supportedDictationLanguages
+        guard !supported.isEmpty else { return nil }
+        let candidates = SpeechLanguagePicker.automaticCandidates(
+            preferred: iPhoneLanguages,
+            current: iPhoneLanguages.first ?? "en-US"
+        )
+        return candidates.lazy.compactMap { DictationLanguageSwitch.supportedMatch(for: $0, in: supported) }.first
+    }
+
+    /// The iPhone's languages, as the keyboard sees them. With a language set for Hex in iOS
+    /// Settings › Apps › Hex, `Locale.preferredLanguages` in Hex is that language alone (iOS 27.2
+    /// simulator: `["en"]` on a Chinese iPhone), while the global domain keeps the iPhone's.
+    static var iPhoneLanguages: [String] {
+        let global = CFPreferencesCopyAppValue("AppleLanguages" as CFString, kCFPreferencesAnyApplication) as? [String]
+        return global ?? Locale.preferredLanguages
+    }
+
+    /// Whether Settings shows Apple's download sheet after a check: only when the pair's
+    /// languages aren't on the iPhone and the check followed the person turning translation on
+    /// or picking a target, never when the page merely opens.
+    static func asksToDownload(_ status: LanguageAvailability.Status, afterPersonActed: Bool) -> Bool {
+        afterPersonActed && status == .supported
     }
 
     /// The most targets the Hex key menu lists; Settings has every language.
