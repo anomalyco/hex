@@ -3178,15 +3178,20 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 │   tried on a device.
 ├── Keyboard > Suggest swear words (off) -> opt in to profanity; listed slurs never offered
 ├── Type a listed word in full -> keep its spelling on space or tap its literal chip
-├── Labs > Keyboard > Symbols on letter keys (off) -> hold a letter from QWERTY's home and
-│   bottom rows (a–l, z–m) for its symbol first, SwiftKey-style (m for /, a for @), with the
-│   letter's accents after it; symbols follow the letter, so AZERTY q/w and QWERTZ y get none,
-│   and row 1 (including AZERTY a/z) keeps its digits; off, the keys are unchanged. With
-│   Number row on, row 1's AZERTY a/z and QWERTZ z show their symbols (@, _) as hint and hold
-│   instead of digits.
-│   `heldLettersOfferSymbolsWhenTheLabIsOn` in InsertionTest.kt passed in
-│   https://github.com/anomalyco/hex/actions/runs/45273240353 (testDebugUnitTest + compileDebugKotlin,
-│   GitHub-hosted); not tried on a device or emulator.
+├── Labs > Keyboard > Symbols on letter keys (off) -> hold a letter from QWERTY's home or
+│   bottom row for its symbol first, SwiftKey-style (m for /, a for @), with the letter's
+│   accents after it; symbols follow the letter, so AZERTY q/w and QWERTZ y get none where
+│   their layouts draw them below row 1. Row 1 keeps its digit while it shows one: with Number
+│   row off it hints and holds the digit first. With it on, the top row's letters show and hold
+│   Gboard's symbols in the hidden digit's place (q for %, p for }, r for = as j holds it),
+│   while a letter that already has a home- or bottom-row symbol keeps that one wherever the
+│   layout draws it (AZERTY a/z for @/_, QWERTZ z for _). The top row's symbols stay on row 1,
+│   so a layout that draws q, w or y lower is unchanged there. Off, the keys are unchanged.
+│   `heldLettersOfferSymbolsWhenTheLabIsOn` in InsertionTest.kt covers the holds, and
+│   `withBothLabsTheTopRowShowsGboardsSymbols` and `theTopRowSymbolsStayOnTheTopRow` in
+│   KeyboardPageTest.kt the top row and the rows it leaves alone; all three passed in
+│   https://github.com/anomalyco/hex/actions/runs/45367619509 (testDebugUnitTest + compileDebugKotlin,
+│   GitHub-hosted); not tried on a device or emulator. The repo has no Android CI.
 ├── Labs > Output > Signature (off) -> one editable line (up to 200 characters; empty adds
 │   nothing, default "Sent from Hex") on its own line at the end of each keyboard dictation,
 │   added once; the next dictation starts on a new line below it, and a signed dictation
@@ -3198,14 +3203,14 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 ├── Labs > Keyboard > Number row (off) -> 1 2 3 4 5 6 7 8 9 0 above the letter rows on
 │   every layout (en, es, nb, de, fr, it), typed like normal keys. The first letter row's
 │   corner digits and digit-first hold are hidden while it shows; accents on hold stay, and
-│   the Symbols on letter keys hints and holds still work, with row 1 letters that have a
-│   symbol (AZERTY a/z, QWERTZ z) showing it instead of the digit. The keyboard is one row
-│   taller and the Hex menu matches that height; ?123, the symbols pages and the pads keep
-│   their keys and are a row shorter than the letters while it is on. Off, the page is
-│   unchanged.
-│   KeyboardPageTest plus a passing `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin`
-│   on a GitHub-hosted runner (https://github.com/anomalyco/hex/actions/runs/45275591325, the
-│   latest observed verification); not tried on a device. The repo has no Android CI.
+│   the Symbols on letter keys hints and holds still work: row 1's first ten letters show a
+│   symbol instead of the digit, Gboard's such as q for % and p for }, or its own home- or
+│   bottom-row symbol where it has one, like AZERTY a for @. The keyboard is one row taller
+│   and the Hex menu matches that height; ?123, the symbols pages and the pads keep their keys
+│   and are a row shorter than the letters while it is on. Off, the page is unchanged.
+│   KeyboardPageTest covers it, including the top row's symbols, and passed in
+│   https://github.com/anomalyco/hex/actions/runs/45367619509 (testDebugUnitTest + compileDebugKotlin,
+│   GitHub-hosted); not tried on a device. The repo has no Android CI.
 ├── Labs > Keyboard > Local currency (off) -> the phone's region picks the ?123 page's
 │   currency symbol in $'s place from a fixed set of single-character symbols: GBP £, EUR €,
 │   JPY and CNY ¥, INR ₹, PHP ₱, KRW ₩, RUB ₽ and UAH ₴. USD, a locale with no country, a
