@@ -18,19 +18,8 @@ pub(super) fn merged(
     table: &[(&'static str, &'static str)],
     language: Language,
 ) -> HashMap<&'static str, &'static str> {
-    let (
-        extra,
-        agents,
-        signature,
-        style,
-        hud_height,
-        voice_isolation,
-        annotate,
-        calls,
-        edits,
-        routing,
-    ) = match language {
-        Language::French => (
+    let sections: &[&[(&'static str, &'static str)]] = match language {
+        Language::French => &[
             FRENCH,
             super::agents::FRENCH,
             super::signature::FRENCH,
@@ -41,8 +30,9 @@ pub(super) fn merged(
             super::calls::FRENCH,
             super::transcript_edits::FRENCH,
             super::routing::FRENCH,
-        ),
-        Language::Portuguese => (
+            super::meeting_mute::FRENCH,
+        ],
+        Language::Portuguese => &[
             PORTUGUESE,
             super::agents::PORTUGUESE,
             super::signature::PORTUGUESE,
@@ -53,8 +43,9 @@ pub(super) fn merged(
             super::calls::PORTUGUESE,
             super::transcript_edits::PORTUGUESE,
             super::routing::PORTUGUESE,
-        ),
-        Language::Russian => (
+            super::meeting_mute::PORTUGUESE,
+        ],
+        Language::Russian => &[
             RUSSIAN,
             super::agents::RUSSIAN,
             super::signature::RUSSIAN,
@@ -65,21 +56,13 @@ pub(super) fn merged(
             super::calls::RUSSIAN,
             super::transcript_edits::RUSSIAN,
             super::routing::RUSSIAN,
-        ),
+            super::meeting_mute::RUSSIAN,
+        ],
     };
 
     table
         .iter()
-        .chain(extra)
-        .chain(agents)
-        .chain(signature)
-        .chain(style)
-        .chain(hud_height)
-        .chain(voice_isolation)
-        .chain(annotate)
-        .chain(calls)
-        .chain(edits)
-        .chain(routing)
+        .chain(sections.iter().flat_map(|section| section.iter()))
         .copied()
         .collect()
 }

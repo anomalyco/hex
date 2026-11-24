@@ -606,6 +606,9 @@ pub(super) enum MeetingRequest {
         id: String,
         entries: Vec<crate::meeting::TranscriptEntryKey>,
     },
+    /// Leave Hex's microphone out of the recording under way, or put it back
+    /// (macOS; Labs › Mute the microphone while recording).
+    SetMicrophoneMuted(bool),
     Rename {
         id: String,
         title: String,

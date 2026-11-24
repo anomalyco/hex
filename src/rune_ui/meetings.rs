@@ -499,6 +499,7 @@ fn recording_action(ui: &Ui, p: Paint) -> El {
                             .color(p.muted())
                     })),
             )
+            .children(mute_control(p))
             .child(button(
                 p,
                 "stop-meeting",
@@ -531,6 +532,29 @@ fn recording_action(ui: &Ui, p: Paint) -> El {
             .child(action);
     }
     action
+}
+
+/// Labs › Mute the microphone while recording: the recording's own
+/// microphone switch beside Stop, only while that lab is on. The call's audio
+/// keeps recording, so the recording never stops for it; the label reads the
+/// switch the controller set, which the recording's own frames pick up.
+fn mute_control(p: Paint) -> Option<El> {
+    crate::labs::meeting_microphone_mute().then(|| {
+        let muted = crate::meeting::microphone_muted();
+        button(
+            p,
+            "mute-meeting-microphone",
+            if muted {
+                tr("Unmute microphone")
+            } else {
+                tr("Mute microphone")
+            },
+            ButtonKind::Secondary,
+            move |ui: &mut Ui, _| {
+                ask(ui, MeetingRequest::SetMicrophoneMuted(!muted));
+            },
+        )
+    })
 }
 
 /// The Labs › Import audio file dialog: one supported audio file.

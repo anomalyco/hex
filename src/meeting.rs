@@ -77,7 +77,7 @@ mod turn;
 mod warning;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod watcher;
-pub use capture::track_levels;
+pub use capture::{microphone_muted, track_levels};
 #[cfg(all(debug_assertions, target_os = "macos"))]
 pub use chapters::chapters_file;
 #[cfg(target_os = "macos")]
@@ -189,6 +189,9 @@ pub enum MeetingRequest {
         id: String,
         entries: Vec<TranscriptEntryKey>,
     },
+    /// Leave Hex's microphone out of the recording under way, or put it back
+    /// (macOS; Labs › Mute the microphone while recording).
+    SetMicrophoneMuted(bool),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

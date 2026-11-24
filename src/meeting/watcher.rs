@@ -48,6 +48,9 @@ pub(crate) enum ControllerCommand {
         id: String,
         entries: Vec<meeting::TranscriptEntryKey>,
     },
+    /// Leave Hex's microphone out of the recording under way, or put it
+    /// back (Labs › Mute the microphone while recording, macOS).
+    SetMicrophoneMuted(bool),
     Summarize(String),
     /// Record a calendar meeting from its reminder, first opening its call
     /// link when `join`.
@@ -231,6 +234,11 @@ pub(crate) fn controller_loop(
 
     while !shutdown.load(Ordering::Relaxed) {
         let enabled = crate::app_settings::meetings_enabled();
+        // Labs › Mute the microphone while recording off: clear the switch on
+        // the first pass that sees it, so turning the lab back on in the same
+        // recording does not silently mute it again. The sink reads the same
+        // gate with each packet, so audio is already back by then.
+        crate::meeting::capture::reconcile_microphone_mute(crate::labs::meeting_microphone_mute());
         poll_import(&mut importing, &events);
         let requested_commands = meeting_requests
             .try_iter()
@@ -244,6 +252,9 @@ pub(crate) fn controller_loop(
                 MeetingRequest::Import(path) => ControllerCommand::Import(path),
                 MeetingRequest::DeleteTranscript { id, entries } => {
                     ControllerCommand::DeleteTranscript { id, entries }
+                }
+                MeetingRequest::SetMicrophoneMuted(muted) => {
+                    ControllerCommand::SetMicrophoneMuted(muted)
                 }
             });
         for command in commands.try_iter().take(8).chain(requested_commands) {
@@ -497,6 +508,17 @@ fn handle_command(
                 if active.auto_stop.disarm() || changed || page_stop {
                     tracing::info!("kept recording after the call ended");
                 }
+            }
+        }
+        // Labs › Mute the microphone while recording: it acts on the recording
+        // under way, and only while the lab is on.
+        ControllerCommand::SetMicrophoneMuted(muted) => {
+            if crate::meeting::capture::request_microphone_mute(
+                recording.is_some(),
+                crate::labs::meeting_microphone_mute(),
+                muted,
+            ) {
+                tracing::info!(muted, "meeting microphone mute set");
             }
         }
         ControllerCommand::Summarize(id) => start_notes(id, events),
@@ -817,8 +839,9 @@ fn start_recording(
     events: &SyncSender<ControllerEvent>,
 ) {
     // `Starting` closes a showing reminder; no reminder shows over a
-    // recording.
+    // recording. Every recording begins with the microphone in.
     reminders.scheduler.clear();
+    crate::meeting::capture::set_microphone_muted(false);
     if automatic {
         tracing::info!(
             source = start.app_label,
@@ -903,6 +926,8 @@ fn poll_recording(
         let active = recording
             .take()
             .ok_or_else(|| eyre!("recording disappeared"))?;
+        // Labs › Mute the microphone while recording ends with its recording.
+        crate::meeting::capture::set_microphone_muted(false);
         match active
             .worker
             .join()

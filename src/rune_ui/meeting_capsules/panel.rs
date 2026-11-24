@@ -11,6 +11,9 @@ use super::*;
 /// What a recording says beside its meter, in place of its title.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Notice {
+    /// Hex leaves the microphone out of the recording (Labs › Mute the
+    /// microphone while recording).
+    Muted,
     /// The microphone is digitally silent (#1518).
     Silent,
     /// For its first seconds, an automatic recording says so.
@@ -20,6 +23,7 @@ pub(super) enum Notice {
 impl Notice {
     fn text(self) -> &'static str {
         match self {
+            Notice::Muted => tr("Microphone muted"),
             Notice::Silent => tr("Microphone is silent"),
             Notice::Automatic => tr("Started automatically"),
         }
@@ -27,6 +31,7 @@ impl Notice {
 
     fn color(self, p: Paint) -> rune::Color {
         match self {
+            Notice::Muted => p.muted(),
             Notice::Silent => p.warning(),
             Notice::Automatic => p.faint(),
         }
@@ -34,7 +39,11 @@ impl Notice {
 }
 
 pub(super) fn recording_notice(shown: &Recording) -> Option<Notice> {
-    if shown.warning.is_some() {
+    // The microphone's own switch says more than the silence warning that
+    // would otherwise stand in its place while Hex leaves it out.
+    if crate::meeting::microphone_muted() {
+        Some(Notice::Muted)
+    } else if shown.warning.is_some() {
         Some(Notice::Silent)
     } else if shown.automatic && shown.started.elapsed() < AUTOMATIC_LABEL {
         Some(Notice::Automatic)

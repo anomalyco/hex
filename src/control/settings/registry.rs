@@ -697,6 +697,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: a saved meeting's transcript offers selecting lines and deleting them, and later summaries, copies, search, and the Markdown file use what's left",
     ),
     key(
+        "labs.meeting_microphone_mute",
+        Kind::Bool,
+        "Labs: while a meeting records, Mute microphone leaves Hex's microphone out of the recording and Unmute microphone puts it back; the call's own audio keeps recording and transcribing (macOS)",
+    ),
+    key(
         "labs.output_fixes",
         Kind::Bool,
         "Labs: Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result",
@@ -1082,6 +1087,7 @@ pub(super) const NEEDS: &[(&str, &str)] = &[
     ("meetings.", "meetings"),
     ("labs.live_chapters", "meetings"),
     ("labs.stop_any_call_recording", "meetings"),
+    ("labs.meeting_microphone_mute", "meetings"),
     ("experimental.hex_microphone", "fun"),
     ("typed_text_hotkey", "typed_text"),
     ("show_dock_icon", "dock_icon"),
