@@ -465,6 +465,9 @@ pub(super) fn toggle_menu(ui: &mut Ui, menu: Menu) {
     if matches!(ui.open, Some(Menu::Microphone)) {
         refresh_microphones(ui);
     }
+    if matches!(ui.open, Some(Menu::Pick("meeting-audio-source"))) {
+        super::meetings::audio_source::refresh(ui);
+    }
 }
 
 /// Lists the microphones again, and what System default resolves to, on a

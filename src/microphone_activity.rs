@@ -49,7 +49,12 @@ pub use os::active_microphone_applications;
 #[cfg(not(target_os = "macos"))]
 pub(crate) use os::application_running_output;
 #[cfg(target_os = "windows")]
-pub(crate) use os::{EndpointSessions, active_endpoint_sessions, process_canonical_bundle_id};
+pub(crate) use os::{
+    EndpointSessions, RunningProcess, active_endpoint_sessions, application_pid,
+    capturable_application, process_application, process_canonical_bundle_id, running_processes,
+};
+#[cfg(target_os = "linux")]
+pub(crate) use os::{PlayingApplication, playing_applications};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ActiveMicrophoneApplication {
@@ -191,6 +196,150 @@ pub(crate) fn application_running_output(canonical_bundle_id: &str) -> Result<bo
                 && property_cf_string(process_object, kAudioProcessPropertyBundleID)
                     .is_some_and(|bundle_id| is_process_of(&bundle_id, canonical_bundle_id))
         }))
+    })
+}
+
+/// One Core Audio process object, as Labs › Choose meeting audio reads it:
+/// a meeting's tap names its `object`, and `id` is the app the Meetings
+/// pane lists for it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) struct OutputProcess {
+    /// The Core Audio process object a tap includes or excludes.
+    pub(crate) object: u32,
+    /// The process the object describes.
+    pub(crate) pid: i32,
+    /// The bundle id the process reports (its LaunchServices one when Core
+    /// Audio reports none), which names it for display.
+    pub(crate) bundle_id: String,
+    /// The canonical bundle id the Meetings pane lists, else `bundle_id`.
+    pub(crate) id: String,
+    /// Whether the process plays output now.
+    pub(crate) running_output: bool,
+}
+
+/// Whether a bundle id is Hex itself, including the identifiers a retired
+/// Hex build still reports: a meeting's tap never includes Hex's own audio,
+/// and its pane never lists Hex.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn is_hex_bundle(bundle_id: &str) -> bool {
+    let bundle_id = bundle_id.to_ascii_lowercase();
+    bundle_id == "anomaly.hex"
+        || bundle_id == "anomaly.hex.test"
+        || crate::desktop::onboarding::LEGACY_MAC_BUNDLE_IDS
+            .iter()
+            .any(|legacy| legacy.eq_ignore_ascii_case(&bundle_id))
+}
+
+/// The process objects a meeting taps for the app `id`: every process of
+/// that app, its helpers included and whether it plays output now or not,
+/// once each and sorted so two readings compare. A process idle now is tapped
+/// anyway, so a helper that starts playing later is heard without rebuilding
+/// the tap; only the set of processes changes it. An app with no processes at
+/// all records silence until it starts, never every output; Hex's own
+/// processes are never among them.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn app_process_objects(id: &str, processes: &[OutputProcess]) -> Vec<u32> {
+    let mut objects: Vec<u32> = processes
+        .iter()
+        .filter(|process| {
+            process.id == id && !is_hex_bundle(&process.id) && !is_hex_bundle(&process.bundle_id)
+        })
+        .map(|process| process.object)
+        .collect();
+    objects.sort_unstable();
+    objects.dedup();
+    objects
+}
+
+#[cfg(target_os = "macos")]
+/// Whether any Core Audio process object of the app `id` reports output
+/// running now: a chosen tap on an app that should be playing but delivers
+/// no IO cycle is stalled. `None` when the process list cannot be read.
+pub(crate) fn app_output_running(id: &str) -> Option<bool> {
+    output_process_objects().ok().map(|processes| {
+        processes
+            .iter()
+            .any(|process| process.id == id && process.running_output)
+    })
+}
+
+#[cfg(target_os = "macos")]
+/// Every Core Audio process object, Hex's own processes excluded, with the
+/// app each belongs to: a helper process is its app's, so a browser's audio
+/// service belongs to the browser. Only Core Audio's process metadata is
+/// read, never audio.
+pub(crate) fn output_process_objects() -> Result<Vec<OutputProcess>> {
+    objc2::rc::autoreleasepool(|_| {
+        let own_pid = std::process::id() as i32;
+        let process_objects = property_vec::<AudioObjectID>(
+            kAudioObjectSystemObject as AudioObjectID,
+            kAudioHardwarePropertyProcessObjectList,
+        )?;
+        let mut processes = Vec::new();
+        for process_object in process_objects {
+            let Ok(pid) = property_value::<i32>(process_object, kAudioProcessPropertyPID) else {
+                continue;
+            };
+            let bundle_id = match property_cf_string(process_object, kAudioProcessPropertyBundleID)
+            {
+                Some(bundle_id) => bundle_id,
+                None => match running_application_info(pid) {
+                    Some((bundle_id, _)) => bundle_id,
+                    None => continue,
+                },
+            };
+            // Safari plays through a WebKit process told apart only by its name.
+            let name = bundle_id
+                .eq_ignore_ascii_case("com.apple.WebKit.GPU")
+                .then(|| running_application_info(pid))
+                .flatten()
+                .and_then(|(_, name)| name);
+            let id = canonical_bundle_id_for(&bundle_id, name.as_deref())
+                .unwrap_or(bundle_id.as_str())
+                .to_owned();
+            if pid == own_pid || is_hex_bundle(&id) || is_hex_bundle(&bundle_id) {
+                continue;
+            }
+            processes.push(OutputProcess {
+                object: process_object,
+                pid,
+                bundle_id,
+                id,
+                running_output: property_value::<u32>(
+                    process_object,
+                    kAudioProcessPropertyIsRunningOutput,
+                )
+                .is_ok_and(|running| running != 0),
+            });
+        }
+        Ok(processes)
+    })
+}
+
+#[cfg(target_os = "macos")]
+/// The applications playing output now, Hex excluded, for Labs › Choose
+/// meeting audio: each canonical bundle id (else its own) and a display
+/// name. A helper process is named as its app, once; only Core Audio's
+/// process metadata is read, never audio.
+pub(crate) fn playing_output_applications() -> Vec<(String, String)> {
+    let Ok(processes) = output_process_objects() else {
+        return Vec::new();
+    };
+    objc2::rc::autoreleasepool(|_| {
+        let mut applications: Vec<(String, String)> = Vec::new();
+        for process in processes.iter().filter(|process| process.running_output) {
+            if applications.iter().any(|(known, _)| *known == process.id) {
+                continue;
+            }
+            let localized = running_application_info(process.pid).and_then(|(_, name)| name);
+            applications.push((
+                process.id.clone(),
+                display_name(&process.bundle_id, localized),
+            ));
+        }
+        applications.sort_by_key(|(_, name)| name.to_lowercase());
+        applications
     })
 }
 
@@ -1101,6 +1250,109 @@ mod tests {
         assert!(!BrowserProcesses::Playing.includes(Some(false)));
         assert!(BrowserProcesses::Playing.includes(None));
         assert!(BrowserProcesses::All.includes(Some(false)));
+    }
+
+    #[test]
+    fn a_chosen_meeting_app_taps_every_one_of_its_processes() {
+        let process =
+            |object: u32, bundle_id: &str, id: &str, running_output: bool| OutputProcess {
+                object,
+                pid: 1_000 + object as i32,
+                bundle_id: bundle_id.into(),
+                id: id.into(),
+                running_output,
+            };
+        let processes = [
+            // A browser's own process and its audio service, both its own.
+            process(10, "com.google.Chrome", "com.google.Chrome", true),
+            process(11, "com.google.Chrome.helper", "com.google.Chrome", true),
+            // A helper whose output is closed now is tapped anyway, so it is
+            // heard as soon as it plays again and the tap is only rebuilt
+            // when the set of processes changes.
+            process(12, "com.google.Chrome.helper", "com.google.Chrome", false),
+            process(20, "com.apple.Music", "com.apple.Music", true),
+            // Hex's own audio never joins a tap, even naming a retired build.
+            process(30, "anomaly.hex", "anomaly.hex", true),
+            process(31, "com.kitlangton.hex2", "com.kitlangton.hex2", true),
+        ];
+        assert_eq!(
+            app_process_objects("com.google.Chrome", &processes),
+            [10, 11, 12]
+        );
+        assert_eq!(app_process_objects("com.apple.Music", &processes), [20]);
+        // An app that isn't playing is tapped as it is, and reaches the track
+        // as silence; an app that isn't running never taps every output.
+        assert_eq!(
+            app_process_objects(
+                "com.apple.Music",
+                &[process(21, "com.apple.Music", "com.apple.Music", false)]
+            ),
+            [21]
+        );
+        assert!(app_process_objects("com.apple.Safari", &processes).is_empty());
+        assert!(app_process_objects("anomaly.hex", &processes).is_empty());
+        assert!(app_process_objects("com.kitlangton.hex2", &processes).is_empty());
+        // Reading the same processes in another order is not a change, so
+        // the tap is not rebuilt for it.
+        let reordered = processes.iter().rev().cloned().collect::<Vec<_>>();
+        assert_eq!(
+            app_process_objects("com.google.Chrome", &processes),
+            app_process_objects("com.google.Chrome", &reordered)
+        );
+    }
+
+    #[test]
+    fn a_helper_process_belongs_to_the_app_its_bundle_id_names() {
+        for (bundle_id, canonical) in [
+            ("com.google.Chrome.helper.Renderer", "com.google.Chrome"),
+            ("us.zoom.CptHost", "us.zoom.xos"),
+            ("com.microsoft.teams2.helper", "com.microsoft.teams2"),
+            ("app.zen-browser.zen-gpu-helper", "app.zen-browser.zen"),
+        ] {
+            let process = OutputProcess {
+                object: 7,
+                pid: 70,
+                bundle_id: bundle_id.into(),
+                id: canonical_bundle_id_for(bundle_id, None)
+                    .unwrap_or(bundle_id)
+                    .into(),
+                running_output: true,
+            };
+            assert_eq!(
+                canonical_bundle_id_for(bundle_id, None),
+                Some(canonical),
+                "{bundle_id}"
+            );
+            assert_eq!(
+                app_process_objects(canonical, std::slice::from_ref(&process)),
+                [7],
+                "{bundle_id}"
+            );
+            assert!(
+                app_process_objects("com.brave.Browser", &[process]).is_empty(),
+                "{bundle_id}"
+            );
+        }
+    }
+
+    #[test]
+    fn hex_is_never_an_app_a_meeting_records() {
+        for bundle_id in [
+            "anomaly.hex",
+            "anomaly.hex.test",
+            "COM.KITLANGTON.HEX2",
+            "com.kitlangton.Hex",
+            "com.kitlangton.Hex.debug",
+        ] {
+            assert!(is_hex_bundle(bundle_id), "{bundle_id}");
+        }
+        for bundle_id in [
+            "com.apple.Music",
+            "com.google.Chrome",
+            "com.tinyspeck.slackmacgap",
+        ] {
+            assert!(!is_hex_bundle(bundle_id), "{bundle_id}");
+        }
     }
 
     #[test]

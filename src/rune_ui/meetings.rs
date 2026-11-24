@@ -28,6 +28,7 @@ use super::{Menu, Ui};
 use crate::desktop::file_dialog::{Dialog, Filter, Pending, Target};
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 
+pub(in crate::rune_ui) mod audio_source;
 mod fixture;
 mod selection;
 
