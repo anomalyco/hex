@@ -67,9 +67,13 @@ internal object SpeechModel {
      * rather than load another: loading is what gets the keyboard's process killed. */
     private const val SHORT_OF_MEMORY = 300_000_000L
 
+    /** Debug builds only: core ratings that stand in for the kernel's, so an emulator (which rates none) can take the
+     * pinned branch once. MainActivity sets it from `--es cpu_capacity 300,300,1024,1024` before anything reads them. */
+    @Volatile var capacityOverride: List<Int?>? = null
+
     /** The kernel's cpu_capacity for each core, or null for one it doesn't rate (an emulator's). */
     private val capacities: List<Int?> by lazy {
-        (0 until Runtime.getRuntime().availableProcessors()).map {
+        capacityOverride?.takeIf { BuildConfig.DEBUG } ?: (0 until Runtime.getRuntime().availableProcessors()).map {
             runCatching { File("/sys/devices/system/cpu/cpu$it/cpu_capacity").readText().trim().toInt() }.getOrNull()
         }
     }
@@ -85,6 +89,10 @@ internal object SpeechModel {
 
     /** The cores [threads] counts, for the pool the model keeps ([open]): 0 when Hex can't tell them apart. */
     internal val poolMask: Long by lazy { fastCoreMask(capacities) }
+
+    /** Where dictation's threads are kept, for Labs › Diagnostics: the loaded model's pool (-1 for none, 0 for any core,
+     * else a bit per core), or, before a model loads, where its pool would be (the same check, the kernel asked). */
+    @Synchronized fun dictationCores(): Long = if (handle != 0L) Whisper.poolCores(handle) else Whisper.usableCores(poolMask, threads)
 
     /** Models opened since the process started (today's or the faster one), so a caller can tell whether a load read one. */
     private var opened = 0L
@@ -295,4 +303,9 @@ internal object Whisper {
     external fun threadPool(handle: Long, threads: Int, fastCores: Long): Boolean
     /** The file this library loaded from, for Labs › Diagnostics. */
     external fun library(): String?
+    /** The cores of [fast] a pool of [threads] would be kept on from this thread: 0 (any core) when fewer than [threads]
+     * are usable or the kernel refuses to pin to them. */
+    external fun usableCores(fast: Long, threads: Int): Long
+    /** The cores model [handle]'s pool is kept on: -1 for no pool, 0 for any core. */
+    external fun poolCores(handle: Long): Long
 }

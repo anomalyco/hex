@@ -92,18 +92,35 @@ extern "C" JNIEXPORT void JNICALL
 Java_ly_anoma_hex_speech_Whisper_abort(JNIEnv *, jobject, jlong job) { abandoned.store(job); }
 
 // [fast]'s bits this thread may run on, or 0 when that leaves fewer cores than the pool has threads: sharing what is
-// left is slower than letting the kernel place them, as before.
+// left is slower than letting the kernel place them, as before. Also 0 when the kernel refuses to pin this thread to
+// them (tried and put back here), so a pool is either pinned to what Labs › Diagnostics reports or not pinned at all.
 static jlong pool_mask(jlong fast, int threads) {
     if (fast == 0) return 0;
     cpu_set_t allowed;
     if (sched_getaffinity(0, sizeof(allowed), &allowed) != 0) return 0;
     jlong usable = 0;
     int cores = 0;
+    cpu_set_t wanted;
+    CPU_ZERO(&wanted);
     for (int core = 0; core < GGML_MAX_N_THREADS && core < 64; ++core) {
         const jlong bit = static_cast<jlong>(1) << core;
-        if ((fast & bit) && CPU_ISSET(core, &allowed)) { usable |= bit; ++cores; }
+        if ((fast & bit) && CPU_ISSET(core, &allowed)) { usable |= bit; ++cores; CPU_SET(core, &wanted); }
     }
-    return cores >= threads ? usable : 0;
+    if (cores < threads) return 0;
+    const bool pinned = sched_setaffinity(0, sizeof(wanted), &wanted) == 0;
+    sched_setaffinity(0, sizeof(allowed), &allowed);
+    return pinned ? usable : 0;
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_ly_anoma_hex_speech_Whisper_usableCores(JNIEnv *, jobject, jlong fast, jint threads) { return pool_mask(fast, threads); }
+
+// The cores the model's pool is kept on: -1 for no pool, 0 for any core.
+extern "C" JNIEXPORT jlong JNICALL
+Java_ly_anoma_hex_speech_Whisper_poolCores(JNIEnv *, jobject, jlong handle) {
+    std::lock_guard<std::mutex> hold(pools_lock);
+    auto found = pools.find(reinterpret_cast<whisper_context *>(handle));
+    return found == pools.end() ? -1 : found->second.mask;
 }
 
 // Keeps a pool of [threads] worker threads with the model for its decodes, or none (0), ggml's default. A pool of
@@ -138,14 +155,16 @@ Java_ly_anoma_hex_speech_Whisper_threadPool(JNIEnv *, jobject, jlong handle, jin
 }
 
 // The last decode's timings, for Labs › Diagnostics: microseconds spent sampling, in the encoder, decoding one token at a
-// time, decoding in batches and on the prompt, then the encoder window (0: the full 30 s) and the thread count. Written
-// by decode and read by timings, both under SpeechModel's lock.
-static jlong last[7];
+// time, decoding in batches and on the prompt, then the encoder window (0: the full 30 s), the thread count, and the cores
+// its threads were kept on (-1: no pool, new threads every graph; 0: kept on any core; else a bit per core, read back from
+// the decoding thread, so a refused pinning reads as any core). Written by decode and read by timings, both under
+// SpeechModel's lock.
+static jlong last[8];
 
 extern "C" JNIEXPORT jlongArray JNICALL
 Java_ly_anoma_hex_speech_Whisper_timings(JNIEnv *env, jobject) {
-    auto result = env->NewLongArray(7);
-    if (result) env->SetLongArrayRegion(result, 0, 7, last);
+    auto result = env->NewLongArray(8);
+    if (result) env->SetLongArrayRegion(result, 0, 8, last);
     return result;
 }
 
@@ -257,12 +276,23 @@ Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jlong handle, jboo
     const int status = whisper_full_with_state(ctx, state.get(), params, pcm.data(), count);
     // Paused workers wait on a condition variable until the next graph instead of polling.
     if (attach) ggml_threadpool_pause(pool);
-    if (attach && mask) sched_setaffinity(0, sizeof(mine), &mine);
+    // Where this decode's threads were kept, for Labs › Diagnostics: read back from this thread, which ggml pinned to the
+    // pool's mask at the first graph unless the kernel refused (then it reads as any core).
+    jlong kept = attach ? 0 : -1;
+    if (attach && mask) {
+        cpu_set_t now_on;
+        if (sched_getaffinity(0, sizeof(now_on), &now_on) == 0) {
+            jlong on = 0;
+            for (int core = 0; core < 64; ++core) if (CPU_ISSET(core, &now_on)) on |= static_cast<jlong>(1) << core;
+            if (on != 0 && (on & ~mask) == 0) kept = on;
+        }
+        sched_setaffinity(0, sizeof(mine), &mine);
+    }
     whisper_timings spent{};
     hex_whisper_state_timings(state.get(), &spent);
-    const jlong now[7] = {static_cast<jlong>(spent.sample_ms * 1000), static_cast<jlong>(spent.encode_ms * 1000),
+    const jlong now[8] = {static_cast<jlong>(spent.sample_ms * 1000), static_cast<jlong>(spent.encode_ms * 1000),
                           static_cast<jlong>(spent.decode_ms * 1000), static_cast<jlong>(spent.batchd_ms * 1000),
-                          static_cast<jlong>(spent.prompt_ms * 1000), params.audio_ctx, params.n_threads};
+                          static_cast<jlong>(spent.prompt_ms * 1000), params.audio_ctx, params.n_threads, kept};
     std::copy(std::begin(now), std::end(now), std::begin(last));
 #ifndef NDEBUG
     // Diagnostics identify the engine and task only; no audio or recognized text is logged.

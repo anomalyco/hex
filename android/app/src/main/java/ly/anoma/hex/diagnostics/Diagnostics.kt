@@ -59,16 +59,20 @@ internal object Diagnostics {
      * the cores [mask] names (0: any core), or with Faster English dictation's model ([english]). */
     private class Mode(val label: String, val threads: Int, val pool: Int, val mask: Long = 0, val english: Boolean = false)
 
-    /** As dictation runs now (its threads kept ready, on the fast cores), the same pool on any core, ggml's default of
-     * new threads for every graph, and six kept ready on a processor whose kernel rates six or more cores fast (at least
-     * half the strongest core's cpu_capacity, Hex's own rule). */
+    /** Each way to keep the threads, named by what it does so reports from different builds read the same: ggml's
+     * default of new threads for every graph, a kept pool on any core, the same pool on the fast cores (only where Hex
+     * can tell them apart: at least half the strongest core's cpu_capacity), and six kept ready on a processor whose
+     * kernel rates six or more cores fast. The row a dictation uses in this build says so ([DICTATION_ROW]). */
     private fun modes(c: Context): List<Mode> {
         val threads = SpeechModel.threads
         val capacities = (0 until Runtime.getRuntime().availableProcessors())
             .map { read("/sys/devices/system/cpu/cpu$it/cpu_capacity")?.toIntOrNull() }
-        return listOfNotNull(Mode("as now", threads, threads, SpeechModel.poolMask),
-            Mode("threads kept ready, any core", threads, threads), Mode("new threads every graph", threads, 0),
-            Mode("6 threads kept ready", 6, 6, SpeechModel.poolMask).takeIf { fastCores(capacities) >= 6 },
+        val dictation = SpeechModel.dictationCores()
+        fun label(name: String, used: Boolean) = if (used) "$name $DICTATION_ROW" else name
+        return listOfNotNull(Mode(label(NEW_THREADS, dictation < 0), threads, 0),
+            Mode(label(KEPT_ANY, dictation == 0L), threads, threads),
+            Mode(label(KEPT_FAST, dictation > 0), threads, threads, SpeechModel.poolMask).takeIf { SpeechModel.poolMask != 0L },
+            Mode(KEPT_SIX, 6, 6, SpeechModel.poolMask).takeIf { fastCores(capacities) >= 6 },
             // Labs › Faster English dictation's model, once it is downloaded, whether or not its switch is on.
             Mode(FASTER_MODE, threads, 0, english = true).takeIf { ModelStore.english.installed(c) != null })
     }
@@ -197,7 +201,8 @@ internal object Diagnostics {
             "Processor: ${Build.SOC_MANUFACTURER} ${Build.SOC_MODEL}, ${cores.size} cores; ${clusterSummary(cores)}",
             "Memory: ${gb(memory.totalMem)} total, ${gb(memory.availMem)} available" + if (memory.lowMemory) ", low" else "",
             "Speech: ${SpeechModel.threads} threads, $library, downloaded model " +
-                if (ModelStore.small.installed(c) != null) "installed" else "not installed",
+                (if (ModelStore.small.installed(c) != null) "installed" else "not installed") +
+                "; dictation threads: ${SpeechModel.threads} ${runCatching { poolWords(SpeechModel.dictationCores()) }.getOrDefault("not known")}",
             fasterEnglishLine(SpeechPreferences(c).fastEnglish, ModelStore.english.installed(c) != null,
                 engineFor(SpeechPreferences(c).options(null))),
         ) + haptics(c)
@@ -422,6 +427,24 @@ internal fun cgroupSummary(text: String) = text.lines().map { it.trim() }.filter
 /** The speed test's mode with Faster English dictation's model. */
 internal const val FASTER_MODE = "faster English dictation"
 
+/** The speed test's rows, the same words in every build from 2412 on. */
+internal const val NEW_THREADS = "new threads every graph"
+internal const val KEPT_ANY = "threads kept ready, any core"
+internal const val KEPT_FAST = "threads kept ready, fast cores"
+internal const val KEPT_SIX = "threads kept ready, 6"
+/** Marks the row this build's dictation uses. */
+internal const val DICTATION_ROW = "(what dictation uses)"
+
+/** Where a decode's threads were kept (hexspeech.cpp's last timing: -1 none, 0 any core, else a bit per core). */
+internal fun poolWords(cores: Long) = when {
+    cores < 0 -> "started for every graph"
+    cores == 0L -> "kept ready on any core"
+    else -> "kept ready on cpu " + cpuRanges((0 until 64).filter { cores and (1L shl it) != 0L })
+}
+
+/** "4 threads kept ready on cpu 4-7" from a decode's timings, or just the count when an older build left no cores. */
+internal fun threadWords(t: LongArray) = "${t[6]} threads" + if (t.size >= 8) " " + poolWords(t[7]) else ""
+
 /** Labs › Faster English dictation in the report: the switch, its download, and what the dictation language now uses,
  * "faster" or "standard". The only line of the report that says "faster". */
 internal fun fasterEnglishLine(on: Boolean, downloaded: Boolean, engine: Engine) =
@@ -474,7 +497,7 @@ internal fun runLines(run: Run, shared: Set<String> = emptySet()): String = buil
         val encoder = t[1] / 1000
         val decoder = (t[0] + t[2] + t[3] + t[4]) / 1000
         append("; encoder $encoder ms, decoder $decoder ms, other ${maxOf(0, run.wallMs - encoder - decoder)} ms")
-        append("; ${t[6]} threads, encoder window ${if (t[5] == 0L) "full" else "${t[5]}"}")
+        append("; ${threadWords(t)}, encoder window ${if (t[5] == 0L) "full" else "${t[5]}"}")
     } else if (run.threads > 0) append("; ${run.threads} threads")
     val before = schedParts(run.before).filterKeys { it !in shared }
     val after = schedParts(run.after).filterKeys { it !in shared }
@@ -513,7 +536,7 @@ internal fun lastDictationLines(t: DictationTimes?): String = buildString {
     append(String.format(Locale.ROOT, ", %.1f s recorded, %.1f s kept", t.recordedMs / 1000.0, t.keptMs / 1000.0))
     append("; ").append(ranOn(t.ran))
     val timings = t.timings?.takeIf { it.size >= 7 }
-    if (timings != null) append("; ${timings[6]} threads, encoder window ${if (timings[5] == 0L) "full" else "${timings[5]}"}")
+    if (timings != null) append("; ${threadWords(timings)}, encoder window ${if (timings[5] == 0L) "full" else "${timings[5]}"}")
     else if (t.threads > 0) append("; ${t.threads} threads")
     append("; model ").append(when (t.model) {
         ModelAtTick.Loaded -> "already loaded"
