@@ -3273,7 +3273,7 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
     Checks: `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` (includes
     `KeyboardToolsTest`) and `python3 scripts/code-shape.py --check`; the repo has no
     Android CI. Not tried on a device or emulator.
-└── Labs > Keyboard > Smart quotes (off) -> in a plain-text field (not a password, email or URL
+├── Labs > Keyboard > Smart quotes (off) -> in a plain-text field (not a password, email or URL
     field, or a TYPE_NULL field such as a terminal), the ' and " keys type ’ ‘ “ ”: an opening
     quote — ‘ or “ — at the start, after whitespace, or after an opening bracket or quote, and
     the closing quote or apostrophe — ’ or ” — after anything else. A word a suggestion,
@@ -3288,6 +3288,35 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
     `SmartQuotesTest`'s 12) on 2026-11-24, on Temurin JDK 21 and Android SDK 36 (platform 36,
     build-tools 35/36, NDK 27.2.12479018); the repo has no Android CI, and nothing was tried on a
     device or emulator. `python3 scripts/code-shape.py --check` passes.
+└── Labs > Keyboard > Voice-only mode (off) -> a "Voice only" subtype of Hex, registered at runtime
+    with `InputMethodManager.setAdditionalInputMethodSubtypes` (never in input_method.xml), that
+    replaces the keyboard with one compact dictation bar: the strip's dot waveform and a status
+    line, ✓ to finish (or to start again after a blocked or failed start) and ✕ to cancel. Showing
+    it starts dictation at once, with the keyboard's guards: a password field, no text field, a
+    microphone another dictation holds, or a missing microphone permission shows the reason in the
+    bar, whose ✕ goes back. ✓ transcribes through the same MicCapture queue and model as the
+    keyboard and inserts the text at the cursor with the same signature and continuation rules
+    (commitSpeech). After the insertion, after ✕, or after a failed dictation (its note shows for
+    1.2 s) Hex calls `switchToPreviousInputMethod()`, opening Android's keyboard picker when that
+    returns false, at most once per dictation; an input restart right after a leave shows the bar
+    idle rather than recording again. The subtype is auxiliary, so Hex's own globe-key rotation
+    stays as it was. Enabling it: turning the toggle on has Android 14 and later enable the
+    voice subtype itself with `setExplicitlyEnabledInputMethodSubtypes` (the full keyboard and voice
+    subtypes); Android 12 and 13 have no such API, so there the toggle opens Android's Hex subtype
+    screen to tick "Voice only". Turning it off clears the subtype and returns the explicit set to
+    the implicit default. Reach it from another keyboard: Android gives a voice-input key one voice
+    input method, preferring the system's, so HeliBoard's and other AOSP-based keyboards' mic keys
+    reach Hex only when no system voice input (such as Google voice typing) is enabled; otherwise
+    use the keyboard switcher or Android's picker. The IME registers the subtype again when it
+    starts, which matters after a settings restore. Off, no subtype or explicit set is touched and
+    Hex is exactly the keyboard it was; a voice subtype that is somehow current shows the full
+    keyboard. Checks:
+    `./gradlew :app:compileDebugKotlin :app:testDebugUnitTest` (with `-x prepareSpeechModel` and a
+    build-tools 36.0.0 override, since AGP's default 35.0.0 is not installed) passed 166 tests,
+    `VoiceOnlyTest`'s 4 among them, on 2026-11-24 on Temurin JDK 21 and Android SDK 36 (platform 36,
+    build-tools 36.0.0, NDK 27.2.12479018); `VoiceOnlyTest` covers the bar-or-keyboard and restart
+    decisions, `python3 scripts/code-shape.py --check` and `git diff --check` pass, and the repo has
+    no Android CI; nothing was tried on a device or emulator.
 Unmerged Windows / deferred features -> Not part of this map
 ```
 

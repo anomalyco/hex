@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ly.anoma.hex.feedback.Feedback
 import ly.anoma.hex.feedback.FeedbackForm
+import ly.anoma.hex.keyboard.VoiceOnly
 import ly.anoma.hex.speech.*
 import ly.anoma.hex.typing.TypingPreferences
 import ly.anoma.hex.updates.Updates
@@ -110,6 +111,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val emojiSuggestions = remember(revision) { typing.emojiSuggestions }
     val keyboardTools = remember(revision) { typing.keyboardTools }
     val smartQuotes = remember(revision) { typing.smartQuotes }
+    val voiceOnly = remember(revision) { typing.voiceOnly }
     // A hidden field or leaving Labs shows the saved line again, never an unsaved draft.
     LaunchedEffect(page, signature) { if (page != Page.Labs || !signature) signatureDraft = speech.signatureText }
     val autoCapitalize = remember(revision) { typing.autoCapitalize }
@@ -354,6 +356,9 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 Rule()
                                 Toggle(stringResource(R.string.smart_quotes), stringResource(R.string.smart_quotes_detail),
                                     smartQuotes) { typing.smartQuotes = it }
+                                Rule()
+                                Toggle(stringResource(R.string.voice_only_mode), stringResource(R.string.voice_only_detail),
+                                    voiceOnly) { typing.voiceOnly = it; VoiceOnly.setEnabledFromSettings(context, it) }
                             }
                         }
                     }
