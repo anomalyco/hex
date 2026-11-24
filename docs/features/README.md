@@ -3176,6 +3176,21 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 │   `standInOffersYourWordsAndShortcutsButNoEnglishCompletionsOrNextWords` /
 │   `standInTurnsOffAutocorrectButKeepsYourTextReplacements` in StandInTypingTest.kt; not
 │   tried on a device.
+├── Private and incognito fields (Android's `IME_FLAG_NO_PERSONALIZED_LEARNING`, such as a
+│   browser's private tab) -> typing assistance stays on: suggestions, next words,
+│   autocorrection, key-hit correction, swipe typing, double-space period and emoji suggestions
+│   behave as in a plain field. Nothing from such a field is saved: a reverted autocorrection is
+│   not added to the local rejection tally that `KeyboardEngine.revert` writes through
+│   `TypingPreferences.undo`, and an emoji picked there is not added to the emoji picker's
+│   recents (`RecentEmoji.recordSelection`). Reads are unchanged: the tally's `blocked` check,
+│   your personal dictionary and the recents already stored still apply. The field is classified
+│   by `FieldRules.of(inputType, imeOptions)`: `ordinary` keeps every earlier exclusion (non-text
+│   classes, password variations, URI/email/web email/filter, `TYPE_TEXT_FLAG_NO_SUGGESTIONS` and
+│   `TYPE_TEXT_FLAG_AUTO_COMPLETE`), and `learns` is only the personalized-learning flag.
+│   Checks: `FieldRulesTest` in android/app/src/test/java/ly/anoma/hex/keyboard/ (plain ints, no
+│   EditorInfo instance) and `python3 scripts/code-shape.py --check`. The repo has no Android CI,
+│   no Android SDK was available where this was written, so `./gradlew :app:testDebugUnitTest
+│   :app:compileDebugKotlin` was not run, and nothing was tried on a device or emulator.
 ├── Keyboard > Suggest swear words (off) -> opt in to profanity; listed slurs never offered
 ├── Type a listed word in full -> keep its spelling on space or tap its literal chip
 ├── Labs > Keyboard > Symbols on letter keys (off) -> hold a letter from QWERTY's home or
