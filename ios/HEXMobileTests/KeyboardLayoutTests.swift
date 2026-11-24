@@ -3489,6 +3489,19 @@ final class FullKeyboardSettingsTests: XCTestCase {
             [literal, KeyboardSuggestion(displayText: "😭", replacement: "😭", kind: .emoji)],
             "cry offers 😭, the example Settings gives"
         )
+        let sobbing = FixtureTextTarget(text: "we sob")
+        sobbing.autocapitalizationType = .none
+        let sobView = FullKeyboardView(model: KeyboardViewModel(), target: sobbing)
+        sobView.emojiOverride = false
+        sobView.emojiSuggestionsOverride = true
+        sobView.refreshEmojiKey()
+        sobView.engine.configureForField()
+        let sob = KeyboardSuggestion(displayText: "“sob”", replacement: "sob", kind: .keepLiteral)
+        XCTAssertEqual(
+            sobView.withTypedWordEmoji([sob]),
+            [sob, KeyboardSuggestion(displayText: "😭", replacement: "😭", kind: .emoji)],
+            "sob offers 😭 too, the tester's own word (a chat word since CLDR's keyword alone was too weak)"
+        )
 
         view.emojiOverride = true
         view.emojiSuggestionsOverride = false
