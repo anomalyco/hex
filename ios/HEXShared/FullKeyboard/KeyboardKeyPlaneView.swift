@@ -118,6 +118,10 @@ final class KeyboardKeyPlaneView: UIView {
             let labelFrame = key.row == 3
                 ? CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height + layout.metrics.bottomRowTrim)
                 : frame
+            if layout.isNumberPad, key.kind != .hex, key.kind != .globe {
+                drawNumberPadKey(key, in: frame, pressed: pressed.contains(key.kind), landscape: layout.orientation == .landscape, context: context, radius: radius, showGlyphs: showGlyphs)
+                continue
+            }
             switch key.kind {
             case .hex:
                 continue
@@ -241,6 +245,59 @@ final class KeyboardKeyPlaneView: UIView {
                 drawSymbol("keyboard.chevron.compact.down", in: labelFrame, color: palette.textBase, pointSize: 19, yOffset: 0)
             }
         }
+    }
+
+    /// A key of Hex's number pad (`KeyboardNumberPad`), as Apple's draws it (iOS 27.2 and 26.5):
+    /// a digit in 22 pt type, its centre 19 pt below a 48 pt keycap's top, and upright the
+    /// letters under it in 10 pt semibold capitals spaced apart, centred 38.5 pt down; turned,
+    /// the digit centred and the letters right of it. Delete and the decimal separator stand
+    /// on the backdrop without a keycap; a press greys the keycap and raises no pop-up.
+    private func drawNumberPadKey(
+        _ key: KeyboardKey,
+        in frame: CGRect,
+        pressed: Bool,
+        landscape: Bool,
+        context: CGContext,
+        radius: CGFloat,
+        showGlyphs: () -> Bool
+    ) {
+        let digit = key.character.map { KeyboardNumberPad.letters(for: $0) != nil || $0.first?.isNumber == true } ?? false
+        if digit || pressed {
+            context.fillKeycap(frame, fill: pressed ? palette.keyHeldFill : palette.keyFill, shadow: digit ? palette.keyShadow : .clear, radius: radius)
+        }
+        guard showGlyphs() else { return }
+        if key.kind == .delete {
+            drawSymbol(pressed ? "delete.left.fill" : "delete.left", in: frame, color: palette.textBase, pointSize: 20)
+            return
+        }
+        guard let text = key.character else { return }
+        let digitFont = UIFont.systemFont(ofSize: 22, weight: .regular)
+        let scale = frame.height / 48
+        let letters = KeyboardNumberPad.letters(for: text)
+        let lettersAttributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 10, weight: .semibold), .kern: 2.0, .foregroundColor: palette.textBase,
+        ]
+        if landscape {
+            let digitSize = (text as NSString).size(withAttributes: [.font: digitFont])
+            drawText(text, in: frame, font: digitFont, color: palette.textBase)
+            if let letters {
+                let size = (letters as NSString).size(withAttributes: lettersAttributes)
+                (letters as NSString).draw(
+                    at: CGPoint(x: frame.midX + digitSize.width / 2 + 8, y: frame.midY - size.height / 2),
+                    withAttributes: lettersAttributes
+                )
+            }
+            return
+        }
+        let digitFrame = CGRect(x: frame.minX, y: frame.minY + 19 * scale - frame.height / 2, width: frame.width, height: frame.height)
+        drawText(text, in: digitFrame, font: digitFont, color: palette.textBase)
+        guard let letters else { return }
+        let size = (letters as NSString).size(withAttributes: lettersAttributes)
+        // Kern adds space after the last letter too: centre the ink, not the advance.
+        (letters as NSString).draw(
+            at: CGPoint(x: frame.midX - (size.width - 2) / 2, y: frame.minY + 38.5 * scale - size.height / 2),
+            withAttributes: lettersAttributes
+        )
     }
 
     /// `rect` with its edges on this screen's pixel grid.
@@ -700,6 +757,8 @@ final class KeyboardKeyPlaneView: UIView {
 
     private func armAccentTimer(for id: Int) {
         cancelAccentTimer(for: id)
+        // Apple's number pad holds nothing.
+        guard !engine.layout.isNumberPad else { return }
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }

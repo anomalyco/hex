@@ -3634,4 +3634,74 @@ final class FullKeyboardSettingsTests: XCTestCase {
         XCTAssertTrue(settings.quickAccents)
         XCTAssertEqual(defaults.object(forKey: "experiments.quickAccents") as? Bool, true)
     }
+
+    /// Hex's number pad sits on Apple's columns (iOS 26.5 and 27.2 simulators: 4.67, 126.33, 6,
+    /// 126.67, 6, 126.33, 6 pt across a 402 pt iPhone; 4.5, 117.5 × 3 with 6 pt gaps on the SE;
+    /// turned, 137.33 pt keys centred) in the letter keys' band, so the keyboard keeps its
+    /// height from a text field to a number field.
+    func testNumberPadSitsOnApplesColumnsInTheLetterKeysBand() throws {
+        func columns(_ layout: KeyboardLayout) -> [[CGFloat]] {
+            [("1", 0), ("2", 1), ("3", 2)].map { name, _ in
+                let f = layout.key(.character(name))!.frame
+                return [(f.minX * 100).rounded() / 100, (f.width * 100).rounded() / 100]
+            }
+        }
+        let pro = KeyboardLayout(width: 402, layer: .numbers, field: .numberPad)
+        XCTAssertTrue(pro.isNumberPad)
+        XCTAssertEqual(pro.totalHeight, KeyboardLayout(width: 402).totalHeight)
+        XCTAssertEqual(columns(pro), [[4.67, 126.33], [137, 126.67], [269.67, 126.33]])
+        XCTAssertEqual(pro.keys.filter { $0.kind != .hex }.count, 11, "1 to 9, 0 and delete")
+        let one = try XCTUnwrap(pro.key(.character("1"))).frame
+        let zero = try XCTUnwrap(pro.key(.character("0"))).frame
+        let letters = KeyboardLayout(width: 402)
+        XCTAssertEqual(one.minY, try XCTUnwrap(letters.key(.character("q"))).frame.minY)
+        XCTAssertEqual(zero.maxY, try XCTUnwrap(letters.key(.space)).frame.maxY, accuracy: 0.01)
+        XCTAssertEqual(one.height, 45.75, accuracy: 0.01)
+        XCTAssertEqual(try XCTUnwrap(pro.key(.character("4"))).frame.minY - one.maxY, 6, accuracy: 0.01)
+        XCTAssertEqual(try XCTUnwrap(pro.key(.delete)).frame.midX, try XCTUnwrap(pro.key(.character("3"))).frame.midX)
+
+        let se = KeyboardLayout(width: 375, layer: .numbers, field: .numberPad, phoneSize: .homeButton)
+        XCTAssertEqual(columns(se), [[4.5, 117.5], [128, 117.5], [251.5, 117.5]])
+        let turned = KeyboardLayout(width: 874, orientation: .landscape, layer: .numbers, field: .numberPad)
+        XCTAssertEqual(columns(turned), [[225, 137.33], [368.33, 137.33], [511.67, 137.33]])
+
+        // The decimal pad's separator takes the blank corner; on a Home-button iPhone, where iOS
+        // draws no globe, Hex's globe shares it.
+        let decimal = KeyboardLayout(width: 402, layer: .numbers, field: .decimalPad)
+        XCTAssertEqual(decimal.keys.first { $0.row == 3 && $0.kind != .character("0") && $0.kind != .delete }?.frame.minX, 14.0 / 3)
+        let globe = KeyboardLayout(width: 375, layer: .numbers, field: .numberPad, showsGlobe: true, phoneSize: .homeButton)
+        XCTAssertEqual(globe.key(.globe)?.frame.minX, 4.5)
+        let both = KeyboardLayout(width: 375, layer: .numbers, field: .decimalPad, showsGlobe: true, phoneSize: .homeButton)
+        XCTAssertNotNil(both.key(.globe))
+        XCTAssertEqual(both.keys.filter { $0.row == 3 }.count, 4)
+
+        // Every key's touch target tiles its cell: a tap between two keys is one of theirs.
+        for key in pro.keys where key.kind != .hex {
+            XCTAssertTrue(key.hitFrame.contains(CGPoint(x: key.frame.midX, y: key.frame.midY)))
+        }
+        XCTAssertEqual(pro.hitTest(CGPoint(x: 134, y: one.midY))?.kind, .character("2"))
+
+        // The Duo: folded on the letters' edges, 7 pt apart; unfolded and upright, Apple's pad is
+        // its split keyboard's right half (552.67, 661 and 769.67 pt, 101.33 pt wide but the middle
+        // 101.67, iOS 27.2): Hex's keys end where Apple's do, the first two a third of a point right.
+        let cover = KeyboardLayout(width: 466, layer: .numbers, field: .numberPad, posture: .cover)
+        XCTAssertEqual(try XCTUnwrap(cover.key(.character("1"))).frame.minX, try XCTUnwrap(KeyboardLayout(width: 466, posture: .cover).key(.character("q"))).frame.minX)
+        XCTAssertEqual(try XCTUnwrap(cover.key(.character("2"))).frame.minX - (try XCTUnwrap(cover.key(.character("1"))).frame.maxX), 7, accuracy: 0.01)
+        let wide = KeyboardLayout(width: 951, layer: .numbers, field: .numberPad, posture: .unfoldedWide)
+        XCTAssertFalse(wide.isSplit)
+        XCTAssertEqual(columns(wide), [[553, 101.33], [661.33, 101.33], [769.67, 101.33]])
+
+        // An iPad keeps the 123 page, as Apple's iPad keyboard does in a number field.
+        let iPad = KeyboardLayout(width: 744, layer: .numbers, field: .numberPad, pad: .docked(.mini))
+        XCTAssertFalse(iPad.isNumberPad)
+        XCTAssertNotNil(iPad.key(.space))
+    }
+
+    func testDecimalPadFollowsTheRegionsSeparator() {
+        XCTAssertEqual(KeyboardNumberPad.decimalSeparator(Locale(identifier: "en_US")), ".")
+        XCTAssertEqual(KeyboardNumberPad.decimalSeparator(Locale(identifier: "de_DE")), ",")
+        XCTAssertEqual(KeyboardNumberPad.decimalSeparator(Locale(identifier: "fr_FR")), ",")
+        XCTAssertEqual(KeyboardNumberPad.letters(for: "7"), "PQRS")
+        XCTAssertNil(KeyboardNumberPad.letters(for: "1"))
+    }
 }
