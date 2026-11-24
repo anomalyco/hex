@@ -139,6 +139,18 @@ pub(super) fn download_failure(ui: &Ui) -> Option<String> {
         .filter(|line| !line.trim().is_empty())
 }
 
+/// Why the model the person picked can't run here, in one line ("… is
+/// unavailable"): the first run names it instead of waiting on a download
+/// that never started.
+pub(super) fn pick_failure(ui: &Ui) -> Option<String> {
+    ui.found
+        .error
+        .as_deref()
+        .and_then(|error| error.lines().next())
+        .map(str::to_owned)
+        .filter(|line| !line.trim().is_empty())
+}
+
 /// Whether a file chosen with [`use_file`] is being checked and copied.
 pub(super) fn using_file(ui: &Ui) -> bool {
     ui.picker.import.use_after && ui.picker.import.busy()

@@ -3632,6 +3632,97 @@ fn a_found_model_moves_on_without_a_download_and_back_returns_to_it() {
     assert!(rt.find("model-list").is_some());
 }
 
+/// A model this build doesn't have: an import that isn't here, which
+/// `available()` refuses the way it refuses Parakeet Ultra with its Labs
+/// switch off.
+fn unavailable_model() -> TranscriptionModelId {
+    use crate::transcription::models::CustomModelId;
+    TranscriptionModelId::Custom(
+        CustomModelId::parse("custom-0123456789abcdef").expect("a custom id"),
+    )
+}
+
+/// A found file this build can't run is dropped from the scan's answer: it
+/// never fills the model step, and never holds the recommended download.
+#[test]
+fn a_found_model_this_build_cannot_run_is_not_offered() {
+    let unavailable = || {
+        let mut found = super::found::fixture_catalog(TranscriptionModelId::ParakeetV3);
+        found.catalog = Some(unavailable_model());
+        found
+    };
+    let open = |models: Vec<crate::transcription::found_models::Found>| {
+        let mut ui = portal_fixture();
+        ui.found.models = models;
+        onboarding::fixture(&mut ui, crate::desktop::onboarding::Step::Setup, false);
+        onboarding_kit::live::fixture(&mut ui, Page::Download);
+        runtime_for(ui, false, PANE_SIZE)
+    };
+
+    // What the scan finds on its own still lists it, and holds ours back.
+    let rt = open(vec![unavailable()]);
+    assert!(texts(&rt).contains(&"Choose a speech model".to_owned()));
+    assert!(sent(&rt).is_empty(), "the download waits for the list");
+
+    // The window keeps only what this build can run: no list, and the
+    // recommended model downloads by itself.
+    let rt = open(super::found::keep_usable(vec![unavailable()]));
+    assert!(!texts(&rt).contains(&"Choose a speech model".to_owned()));
+    assert!(
+        matches!(
+            sent(&rt),
+            [Request::ChooseModel { model, .. }] if *model == rt.state.settings.transcription.model
+        ),
+        "{:?}",
+        sent(&rt)
+    );
+}
+
+/// A pick that can't run says why on the page instead of waiting at "0 of
+/// N MB" for a download that never starts.
+#[test]
+fn an_unavailable_pick_fails_the_page_instead_of_downloading_forever() {
+    let mut ui = portal_fixture();
+    onboarding::fixture(&mut ui, crate::desktop::onboarding::Step::Setup, false);
+    onboarding_kit::live::fixture(&mut ui, Page::Download);
+    let mut rt = runtime_for(ui, false, PANE_SIZE);
+    assert!(matches!(sent(&rt), [Request::ChooseModel { .. }]));
+    let before = sent(&rt).len();
+
+    // The list's pick isn't a model this build has.
+    rt.update(|ui, _| {
+        let selection = TranscriptionSelection {
+            model: unavailable_model(),
+            language: "en".into(),
+        };
+        ui.settings.transcription = selection.clone();
+        ui.found.choice = Some(selection);
+        ui.found.picked = Some(1);
+    });
+    rt.update(|ui, _| {
+        onboarding::input(
+            ui,
+            crate::desktop::onboarding::Input::Grant(crate::desktop::onboarding::SetupItem::Model),
+        )
+    });
+    settle(&mut rt);
+
+    assert_eq!(sent(&rt).len(), before, "nothing is asked of the service");
+    assert_eq!(
+        rt.state.tour.as_ref().unwrap().flow.view().model,
+        crate::desktop::onboarding::ItemStatus::Failed
+    );
+    assert!(rt.state.found.picked.is_none(), "the pick is cleared");
+    assert!(rt.state.error.is_some(), "the window says why");
+    let shown = texts(&rt);
+    assert!(
+        shown.iter().any(|text| text.ends_with("is unavailable")),
+        "{shown:?}"
+    );
+    assert!(!shown.contains(&"0 of 731 MB".to_owned()), "{shown:?}");
+    assert!(shown.contains(&"Try again".to_owned()), "{shown:?}");
+}
+
 #[test]
 fn a_failed_download_names_its_cause_and_offers_a_model_file() {
     let mut rt = runtime("onboarding", false, PANE_SIZE);

@@ -565,8 +565,8 @@ Settings picker > Every model row          // fixed height; scrolls
 │   model); missing or changed -> warning line and no Use (own-models.md)
 └── Found on this computer -> a scan of the Hugging Face cache when the picker  // setup.found-models
     opens: other compatible files at the top (Not tested by Hex, Use); a catalog
-    model already downloaded there says so and offers Use; a found file's
-    Delete is Forget (own-models.md)
+    model already downloaded there says so and offers Use; only models this
+    build offers are listed; a found file's Delete is Forget (own-models.md)
 ```
 
 Parakeet Unified English (chunked attention) and Nemotron 3.5 ASR (cache-aware)

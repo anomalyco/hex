@@ -564,7 +564,10 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
                 t.error.is_some(),
             )
         });
-    let failure = super::super::model_import::download_failure(ui);
+    // A pick the window refused before any download names its own reason,
+    // ahead of the service's last failure.
+    let failure = super::super::model_import::pick_failure(ui)
+        .or_else(|| super::super::model_import::download_failure(ui));
     let using_file = super::super::model_import::using_file(ui);
     // The disk and macOS checks run a few times a second, not every frame.
     let checked = ui

@@ -956,7 +956,12 @@ CoreAudio formats, AppleScript details, or event serialization.
   and is read-only: Hex never writes, moves, or deletes anything in the cache,
   keeps its receipts in its own models folder, hashes a file in full once when
   it is chosen or when Enable's installed-only check finds it unverified
-  (against the pin or the blob name), and removing one only forgets it.
+  (against the pin or the blob name), and removing one only forgets it. Only
+  models this build offers are listed: a found file naming a catalog model its
+  Labs switch hides (Parakeet Ultra with the lab off) never fills the model
+  step and never holds the recommended download, and a pick that can't run
+  says why instead of waiting at 0 of N MB on a download that never started
+  (`rune_ui::found::keep_usable`, `Flow::model_failed`).
 - Hex has one onboarding, on every build and OS, stable and dev alike: the
   first-run story (`rune_ui/onboarding_kit/live.rs`) over the tour state
   machine (`rune_ui/onboarding.rs`, `desktop::onboarding::Flow`). No flag,
