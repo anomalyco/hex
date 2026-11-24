@@ -630,12 +630,42 @@
         }
       }
     },
-    "Emoji key and suggestions" : {
+    "Emoji key" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "表情符号键和建议"
+            "value" : "表情符号键"
+          }
+        }
+      }
+    },
+    "Emoji suggestions" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "表情符号建议"
+          }
+        }
+      }
+    },
+    "Opens all emoji from the keyboard" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从键盘打开全部表情符号"
+          }
+        }
+      }
+    },
+    "Suggests 😭 as you type cry" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入 cry 时推荐 😭"
           }
         }
       }

@@ -47,8 +47,9 @@ list starts at the top. The pages, one file each in `HEXMobile/Settings/`
   autocorrect below it while it's on), Swipe typing, Suggest swear words and Vocabulary (Hex's
   custom vocabulary list, how many words it holds); under **Feedback**, Key pop-ups (Full
   only), Haptics (the dictation bar uses it too; Strength below it while it's on: Light, the
-  default until you choose, Medium or Strong) and Emoji (Clear emoji history while it's on,
-  which asks first); and a field to try the keyboard in.
+  default until you choose, Medium or Strong), Emoji key, Emoji suggestions (Full only; the
+  strip's emoji, with or without the key) and Clear emoji history while either is on, which
+  asks first; and a field to try the keyboard in.
 - **Privacy:** "Everything stays on this iPhone", Learn how I type (what it
   learned below the switch), and under **Advanced**, Record typing logs (off
   by default) with its Typing logs viewer while it's on; last, under **Feedback**, what
@@ -73,7 +74,7 @@ added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
 `model-card-<waiting|downloading|ready>` (Home's speech model card, with English
 dictation and no keyboard limit, so nothing downloads). Each settings scene writes
 its page's switches to the App Group: off by default, on with `-on`; switches that are
-on by default (Spatial autocorrect, Swipe typing, Emoji) stay on.
+on by default (Spatial autocorrect, Swipe typing, Emoji key, Emoji suggestions) stay on.
 `-end` starts the page scrolled to the bottom. `settings-privacy-confirm`
 opens Record typing logs' consent dialog. `--experiment-keyboard-themes` turns
 Keyboard themes on, and `--keyboard-theme automatic|black|white|navy|forest|ember`

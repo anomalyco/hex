@@ -3450,23 +3450,102 @@ final class FullKeyboardSettingsTests: XCTestCase {
 
         let fresh = FullKeyboardSettings(defaults: defaults)
         XCTAssertTrue(fresh.swipeTyping)
-        XCTAssertTrue(fresh.emoji)
+        XCTAssertTrue(fresh.emojiKey)
         XCTAssertNil(defaults.object(forKey: "experiments.swipeTyping"), "reading writes nothing")
         XCTAssertNil(defaults.object(forKey: "experiments.emoji"))
         XCTAssertTrue(FullKeyboardSettings(defaults: nil).swipeTyping, "without the App Group")
-        XCTAssertTrue(FullKeyboardSettings(defaults: nil).emoji)
+        XCTAssertTrue(FullKeyboardSettings(defaults: nil).emojiKey)
 
         defaults.set(false, forKey: "experiments.swipeTyping")
         defaults.set(false, forKey: "experiments.emoji")
         XCTAssertFalse(FullKeyboardSettings(defaults: defaults).swipeTyping, "an upgrade that turned it off")
-        XCTAssertFalse(FullKeyboardSettings(defaults: defaults).emoji)
+        XCTAssertFalse(FullKeyboardSettings(defaults: defaults).emojiKey)
         fresh.applyLaunchArguments(["HEX"])
         XCTAssertFalse(fresh.swipeTyping, "no launch argument leaves a stored off")
         fresh.applyLaunchArguments(["HEX", FullKeyboardSettings.swipeLaunchArgument, FullKeyboardSettings.emojiLaunchArgument])
         XCTAssertTrue(fresh.swipeTyping)
-        XCTAssertTrue(fresh.emoji)
+        XCTAssertTrue(fresh.emojiKey)
+        XCTAssertTrue(fresh.emojiSuggestions)
         fresh.swipeTyping = false
         XCTAssertEqual(defaults.object(forKey: "experiments.swipeTyping") as? Bool, false)
+    }
+
+    /// Settings › Keyboard › Emoji was one switch for the key and the strip's emoji; testers
+    /// asked for the suggestions without the key (X). Unset, the suggestions read the key's
+    /// value, so the one switch's on or off carries over to both, in the app and the keyboard,
+    /// whichever reads first; once either changes, they're apart.
+    func testEmojiKeyAndSuggestionsSplitFromTheOneSwitch() throws {
+        let suite = "FullKeyboardSettingsTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = FullKeyboardSettings(defaults: defaults)
+
+        XCTAssertTrue(settings.emojiKey)
+        XCTAssertTrue(settings.emojiSuggestions, "a fresh install: both on")
+        XCTAssertNil(defaults.object(forKey: "settings.keyboardEmojiSuggestions"), "reading writes nothing")
+        XCTAssertTrue(FullKeyboardSettings(defaults: nil).emojiSuggestions, "without the App Group")
+
+        defaults.set(false, forKey: "experiments.emoji")
+        XCTAssertFalse(settings.emojiKey)
+        XCTAssertFalse(settings.emojiSuggestions, "the one switch off: both off")
+        defaults.set(true, forKey: "experiments.emoji")
+        XCTAssertTrue(settings.emojiSuggestions, "the one switch on: both on")
+
+        settings.emojiKey = false
+        XCTAssertFalse(settings.emojiKey)
+        XCTAssertTrue(settings.emojiSuggestions, "the key off keeps the suggestions it had")
+        XCTAssertEqual(defaults.object(forKey: "settings.keyboardEmojiSuggestions") as? Bool, true)
+        settings.emojiKey = true
+        settings.emojiSuggestions = false
+        XCTAssertTrue(settings.emojiKey, "the suggestions off leave the key")
+        XCTAssertFalse(FullKeyboardSettings(defaults: defaults).emojiSuggestions)
+
+        // An upgrade with the one switch off: turning the key on later keeps the suggestions off.
+        defaults.removeObject(forKey: "settings.keyboardEmojiSuggestions")
+        defaults.set(false, forKey: "experiments.emoji")
+        settings.emojiKey = true
+        XCTAssertFalse(settings.emojiSuggestions)
+    }
+
+    /// Emoji suggestions without the emoji key: the bottom row has no emoji key (123 in its
+    /// place, as with Emoji off), while the strip still offers the typed word's emoji.
+    func testEmojiSuggestionsWithoutTheEmojiKey() {
+        let target = FixtureTextTarget(text: "we cry")
+        target.autocapitalizationType = .none
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: target)
+        view.emojiOverride = false
+        view.emojiSuggestionsOverride = true
+        view.refreshEmojiKey()
+        view.engine.configureForField()
+        XCTAssertFalse(view.engine.showsEmoji)
+        XCTAssertNil(view.engine.layout.key(.emoji), "no emoji key")
+        XCTAssertTrue(view.showsEmojiSuggestions)
+        let literal = KeyboardSuggestion(displayText: "“cry”", replacement: "cry", kind: .keepLiteral)
+        XCTAssertEqual(
+            view.withTypedWordEmoji([literal]),
+            [literal, KeyboardSuggestion(displayText: "😭", replacement: "😭", kind: .emoji)],
+            "cry offers 😭, the example Settings gives"
+        )
+        let sobbing = FixtureTextTarget(text: "we sob")
+        sobbing.autocapitalizationType = .none
+        let sobView = FullKeyboardView(model: KeyboardViewModel(), target: sobbing)
+        sobView.emojiOverride = false
+        sobView.emojiSuggestionsOverride = true
+        sobView.refreshEmojiKey()
+        sobView.engine.configureForField()
+        let sob = KeyboardSuggestion(displayText: "“sob”", replacement: "sob", kind: .keepLiteral)
+        XCTAssertEqual(
+            sobView.withTypedWordEmoji([sob]),
+            [sob, KeyboardSuggestion(displayText: "😭", replacement: "😭", kind: .emoji)],
+            "sob offers 😭 too, the tester's own word (a chat word since CLDR's keyword alone was too weak)"
+        )
+
+        view.emojiOverride = true
+        view.emojiSuggestionsOverride = false
+        XCTAssertTrue(view.engine.showsEmoji, "the key alone")
+        XCTAssertNotNil(view.engine.layout.key(.emoji))
+        XCTAssertFalse(view.showsEmojiSuggestions)
+        XCTAssertNil(view.withTypedWordEmoji([literal]), "and no emoji in the strip")
     }
 
     /// Settings › Keyboard › Number row is off by default, and `--number-row on|off` sets it.

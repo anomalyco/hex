@@ -135,8 +135,13 @@ final class FullKeyboardView: UIView {
 
     /// The keys' target: the field, or the emoji search while you search.
     let routedTarget: EmojiRoutedTarget
-    /// Fixtures turn the emoji experiment on or off; otherwise the App Group's switch.
+    /// Fixtures turn the emoji key, and with it the emoji suggestions, on or off; otherwise the
+    /// App Group's switches.
     var emojiOverride: Bool? { didSet { refreshEmojiKey() } }
+    /// Fixtures and tests turn the emoji suggestions alone on or off.
+    var emojiSuggestionsOverride: Bool? { didSet { refreshEmojiKey() } }
+    /// The strip offers emoji here: Emoji suggestions on, in a field that takes emoji.
+    var showsEmojiSuggestions = false
     /// Fixtures and tests turn the ABC experiment on or off; otherwise the App Group's switch.
     var emojiLettersUnderEmojiKeyOverride: Bool? { didSet { setNeedsLayout() } }
     /// Where emoji use is kept; fixtures give a seeded store.

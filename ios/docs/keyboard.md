@@ -951,7 +951,7 @@ return row 2, a shift key opens and closes row 3, after the letters Apple's two-
 (, and ! then . and ?; AZERTY , and ?, . and !, ' and :), the shifted symbol drawn over the
 one a tap types and typed with shift (`KeyboardKey.shifted`), and the bottom row the globe,
 123, the Hex key where Apple's dictation key is (whatever Settings › Hex key says: the strip
-is all suggestions), the space bar, emoji (or 123 when Emoji is off) where Apple's second
+is all suggestions), the space bar, emoji (or 123 when Emoji key is off) where Apple's second
 123 is, and the hide-keyboard key. The letter keys are as wide as the longest row allows
 with its delete or return at least 1.236 and 1.24 letters wide (English 54.5 pt, French
 53.25 pt on the mini upright), row 2 is set in 0.4 of a key pitch (0.2 where it holds as
@@ -1186,11 +1186,21 @@ emoji-test.txt 18.0 and CLDR 49, and no copy is checked in). Unit tests only
 (`EmojiShortcodeTests`): no CI compiles the iOS targets, and no physical iPhone run checks
 it.
 
-## Emoji (Settings › Keyboard › Emoji, for the full keyboard)
+## Emoji (Settings › Keyboard › Emoji key and Emoji suggestions, for the full keyboard)
 
-On by default (stored as
-`experiments.emoji` from when it was an experiment off by default: unset or true is on,
-false off, so testers who turned it off keep it off). An emoji key
+Two switches, both on by default. **Emoji key** (stored as `experiments.emoji` from when
+it was an experiment off by default: unset or true is on, false off, so testers who turned
+it off keep it off) is the key and its panel below, on the full keyboard and the dictation
+bar. **Emoji suggestions** (`settings.keyboardEmojiSuggestions`) is the strip's emoji for
+the word typed and the word just finished, and Emoji shortcodes' while that experiment is
+on. They were one switch until testers asked for the suggestions without the key (X,
+2026-11-24): unset, Emoji suggestions reads the emoji key's
+value, so whoever had the one switch on or off keeps both so, in the app and the keyboard
+alike, whichever runs first; the first change to Emoji key writes the suggestions' value it
+had, so turning the key off later leaves them on. With the key off there is no way into
+Hex's panel or search (Apple's emoji keyboard stays a globe press away); the suggestions
+need neither. The dictation bar has no strip, so Settings shows only Emoji key while the
+full keyboard is off. An emoji key
 right of 123 (after the globe) in text and web search fields, not web address, email or
 ASCII-only ones. It opens a panel in place of the strip and the keys: a row of
 emoji for the text before the cursor, then a grid that scrolls sideways through
