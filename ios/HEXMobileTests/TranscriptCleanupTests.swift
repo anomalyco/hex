@@ -1385,24 +1385,27 @@ final class SpokenCleanupRulesTests: XCTestCase {
     /// but everything is still lowercase"): the whole pipeline keeps Polished's capitals, for a
     /// speech model's capitalised text and for all-lowercase text alike, while Casual starts its
     /// sentences lowercase and writes "i" for "I" whatever the switch says, as its hint promises.
-    func testLowercaseOffKeepsPolishedCapitalsAndCasualStillStartsLowercase() {
+    func testLowercaseOffKeepsPolishedCapitalsAndCasualStillStartsLowercase() async {
         let capitalised = "Hey, I just got home. Are you free tomorrow?"
         let lowercase = "hey i just got home are you free tomorrow"
-        func run(_ style: DictationStyle, _ text: String, lowercase: Bool = false) -> String {
-            DictationPipeline.Preferences(style: style, lowercase: lowercase).format(text, language: "en-US")
+        func run(_ style: DictationStyle, _ text: String, lowercase: Bool = false) async -> String {
+            await DictationPipeline(style: style, language: "en-US", lowercase: lowercase).run(text)
         }
         for text in [capitalised, lowercase] {
-            let polished = run(.polished, text)
+            let polished = await run(.polished, text)
             XCTAssertEqual(polished.first, "H", polished)
             XCTAssertTrue(polished.contains(" I "), polished)
-            let casual = run(.casual, text)
+            let casual = await run(.casual, text)
             XCTAssertEqual(casual.first, "h", casual)
             XCTAssertTrue(casual.contains(" i "), casual)
             XCTAssertFalse(casual.contains(where: \.isUppercase), casual)
-            XCTAssertEqual(run(.polished, text, lowercase: true), polished.lowercased())
+            let lowered = await run(.polished, text, lowercase: true)
+            XCTAssertEqual(lowered, polished.lowercased())
         }
-        XCTAssertEqual(run(.polished, capitalised), capitalised)
-        XCTAssertTrue(run(.casual, capitalised).hasSuffix("i just got home. are you free tomorrow?"))
+        let polished = await run(.polished, capitalised)
+        XCTAssertEqual(polished, capitalised)
+        let casual = await run(.casual, capitalised)
+        XCTAssertTrue(casual.hasSuffix("i just got home. are you free tomorrow?"), casual)
     }
 
     /// Casual texts: sentences may start lowercase, "I" is "i", an opening interjection loses
