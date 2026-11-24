@@ -334,7 +334,6 @@ pub fn apply(
                 ));
             }
         }
-        "labs.double_tap_modifiers" => candidate.normalize_double_tap_settings(),
         _ if matches!(key.kind, Kind::Shortcut(_)) => {
             let Kind::Shortcut(slot) = key.kind else {
                 unreachable!("shortcut keys have the shortcut kind");
@@ -418,13 +417,6 @@ pub fn apply(
                  shortcut first",
             ));
         }
-        #[cfg(hex_capture)]
-        "labs.screenshots" if candidate.labs.screenshots => {
-            candidate.clear_record_shortcut_sharing_capture();
-        }
-        "labs.standalone_special_keys" => candidate.repair_special_keys(),
-        "labs.section_key_alone" => candidate.repair_section_key(),
-        "labs.microphone_key" => candidate.repair_microphone_key(),
         "labs.parakeet_ultra" if !candidate.labs.parakeet_ultra => {
             if let Some(why) = crate::labs::Feature::ParakeetUltra.off_refusal(settings) {
                 return Err(invalid(name, why));
@@ -433,6 +425,11 @@ pub fn apply(
         "show_dock_icon" => effects.push(Effect::DockIcon),
         "updates.channel" => effects.push(Effect::CheckForUpdates),
         _ => {}
+    }
+    if let Some(feature) = crate::labs::Feature::for_settings_key(key.key)
+        && feature.settings_key() == key.key
+    {
+        feature.apply_side_effects(&mut candidate);
     }
     Ok(Change {
         settings: candidate,

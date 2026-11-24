@@ -13,7 +13,7 @@ use objc2_foundation::{MainThreadMarker, NSData, NSObject, NSSize, NSString};
 
 use crate::app_settings::{AppSettings, HotkeyBinding};
 use crate::calendar::CalendarMeeting;
-use crate::desktop::i18n::{tr, tr_fill};
+use crate::desktop::i18n::{menu_label as label, tr, tr_fill};
 use crate::desktop::tray_menu::model_menu_entries;
 use crate::dictation::vocabulary::VocabularyEntry;
 use crate::transcription::models::{MODELS, TranscriptionModelId};
@@ -494,19 +494,6 @@ fn menu_key(label: &str) -> Option<String> {
         .then(|| char::from_u32(0xF704 + number - 1))
         .flatten()
         .map(String::from)
-}
-
-/// A menu label in the interface language: macOS's title case in English
-/// (`title`), else the window's sentence-case label translated, with the
-/// title's trailing `…` kept.
-fn label(title: &str, translated: &str) -> String {
-    if crate::desktop::i18n::english() {
-        return title.into();
-    }
-    match title.strip_suffix('…') {
-        Some(_) if !translated.ends_with('…') => format!("{translated}…"),
-        _ => translated.into(),
-    }
 }
 
 /// The Speech Model submenu's fixed items, with their titles.

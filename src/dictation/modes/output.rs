@@ -171,8 +171,6 @@ pub(crate) fn sign_for_target(
 /// How the OS adapter should insert a non-empty finished dictation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum InsertPlan {
-    /// Target does not insert (`Print`, `RawPrint`, `Service`).
-    None,
     /// Leave the text on the clipboard without pasting: rescued captures, or
     /// Labs › Copy dictation only when YOLO mode does not send.
     CopyOnly,
@@ -196,21 +194,21 @@ impl InsertPlan {
         yolo_sends: bool,
         copy_only_lab: bool,
         signed: bool,
-    ) -> Self {
+    ) -> Option<Self> {
         if !target.inserts() {
-            return Self::None;
+            return None;
         }
         if target.is_rescued_copy_only() {
-            return Self::CopyOnly;
+            return Some(Self::CopyOnly);
         }
         let send = target.may_yolo_send() && yolo_sends;
         if !send && copy_only_lab {
-            return Self::CopyOnly;
+            return Some(Self::CopyOnly);
         }
-        Self::Paste {
+        Some(Self::Paste {
             send,
             standalone: signed,
-        }
+        })
     }
 }
 
@@ -230,8 +228,7 @@ pub(crate) trait OutputAdapter {
     /// inserting (e.g. Linux live typing on empty/print/voice-prompt-nothing).
     fn cancel_pending(&mut self) {}
 
-    /// Executes [`InsertPlan::CopyOnly`] or [`InsertPlan::Paste`]. Never called
-    /// for [`InsertPlan::None`].
+    /// Executes [`InsertPlan::CopyOnly`] or [`InsertPlan::Paste`].
     fn insert(&mut self, text: &str, plan: InsertPlan) -> Result<InsertResult, String>;
 
     /// Updates Paste Last after insertion succeeds or fails. `recorded_in_history`
@@ -332,11 +329,11 @@ pub(crate) fn deliver_with_flags(
     let plan = InsertPlan::decide(input.target, sends, copy_only_lab, signed);
 
     let inserted = match plan {
-        InsertPlan::None => {
+        None => {
             adapter.cancel_pending();
             InsertResult::default()
         }
-        plan => match adapter.insert(&input.text, plan) {
+        Some(plan) => match adapter.insert(&input.text, plan) {
             Ok(result) => result,
             Err(error) => {
                 // A failed paste still keeps the text for Paste Last so the
@@ -430,7 +427,7 @@ mod tests {
             }
             let sent = match plan {
                 InsertPlan::Paste { send, .. } => self.result.sent || send,
-                _ => false,
+                InsertPlan::CopyOnly => false,
             };
             let copied = matches!(plan, InsertPlan::CopyOnly) || self.result.copied;
             Ok(InsertResult { sent, copied })
@@ -569,33 +566,33 @@ mod tests {
     fn yolo_mode_overrides_copy_only_while_rescued_captures_always_copy() {
         assert_eq!(
             InsertPlan::decide(OutputTarget::Paste, true, true, false),
-            InsertPlan::Paste {
+            Some(InsertPlan::Paste {
                 send: true,
                 standalone: false
-            },
+            }),
             "YOLO mode pastes and sends even while Copy dictation only is on"
         );
         assert_eq!(
             InsertPlan::decide(OutputTarget::Paste, false, true, false),
-            InsertPlan::CopyOnly
+            Some(InsertPlan::CopyOnly)
         );
         assert_eq!(
             InsertPlan::decide(OutputTarget::CopyOnlyPaste, true, false, false),
-            InsertPlan::CopyOnly,
+            Some(InsertPlan::CopyOnly),
             "rescued captures always copy and never YOLO-send"
         );
         assert_eq!(
             InsertPlan::decide(OutputTarget::RawCopyOnlyPaste, true, false, false),
-            InsertPlan::CopyOnly
+            Some(InsertPlan::CopyOnly)
         );
         assert_eq!(
             InsertPlan::decide(OutputTarget::RawPaste, true, true, false),
-            InsertPlan::CopyOnly,
+            Some(InsertPlan::CopyOnly),
             "raw dictations never YOLO-send, so Copy dictation only copies them"
         );
         assert_eq!(
             InsertPlan::decide(OutputTarget::Print, true, true, false),
-            InsertPlan::None
+            None
         );
     }
 

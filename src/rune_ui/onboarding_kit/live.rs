@@ -630,13 +630,8 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
 
     // Permissions, as the tour's setup rows show them.
     if let Some(view) = &view {
-        for row in &view.rows {
-            match row.item {
-                SetupItem::Microphone => live.microphone = row.status,
-                SetupItem::Accessibility => live.accessibility = row.status,
-                _ => {}
-            }
-        }
+        live.microphone = view.microphone;
+        live.accessibility = view.accessibility;
         live.restart = view.restart;
         if view.practice == Practice::TooShort && live.practice != Practice::TooShort {
             s.taps = s.taps.saturating_add(1);

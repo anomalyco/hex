@@ -327,11 +327,18 @@ pub(crate) fn tr(english: &str) -> &str {
     table.get(english).copied().unwrap_or(english)
 }
 
-/// Whether the interface is in English, for labels whose English form
-/// differs from the translated key (macOS menus' title case).
+/// A menu label in the interface language: macOS's title case in English
+/// (`english_title`), else the window's sentence-case label translated, with
+/// the title's trailing `…` kept.
 #[cfg(any(target_os = "macos", test))]
-pub(crate) fn english() -> bool {
-    current() == ENGLISH
+pub(crate) fn menu_label(english_title: &str, translated: &str) -> String {
+    if current() == ENGLISH {
+        return english_title.into();
+    }
+    match english_title.strip_suffix('…') {
+        Some(_) if !translated.ends_with('…') => format!("{translated}…"),
+        _ => translated.into(),
+    }
 }
 
 /// Translate a `{}` template and substitute the dynamic value, keeping

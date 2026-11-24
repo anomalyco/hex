@@ -157,7 +157,6 @@ pub enum ItemStatus {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ModelProgress {
-    pub installed: bool,
     pub downloading: Option<f32>,
     pub failed: bool,
 }
@@ -229,25 +228,11 @@ pub enum Effect {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Row {
-    pub item: SetupItem,
-    pub status: ItemStatus,
-    /// The first row still to do; its button carries the screen's accent.
-    pub next: bool,
-}
-
-#[derive(Clone, Debug, PartialEq)]
 pub struct View {
     pub step: Step,
-    pub rows: Vec<Row>,
-    /// Every setup row is ready.
-    pub ready: bool,
-    /// Dictation can run: permissions and the model are ready.
-    pub dictation_ready: bool,
+    pub microphone: ItemStatus,
+    pub accessibility: ItemStatus,
     pub model: ItemStatus,
-    /// The tour downloaded the model, so its progress is worth showing
-    /// outside the setup rows.
-    pub show_download: bool,
     pub practice: Practice,
     /// The listener needs a restart Hex will not do by itself again.
     pub reopen: bool,
@@ -275,8 +260,6 @@ pub struct Flow {
     status: SetupStatus,
     model: ModelProgress,
     permissions: bool,
-    /// Windows: the microphone switch was seen off, so its row shows.
-    microphone_row: bool,
     practice_step: bool,
     /// Microphone, then Accessibility.
     asked: [bool; 2],
@@ -300,12 +283,8 @@ impl Flow {
         let mut flow = Self {
             step: Step::Welcome,
             status,
-            model: ModelProgress {
-                installed: status.transcription_model,
-                ..ModelProgress::default()
-            },
+            model: ModelProgress::default(),
             permissions,
-            microphone_row: status.microphone != PermissionState::Ready,
             practice_step: practice,
             asked: [false; 2],
             accessibility_stale: false,
@@ -391,11 +370,9 @@ impl Flow {
     pub fn view(&self) -> View {
         View {
             step: self.step,
-            rows: self.rows(),
-            ready: self.setup_ready(),
-            dictation_ready: self.status.ready(),
+            microphone: self.microphone_status(),
+            accessibility: self.accessibility_status(),
             model: self.model_status(),
-            show_download: self.download_requested && !self.model_in_setup(),
             practice: self.practice,
             reopen: self.relaunch == RelaunchState::ReopenNeeded,
             restart: self.restart_needed(),
@@ -445,7 +422,6 @@ impl Flow {
 
     fn update(&mut self, status: SetupStatus, model: ModelProgress) -> Effect {
         let was_ready = self.setup_ready();
-        self.microphone_row |= status.microphone != PermissionState::Ready;
         self.status = status;
         // A grant answers what was asked, as the host's own record of asks
         // does: a permission switched off again is asked for afresh.
@@ -480,55 +456,28 @@ impl Flow {
         Effect::None
     }
 
-    fn rows(&self) -> Vec<Row> {
-        let mut rows = Vec::with_capacity(4);
-        if self.permissions || self.microphone_row {
-            rows.push(Row {
-                item: SetupItem::Microphone,
-                status: match self.status.microphone {
-                    PermissionState::Ready => ItemStatus::Ready,
-                    PermissionState::NeedsSettings if self.microphone_guide => ItemStatus::Waiting,
-                    PermissionState::NeedsSettings => ItemStatus::Denied,
-                    PermissionState::NeedsRequest if self.asked[0] => ItemStatus::Waiting,
-                    PermissionState::NeedsRequest => ItemStatus::Todo,
-                    PermissionState::NeedsRestart => ItemStatus::Restart,
-                },
-                next: false,
-            });
+    fn microphone_status(&self) -> ItemStatus {
+        match self.status.microphone {
+            PermissionState::Ready => ItemStatus::Ready,
+            PermissionState::NeedsSettings if self.microphone_guide => ItemStatus::Waiting,
+            PermissionState::NeedsSettings => ItemStatus::Denied,
+            PermissionState::NeedsRequest if self.asked[0] => ItemStatus::Waiting,
+            PermissionState::NeedsRequest => ItemStatus::Todo,
+            PermissionState::NeedsRestart => ItemStatus::Restart,
         }
-        if self.permissions {
-            rows.push(Row {
-                item: SetupItem::Accessibility,
-                status: match self.status.accessibility {
-                    PermissionState::Ready => ItemStatus::Ready,
-                    PermissionState::NeedsRestart => ItemStatus::Restart,
-                    _ if self.asked[1] && self.accessibility_stale => ItemStatus::Stale,
-                    _ if self.asked[1] => ItemStatus::Waiting,
-                    _ => ItemStatus::Todo,
-                },
-                next: false,
-            });
+    }
+
+    fn accessibility_status(&self) -> ItemStatus {
+        if !self.permissions {
+            return ItemStatus::Ready;
         }
-        if self.model_in_setup() {
-            rows.push(Row {
-                item: SetupItem::Model,
-                status: self.model_status(),
-                next: false,
-            });
+        match self.status.accessibility {
+            PermissionState::Ready => ItemStatus::Ready,
+            PermissionState::NeedsRestart => ItemStatus::Restart,
+            _ if self.asked[1] && self.accessibility_stale => ItemStatus::Stale,
+            _ if self.asked[1] => ItemStatus::Waiting,
+            _ => ItemStatus::Todo,
         }
-        if let Some(row) = rows.iter_mut().find(|row| {
-            !matches!(
-                row.status,
-                ItemStatus::Ready
-                    | ItemStatus::Downloading(_)
-                    | ItemStatus::Waiting
-                    | ItemStatus::Stale
-                    | ItemStatus::Restart
-            )
-        }) {
-            row.next = true;
-        }
-        rows
     }
 
     fn passes(&self, step: Step) -> bool {
@@ -1720,18 +1669,7 @@ mod tests {
     }
 
     fn installed() -> ModelProgress {
-        ModelProgress {
-            installed: true,
-            ..ModelProgress::default()
-        }
-    }
-
-    fn statuses(flow: &Flow) -> Vec<(SetupItem, ItemStatus, bool)> {
-        flow.view()
-            .rows
-            .into_iter()
-            .map(|row| (row.item, row.status, row.next))
-            .collect()
+        ModelProgress::default()
     }
 
     fn downloading(progress: f32) -> ModelProgress {
@@ -1756,7 +1694,11 @@ mod tests {
         assert_eq!(flow.on(Input::Continue), Effect::None, "setup is not ready");
         assert_eq!(flow.step(), Step::Setup);
         flow.on(Input::Status(ready_status(), installed()));
-        assert!(flow.view().ready);
+        let view = flow.view();
+        assert_eq!(
+            (view.microphone, view.accessibility, view.model),
+            (ItemStatus::Ready, ItemStatus::Ready, ItemStatus::Ready)
+        );
         flow.on(Input::Continue);
         assert_eq!(flow.step(), Step::TryIt);
         assert_eq!(flow.on(Input::Continue), Effect::None, "practice first");
@@ -1779,7 +1721,6 @@ mod tests {
             "on the welcome screen, before any permission"
         );
         assert_eq!(flow.step(), Step::Welcome);
-        assert!(flow.view().show_download);
         assert_eq!(
             flow.view().model,
             ItemStatus::Downloading(0.0),
@@ -1801,7 +1742,7 @@ mod tests {
             );
             flow
         };
-        assert!(!installed_flow.view().show_download);
+        assert_eq!(installed_flow.view().model, ItemStatus::Ready);
     }
 
     #[test]
@@ -1863,12 +1804,10 @@ mod tests {
         flow.on(Input::Status(denied, ModelProgress::default()));
         flow.on(Input::Grant(SetupItem::Microphone));
         flow.on(Input::Grant(SetupItem::Accessibility));
+        let view = flow.view();
         assert_eq!(
-            statuses(&flow),
-            [
-                (SetupItem::Microphone, ItemStatus::Waiting, false),
-                (SetupItem::Accessibility, ItemStatus::Waiting, false),
-            ]
+            (view.microphone, view.accessibility),
+            (ItemStatus::Waiting, ItemStatus::Waiting)
         );
         let granted = SetupStatus {
             transcription_model: false,
@@ -1876,59 +1815,50 @@ mod tests {
         };
         flow.on(Input::Status(granted, ModelProgress::default()));
         flow.on(Input::Status(denied, ModelProgress::default()));
+        let view = flow.view();
         assert_eq!(
-            statuses(&flow),
-            [
-                (SetupItem::Microphone, ItemStatus::Denied, true),
-                (SetupItem::Accessibility, ItemStatus::Todo, false),
-            ],
+            (view.microphone, view.accessibility),
+            (ItemStatus::Denied, ItemStatus::Todo),
             "not still waiting on the earlier ask"
         );
     }
 
     #[test]
-    fn permissions_are_the_only_rows_and_the_model_waits_for_practice() {
+    fn permissions_finish_setup_while_the_model_waits_for_practice() {
         let mut flow = Flow::new(Step::Setup, fresh_status(), true, true);
+        let view = flow.view();
         assert_eq!(
-            statuses(&flow),
-            [
-                (SetupItem::Microphone, ItemStatus::Todo, true),
-                (SetupItem::Accessibility, ItemStatus::Todo, false),
-            ]
+            (view.microphone, view.accessibility),
+            (ItemStatus::Todo, ItemStatus::Todo)
         );
         flow.on(Input::Status(permissions_only(), downloading(0.5)));
-        assert!(flow.view().ready, "permissions alone finish setup");
-        assert!(!flow.view().dictation_ready);
+        assert!(flow.setup_ready(), "permissions alone finish setup");
         flow.on(Input::Continue);
         assert_eq!(flow.step(), Step::TryIt);
         assert_eq!(flow.view().model, ItemStatus::Downloading(0.5));
         flow.on(Input::Status(ready_status(), installed()));
-        assert!(flow.view().dictation_ready);
+        assert_eq!(flow.view().model, ItemStatus::Ready);
     }
 
     #[test]
-    fn rows_flip_live_and_the_next_row_carries_the_accent() {
+    fn permission_statuses_flip_live() {
         let mut flow = Flow::new(Step::Setup, fresh_status(), true, true);
         assert_eq!(
             flow.on(Input::Grant(SetupItem::Microphone)),
             Effect::RequestMicrophone
         );
-        assert_eq!(flow.view().rows[0].status, ItemStatus::Waiting);
-        assert!(
-            flow.view().rows[1].next,
-            "a waiting row hands on the accent"
-        );
+        assert_eq!(flow.view().microphone, ItemStatus::Waiting);
+        assert_eq!(flow.view().accessibility, ItemStatus::Todo);
         let mut status = fresh_status();
         status.microphone = PermissionState::Ready;
         flow.on(Input::Status(status, downloading(0.4)));
-        assert_eq!(flow.view().rows[0].status, ItemStatus::Ready);
-        assert!(flow.view().rows[1].next);
+        assert_eq!(flow.view().microphone, ItemStatus::Ready);
+        assert_eq!(flow.view().accessibility, ItemStatus::Todo);
         assert_eq!(
             flow.on(Input::Grant(SetupItem::Accessibility)),
             Effect::ShowGuide(PermissionKind::Accessibility)
         );
-        assert_eq!(flow.view().rows[1].status, ItemStatus::Waiting);
-        assert!(!flow.view().rows[1].next, "a waiting row has no accent");
+        assert_eq!(flow.view().accessibility, ItemStatus::Waiting);
     }
 
     #[test]
@@ -1964,32 +1894,29 @@ mod tests {
         let mut status = fresh_status();
         status.microphone = PermissionState::NeedsSettings;
         let mut flow = Flow::new(Step::Setup, status, true, true);
-        assert_eq!(flow.view().rows[0].status, ItemStatus::Denied);
+        assert_eq!(flow.view().microphone, ItemStatus::Denied);
         assert_eq!(
             flow.on(Input::Grant(SetupItem::Microphone)),
             Effect::ShowGuide(PermissionKind::Microphone)
         );
-        assert_eq!(flow.view().rows[0].status, ItemStatus::Waiting);
+        assert_eq!(flow.view().microphone, ItemStatus::Waiting);
     }
 
     #[test]
-    fn platforms_without_permissions_show_only_the_model() {
+    fn platforms_without_permissions_gate_setup_on_the_model() {
         let status = SetupStatus {
             transcription_model: false,
             ..ready_status()
         };
         let mut flow = Flow::new(Step::Welcome, status, false, false);
+        let view = flow.view();
         assert_eq!(
-            statuses(&flow),
-            [(SetupItem::Model, ItemStatus::Todo, true)]
+            (view.microphone, view.accessibility, view.model),
+            (ItemStatus::Ready, ItemStatus::Ready, ItemStatus::Todo)
         );
         assert_eq!(
             flow.on(Input::Status(status, ModelProgress::default())),
             Effect::DownloadModel
-        );
-        assert!(
-            !flow.view().show_download,
-            "the setup row shows the progress"
         );
         flow.on(Input::Continue);
         assert_eq!(flow.step(), Step::Setup);
@@ -2001,7 +1928,7 @@ mod tests {
     }
 
     #[test]
-    fn a_switched_off_windows_microphone_adds_its_row_until_setup_ends() {
+    fn a_switched_off_windows_microphone_gates_setup_until_enabled() {
         let off = SetupStatus {
             microphone: PermissionState::NeedsSettings,
             ..ready_status()
@@ -2009,13 +1936,10 @@ mod tests {
         let mut flow = Flow::new(Step::Welcome, off, false, false);
         flow.on(Input::Continue);
         assert_eq!(flow.step(), Step::Setup);
+        let view = flow.view();
         assert_eq!(
-            statuses(&flow),
-            [
-                (SetupItem::Microphone, ItemStatus::Denied, true),
-                (SetupItem::Model, ItemStatus::Ready, false),
-            ],
-            "no Accessibility row"
+            (view.microphone, view.accessibility, view.model),
+            (ItemStatus::Denied, ItemStatus::Ready, ItemStatus::Ready)
         );
         assert_eq!(
             flow.on(Input::Grant(SetupItem::Microphone)),
@@ -2025,15 +1949,11 @@ mod tests {
             flow.on(Input::Status(ready_status(), installed())),
             Effect::AdvanceSoon
         );
+        assert_eq!(flow.view().microphone, ItemStatus::Ready);
+        let ready = Flow::new(Step::Welcome, ready_status(), false, false).view();
         assert_eq!(
-            statuses(&flow)[0],
-            (SetupItem::Microphone, ItemStatus::Ready, false),
-            "the row stays to show its check"
-        );
-        assert_eq!(
-            statuses(&Flow::new(Step::Welcome, ready_status(), false, false)),
-            [(SetupItem::Model, ItemStatus::Ready, false)],
-            "a switch already on adds nothing"
+            (ready.microphone, ready.accessibility, ready.model),
+            (ItemStatus::Ready, ItemStatus::Ready, ItemStatus::Ready)
         );
     }
 
@@ -2238,7 +2158,7 @@ mod tests {
             Effect::AdvanceSoon
         );
         assert!(!flow.view().restart);
-        assert!(flow.view().ready);
+        assert!(flow.setup_ready());
     }
 
     #[test]
@@ -2251,10 +2171,7 @@ mod tests {
             },
             downloading(0.5),
         ));
-        assert_eq!(
-            statuses(&flow)[1],
-            (SetupItem::Accessibility, ItemStatus::Restart, false)
-        );
+        assert_eq!(flow.view().accessibility, ItemStatus::Restart);
         assert!(!flow.view().restart, "the microphone is still off");
         assert_eq!(flow.on(Input::Restart), Effect::None);
         assert_eq!(
@@ -2272,7 +2189,7 @@ mod tests {
             downloading(0.5),
         ));
         assert!(flow.view().restart);
-        assert!(!flow.view().ready);
+        assert!(!flow.setup_ready());
         assert_eq!(flow.on(Input::Continue), Effect::None);
         assert_eq!(flow.on(Input::Restart), Effect::Relaunch);
         assert!(!flow.view().restart, "one restart per tour");
@@ -2475,24 +2392,15 @@ mod tests {
             flow.on(Input::Grant(SetupItem::Accessibility)),
             Effect::ShowGuide(PermissionKind::Accessibility)
         );
-        assert_eq!(
-            statuses(&flow)[1],
-            (SetupItem::Accessibility, ItemStatus::Waiting, false)
-        );
+        assert_eq!(flow.view().accessibility, ItemStatus::Waiting);
 
         flow.set_accessibility_stale(true);
-        assert_eq!(
-            statuses(&flow)[1],
-            (SetupItem::Accessibility, ItemStatus::Stale, false)
-        );
+        assert_eq!(flow.view().accessibility, ItemStatus::Stale);
         assert_eq!(
             flow.on(Input::Grant(SetupItem::Accessibility)),
             Effect::ResetPermission(PermissionKind::Accessibility)
         );
-        assert_eq!(
-            statuses(&flow)[1],
-            (SetupItem::Accessibility, ItemStatus::Waiting, false)
-        );
+        assert_eq!(flow.view().accessibility, ItemStatus::Waiting);
     }
 
     #[test]

@@ -366,7 +366,6 @@ pub(crate) fn run(
                                 copied: false,
                             })
                         }
-                        InsertPlan::None => Ok(InsertResult::default()),
                     }
                 };
                 output_settings.deliver(
