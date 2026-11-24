@@ -155,7 +155,16 @@ A refused file is never shown entry by entry and nothing of it is kept.
 
    Strict JSON allows no comments, no trailing commas, no single quotes or unquoted keys, no
    `NaN` or `Infinity`, no leading zeros, and exactly one value. It also allows no raw control
-   character U+0000–U+001F inside a string, and no `\u` escape for a lone surrogate. Most
+   character U+0000–U+001F inside a string, and no `\u` escape for a lone surrogate. For this
+   format, a number that a 64-bit float can't hold (`1e400`, or a 400-digit integer) is
+   `notJSON` too, wherever it is in the file.
+
+   Where a problem is met:
+   - a repeated key, at its second appearance;
+   - too deep, at the opening bracket that goes past 8 levels;
+   - anything else, where the text stops being strict JSON.
+
+   So a file with two problems is refused for the earlier one. Most
    parsers check some of these and not others. That is why every platform checks all of them.
 6. **The top level isn't an object:** refuse, `notAnObject`.
 7. **`format` isn't the string `"hex.words"`:** refuse, `notHexWords`. A typing config is
@@ -250,7 +259,7 @@ Every writer:
 - writes text **cleaned** as above, and writes non-ASCII as UTF-8 rather than `\u` escapes;
   any whitespace layout is fine;
 - leaves out every entry a reader would skip, applying the same rules and limits in the same
-  order, and tells the person how many it left out and why. It never writes a file its own
+  order (a full list's limit first), and tells the person how many it left out and why. It never writes a file its own
   reader would skip anything in. Its output passes `hex-words.schema.json`;
 - writes `soundsLike` only when a term has spellings, and `learned` only when it is `true`;
 - names the file `hex-words.hexwords` and writes it atomically (write, then rename).
@@ -269,6 +278,7 @@ What each app exports:
   - the new **Word replacements** list;
   - optionally, after them, **learned dictation fixes**. This is behind a switch in the export
     sheet that is off by default. Only fixes in use are written: applied and not switched off.
+    "In use" means Hex applies them now: on Android, only while Labs › Learn from my fixes is on.
     They are written with `learned: true`. A learned fix whose heard words the person already
     replaces is left out as `duplicate`.
 
@@ -311,8 +321,10 @@ become replacements come last.
 - The desktop's 1,000 applies to importing only. A Global list that already holds more keeps
   them all.
 - A phone's merge reads and changes only Custom vocabulary and Word replacements. It never
-  changes the learned fixes. When dictating, a Word replacement wins over a learned fix with the
-  same heard words.
+  changes the learned fixes.
+- On a phone, Word replacements apply to every dictation Hex writes there: the app's own and the
+  keyboard's, but never a translated one. They run before learned fixes, and a Word replacement
+  wins over a learned fix with the same heard words.
 
 **Undo.** Before Add, the app keeps a copy of both lists. A phone also keeps the state of any
 switch the sheet turned on (Custom vocabulary). Undo puts that copy back exactly. It is offered
