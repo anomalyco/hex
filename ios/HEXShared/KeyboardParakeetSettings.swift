@@ -129,33 +129,6 @@ nonisolated struct KeyboardParakeetNotice {
         self.defaults = defaults
     }
 
-    /// The keyboard would dictate with Hex's model, as `KeyboardParakeet.choice` and Hex's own
-    /// download decide (`KeyboardParakeetDownload.hold`): the switch on, an iPhone with the
-    /// memory, the keyboard's limit measured and enough, English, not Two-language dictation or
-    /// the multilingual model. And the model isn't downloaded yet.
-    static func modelAwaitsDownload(
-        settings: KeyboardParakeetSettings = KeyboardParakeetSettings(),
-        english: Bool = Self.dictatesEnglish(),
-        otherEngine: Bool = TwoLanguageDictationSettings().isEnabled || MultilingualParakeetSettings().language() != nil,
-        downloaded: Bool = SpeechModelStore.isComplete(SpeechModelStore.parakeetV2)
-    ) -> Bool {
-        KeyboardParakeetPlan.resolve(
-            isEnabled: settings.isEnabled,
-            fitsDevice: KeyboardParakeetSettings.fits(),
-            twoLanguageEnabled: otherEngine,
-            multilingualLanguage: nil,
-            wantedLanguage: english ? "en-US" : "fr-FR",
-            keyboardLimit: settings.keyboardLimit,
-            v2Downloaded: downloaded,
-            ultraDownloaded: false
-        ).awaitsV2Download
-    }
-
-    static func dictatesEnglish(_ languages: LanguageSettings = LanguageSettings()) -> Bool {
-        guard let wanted = languages.wantedDictationLanguage() else { return false }
-        return SpeechLanguagePicker.isEnglish(wanted)
-    }
-
     /// Not opened from or dismissed, under three showings, and not shown today.
     func mayShow(now: Date = Date(), calendar: Calendar = .current) -> Bool {
         guard let defaults, !defaults.bool(forKey: Self.openedKey), !defaults.bool(forKey: Self.dismissedKey),

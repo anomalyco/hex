@@ -1005,7 +1005,16 @@ final class KeyboardBridgeTests: XCTestCase {
         let settings = KeyboardParakeetSettings(defaults: UserDefaults(suiteName: suite))
         settings.recordKeyboardLimit(177 * KeyboardParakeetBudget.megabyte)
         func awaits(_ settings: KeyboardParakeetSettings, english: Bool = true, other: Bool = false, downloaded: Bool = false) -> Bool {
-            KeyboardParakeetNotice.modelAwaitsDownload(settings: settings, english: english, otherEngine: other, downloaded: downloaded)
+            KeyboardParakeetPlan.resolve(
+                isEnabled: settings.isEnabled,
+                fitsDevice: true,
+                twoLanguageEnabled: other,
+                multilingualLanguage: nil,
+                wantedLanguage: english ? "en-US" : "fr-FR",
+                keyboardLimit: settings.keyboardLimit,
+                v2Downloaded: downloaded,
+                ultraDownloaded: false
+            ).awaitsV2Download
         }
         XCTAssertTrue(awaits(settings), "English, the switch on, an iPhone and a keyboard with the memory, not downloaded")
         XCTAssertFalse(awaits(settings, downloaded: true), "downloaded")
@@ -1116,60 +1125,78 @@ final class KeyboardBridgeTests: XCTestCase {
         return nil
     }
 
-    func testLocalCaptureStaysStartingUntilFirstAudioArrives() {
+    func testLocalCapturePhaseProjectsSnapshotsAndCaptureOwnership() {
         let t0 = 50_000.0
-        var phase: KeyboardLocalCapturePhase = .starting(jobID: "job-1", requestedAt: t0)
+
+        // Idle and armed stay unseen (nil snapshot); only non-failed armed captures match jobID.
+        let idle: KeyboardLocalCapturePhase = .idle
+        XCTAssertFalse(idle.isActive)
+        XCTAssertFalse(idle.isCapturing("job-1"))
+        XCTAssertEqual(idle.visibleStage, .idle)
+        XCTAssertNil(idle.snapshot(now: t0, loudnessDB: -62))
+
+        let armed: KeyboardLocalCapturePhase = .armed(jobID: "job-1")
+        XCTAssertTrue(armed.isActive)
+        XCTAssertTrue(armed.isCapturing("job-1"))
+        XCTAssertFalse(armed.isCapturing("other"))
+        XCTAssertEqual(armed.visibleStage, .idle)
+        XCTAssertNil(armed.snapshot(now: t0 + 0.05, loudnessDB: -30), "armed stays unseen")
+
+        let armedFailed: KeyboardLocalCapturePhase = .armed(jobID: "job-1", failed: true)
+        XCTAssertTrue(armedFailed.isActive)
+        XCTAssertFalse(armedFailed.isCapturing("job-1"), "failed armed capture accepts no further events")
+        XCTAssertEqual(armedFailed.visibleStage, .idle)
+        XCTAssertNil(armedFailed.snapshot(now: t0 + 0.10, loudnessDB: -62))
 
         // While starting, the snapshot is .starting with no recording clock yet.
-        XCTAssertTrue(phase.isActive)
-        XCTAssertTrue(phase.isCapturing("job-1"))
-        XCTAssertEqual(phase.visibleStage, .starting)
-        let startingSnap = phase.snapshot(now: t0 + 0.15, loudnessDB: -25)
+        let starting: KeyboardLocalCapturePhase = .starting(jobID: "job-1")
+        XCTAssertTrue(starting.isActive)
+        XCTAssertTrue(starting.isCapturing("job-1"))
+        XCTAssertFalse(starting.isCapturing("other"))
+        XCTAssertEqual(starting.visibleStage, .starting)
+        let startingSnap = starting.snapshot(now: t0 + 0.15, loudnessDB: -25)
         XCTAssertEqual(startingSnap?.state, .starting)
+        XCTAssertEqual(startingSnap?.jobID, "job-1")
         XCTAssertNil(startingSnap?.recordingStartedAt)
 
-        // Samples from another job never promote this start.
-        XCTAssertFalse(phase.receiveAudio(jobID: "other", at: t0 + 0.2))
-        XCTAssertEqual(phase.visibleStage, .starting)
-
-        // First real audio buffer promotes starting -> recording, stamped at first-audio time.
-        XCTAssertTrue(phase.receiveAudio(jobID: "job-1", at: t0 + 0.25))
-        XCTAssertEqual(phase, .recording(jobID: "job-1", startedAt: t0 + 0.25))
-        let recSnap = phase.snapshot(now: t0 + 1.25, loudnessDB: -28)
+        // Recording projects startedAt and loudnessDB so the elapsed clock starts at first audio.
+        let recording: KeyboardLocalCapturePhase = .recording(jobID: "job-1", startedAt: t0 + 0.25)
+        XCTAssertTrue(recording.isActive)
+        XCTAssertTrue(recording.isCapturing("job-1"))
+        XCTAssertEqual(recording.visibleStage, .recording)
+        let recSnap = recording.snapshot(now: t0 + 1.25, loudnessDB: -28)
         XCTAssertEqual(recSnap?.state, .recording)
         XCTAssertEqual(recSnap?.recordingStartedAt, t0 + 0.25)
+        XCTAssertEqual(recSnap?.loudnessDB, -28)
         XCTAssertEqual(recSnap?.recordingElapsed(at: t0 + 1.25) ?? -1, 1.0, accuracy: 0.001)
 
-        // Later buffers keep the original startedAt timestamp.
-        XCTAssertFalse(phase.receiveAudio(jobID: "job-1", at: t0 + 0.40))
-        XCTAssertEqual(phase, .recording(jobID: "job-1", startedAt: t0 + 0.25))
-    }
+        // Transcribing is active but no longer capturing.
+        let transcribing: KeyboardLocalCapturePhase = .transcribing(jobID: "job-1")
+        XCTAssertTrue(transcribing.isActive)
+        XCTAssertFalse(transcribing.isCapturing("job-1"))
+        XCTAssertEqual(transcribing.visibleStage, .transcribing)
+        XCTAssertEqual(transcribing.snapshot(now: t0 + 1.5, loudnessDB: -62)?.state, .transcribing)
 
-    func testArmedCapturePromotesToStartingOrRecordingBasedOnAudioArrival() {
-        let t0 = 60_000.0
+        // Finished projects the KeyboardResult payload; failed expires once until <= now.
+        let result = KeyboardResult(id: "res-1", transcript: "Ship it.", heard: "ship it")
+        let finished: KeyboardLocalCapturePhase = .finished(jobID: "job-1", result: result)
+        XCTAssertFalse(finished.isActive)
+        XCTAssertEqual(finished.visibleStage, .finished)
+        let finSnap = finished.snapshot(now: t0 + 2.0, loudnessDB: -62)
+        XCTAssertEqual(finSnap?.state, .ready)
+        XCTAssertEqual(finSnap?.resultID, "res-1")
+        XCTAssertEqual(finSnap?.transcript, "Ship it.")
+        XCTAssertEqual(finSnap?.heard, "ship it")
 
-        // Quick tap before audio arrived: armed -> starting -> recording on first buffer.
-        var quickTap: KeyboardLocalCapturePhase = .armed(
-            jobID: "tap",
-            requestedAt: t0,
-            readiness: .starting(.awaitingFirstAudio)
-        )
-        XCTAssertNil(quickTap.snapshot(now: t0 + 0.05, loudnessDB: -62), "armed stays unseen")
-        XCTAssertEqual(quickTap.keepArmed(), .starting(.awaitingFirstAudio))
-        XCTAssertEqual(quickTap, .starting(jobID: "tap", requestedAt: t0, stage: .awaitingFirstAudio))
-        XCTAssertTrue(quickTap.receiveAudio(jobID: "tap", at: t0 + 0.22))
-        XCTAssertEqual(quickTap, .recording(jobID: "tap", startedAt: t0 + 0.22))
-
-        // Hold where audio already flowed while armed: armed -> recording immediately.
-        var held: KeyboardLocalCapturePhase = .armed(
-            jobID: "hold",
-            requestedAt: t0,
-            readiness: .starting(.awaitingFirstAudio)
-        )
-        XCTAssertFalse(held.receiveAudio(jobID: "hold", at: t0 + 0.18))
-        XCTAssertNil(held.snapshot(now: t0 + 0.20, loudnessDB: -30), "still unseen until kept")
-        XCTAssertEqual(held.keepArmed(), .recording(startedAt: t0 + 0.18))
-        XCTAssertEqual(held, .recording(jobID: "hold", startedAt: t0 + 0.18))
+        let failed: KeyboardLocalCapturePhase = .failed(message: "Mic busy", until: t0 + 8.0)
+        XCTAssertFalse(failed.isActive)
+        XCTAssertEqual(failed.visibleStage, .failed)
+        let failSnap = failed.snapshot(now: t0 + 7.9, loudnessDB: -62)
+        XCTAssertEqual(failSnap?.state, .failed)
+        XCTAssertEqual(failSnap?.heartbeat, 0)
+        XCTAssertEqual(failSnap?.expiresAt, 0)
+        XCTAssertEqual(failSnap?.message, "Mic busy")
+        XCTAssertNil(failed.snapshot(now: t0 + 8.0, loudnessDB: -62))
     }
 
     func testKeyboardViewModelShowsStartingUntilAudioFlowsAndHandlesEarlyCancelAndFailure() {
