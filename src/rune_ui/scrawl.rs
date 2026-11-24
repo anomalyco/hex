@@ -1,30 +1,41 @@
-//! The Annotate pane (macOS and Linux): Scrawl's captures inside Hex. The opt-in, the capture shortcut,
-//! the send-to list's shortcut, Screen Recording, the transcriber, the captures folder and how long
-//! captures are kept, and Scrawl's own app, which keeps the shortcut while
-//! it runs until "Use Hex for annotations" asks it to quit.
+//! The Annotate pane (macOS, Linux, and Windows): Scrawl's captures inside
+//! Hex. The opt-in with Screen Recording while it's missing and the capture
+//! shortcut, collapsed How it works, what happens after an annotation (how
+//! long it's kept and its folder), optional Agents setup, and an Advanced fold
+//! for the transcriber, demos, and the replay Lab. Scrawl's own app keeps the
+//! shortcut while it runs until "Use Hex for annotations" asks it to quit.
 
-use rune::{El, row, text};
+use rune::{El, col, row, text};
 use scrawl_capture::retention::{Policy, Preset};
 
 use super::controls::{
-    ButtonKind, Choice, Paint, button, card, described_row, folder_label, folding, note, page,
-    section, section_with, segmented, select, setting_row, step_row, toggle_row,
+    ButtonKind, CardRow, Choice, METRICS, Paint, button, card, folder_label, folding, icon_row,
+    icon_toggle_row, nested, note, page, section, section_with, segmented, select, setting_row,
+    step_row,
 };
-use super::general::keys_button;
+use super::general::{advanced_open, advanced_toggle, disclosure_link, keys_button};
+use super::icons::{CLOCK, FOLDER, KEYBOARD, WAVE};
 use super::lists::permission_control;
 use super::platform::{PlatformRequest, ScrawlRequest, ScrawlView};
 use super::settings::cancel_capture;
-use super::{Menu, ShortcutTarget, Ui};
+use super::sidebar::SCRAWL_ICON;
+use super::{Menu, Pane, ShortcutTarget, Ui};
 use crate::agent_install::{self, Agent, AgentStatus, SkillState};
 use crate::app_settings::{AppSettings, CaptureTranscriber};
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::desktop::onboarding::{PermissionAction, PermissionKind};
 
-fn description(enabled: bool) -> &'static str {
-    if enabled {
-        tr("Record your screen, draw on it, and talk over it with the shortcut below")
+/// The switch's second line: the whole gesture with the bound shortcut while
+/// on and a shortcut is bound, else what Annotate does.
+fn description(ui: &Ui, enabled: bool) -> String {
+    if enabled && ui.records_shortcuts() {
+        let separator = if cfg!(target_os = "macos") { "" } else { "+" };
+        tr_fill(
+            "Tap {}, talk and draw; tap again and it's copied",
+            &ui.settings.capture.hotkey.keycaps().join(separator),
+        )
     } else {
-        tr("Off. Hex records nothing and keeps no shortcut until you turn this on.")
+        tr("Record your screen, draw on it, and talk over it").into()
     }
 }
 
@@ -70,10 +81,8 @@ pub(super) fn toggle(ui: &mut Ui) {
 
 fn transcriber_description(transcriber: CaptureTranscriber) -> &'static str {
     match transcriber {
-        CaptureTranscriber::Parakeet => {
-            tr("The model Hex dictates with, with a time for every word")
-        }
-        CaptureTranscriber::Apple => tr("Apple's speech recognizer, as Scrawl uses"),
+        CaptureTranscriber::Parakeet => tr("Uses Hex's dictation model"),
+        CaptureTranscriber::Apple => tr("Apple's speech recognizer"),
     }
 }
 
@@ -94,23 +103,20 @@ fn retention_label(policy: Policy) -> String {
     }
 }
 
-fn retention_description(policy: Policy) -> String {
-    match policy.bundle_days {
-        Some(days) => tr_fill(
-            "Video and audio go first; annotations are removed after {} days",
-            &days.to_string(),
-        ),
-        None if policy.media_days.is_some() => {
-            tr("Video and audio go first; annotations stay until you remove them").into()
-        }
-        None => tr("Annotations stay until you remove them").into(),
+/// The non-obvious half of retention: the dropdown already names video days,
+/// so the caption only notes how long the annotation itself lasts.
+fn retention_description(policy: Policy) -> Option<String> {
+    match (policy.media_days, policy.bundle_days) {
+        (_, Some(days)) => Some(tr_fill("Annotations for {} days", &days.to_string())),
+        (Some(_), None) => Some(tr("Annotations stay until you remove them").into()),
+        (None, None) => None,
     }
 }
 
 /// The steps in order, each with its keys where it has any: one key taps
 /// to start and stop and is held to draw; the capsule's pen draws without
 /// it; Esc stops drawing.
-fn how_it_works(ui: &Ui, p: Paint) -> Vec<El> {
+fn how_it_works_steps(ui: &Ui, p: Paint) -> Vec<El> {
     let shortcut = ui.settings.capture.hotkey.keycaps();
     let keys = |key: &str, parts: &[String]| Some(super::controls::keycaps(p, key, parts));
     // Wayland tells Hex nothing of Shift outside its own windows.
@@ -167,6 +173,36 @@ fn how_it_works(ui: &Ui, p: Paint) -> Vec<El> {
     ]
 }
 
+/// A fold's link, and under it, while open, its card.
+fn fold(p: Paint, key: &str, link: El, rows: Option<Vec<El>>) -> El {
+    col()
+        .key(key)
+        .gap(METRICS.label_gap)
+        .child(link)
+        .children(rows.map(|rows| card(p, "card", rows)))
+}
+
+/// How it works, closed until its link is pressed.
+fn how_it_works(ui: &Ui, p: Paint, view: &ScrawlView) -> El {
+    let link = disclosure_link(
+        p,
+        "how-toggle",
+        tr("How it works"),
+        view.how_it_works,
+        |ui: &mut Ui| {
+            if let Some(view) = ui.platform.scrawl.as_mut() {
+                view.how_it_works = !view.how_it_works;
+            }
+        },
+    );
+    fold(
+        p,
+        "how",
+        link,
+        view.how_it_works.then(|| how_it_works_steps(ui, p)),
+    )
+}
+
 fn scrawl_request(ui: &mut Ui, request: ScrawlRequest) {
     ui.ask(PlatformRequest::Scrawl(request));
 }
@@ -187,7 +223,7 @@ fn scrawl_running(p: Paint, view: &ScrawlView) -> El {
             "scrawl-running-row",
             tr("Scrawl is running"),
             Some(description),
-            super::controls::button(
+            button(
                 p,
                 "use-hex-for-captures",
                 tr("Use Hex for annotations"),
@@ -198,76 +234,88 @@ fn scrawl_running(p: Paint, view: &ScrawlView) -> El {
     )
 }
 
-fn shortcut_rows(ui: &Ui, p: Paint, view: &ScrawlView) -> Vec<El> {
+/// The switch, Screen Recording while Annotate can't record yet, and the
+/// shortcut (or desktop command on Linux without a shortcuts portal).
+fn top_rows(ui: &Ui, p: Paint, view: &ScrawlView) -> Vec<CardRow> {
     let enabled = ui.settings.capture.enabled;
+    let switch = if crate::policy::Policy::current().locks(crate::policy::Lock::Annotate) {
+        super::controls::managed_row(p, "capture-enabled", Some(&SCRAWL_ICON), tr("Annotate"))
+    } else {
+        icon_toggle_row(
+            p,
+            "capture-enabled",
+            &SCRAWL_ICON,
+            tr("Annotate"),
+            description(ui, enabled).as_str(),
+            enabled,
+            toggle,
+        )
+    };
+    let mut rows = vec![
+        switch.into(),
+        folding(
+            "capture-error-fold",
+            view.enable_error.as_ref().map(|error| {
+                note(
+                    "capture-error",
+                    &format!("{} {error}", tr("Could not update Annotate:")),
+                    p.danger(),
+                )
+            }),
+        ),
+        folding("screen-recording-fold", screen_recording_row(ui, p, view)),
+    ];
     // Without a shortcuts portal nothing registers the key: the row says
     // which command to bind in the desktop's own keyboard settings.
     if !ui.records_shortcuts() {
-        return vec![
-            note(
-                "no-portal",
-                tr(
-                    "Your desktop has no shortcuts portal. Bind this command in its keyboard settings.",
-                ),
-                p.muted(),
-            ),
-            super::settings::command_row(
-                p,
-                "capture-command",
-                tr("Annotate"),
-                tr("Start and stop an annotation"),
-                &["hex annotate toggle"],
-            ),
-        ];
-    }
-    let purpose = if enabled {
-        tr("Tap to start and stop; hold while recording to draw")
-    } else {
-        tr("Saved for when Annotate is on")
-    };
-    let mut rows = vec![described_row(
-        p,
-        "capture-shortcut",
-        tr("Shortcut"),
-        Some((purpose.to_string(), p.muted())),
-        keys_button(ui, p, ShortcutTarget::Capture),
-    )];
-    #[cfg(target_os = "macos")]
-    if crate::labs::Feature::AnnotateReplay.on_this_os()
-        && crate::labs::Feature::AnnotateReplay.on(&ui.settings)
-    {
-        let mut control = row()
-            .key("capture-replay-shortcut-control")
-            .gap(4.0)
-            .center_y()
-            .child(keys_button(ui, p, ShortcutTarget::CaptureReplay));
-        if ui.settings.capture.replay_hotkey.is_some() {
-            control = control.child(super::controls::icon_button(
-                p,
-                "clear-capture-replay-shortcut",
-                &rune_theme_opencode::icons::TRASH,
-                tr("Clear shortcut"),
-                |ui: &mut Ui| {
-                    ui.update(|settings| settings.capture.replay_hotkey = None);
-                },
-            ));
+        if enabled {
+            rows.push(
+                note(
+                    "no-portal",
+                    tr(
+                        "Your desktop has no shortcuts portal. Bind this command in its keyboard settings.",
+                    ),
+                    p.muted(),
+                )
+                .into(),
+            );
+            rows.push(
+                super::settings::command_row(
+                    p,
+                    "capture-command",
+                    tr("Annotate"),
+                    tr("Start and stop an annotation"),
+                    &["hex annotate toggle"],
+                )
+                .into(),
+            );
         }
-        rows.push(described_row(
-            p,
-            "capture-replay-shortcut",
-            tr("Replay last 15 s"),
-            Some((
-                tr("Press to save the last 15 s; hold to narrate over it").to_string(),
-                p.muted(),
-            )),
-            control,
-        ));
+        return rows;
     }
-    // Linux asks through the desktop's screen-cast portal when a capture
-    // starts, and Wayland can't keep an overlay out of a recording.
-    if enabled && cfg!(target_os = "macos") && view.screen_needs_restart {
+    rows.push(
+        icon_row(
+            p,
+            "capture-shortcut",
+            &KEYBOARD,
+            tr("Shortcut"),
+            enabled.then(|| tr("Hold while recording to draw")),
+            keys_button(ui, p, ShortcutTarget::Capture),
+        )
+        .into(),
+    );
+    rows
+}
+
+/// Screen Recording, only while Annotate is on and can't record the screen.
+/// Linux asks through the desktop's screen-cast portal when a capture
+/// starts, so it has none.
+fn screen_recording_row(ui: &Ui, p: Paint, view: &ScrawlView) -> Option<El> {
+    if !ui.settings.capture.enabled || !cfg!(target_os = "macos") {
+        return None;
+    }
+    if view.screen_needs_restart {
         // macOS lets a running app use the grant only after it relaunches.
-        rows.push(setting_row(
+        return Some(nested(setting_row(
             p,
             "screen-recording",
             tr("Screen Recording"),
@@ -279,86 +327,41 @@ fn shortcut_rows(ui: &Ui, p: Paint, view: &ScrawlView) -> Vec<El> {
                 ButtonKind::Secondary,
                 |ui: &mut Ui, _| ui.ask(PlatformRequest::Permission(PermissionAction::Restart)),
             ),
-        ));
-        rows.push(recordings_row(ui, p));
-    } else if enabled && cfg!(target_os = "macos") {
-        let stale = !view.screen_recording && ui.platform.stale(PermissionKind::ScreenRecording);
-        rows.push(setting_row(
-            p,
-            "screen-recording",
-            tr("Screen Recording"),
-            Some(if view.screen_recording {
-                tr("Lets Annotate record your screen")
-            } else if stale {
-                tr("An older Hex entry can keep this off")
-            } else {
-                tr("Required to record your screen. macOS asks the first time you annotate, or allow it here.")
-            }),
-            permission_control(
-                p,
-                "screen-recording-allow",
-                ui.platform
-                    .control_for(PermissionKind::ScreenRecording, view.screen_recording),
-                ButtonKind::Secondary,
-                move |ui: &mut Ui| {
-                    let action = if stale {
-                        PermissionAction::ResetAndPrompt(PermissionKind::ScreenRecording)
-                    } else {
-                        PermissionAction::ShowGuide(PermissionKind::ScreenRecording)
-                    };
-                    ui.ask(PlatformRequest::Permission(action))
-                },
-            ),
-        ));
-        rows.push(recordings_row(ui, p));
+        )));
     }
-    rows
-}
-
-/// Lets screen recordings, captures included, show Hex's overlays, for
-/// showing someone how captures work.
-fn recordings_row(ui: &Ui, p: Paint) -> El {
-    toggle_row(
+    if view.screen_recording {
+        return None;
+    }
+    let stale = ui.platform.stale(PermissionKind::ScreenRecording);
+    Some(nested(setting_row(
         p,
-        "capture-show-in-recordings",
-        tr("Show in screen recordings"),
-        tr("Lets recordings, annotations included, show Hex's capsule, ink, and HUD, for demos"),
-        ui.settings.capture.show_overlays_in_recordings,
-        |ui: &mut Ui| {
-            ui.update(|settings| {
-                settings.capture.show_overlays_in_recordings =
-                    !settings.capture.show_overlays_in_recordings;
-            });
-        },
-    )
-}
-
-fn transcriber_row(ui: &Ui, p: Paint) -> El {
-    let transcriber = ui.settings.capture.transcriber;
-    let selected = CaptureTranscriber::ALL
-        .iter()
-        .position(|choice| *choice == transcriber)
-        .unwrap_or(0);
-    setting_row(
-        p,
-        "capture-transcriber",
-        tr("Transcriber"),
-        Some(transcriber_description(transcriber)),
-        segmented(
+        "screen-recording",
+        tr("Screen Recording"),
+        Some(if stale {
+            tr("An older Hex entry can keep this off")
+        } else {
+            tr("Hex can't see your screen yet")
+        }),
+        permission_control(
             p,
-            "capture-transcriber-choice",
-            &["Parakeet", "Apple"],
-            selected,
-            |ui: &mut Ui, index| {
-                let transcriber = CaptureTranscriber::ALL[index];
-                ui.update(|settings| settings.capture.transcriber = transcriber);
+            "screen-recording-allow",
+            ui.platform
+                .control_for(PermissionKind::ScreenRecording, false),
+            ButtonKind::Secondary,
+            move |ui: &mut Ui| {
+                let action = if stale {
+                    PermissionAction::ResetAndPrompt(PermissionKind::ScreenRecording)
+                } else {
+                    PermissionAction::ShowGuide(PermissionKind::ScreenRecording)
+                };
+                ui.ask(PlatformRequest::Permission(action))
             },
         ),
-    )
+    )))
 }
 
-fn storage_rows(ui: &Ui, p: Paint, view: &ScrawlView, layer: &mut Vec<El>) -> Vec<El> {
-    use super::controls::button;
+/// Keep, then the folder.
+fn after_rows(ui: &Ui, p: Paint, view: &ScrawlView, layer: &mut Vec<El>) -> Vec<El> {
     let policy = ui.settings.capture.retention();
     let mut choices: Vec<Choice> = Preset::ALL
         .into_iter()
@@ -381,36 +384,14 @@ fn storage_rows(ui: &Ui, p: Paint, view: &ScrawlView, layer: &mut Vec<El>) -> Ve
         });
     }
     let kept = retention_description(policy);
+    let folder = folder_label(&ui.settings.capture.captures_dir());
     let mut rows = vec![
-        setting_row(
-            p,
-            "capture-folder",
-            tr("Annotations folder"),
-            Some(tr("Shared with Scrawl, so both list the same annotations")),
-            row()
-                .key("controls")
-                .gap(8.0)
-                .center_y()
-                .child(button(
-                    p,
-                    "reveal-capture-folder",
-                    tr("Reveal"),
-                    ButtonKind::Secondary,
-                    |ui: &mut Ui, _| scrawl_request(ui, ScrawlRequest::RevealFolder),
-                ))
-                .child(button(
-                    p,
-                    "choose-capture-folder",
-                    &folder_label(&ui.settings.capture.captures_dir()),
-                    ButtonKind::Secondary,
-                    |ui: &mut Ui, _| scrawl_request(ui, ScrawlRequest::ChooseFolder),
-                )),
-        ),
-        setting_row(
+        icon_row(
             p,
             "capture-retention",
+            &CLOCK,
             tr("Keep"),
-            Some(kept.as_str()),
+            kept.as_deref(),
             select(
                 p,
                 "capture-retention-menu",
@@ -425,11 +406,118 @@ fn storage_rows(ui: &Ui, p: Paint, view: &ScrawlView, layer: &mut Vec<El>) -> Ve
                 layer,
             ),
         ),
+        icon_row(
+            p,
+            "capture-folder",
+            &FOLDER,
+            tr("Folder"),
+            Some(folder.as_str()),
+            row()
+                .key("controls")
+                .gap(8.0)
+                .center_y()
+                .child(button(
+                    p,
+                    "reveal-capture-folder",
+                    tr("Reveal"),
+                    ButtonKind::Secondary,
+                    |ui: &mut Ui, _| scrawl_request(ui, ScrawlRequest::RevealFolder),
+                ))
+                .child(button(
+                    p,
+                    "choose-capture-folder",
+                    tr("Change…"),
+                    ButtonKind::Secondary,
+                    |ui: &mut Ui, _| scrawl_request(ui, ScrawlRequest::ChooseFolder),
+                )),
+        ),
     ];
     if let Some(error) = &view.folder_error {
         rows.push(note("capture-folder-error", error, p.danger()));
     }
     rows
+}
+
+/// The transcriber, showing Hex in screen recordings for demos, and the
+/// replay Lab: settings most people never change. macOS only.
+fn more_rows(ui: &Ui, p: Paint) -> Vec<El> {
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+    let mut rows = vec![transcriber_row(ui, p), recordings_row(ui, p)];
+    #[cfg(target_os = "macos")]
+    if crate::labs::Feature::AnnotateReplay.on_this_os()
+        && crate::labs::Feature::AnnotateReplay.on(&ui.settings)
+    {
+        let mut control = row()
+            .key("capture-replay-shortcut-control")
+            .gap(4.0)
+            .center_y()
+            .child(keys_button(ui, p, ShortcutTarget::CaptureReplay));
+        if ui.settings.capture.replay_hotkey.is_some() {
+            control = control.child(super::controls::icon_button(
+                p,
+                "clear-capture-replay-shortcut",
+                &rune_theme_opencode::icons::TRASH,
+                tr("Clear shortcut"),
+                |ui: &mut Ui| {
+                    ui.update(|settings| settings.capture.replay_hotkey = None);
+                },
+            ));
+        }
+        use super::lists::{Tone, tone_tag};
+        rows.push(super::controls::icon_row_tagged(
+            p,
+            "capture-replay-shortcut",
+            &super::icons::REFRESH,
+            tr("Replay last 15 s"),
+            Some(tone_tag(p, "lab", tr("Lab"), Tone::Accent)),
+            Some(tr("Press to save; hold to narrate")),
+            control,
+        ));
+    }
+    rows
+}
+
+/// Lets screen recordings, captures included, show Hex's overlays.
+fn recordings_row(ui: &Ui, p: Paint) -> El {
+    icon_toggle_row(
+        p,
+        "capture-show-in-recordings",
+        &rune_kit::glyphs::EYE,
+        tr("Show Hex in screen recordings"),
+        tr("Include the capsule, ink, and HUD"),
+        ui.settings.capture.show_overlays_in_recordings,
+        |ui: &mut Ui| {
+            ui.update(|settings| {
+                settings.capture.show_overlays_in_recordings =
+                    !settings.capture.show_overlays_in_recordings;
+            });
+        },
+    )
+}
+
+fn transcriber_row(ui: &Ui, p: Paint) -> El {
+    let transcriber = ui.settings.capture.transcriber;
+    let selected = CaptureTranscriber::ALL
+        .iter()
+        .position(|choice| *choice == transcriber)
+        .unwrap_or(0);
+    icon_row(
+        p,
+        "capture-transcriber",
+        &WAVE,
+        tr("Transcriber"),
+        Some(transcriber_description(transcriber)),
+        segmented(
+            p,
+            "capture-transcriber-choice",
+            &["Parakeet", "Apple"],
+            selected,
+            |ui: &mut Ui, index| {
+                let transcriber = CaptureTranscriber::ALL[index];
+                ui.update(|settings| settings.capture.transcriber = transcriber);
+            },
+        ),
+    )
 }
 
 /// The command the copy row hands to people who manage skills themselves.
@@ -750,67 +838,28 @@ fn agents_section(ui: &Ui, p: Paint) -> El {
 pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let view = ui.platform.scrawl.clone().unwrap_or_default();
     let enabled = ui.settings.capture.enabled;
-    let mut content = page("content");
-    content = content.child(card(
-        p,
-        "enable",
-        vec![
-            if crate::policy::Policy::current().locks(crate::policy::Lock::Annotate) {
-                super::controls::managed_row(p, "capture-enabled", None, tr("Annotate"))
-            } else {
-                toggle_row(
-                    p,
-                    "capture-enabled",
-                    tr("Annotate"),
-                    description(enabled),
-                    enabled,
-                    toggle,
-                )
-            }
-            .into(),
-            folding(
-                "capture-error-fold",
-                view.enable_error.as_ref().map(|error| {
-                    note(
-                        "capture-error",
-                        &format!("{} {error}", tr("Could not update Annotate:")),
-                        p.danger(),
-                    )
-                }),
-            ),
-        ],
-    ));
-    if enabled && view.scrawl_running {
+    let mut content = page("content").child(card(p, "enable", top_rows(ui, p, &view)));
+    if !enabled {
+        return super::scroll_body(p.k, "scroll", content);
+    }
+    if view.scrawl_running {
         content = content.child(scrawl_running(p, &view));
     }
-    content = content.child(section(
+    content = content.child(how_it_works(ui, p, &view)).child(section(
         p,
-        "capture",
-        tr("Shortcuts"),
-        shortcut_rows(ui, p, &view),
+        "after",
+        tr("After an annotation"),
+        after_rows(ui, p, &view, layer),
     ));
-    if enabled {
-        content = content.child(section(p, "how", tr("How it works"), how_it_works(ui, p)));
-    }
-    if enabled && ui.settings.labs.annotate_agent_install {
+    if ui.settings.labs.annotate_agent_install {
         content = content.child(agents_section(ui, p));
     }
-    // Apple's speech recognizer is macOS's; Linux transcribes with Hex's model.
-    if enabled && cfg!(target_os = "macos") {
-        content = content.child(section(
-            p,
-            "transcription",
-            tr("Transcription"),
-            vec![transcriber_row(ui, p)],
-        ));
-    }
-    if enabled {
-        content = content.child(section(
-            p,
-            "storage",
-            tr("Storage"),
-            storage_rows(ui, p, &view, layer),
-        ));
+    // Apple's speech recognizer, keeping Hex out of recordings, and replay
+    // are macOS's; Linux and Windows transcribe with Hex's model.
+    if cfg!(target_os = "macos") {
+        let link = advanced_toggle(ui, p, Pane::Annotate);
+        let open = advanced_open(ui, Pane::Annotate);
+        content = content.child(fold(p, "advanced", link, open.then(|| more_rows(ui, p))));
     }
     super::scroll_body(p.k, "scroll", content)
 }
@@ -976,15 +1025,10 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn granted_screen_recording_shows_allowed_and_asks_nothing() {
-        let mut rt = pane("mac-scrawl");
-        assert!(
-            rt.find(&format!("{ALLOW}-control/mark/ink/check"))
-                .is_some(),
-            "already granted reads Allowed"
-        );
-        tap(&mut rt, ALLOW);
-        assert!(asked(&rt).is_empty(), "Allowed is not a button");
+    fn granted_screen_recording_hides_its_row() {
+        let rt = pane("mac-scrawl");
+        assert!(rt.find("screen-recording").is_none());
+        assert!(rt.find(ALLOW).is_none());
     }
 
     #[cfg(target_os = "macos")]
@@ -1005,10 +1049,37 @@ mod tests {
         // The fixture grants on the second ask.
         tap(&mut rt, ALLOW);
         assert!(rt.state.platform.scrawl.as_ref().unwrap().screen_recording);
-        assert!(
-            rt.find(&format!("{ALLOW}-control/mark/ink/check"))
-                .is_some()
-        );
+        rt.settle_all();
+        rt.frame(0.0);
+        assert!(rt.find(ALLOW).is_none(), "the row folds away once granted");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn rare_settings_stay_folded_until_opened() {
+        let mut rt = pane("mac-scrawl");
+        assert!(rt.find("capture-transcriber").is_none());
+        tap(&mut rt, "advanced-toggle");
+        assert!(rt.find("capture-transcriber").is_some());
+        assert!(rt.find("capture-show-in-recordings").is_some());
+    }
+
+    #[test]
+    fn how_it_works_opens_from_its_link() {
+        let mut rt = pane("mac-scrawl");
+        assert!(rt.find("how-start").is_none());
+        tap(&mut rt, "how-toggle");
+        assert!(rt.find("how-start").is_some());
+    }
+
+    #[test]
+    fn off_shows_only_the_top_card() {
+        let rt = pane("mac-scrawl-off");
+        assert!(rt.find("capture-enabled").is_some());
+        assert!(rt.find("capture-shortcut").is_some());
+        assert!(rt.find("how-toggle").is_none());
+        assert!(rt.find("after").is_none());
+        assert!(rt.find("advanced-toggle").is_none());
     }
 
     #[cfg(target_os = "macos")]
@@ -1066,12 +1137,24 @@ mod tests {
     fn retention_names_presets_and_imported_days() {
         assert_eq!(retention_label(Preset::Week.policy()), "Video for 7 days");
         assert_eq!(retention_label(Preset::Forever.policy()), "Forever");
+        assert_eq!(retention_description(Preset::Forever.policy()), None);
         let imported = Policy {
             media_days: Some(3),
             bundle_days: Some(30),
         };
         assert_eq!(retention_label(imported), "Video for 3 days");
-        assert!(retention_description(imported).contains("30 days"));
+        assert_eq!(
+            retention_description(imported).as_deref(),
+            Some("Annotations for 30 days")
+        );
+        let video_only = Policy {
+            media_days: Some(3),
+            bundle_days: None,
+        };
+        assert_eq!(
+            retention_description(video_only).as_deref(),
+            Some("Annotations stay until you remove them")
+        );
     }
 
     /// The Agents section is exactly absent while its lab is off.

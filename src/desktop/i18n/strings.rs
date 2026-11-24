@@ -37,7 +37,7 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Pick the OpenCode provider and model that write meeting titles and summaries, in Meetings › Settings › Advanced", ["Wybierz dostawcę i model OpenCode, które piszą tytuły i podsumowania spotkań, w Spotkania › Ustawienia › Zaawansowane", "在“会议 › 设置 › 高级”中选择撰写会议标题和摘要的 OpenCode 提供方和模型", "会議のタイトルと要約を書く OpenCode のプロバイダとモデルを、会議 › 設定 › 詳細 で選びます", "Wähle unter Meetings › Einstellungen › Erweitert den OpenCode-Anbieter und das Modell, die Meeting-Titel und -Zusammenfassungen schreiben", "Elige el proveedor y el modelo de OpenCode que escriben los títulos y resúmenes de reuniones, en Reuniones › Ajustes › Avanzado", "Виберіть постачальника й модель OpenCode, які пишуть назви та підсумки зустрічей, у Зустрічі › Налаштування › Додатково"]),
     ("Save the last 15 seconds of your screen. macOS shows the screen-recording dot the whole time it's on", ["Zapisz ostatnie 15 sekund ekranu. macOS pokazuje kropkę nagrywania ekranu przez cały czas, gdy jest to włączone", "保存屏幕最近的 15 秒。开启期间 macOS 会一直显示屏幕录制圆点", "画面の直近 15 秒を保存します。オンの間、macOS の画面収録ドットが表示され続けます", "Speichere die letzten 15 Sekunden deines Bildschirms. Solange das aktiv ist, zeigt macOS durchgehend den Bildschirmaufnahme-Punkt an", "Guarda los últimos 15 segundos de la pantalla. macOS muestra el punto de grabación de pantalla todo el tiempo que esté activado", "Зберігає останні 15 секунд екрана. Поки увімкнено, macOS постійно показує індикатор запису екрана"]),
     ("Replay last 15 s", ["Powtórz ostatnie 15 s", "回放最近 15 秒", "直近 15 秒を保存", "Letzte 15 s speichern", "Guardar últimos 15 s", "Зберегти останні 15 с"]),
-    ("Press to save the last 15 s; hold to narrate over it", ["Naciśnij, aby zapisać ostatnie 15 s; przytrzymaj, aby dodać komentarz głosowy", "按下保存最近 15 秒；按住可边说边配音", "押すと直近 15 秒を保存し、押し続けると音声で説明を添えられます", "Drücken, um die letzten 15 s zu speichern; halten, um darüberzusprechen", "Pulsa para guardar los últimos 15 s; mantén pulsado para narrar encima", "Натисніть, щоб зберегти останні 15 с; утримуйте, щоб озвучити"]),
+    ("Press to save; hold to narrate", ["Naciśnij, aby zapisać; przytrzymaj, aby skomentować", "按下保存；按住配音", "押して保存、長押しで音声解説", "Drücken zum Speichern; halten zum Kommentieren", "Pulsa para guardar; mantén para narrar", "Натисніть, щоб зберегти; утримуйте, щоб озвучити"]),
     ("Summary model", ["Model podsumowań", "摘要模型", "要約モデル", "Modell für Zusammenfassungen", "Modelo de resúmenes", "Модель підсумків"]),
     ("After a meeting", ["Po spotkaniu", "会议结束后", "会議のあと", "Nach einer Besprechung", "Después de una reunión", "Після зустрічі"]),
     ("Summaries", ["Podsumowania", "摘要", "要約", "Zusammenfassungen", "Resúmenes", "Підсумки"]),
@@ -214,7 +214,6 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Clear history", ["Wyczyść historię", "清除历史记录", "履歴を消去", "Verlauf löschen", "Borrar historial", "Очистити історію"]),
     ("Keep for", ["Przechowuj przez", "保留时长", "保存期間", "Behalten für", "Conservar durante", "Зберігати"]),
     ("Annotate", ["Adnotacje", "Annotate", "Annotate", "Annotate", "Annotate", "Annotate"]),
-    ("Tap to start and stop; hold while recording to draw", ["Stuknij, aby zacząć i zakończyć; podczas nagrywania przytrzymaj, aby rysować", "轻按开始和停止；录制时按住即可绘制", "タップで開始と停止、録画中は押したままで描画", "Tippen zum Starten und Stoppen; während der Aufnahme halten zum Zeichnen", "Toca para empezar y parar; mantén pulsado mientras graba para dibujar", "Торкніться, щоб почати й зупинити; під час запису утримуйте, щоб малювати"]),
     ("Tap the shortcut to start recording; talk as you go", ["Stuknij skrót, aby zacząć nagrywać; mów na bieżąco", "轻按快捷键开始录制，边做边说", "ショートカットをタップすると録画が始まります。話しながら進めてください", "Tippe auf das Kürzel, um die Aufnahme zu starten; sprich dabei", "Toca el atajo para empezar a grabar; habla mientras tanto", "Торкніться сполучення клавіш, щоб почати запис; говоріть по ходу"]),
     ("While it records, hold the shortcut and move the pointer; no click needed", ["Podczas nagrywania przytrzymaj skrót i poruszaj wskaźnikiem; bez klikania", "录制时按住快捷键并移动指针，无需点击", "録画中にショートカットを押したままポインタを動かします。クリックは不要です", "Halte während der Aufnahme das Kürzel und bewege den Zeiger; ohne Klicken", "Mientras graba, mantén el atajo y mueve el puntero; sin hacer clic", "Під час запису утримуйте сполучення клавіш і рухайте вказівником; клацати не треба"]),
     ("While it records, hold the shortcut and move the pointer; no click needed. Shift draws too", ["Podczas nagrywania przytrzymaj skrót i poruszaj wskaźnikiem; bez klikania. Shift też rysuje", "录制时按住快捷键并移动指针，无需点击。按住 Shift 也能绘制", "録画中にショートカットを押したままポインタを動かします。クリックは不要です。Shift でも描けます", "Halte während der Aufnahme das Kürzel und bewege den Zeiger; ohne Klicken. Umschalt zeichnet auch", "Mientras graba, mantén el atajo y mueve el puntero; sin hacer clic. Mayús también dibuja", "Під час запису утримуйте сполучення клавіш і рухайте вказівником; клацати не треба. Shift теж малює"]),
@@ -246,17 +245,13 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Draw", ["Rysuj", "绘制", "描く", "Zeichnen", "Dibujar", "Малювати"]),
     ("Paste it anywhere, or click Send to… on the capsule to pick a session", ["Wklej ją w dowolnym miejscu albo kliknij Wyślij do… na kapsule, aby wybrać sesję", "可粘贴到任意位置，或点击胶囊上的“发送到…”选择会话", "どこにでも貼り付けるか、カプセルの「送信先…」をクリックしてセッションを選びます", "Füge sie überall ein oder klicke auf der Kapsel auf „Senden an…“, um eine Sitzung zu wählen", "Pégala donde quieras o haz clic en Enviar a… en la cápsula para elegir una sesión", "Вставте її будь-де або натисніть «Надіслати до…» на капсулі, щоб вибрати сесію"]),
     #[cfg(hex_capture)]
-    ("Record your screen, draw on it, and talk over it with the shortcut below", ["Nagrywaj ekran, rysuj na nim i komentuj głosem za pomocą skrótu poniżej", "用下方快捷键录制屏幕、在上面绘制并配上讲解", "下のショートカットで画面を録画し、描き込み、話しながら説明できます", "Mit dem Kürzel unten den Bildschirm aufnehmen, darauf zeichnen und dazu sprechen", "Graba tu pantalla, dibuja sobre ella y coméntala con el atajo de abajo", "Записуйте екран, малюйте на ньому й коментуйте голосом за допомогою комбінації нижче"]),
-    #[cfg(hex_capture)]
-    ("Off. Hex records nothing and keeps no shortcut until you turn this on.", ["Wyłączone. Hex niczego nie nagrywa i nie zajmuje skrótu, dopóki tego nie włączysz.", "已关闭。打开之前，Hex 不录制任何内容，也不占用快捷键。", "オフです。オンにするまで、Hex は何も録画せず、ショートカットも使いません。", "Aus. Hex nimmt nichts auf und belegt kein Kürzel, bis du es einschaltest.", "Desactivado. Hex no graba nada ni ocupa ningún atajo hasta que lo actives.", "Вимкнено. Hex нічого не записує й не займає комбінацію клавіш, доки ви це не ввімкнете."]),
-    #[cfg(hex_capture)]
     ("The capture shortcut is already in use. Change it below before turning captures on.", ["Skrót nagrywania jest już używany. Zmień go poniżej, zanim włączysz nagrywanie.", "捕获快捷键已被占用。请先在下方更改，再开启捕获。", "キャプチャのショートカットはすでに使われています。オンにする前に下で変更してください。", "Das Aufnahmekürzel wird bereits verwendet. Ändere es unten, bevor du Aufnahmen einschaltest.", "El atajo de captura ya está en uso. Cámbialo abajo antes de activar las capturas.", "Сполучення клавіш для записів уже використовується. Змініть його нижче, перш ніж вмикати записи."]),
     #[cfg(hex_capture)]
     ("Could not update Annotate:", ["Nie udało się zaktualizować Adnotacji:", "无法更新 Annotate：", "Annotate を更新できませんでした:", "Annotate konnte nicht aktualisiert werden:", "No se pudo actualizar Annotate:", "Не вдалося оновити Annotate:"]),
     #[cfg(hex_capture)]
-    ("The model Hex dictates with, with a time for every word", ["Model, którym Hex dyktuje, z czasem każdego słowa", "Hex 听写所用的模型，并标注每个词的时间", "Hex が音声入力に使うモデル。単語ごとの時刻付き", "Das Modell, mit dem Hex diktiert, mit einer Zeit für jedes Wort", "El modelo con el que Hex dicta, con el tiempo de cada palabra", "Модель, якою диктує Hex, з часом для кожного слова"]),
+    ("Uses Hex's dictation model", ["Używa modelu dyktowania Hex", "使用 Hex 的听写模型", "Hex の音声入力モデルを使用", "Verwendet Hex' Diktiermodell", "Usa el modelo de dictado de Hex", "Використовує модель диктування Hex"]),
     #[cfg(hex_capture)]
-    ("Apple's speech recognizer, as Scrawl uses", ["Rozpoznawanie mowy Apple, jak w Scrawl", "Apple 语音识别，与 Scrawl 相同", "Scrawl と同じ Apple の音声認識", "Apples Spracherkennung, wie Scrawl sie nutzt", "El reconocimiento de voz de Apple, como en Scrawl", "Розпізнавання мовлення Apple, як у Scrawl"]),
+    ("Apple's speech recognizer", ["Rozpoznawanie mowy Apple", "Apple 语音识别", "Apple の音声認識", "Apples Spracherkennung", "Reconocimiento de voz de Apple", "Розпізнавання мовлення Apple"]),
     #[cfg(hex_capture)]
     ("Video for 7 days", ["Wideo przez 7 dni", "视频保留 7 天", "ビデオは 7 日間", "Video 7 Tage", "Vídeo durante 7 días", "Відео 7 днів"]),
     #[cfg(hex_capture)]
@@ -264,9 +259,7 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     #[cfg(hex_capture)]
     ("Video for {} days", ["Wideo przez {} dni", "视频保留 {} 天", "ビデオは {} 日間", "Video {} Tage", "Vídeo durante {} días", "Відео {} дн."]),
     #[cfg(hex_capture)]
-    ("Video and audio go first; annotations are removed after {} days", ["Najpierw znika wideo i dźwięk; adnotacje są usuwane po {} dniach", "先删除视频和音频；批注会在 {} 天后删除", "先に動画と音声が消え、注釈は {} 日後に削除されます", "Video und Audio gehen zuerst; Annotationen werden nach {} Tagen entfernt", "Primero se van el vídeo y el audio; las anotaciones se eliminan a los {} días", "Спершу зникають відео й аудіо; анотації видаляються через {} днів"]),
-    #[cfg(hex_capture)]
-    ("Video and audio go first; annotations stay until you remove them", ["Najpierw znika wideo i dźwięk; adnotacje zostają, dopóki ich nie usuniesz", "先删除视频和音频；批注会保留到你删除为止", "先に動画と音声が消えます。注釈は削除するまで残ります", "Video und Audio gehen zuerst; Annotationen bleiben, bis du sie entfernst", "Primero se van el vídeo y el audio; las anotaciones se quedan hasta que las elimines", "Спершу зникають відео й аудіо; анотації лишаються, доки ви їх не видалите"]),
+    ("Annotations for {} days", ["Adnotacje przez {} dni", "批注保留 {} 天", "注釈は {} 日間", "Annotationen {} Tage", "Anotaciones durante {} días", "Анотації {} дн."]),
     #[cfg(hex_capture)]
     ("Annotations stay until you remove them", ["Adnotacje zostają, dopóki ich nie usuniesz", "批注会保留到你删除为止", "注釈は削除するまで残ります", "Annotationen bleiben, bis du sie entfernst", "Las anotaciones se quedan hasta que las elimines", "Анотації лишаються, доки ви їх не видалите"]),
     #[cfg(hex_capture)]
@@ -278,27 +271,26 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     #[cfg(hex_capture)]
     ("Use Hex for annotations", ["Używaj Hex do adnotacji", "用 Hex 批注", "注釈に Hex を使う", "Hex für Annotationen verwenden", "Usar Hex para anotar", "Використовувати Hex для анотацій"]),
     #[cfg(hex_capture)]
+    ("Tap {}, talk and draw; tap again and it's copied", ["Stuknij {}, mów i rysuj; stuknij ponownie, a zostanie skopiowane", "轻按 {}，边说边画；再按一次即复制", "{} をタップして話しながら描き、もう一度タップするとコピーされます", "Tippe {}, sprich und zeichne; tippe erneut und es ist kopiert", "Toca {}, habla y dibuja; vuelve a tocar y se copia", "Торкніться {}, говоріть і малюйте; торкніться ще раз, і все скопійовано"]),
     #[cfg(hex_capture)]
+    ("Hold while recording to draw", ["Podczas nagrywania przytrzymaj, aby rysować", "录制时按住即可绘制", "録画中に押したままで描画", "Während der Aufnahme halten zum Zeichnen", "Mantén pulsado mientras graba para dibujar", "Під час запису утримуйте, щоб малювати"]),
     #[cfg(hex_capture)]
+    ("Hex can't see your screen yet", ["Hex jeszcze nie widzi twojego ekranu", "Hex 还看不到你的屏幕", "Hex はまだ画面を見られません", "Hex kann deinen Bildschirm noch nicht sehen", "Hex aún no puede ver tu pantalla", "Hex ще не бачить ваш екран"]),
     #[cfg(hex_capture)]
-    ("Saved for when Annotate is on", ["Zapisany na czas, gdy Adnotacje są włączone", "Annotate 打开后生效", "Annotate がオンのときに使われます", "Gespeichert für, wenn Annotate an ist", "Guardado para cuando Annotate esté activado", "Збережено на час, коли Annotate увімкнено"]),
+    ("After an annotation", ["Po adnotacji", "批注之后", "注釈のあと", "Nach einer Annotation", "Después de una anotación", "Після анотації"]),
+    #[cfg(hex_capture)]
+    ("Folder", ["Folder", "文件夹", "フォルダ", "Ordner", "Carpeta", "Папка"]),
+    #[cfg(hex_capture)]
+    ("Change…", ["Zmień…", "更改…", "変更…", "Ändern…", "Cambiar…", "Змінити…"]),
+    #[cfg(hex_capture)]
+    ("Show Hex in screen recordings", ["Pokazuj Hex w nagraniach ekranu", "在屏幕录制中显示 Hex", "画面収録に Hex を表示", "Hex in Bildschirmaufnahmen zeigen", "Mostrar Hex en grabaciones de pantalla", "Показувати Hex у записах екрана"]),
+    #[cfg(hex_capture)]
+    ("Include the capsule, ink, and HUD", ["Uwzględnij kapsułę, atrament i HUD", "包含胶囊、墨迹和 HUD", "カプセル、インク、HUD を含める", "Kapsel, Tinte und HUD einschließen", "Incluir la cápsula, la tinta y el HUD", "Включити капсулу, чорнило й HUD"]),
     ("Screen Recording", ["Nagrywanie ekranu", "屏幕录制", "画面収録", "Bildschirmaufnahme", "Grabación de pantalla", "Запис екрана"]),
     ("Lets Annotate record your screen", ["Pozwala Adnotacjom nagrywać ekran", "允许 Annotate 录制你的屏幕", "Annotate に画面の録画を許可します", "Erlaubt Annotate, deinen Bildschirm aufzunehmen", "Permite que Annotate grabe tu pantalla", "Дозволяє Annotate записувати ваш екран"]),
     #[cfg(hex_capture)]
-    ("Required to record your screen. macOS asks the first time you annotate, or allow it here.", ["Wymagane do nagrywania ekranu. macOS zapyta przy pierwszej adnotacji albo zezwól tutaj.", "录制屏幕需要此权限。macOS 会在你第一次批注时询问，你也可以在这里允许。", "画面の録画に必要です。初めて注釈するときに macOS が尋ねます。ここで許可することもできます。", "Zum Aufnehmen des Bildschirms nötig. macOS fragt beim ersten Annotieren, oder erlaube es hier.", "Necesario para grabar tu pantalla. macOS lo pide la primera vez que anotas, o permítelo aquí.", "Потрібно для запису екрана. macOS запитає під час першої анотації, або дозвольте тут."]),
-    #[cfg(hex_capture)]
-    ("Show in screen recordings", ["Pokazuj w nagraniach ekranu", "在屏幕录制中显示", "画面収録に表示", "In Bildschirmaufnahmen zeigen", "Mostrar en grabaciones de pantalla", "Показувати в записах екрана"]),
-    #[cfg(hex_capture)]
-    ("Lets recordings, annotations included, show Hex's capsule, ink, and HUD, for demos", ["Pozwala nagraniom, także adnotacjom, pokazywać kapsułę, atrament i HUD Hex, do prezentacji", "让录屏（包括批注）显示 Hex 的胶囊、墨迹和 HUD，用于演示", "録画（注釈を含む）に Hex のカプセル、インク、HUD を映します。デモ用です", "Lässt Aufnahmen, auch Annotationen, Hex' Kapsel, Tinte und HUD zeigen, für Demos", "Permite que las grabaciones, anotaciones incluidas, muestren la cápsula, la tinta y el HUD de Hex, para demos", "Дозволяє записам, зокрема анотаціям, показувати капсулу, чорнило й HUD Hex, для демонстрацій"]),
-    #[cfg(hex_capture)]
     ("Transcriber", ["Transkrypcja", "转写引擎", "文字起こし", "Transkription", "Transcriptor", "Транскрибатор"]),
-    #[cfg(hex_capture)]
-    ("Transcription", ["Transkrypcja", "转写", "文字起こし", "Transkription", "Transcripción", "Транскрипція"]),
-    #[cfg(hex_capture)]
-    ("Storage", ["Przechowywanie", "存储", "保存", "Speicher", "Almacenamiento", "Сховище"]),
     ("Annotations folder", ["Folder adnotacji", "批注文件夹", "注釈フォルダ", "Annotationsordner", "Carpeta de anotaciones", "Папка анотацій"]),
-    #[cfg(hex_capture)]
-    ("Shared with Scrawl, so both list the same annotations", ["Wspólny ze Scrawl, więc obie aplikacje widzą te same adnotacje", "与 Scrawl 共用，两者列出相同的批注", "Scrawl と共有するので、どちらにも同じ注釈が並びます", "Mit Scrawl geteilt, beide zeigen dieselben Annotationen", "Compartida con Scrawl, así ambos muestran las mismas anotaciones", "Спільна зі Scrawl, тож обидва показують ті самі анотації"]),
     #[cfg(hex_capture)]
     ("Keep", ["Przechowuj", "保留", "保持期間", "Behalten", "Conservar", "Зберігати"]),
     ("Add application", ["Dodaj aplikację", "添加应用", "アプリを追加", "App hinzufügen", "Añadir aplicación", "Додати програму"]),
