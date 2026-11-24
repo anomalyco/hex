@@ -269,6 +269,9 @@ pub struct Flow {
     microphone_guide: bool,
     practice: Practice,
     download_requested: bool,
+    /// A pick whose model doesn't run here: nothing is downloading, so the
+    /// page says failed until another pick or a real download replaces it.
+    pick_failed: bool,
     /// The recommended model waits for the person: a scan for models already
     /// on this computer is running, or found one and they choose.
     download_held: bool,
@@ -300,6 +303,7 @@ impl Flow {
             microphone_guide: false,
             practice: Practice::Waiting,
             download_requested: false,
+            pick_failed: false,
             download_held: false,
             advance_due: false,
             relaunch: RelaunchState::Idle,
@@ -321,6 +325,26 @@ impl Flow {
     /// person can choose a model already on this computer instead.
     pub fn hold_download(&mut self, held: bool) {
         self.download_held = held;
+    }
+
+    /// The model the person picked can't run here, so no download will start
+    /// for it: stop waiting and show the row failed. A later pick clears it.
+    pub fn model_failed(&mut self) {
+        self.download_requested = false;
+        self.pick_failed = true;
+    }
+
+    /// Whether that pick is still the one the page should explain: another
+    /// attempt clears it, so its reason never hides that attempt's failure.
+    pub fn pick_failed(&self) -> bool {
+        self.pick_failed
+    }
+
+    /// A model file the person chose is being prepared: the refused pick is
+    /// over, and no download of ours starts behind the import.
+    pub fn pick_replaced(&mut self) {
+        self.pick_failed = false;
+        self.download_requested = true;
     }
 
     pub fn step(&self) -> Step {
@@ -457,7 +481,7 @@ impl Flow {
             ItemStatus::Ready
         } else if let Some(progress) = self.model.downloading {
             ItemStatus::Downloading(progress)
-        } else if self.model.failed {
+        } else if self.model.failed || self.pick_failed {
             ItemStatus::Failed
         } else if self.download_requested {
             ItemStatus::Downloading(0.0)
@@ -482,6 +506,11 @@ impl Flow {
             self.accessibility_stale = false;
         }
         self.model = model;
+        // Only a model on its way or ready replaces a pick that couldn't
+        // start; the host's status carries no error for one it never saw.
+        if status.transcription_model || model.downloading.is_some() {
+            self.pick_failed = false;
+        }
         if self.step == Step::Setup && !was_ready && self.setup_ready() {
             self.advance_due = true;
         }
@@ -492,6 +521,7 @@ impl Flow {
             && !model.failed
             && !self.download_requested
             && !self.download_held
+            && !self.pick_failed
         {
             self.download_requested = true;
             return Effect::DownloadModel;
@@ -568,6 +598,7 @@ impl Flow {
                 if !self.status.transcription_model && self.model.downloading.is_none() =>
             {
                 self.model.failed = false;
+                self.pick_failed = false;
                 self.download_requested = true;
                 Effect::DownloadModel
             }
@@ -1914,6 +1945,49 @@ mod tests {
             flow.on(Input::Grant(SetupItem::Model)),
             Effect::None,
             "a running download is not restarted"
+        );
+    }
+
+    #[test]
+    fn a_pick_that_cannot_start_stays_failed_until_another_pick() {
+        let mut flow = Flow::new(Step::Welcome, fresh_status(), true, true);
+        assert_eq!(
+            flow.on(Input::Status(fresh_status(), ModelProgress::default())),
+            Effect::DownloadModel,
+            "the tour starts its own download"
+        );
+        assert_eq!(flow.view().model, ItemStatus::Downloading(0.0));
+        // The pick's model doesn't run here, so the window never asks the
+        // host for it: nothing will ever report progress or an error.
+        flow.model_failed();
+        assert_eq!(flow.view().model, ItemStatus::Failed);
+        assert_eq!(
+            flow.on(Input::Status(fresh_status(), ModelProgress::default())),
+            Effect::None,
+            "no retry is started behind the person's back"
+        );
+        assert_eq!(flow.view().model, ItemStatus::Failed, "the failure stays");
+        // Picking again clears it; a download that starts replaces it.
+        assert_eq!(
+            flow.on(Input::Grant(SetupItem::Model)),
+            Effect::DownloadModel
+        );
+        flow.on(Input::Status(fresh_status(), downloading(0.1)));
+        assert_eq!(flow.view().model, ItemStatus::Downloading(0.1));
+    }
+
+    #[test]
+    fn a_chosen_file_ends_the_refused_pick_without_a_new_download() {
+        let mut flow = Flow::new(Step::Welcome, fresh_status(), true, true);
+        flow.on(Input::Status(fresh_status(), ModelProgress::default()));
+        flow.model_failed();
+        assert_eq!(flow.view().model, ItemStatus::Failed);
+        flow.pick_replaced();
+        assert!(!flow.pick_failed());
+        assert_eq!(
+            flow.on(Input::Status(fresh_status(), ModelProgress::default())),
+            Effect::None,
+            "the import is already being prepared"
         );
     }
 

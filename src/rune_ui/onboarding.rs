@@ -180,11 +180,21 @@ fn apply(ui: &mut Ui, effect: Effect) {
                 .choice
                 .take()
                 .unwrap_or_else(|| ui.settings.transcription.clone());
-            if crate::transcription::models::validate(&selection).is_ok() {
-                ui.send(Request::ChooseModel {
+            match crate::transcription::models::validate(&selection) {
+                Ok(_) => ui.send(Request::ChooseModel {
                     model: selection.model,
                     language: selection.language,
-                });
+                }),
+                // A model this build can't run (a found file whose Labs switch
+                // is off, an import that is gone) must say so: left alone, the
+                // tour waits on a download that never starts.
+                Err(error) => {
+                    ui.found.picked = None;
+                    ui.found.error = Some(format!("{error:#}"));
+                    if let Some(tour) = &mut ui.tour {
+                        tour.flow.model_failed();
+                    }
+                }
             }
         }
         Effect::AdvanceSoon => {

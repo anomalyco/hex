@@ -54,7 +54,16 @@ impl LinuxDesktopHost {
     /// and starts only once that load exits; a switch never cancels a
     /// download or check someone else started and is refused instead.
     pub(super) fn request_transcription(&mut self, request: PendingPreparation) -> Result<()> {
-        let definition = crate::transcription::models::validate(&request.selection)?;
+        let definition = match crate::transcription::models::validate(&request.selection) {
+            Ok(definition) => definition,
+            // The row and the page say why instead of waiting on a download
+            // that never starts.
+            Err(error) => {
+                let error = format!("{error:#}");
+                self.transcription_error = Some(error.clone());
+                return Err(color_eyre::eyre::eyre!(error));
+            }
+        };
         if self.shortcut_edit.is_some() {
             if request.automatic {
                 // A layout switch waits until the shortcut recorder closes

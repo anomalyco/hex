@@ -1500,7 +1500,7 @@ impl LinuxDesktopHost {
 mod tests {
     use super::*;
     use crate::transcription::models::{
-        ModelPreparationStage, TranscriptionModelId, TranscriptionSelection,
+        CustomModelId, ModelPreparationStage, TranscriptionModelId, TranscriptionSelection,
     };
     use std::sync::atomic::{AtomicU8, AtomicU64};
 
@@ -1885,6 +1885,36 @@ mod tests {
         }
         host.refresh();
         assert_eq!(host.status, ListenerStatus::ModelRequired);
+    }
+
+    #[test]
+    fn a_model_this_build_cannot_run_says_why_and_starts_nothing() {
+        let mut host = host_for_edit(false);
+        let error = host
+            .prepare_transcription(
+                TranscriptionSelection {
+                    // An import that isn't here: `available()` refuses it.
+                    model: TranscriptionModelId::Custom(
+                        CustomModelId::parse("custom-0123456789abcdef").unwrap(),
+                    ),
+                    language: "en".into(),
+                },
+                false,
+                false,
+            )
+            .unwrap_err();
+        assert!(host.transcription_preparation.is_none(), "no worker starts");
+        assert!(!host.has_pending_work());
+        assert_eq!(
+            host.transcription_error.as_deref(),
+            Some(format!("{error:#}").as_str()),
+            "the window shows the reason"
+        );
+        assert!(
+            host.transcription_error
+                .as_deref()
+                .is_some_and(|error| error.ends_with("is unavailable"))
+        );
     }
 
     #[test]

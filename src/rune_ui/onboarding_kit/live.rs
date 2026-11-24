@@ -564,7 +564,22 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
                 t.error.is_some(),
             )
         });
-    let failure = super::super::model_import::download_failure(ui);
+    // A chosen file's failure names itself first; then a pick the window
+    // refused, while the tour still reports that pick and nothing else is
+    // being prepared (an import the person chose replaces it); then the
+    // service's.
+    let preparing_any = ui
+        .view
+        .as_ref()
+        .is_some_and(|view| view.transcription.preparing.is_some());
+    let picked_failed =
+        !preparing_any && ui.tour.as_ref().is_some_and(|tour| tour.flow.pick_failed());
+    let failure = super::super::model_import::import_failure(ui)
+        .or_else(|| match picked_failed {
+            true => super::super::model_import::pick_failure(ui),
+            false => None,
+        })
+        .or_else(|| super::super::model_import::download_failure(ui));
     let using_file = super::super::model_import::using_file(ui);
     // The disk and macOS checks run a few times a second, not every frame.
     let checked = ui
@@ -673,8 +688,10 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     }
     live.listening = live.practice == Practice::Listening;
 
-    // The model download.
-    live.failed = !choice_installed && !preparing && (errored || failure.is_some());
+    // The model download. A pick the tour still reports failed fills the
+    // page even when its own reason is gone, so its actions never vanish.
+    live.failed =
+        !choice_installed && !preparing && (errored || failure.is_some() || picked_failed);
     live.progress = (preparing && !choice_installed).then_some(match live.progress {
         Some((bytes, since)) if bytes == downloaded_bytes => (bytes, since),
         _ => (downloaded_bytes, now),
@@ -885,7 +902,8 @@ pub(super) fn use_file(ui: &mut Ui) {
 }
 
 /// "Try again": retries the model the person picked from the list, else the
-/// language capsule's choice.
+/// language capsule's choice. A refused pick's reason goes with it, so the
+/// next failure is the one this attempt earned.
 pub(super) fn retry_download(ui: &mut Ui) {
     let Some(live) = ui.first_run.as_mut().and_then(|s| s.live.as_mut()) else {
         return;
@@ -893,10 +911,15 @@ pub(super) fn retry_download(ui: &mut Ui) {
     live.failed = false;
     live.stalled = false;
     live.progress = None;
+    // A retry starts a fresh attempt: an old import's error must not name it.
+    ui.picker.import.error = None;
     let choice = live.choice.clone();
     match ui.found.picked {
         Some(index) => found_choice::pick(ui, index),
-        None => choose(ui, &choice),
+        None => {
+            ui.found.error = None;
+            found_choice::prepare(ui, choice);
+        }
     }
 }
 
