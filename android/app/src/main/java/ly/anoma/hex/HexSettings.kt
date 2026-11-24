@@ -47,16 +47,21 @@ import ly.anoma.hex.keyboard.VoiceOnly
 import ly.anoma.hex.speech.*
 import ly.anoma.hex.typing.TypingPreferences
 import ly.anoma.hex.updates.Updates
+import ly.anoma.hex.words.WordReplacementsPage
+import ly.anoma.hex.words.WordsFilePage
+import ly.anoma.hex.words.WordsRows
+import ly.anoma.hex.words.WordsStore
 
 private enum class Page(val title: Int) {
     Home(R.string.app_name), Dictation(R.string.settings_dictation), Keyboard(R.string.settings_keyboard), Privacy(R.string.settings_privacy),
     Labs(R.string.settings_labs),
     Language(R.string.settings_dictation_language), Layout(R.string.settings_keyboard_layout), Styles(R.string.settings_style),
     Policy(R.string.settings_privacy_policy), Licences(R.string.settings_licences), Licence(R.string.settings_licences),
-    Feedback(R.string.feedback_send_feedback), Diagnostics(R.string.diagnostics);
+    Feedback(R.string.feedback_send_feedback), Diagnostics(R.string.diagnostics),
+    Replacements(R.string.words_replacements), WordsFile(R.string.words_file);
     val parent get() = when (this) {
         Diagnostics -> Labs
-        Language, Styles -> Dictation
+        Language, Styles, Replacements, WordsFile -> Dictation
         Layout -> Keyboard
         Policy, Licences -> Privacy
         Licence -> Licences
@@ -111,7 +116,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val formatLists = remember(revision) { speech.formatLists }
     val spokenPunctuation = remember(revision) { speech.spokenPunctuation }
     val customVocabulary = remember(revision) { speech.customVocabulary }
-    var vocabularyDraft by remember { mutableStateOf(speech.vocabularyTerms.joinToString("\n")) }
+    // An import or its Undo changes the terms under the editor, so it reloads them.
+    val words = remember(context) { WordsStore(context) }
+    val imports = remember(revision) { words.imports }
+    var vocabularyDraft by remember(imports) { mutableStateOf(speech.vocabularyTerms.joinToString("\n")) }
     val signature = remember(revision) { speech.signature }
     val fastEnglish = remember(revision) { speech.fastEnglish }
     val learnFixes = remember(revision) { speech.learnFixes }
@@ -270,13 +278,14 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             if (customVocabulary) {
                                 val ink = colorResource(R.color.ink)
                                 BasicTextField(value = vocabularyDraft, onValueChange = {
-                                    vocabularyDraft = it; speech.vocabularyTerms = it.split('\n')
+                                    vocabularyDraft = it; speech.vocabularyTerms = it.split('\n'); words.edited()
                                 }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 14.dp),
                                     textStyle = TextStyle(color = ink, fontFamily = inter, fontSize = 16.sp),
                                     cursorBrush = SolidColor(ink), decorationBox = { field ->
                                         Box { if (vocabularyDraft.isEmpty()) Label(stringResource(R.string.dictation_vocabulary_hint), muted = true); field() }
                                     })
                             }
+                            WordsRows(speech, words, revision, customVocabulary, { open(Page.Replacements) }, { open(Page.WordsFile) })
                         }
                         Card {
                             val action = modelAction(model)
@@ -329,6 +338,8 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                     }
                     Page.Feedback -> FeedbackForm(done = { open(Page.Home) })
                     Page.Diagnostics -> DiagnosticsPage()
+                    Page.Replacements -> WordReplacementsPage(speech, words, revision)
+                    Page.WordsFile -> WordsFilePage(speech, words, revision)
                     Page.Labs -> {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Label(stringResource(R.string.labs_dictation), muted = true, size = 14,
