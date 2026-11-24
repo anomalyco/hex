@@ -1,5 +1,8 @@
-# libhexspeech resolves this class and method by their JNI names.
+# libhexspeech and libhexenglish resolve these classes and methods by their JNI names.
 -keep class ly.anoma.hex.speech.Whisper {
+    native <methods>;
+}
+-keep class ly.anoma.hex.speech.Parakeet {
     native <methods>;
 }
 

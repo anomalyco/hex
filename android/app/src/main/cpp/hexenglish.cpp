@@ -1,7 +1,9 @@
 #include <jni.h>
+#include <android/log.h>
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -78,8 +80,18 @@ Java_ly_anoma_hex_speech_Parakeet_decode(JNIEnv *env, jobject, jlong handle, jsh
     params.vocabulary = words.empty() ? nullptr : words.data();
     params.n_vocabulary = static_cast<int32_t>(words.size());
     transcribe_set_abort_callback(session, [](void *mine) { return abandoned.load() == *static_cast<const jlong *>(mine); }, &job);
+#ifndef NDEBUG
+    const auto started = std::chrono::steady_clock::now();
+#endif
     const transcribe_status status = transcribe_run(session, pcm.data(), count, &params);
     transcribe_set_abort_callback(session, nullptr, nullptr);
+#ifndef NDEBUG
+    // As hexspeech.cpp's line: the engine and outcome only, never audio or words.
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
+    __android_log_print(ANDROID_LOG_DEBUG, "HexSpeech", "english %s in %lld ms, %d samples, %d terms",
+                        status == TRANSCRIBE_OK ? "complete" : status == TRANSCRIBE_ERR_ABORTED ? "abandoned" : "failed",
+                        static_cast<long long>(ms), count, static_cast<int>(words.size()));
+#endif
     if (status != TRANSCRIBE_OK) return nullptr;
     const char *text = transcribe_full_text(session);
     if (!text) return nullptr;

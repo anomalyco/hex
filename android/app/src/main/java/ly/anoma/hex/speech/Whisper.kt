@@ -3,6 +3,8 @@ package ly.anoma.hex.speech
 import android.app.ActivityManager
 import android.content.Context
 import android.content.res.AssetManager
+import android.util.Log
+import ly.anoma.hex.BuildConfig
 import java.io.File
 import java.time.LocalDate
 import java.util.concurrent.Executors
@@ -202,6 +204,8 @@ internal object SpeechModel {
     private fun freeEnglish() { if (english != 0L) Parakeet.free(english); english = 0L }
 
     private fun shortOfMemory(app: Context): Boolean {
+        // Debug builds only: "adb shell setprop log.tag.HexLowMemory DEBUG" acts out a shortage, to see the fallback.
+        if (BuildConfig.DEBUG && Log.isLoggable("HexLowMemory", Log.DEBUG)) return true
         val info = ActivityManager.MemoryInfo()
         app.getSystemService(ActivityManager::class.java)?.getMemoryInfo(info) ?: return false
         return info.lowMemory || info.availMem < SHORT_OF_MEMORY
