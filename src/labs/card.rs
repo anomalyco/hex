@@ -99,6 +99,7 @@ impl Feature {
             Self::ClipboardPhrase => "Clipboard phrase",
             Self::MeetingMicrophoneMute => "Mute the microphone while recording",
             Self::MeetingIndicatorDisplay => "Indicator on any display",
+            Self::MeetingAudioSource => "Choose meeting audio",
         }
     }
 
@@ -366,6 +367,9 @@ impl Feature {
             }
             Self::MeetingIndicatorDisplay => {
                 "Drag the meeting recording indicator to another display and it stays there"
+            }
+            Self::MeetingAudioSource => {
+                "Record one app or one output device in meetings instead of all computer audio"
             }
         }
     }

@@ -453,7 +453,7 @@ const SCRAWL_IMPORT_MIGRATION: &str = "scrawl-capture-settings";
 #[cfg(hex_capture)]
 const SCRAWL_ROUTING_IMPORT_MIGRATION: &str = "scrawl-routing-settings";
 /// Meeting retention first saved `forever` as its default; that default is
-/// now unchosen (24 hours for new meetings, older ones kept).
+/// now unchosen (7 days for new meetings, older ones kept).
 const MEETING_RETENTION_DEFAULT_MIGRATION: &str = "meeting-retention-default";
 /// Summarize with Apple Intelligence and Summarize with OpenCode became one
 /// choice, `meetings.summaries`.

@@ -60,6 +60,9 @@ pub(super) enum State {
         hovered: bool,
         /// The command was accepted, but the worker has not reported capture stopped.
         stopping: bool,
+        /// The ✕ was pressed: the panel asks "Discard recording?" until Keep,
+        /// Discard, or the pointer leaving answers it.
+        confirming: bool,
     },
     Finalizing {
         duration_ms: u64,
@@ -69,6 +72,9 @@ pub(super) enum State {
     Ready {
         manifest: Box<MeetingManifest>,
         hover: ReadyHover,
+        /// What is left of its stay, drawn as the ring round ✕; held while
+        /// the pointer is inside.
+        stay: stay::Stay,
     },
 }
 
@@ -97,10 +103,12 @@ impl State {
                 recording,
                 hovered: false,
                 stopping: false,
+                confirming: false,
             },
             Kind::Ready(manifest) => Self::Ready {
                 manifest,
                 hover: ReadyHover::Idle,
+                stay: stay::Stay::new(READY_TIMEOUT),
             },
         }
     }

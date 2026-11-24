@@ -6,6 +6,8 @@ import Foundation
 /// and after anything else (another letter, an accented one, a space, nothing) types itself.
 /// ´ gives á ć é í ĺ ń ó ŕ ś ú ý ź; ˇ gives č ď ě ľ ň ř š ť ž, and ů after u; the ring ˚, held on
 /// ˇ, gives ů and å. Capitals take theirs (Á, Č, Ů). Delete takes the accented letter whole.
+/// Apple's Slovak keyboard, on the same keys, does the same except that ˇ after u types itself
+/// ("uˇ"), as it does after o and a: ô and ä are held on o and a (iOS 26.5 and 27.2 simulators).
 nonisolated enum CzechTyping {
     static let acuteKey = "\u{00B4}"
     static let caronKey = "\u{02C7}"
@@ -25,10 +27,11 @@ nonisolated enum CzechTyping {
 
     /// The letter `before` ends with, accented by the mark `text` types after it; nil when
     /// the key types the mark itself.
-    static func accenting(_ text: String, after before: String?) -> String? {
+    static func accenting(_ text: String, after before: String?, language: KeyboardLanguage = .czech) -> String? {
         guard let table = marks[text], let last = before?.last else { return nil }
         let lower = Character(last.lowercased())
-        guard let accented = table[lower] else { return nil }
+        // Slovak has no ů: Apple's Slovak ˇ after u types itself.
+        guard let accented = table[lower], !(language == .slovak && text == caronKey && lower == "u") else { return nil }
         return last.isUppercase ? accented.uppercased() : String(accented)
     }
 }
@@ -54,12 +57,12 @@ nonisolated enum FrenchTyping {
 @MainActor
 extension FullKeyboardEngine {
     /// The layout's own keys' typing rules: Greek's tonos key and final sigma (`GreekTyping`),
-    /// Czech's ´ and ˇ (`CzechTyping`), French's apostrophe key (`FrenchTyping`). True when
+    /// Czech's and Slovak's ´ and ˇ (`CzechTyping`), French's apostrophe key (`FrenchTyping`). True when
     /// the key already did all it does; else `text` is what to type.
     func typeLayoutRules(_ text: inout String) -> Bool {
         switch layout.language {
         case .greek: return typeGreek(&text)
-        case .czech: return typeCzech(text)
+        case .czech, .slovak: return typeCzech(text)
         case .french, .frenchCanadian, .frenchSwiss:
             if typesFrenchApostrophe(text) { text = "'" }
             return false
@@ -82,7 +85,7 @@ extension FullKeyboardEngine {
     /// Czech: a held ˇ's ˇ or ˚ accents the letter before it, as a tapped ˇ does. True when it
     /// did; else the held key's choice goes in as it is.
     func typeHeldMark(_ chosen: String) -> Bool {
-        guard layout.language == .czech else { return false }
+        guard layout.language.typesOnCzechKeys else { return false }
         var mark = chosen
         return typeLayoutRules(&mark)
     }
@@ -90,7 +93,9 @@ extension FullKeyboardEngine {
     /// ´, ˇ or ˚ after a letter it accents: puts the accented letter in its place. False
     /// otherwise, and the mark is typed as itself.
     private func typeCzech(_ text: String) -> Bool {
-        guard let accented = CzechTyping.accenting(text, after: target.documentContextBeforeInput) else { return false }
+        guard let accented = CzechTyping.accenting(text, after: target.documentContextBeforeInput, language: layout.language) else {
+            return false
+        }
         rememberTypingContext(before: textBefore.map { String($0.dropLast(1)) }, inserted: accented)
         target.deleteBackward()
         target.insertText(accented)

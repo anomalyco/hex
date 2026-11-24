@@ -650,6 +650,33 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(AutocorrectEngine.sentenceStarters(.czech).count, 3)
     }
 
+    /// Slovak follows Czech: with an iPhone's sk dictionary, háčky, čárky, the vokáň and the
+    /// dĺžeň left out are the cheapest fix ("dakujem" -> "ďakujem", "kon" -> "kôň"); a word it
+    /// knows stays. Without one (the iOS 26.5 and 27.2 simulators list no sk), nothing is
+    /// changed or suggested, never Czech's dictionary in its place.
+    func testSlovakFollowsCzechAndGuessesNothingWithoutADictionary() {
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "dakujem", to: "ďakujem", language: .slovak)!, 0.15, accuracy: 0.001)
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "kon", to: "kôň", language: .slovak)!, 0.20, accuracy: 0.001)
+        let slovak = stubbed {
+            $0.valid = ["ďakujem", "kôň", "ľudia", "dobrý", "je"]
+            $0.guessTable = ["dakujem": ["ďakujem"], "ludia": ["ľudia"], "dobry": ["dobrý"]]
+        }
+        slovak.setLanguage(.slovak, available: ["sk", "en_US"])
+        XCTAssertTrue(slovak.hasDictionary)
+        XCTAssertEqual(fix(slovak, "dakujem"), "ďakujem")
+        XCTAssertEqual(fix(slovak, "Ludia"), "Ľudia")
+        XCTAssertEqual(fix(slovak, "dobry"), "dobrý")
+        XCTAssertNil(fix(slovak, "je"), "a word stays")
+        XCTAssertEqual(AutocorrectEngine.sentenceStarters(.slovak), ["to", "ja", "ale"])
+        XCTAssertEqual(AutocorrectEngine.commonWords(.slovak), ["a", "sa", "je", "v", "na", "to"])
+
+        slovak.setLanguage(.slovak, available: ["cs_CZ", "hu_HU", "pl_PL", "en_US"])
+        XCTAssertFalse(slovak.hasDictionary)
+        XCTAssertNil(fix(slovak, "dakujem"), "as typed")
+        XCTAssertTrue(slovak.suggestions(beforeInput: "dakuj", field: .text, autocorrectionType: .default).isEmpty)
+        XCTAssertTrue(slovak.suggestions(beforeInput: "", field: .text, autocorrectionType: .default).isEmpty)
+    }
+
     /// Hungarian types with iOS's hu dictionary, and a missing accent is the cheapest fix there
     /// is, however many a word lacks ("koszonom" -> "köszönöm", "kesobb" -> "később"); ő and ű
     /// are o and u with the combining double acute, so each is one edit like á or é, where
@@ -698,6 +725,34 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertNil(fix(hungarian, "is"), "is is one too")
         hungarian.setLanguage(.spanish, available: ["hu", "es_ES"])
         XCTAssertNil(fix(hungarian, "koszonom"), "three accents are three edits on another layout")
+    }
+
+    /// Swedish uses the iPhone's sv dictionary, a real one on the iOS 26.5 and 27.2 simulators
+    /// (it rejects "qzxjvkq" and guesses "köttbullar" for "kottbullar", "tack" for "tacck"), as
+    /// Hungarian does; English's fixes stay off ("i" is "in"). Where iOS lists no sv, nothing is
+    /// changed or suggested, never Norwegian's or Danish's words in its place.
+    func testSwedishUsesTheIPhonesDictionaryAndNeverAnotherLanguages() {
+        let swedish = stubbed {
+            $0.valid = ["köttbullar", "läsa", "små", "tack", "hej", "i", "och", "jag"]
+            $0.guessTable = ["kottbullar": ["köttbullar", "köttbullars"], "lasa": ["läsa", "låsa"], "sma": ["små", "sam"], "tacck": ["tack"]]
+        }
+        swedish.setLanguage(.swedish, available: ["nb_NO", "da_DK", "sv_SE", "en_US"])
+        XCTAssertTrue(swedish.hasDictionary)
+        XCTAssertEqual(fix(swedish, "kottbullar"), "köttbullar")
+        XCTAssertEqual(fix(swedish, "Lasa"), "Läsa")
+        XCTAssertEqual(fix(swedish, "sma"), "små")
+        XCTAssertEqual(fix(swedish, "tacck"), "tack")
+        XCTAssertNil(fix(swedish, "hej"), "a word stays")
+        XCTAssertNil(fix(swedish, "i"), "Swedish \"i\" means \"in\"")
+        XCTAssertEqual(AutocorrectEngine.sentenceStarters(.swedish), ["jag", "det", "vi"])
+        XCTAssertEqual(AutocorrectEngine.clauseStarters(.swedish), ["och", "men", "jag"])
+        XCTAssertEqual(AutocorrectEngine.commonWords(.swedish), ["och", "i", "att", "det", "som", "en"])
+        XCTAssertEqual(AutocorrectEngine.sentenceStarters(.norwegian), ["jeg", "det", "vi"], "Norwegian's unchanged")
+
+        swedish.setLanguage(.swedish, available: ["nb_NO", "da_DK", "fi_FI", "en_US"])
+        XCTAssertFalse(swedish.hasDictionary)
+        XCTAssertNil(fix(swedish, "kottbullar"), "as typed")
+        XCTAssertTrue(swedish.suggestions(beforeInput: "kottb", field: .text, autocorrectionType: .default).isEmpty)
     }
 
     /// Dutch types with iOS's nl dictionary, no typing model of its own: a missing diaeresis or

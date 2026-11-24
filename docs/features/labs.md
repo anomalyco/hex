@@ -314,6 +314,11 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        with `meetings.recording_indicator_display` keeping the OS's own name for it;
 │                                        a display that is gone falls back to the primary one, and off, every capsule
 │                                        stays on the primary display in the saved corner (see meetings.md)
+├── Choose meeting audio no labs.meeting_audio_source + labs.meeting_audio_source_choice (all by default, every OS)
+│                                        Meetings › Settings offers Computer audio: all computer audio, one output device,
+│                                        or one app; a chosen source that isn't there records silence until it returns,
+│                                        a chosen source never falls back to all audio, and another choice applies
+│                                        mid-recording (see meetings.md)
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
 ├── Transform typed text no labs.typed_text + typed_text_hotkey (Linux) Settings › Output shows a Typed text section whose shortcut is unbound by
@@ -4410,6 +4415,59 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   `cargo check --target x86_64-pc-windows-msvc -p scrawl-capture` did check
   the monitor helper's new device name. A native Wayland capsule still has no
   display to measure, which is why Linux does not list the card.
+- Choose meeting audio (every OS, with Meetings on): **Computer audio** in
+  Meetings › Settings chooses what a recording's system track hears: all
+  computer audio (the default), one output device, or one app. Its toggle is
+  `labs.meeting_audio_source` (off by default) and the choice is
+  `labs.meeting_audio_source_choice` (`"all"`,
+  `{"app":{"id","name"}}`, or `{"output":{"id","name"}}`). Off, the choice is
+  ignored and every output records exactly as before; on with All computer
+  audio, it does too. The row lists all computer audio first, then each output
+  a meeting can capture, then each app playing now, and it never falls back to
+  every output once a source is chosen: an app that isn't playing, or a device
+  that was unplugged, records silence and keeps its place on the timeline until
+  it returns. A malformed saved value loads as all computer audio, and a saved
+  app or device missing from the list stays the shown choice with "not
+  playing now" or "not connected". Listing runs off the window thread
+  ([rune_ui/meetings/audio_source.rs](../../src/rune_ui/meetings/audio_source.rs)),
+  and a change applies mid-recording: every source compares the choice it
+  opened with on its 2 s route check and reopens with the new one.
+  - macOS taps the app's Core Audio process objects, every one of them, so a
+    helper that starts playing is heard without rebuilding the tap, or the
+    chosen device's UID through its own aggregate; ScreenCaptureKit is never
+    used for a chosen source, and a chosen app or output needs System Audio
+    Recording consent even when Screen Recording is on.
+  - Windows opens that endpoint's cpal loopback, or WASAPI process loopback
+    of the app's process-tree roots; the pane climbs from a playing session
+    only to a known helper (a WebView2 helper, or the browser's own child
+    sharing its executable) that started first, so new Teams'
+    `msedgewebview2.exe` children list and capture as `ms-teams.exe` and an
+    app Chrome, Terminal, Steam or Hex launched is its own app.
+  - Linux runs one `pw-record` per running output stream of the app, adding
+    and removing them in place so an extra stream mid-call is heard without a
+    gap, or one for the chosen sink.
+  Checks:
+  `the_choose_meeting_audio_lab_ships_on_every_os_and_is_off_by_default`
+  ([labs.rs](../../src/labs.rs)),
+  `the_lab_gate_keeps_all_computer_audio_while_off` and the choice's serde
+  tests ([meeting/audio_source.rs](../../src/meeting/audio_source.rs)),
+  `a_choice_records_only_its_own_source`,
+  `an_apps_streams_are_added_and_removed_without_reopening_the_source`,
+  `a_capture_targets_its_own_sink_and_the_fallback_keeps_the_default`, and
+  `an_exited_monitor_is_restarted_while_its_sink_keeps_its_name`
+  ([meeting/linux.rs](../../src/meeting/linux.rs)),
+  `running_output_streams_name_their_apps_and_node_targets` and
+  `hex_own_playback_is_never_an_app_to_choose`
+  ([microphone_activity/linux.rs](../../src/microphone_activity/linux.rs)),
+  `a_chosen_meeting_app_taps_every_one_of_its_processes` and
+  `an_audio_session_belongs_to_its_top_most_ancestor_outside_the_shell`
+  ([microphone_activity.rs](../../src/microphone_activity.rs),
+  [microphone_activity/windows.rs](../../src/microphone_activity/windows.rs)),
+  `an_invalid_meeting_audio_source_choice_loads_all_computer_audio`
+  ([app_settings/persistence/tests.rs](../../src/app_settings/persistence/tests.rs)),
+  and `meeting_audio_source_lists_all_audio_and_keeps_a_missing_choice_visible`
+  ([rune_ui/tests/panes.rs](../../src/rune_ui/tests/panes.rs)); not observed on a
+  real PipeWire session or on macOS or Windows hardware.
 - Import audio (macOS): Meetings offers **Import audio…** beside Start
   recording. A local WAV, M4A, MP3, AIFF, or CAF file is decoded to 16 kHz
   mono float WAV by the AVFoundation bridge, then transcribed with the

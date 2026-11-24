@@ -270,6 +270,9 @@ impl Feature {
             Self::MeetingIndicatorDisplay => {
                 "Drag the meeting recording indicator to another display and it stays there, in the corner nearest where you let go. Off, it stays on the primary display (macOS and Windows)"
             }
+            Self::MeetingAudioSource => {
+                "Record one app or one output device in a meeting instead of all computer audio (labs.meeting_audio_source_choice); a chosen source that isn't playing records silence until it returns"
+            }
         }
     }
 }

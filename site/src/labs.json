@@ -976,6 +976,19 @@
       ],
       "summary": "Drag the meeting recording indicator to another display and it stays there",
       "title": "Indicator on any display"
+    },
+    {
+      "added": "2026-11-24",
+      "group": "meetings",
+      "groupTitle": "Meetings",
+      "id": "meeting-audio-source",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "Record one app or one output device in meetings instead of all computer audio",
+      "title": "Choose meeting audio"
     }
   ]
 }
