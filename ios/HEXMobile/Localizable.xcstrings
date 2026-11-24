@@ -5080,6 +5080,16 @@
           }
         }
       }
+    },
+    "Casual starts sentences lowercase anyway. Pick Polished for capitals." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“随意”本来就让句首小写。要大写请选“精修”。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

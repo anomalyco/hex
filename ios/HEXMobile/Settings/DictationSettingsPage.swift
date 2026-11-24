@@ -123,9 +123,13 @@ struct DictationSettingsPage: View {
             SettingsSectionHeader(title: "Formatting")
 
             SettingsCard {
-                // After the style, on every path (`DictationPipeline`).
+                // After the style, on every path (`DictationPipeline`). Casual lowercases sentence
+                // starts by itself, which read as this switch not working (TestFlight build 149).
                 SettingsToggleRow(
                     title: String(localized: "Lowercase"),
+                    detail: dictation.style == .casual
+                        ? String(localized: "Casual starts sentences lowercase anyway. Pick Polished for capitals.")
+                        : nil,
                     isOn: toggleBinding(
                         { DictationLowercaseSettings().isEnabled },
                         { DictationLowercaseSettings().isEnabled = $0 }
