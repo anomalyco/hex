@@ -37,6 +37,8 @@
     <string name="model_no_connection">没有网络连接。正在使用较小的内置模型。</string>
     <string name="model_no_space">存储空间不足。正在使用较小的内置模型。</string>
     <string name="model_loading">正在下载 190 MB · %1$d%%</string>
+    <string name="model_waiting_wifi">190 MB，连上 Wi-Fi 后自动开始下载。</string>
+    <string name="model_use_mobile_data">使用移动数据</string>
     <string name="model_download">下载</string>
     <string name="model_try_again">再试一次</string>
 
