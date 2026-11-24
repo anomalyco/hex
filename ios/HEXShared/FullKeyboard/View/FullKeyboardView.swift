@@ -116,7 +116,7 @@ final class FullKeyboardView: UIView {
     /// Settings › Experiments › Emoji shortcodes, cached by `syncEmojiShortcodes`: the strip
     /// offers emoji for a ":name" and the closing ":" completes one while it is on.
     private(set) var emojiShortcodesEnabled = false
-    /// Settings › Experiments › Keyboard themes: Automatic keeps iOS's glass; another theme
+    /// Settings › Experiments › Key colors: Automatic keeps iOS's glass; another theme
     /// paints the keyboard's own colours. Read again by `syncSettings`, which rebuilds the
     /// palette when it changes.
     private var keyboardTheme = FullKeyboardSettings().effectiveKeyboardTheme

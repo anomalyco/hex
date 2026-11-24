@@ -1,6 +1,6 @@
 import UIKit
 
-/// Settings › Experiments › Keyboard themes: the full keyboard's keys in colours of their own.
+/// Settings › Experiments › Key colors: the full keyboard's keys in colours of their own.
 /// A theme colours the keys only: every keycap (letters and the special keys alike), their
 /// pressed and held states, the key pop-ups and accent callout, the return key's action colour
 /// and the labels on them. The background stays iOS's own glass panel in light and dark, the

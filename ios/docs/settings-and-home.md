@@ -61,7 +61,7 @@ list starts at the top. The pages, one file each in `HEXMobile/Settings/`
   Korean keyboard (두벌식), Swipe typing in more languages and German spatial autocorrect
   (greyed, its value kept, unless Autocorrect and Spatial autocorrect are on); **Keyboard
   layout**: Comma and period keys, Dvorak punctuation keys, Quick accents, ABC under the
-  emoji key, Keyboard themes (its Theme menu below the switch while it's on) and Join the
+  emoji key, Key colors (its Color menu below the switch while it's on) and Join the
   keyboard when unfolded (only on a foldable iPhone, `FullKeyboardView.isFoldable`);
   **Typing**: Adaptive touch (its status and Reset touch learning below the switch),
   Two-thumb selection, Delete swiped words letter by letter, Hide word suggestions, Emoji
@@ -78,7 +78,7 @@ its page's switches to the App Group: off by default, on with `-on`; switches th
 on by default (Spatial autocorrect, Swipe typing, Emoji key, Emoji suggestions) stay on.
 `-end` starts the page scrolled to the bottom. `settings-privacy-confirm`
 opens Record typing logs' consent dialog. `--experiment-keyboard-themes` turns
-Keyboard themes on, and `--keyboard-theme automatic|black|white|navy|forest|ember|burgundy`
+Key colors on, and `--keyboard-theme automatic|black|white|navy|forest|ember|burgundy`
 picks the theme. A theme colours the keys only (every keycap, special keys included, their
 pressed and held states, the key pop-ups and the labels), the same in light and dark; the
 background stays iOS's glass, matching the band iOS draws above a third-party keyboard and
