@@ -2590,14 +2590,15 @@ Granola import: see [granola-import.md](../plans/granola-import.md).
 - Microphone and system audio now run on separate device clocks aligned by
   arrival time; drift below the 1 s gap threshold is uncorrected and echo
   thresholds were tuned on ScreenCaptureKit's shared clock.
-- Calendar titles (EventKit) are not implemented.
 - In-call text trails speech by one chunk plus its settling (seconds, see the
   replay numbers); nothing shows a partial sentence before then. A track that
   falls more than 120 s behind skips audio until Stop rebuilds it.
 - The recording capsule's Copy agent prompt / Copy all are unverified on a
   real Mac screen; Copy all can trail the transcript by up to a second.
-- The Meetings pane is verified by Rune goldens rendered offscreen (on Linux
-  and on hailmary's Metal), not on a Mac screen; the capsules have no golden.
+- The Meetings pane and five capsule states (recording rest and open,
+  auto-started, call-ended, and ready) are verified by Rune goldens rendered
+  offscreen on Linux, not on a Mac screen; the offer, finalizing, and
+  calendar-reminder capsules have no golden yet.
 - Echo thresholds are tuned on two speaker-mode calls (2026-10-15 and
   2026-10-16), with six hand-labeled local utterances; other rooms, external
   speakers, and Bluetooth are unmeasured. The 2026-10-16 replay audio was lost

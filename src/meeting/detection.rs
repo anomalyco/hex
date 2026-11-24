@@ -580,7 +580,7 @@ impl MeetingSource {
             Self::Banshee => "Banshee",
             Self::Zoom => "Zoom",
             Self::Teams => "Microsoft Teams",
-            Self::SlackHuddle => "Slack Huddle",
+            Self::SlackHuddle => "Slack huddle",
             Self::FaceTime => "FaceTime",
             Self::WhatsApp => "WhatsApp",
             Self::Gather => "Gather",

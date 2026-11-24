@@ -24,6 +24,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("{} call ended", "Appel {} terminé"),
     ("Recording stops in {} s", "L'enregistrement s'arrête dans {} s"),
     ("Stop now", "Arrêter maintenant"),
+    ("Couldn't record", "Impossible d'enregistrer"),
 ];
 
 #[rustfmt::skip]
@@ -47,6 +48,7 @@ pub(super) const PORTUGUESE: &[(&str, &str)] = &[
     ("{} call ended", "Chamada do {} encerrada"),
     ("Recording stops in {} s", "A gravação para em {} s"),
     ("Stop now", "Parar agora"),
+    ("Couldn't record", "Não foi possível gravar"),
 ];
 
 #[rustfmt::skip]
@@ -70,4 +72,5 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
     ("{} call ended", "Звонок в {} завершён"),
     ("Recording stops in {} s", "Запись остановится через {} с"),
     ("Stop now", "Остановить сейчас"),
+    ("Couldn't record", "Не удалось записать"),
 ];

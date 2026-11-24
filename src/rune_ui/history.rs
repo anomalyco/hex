@@ -789,6 +789,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (
                             title: entry.final_text.replace('\n', " "),
                             meta,
                             meta_ink: None,
+                            note: None,
                             time: event_age(entry.timestamp_ms),
                             hover: vec![copy_action(ui, p, id, true)],
                             selected,
