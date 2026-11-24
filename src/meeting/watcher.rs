@@ -164,6 +164,9 @@ struct ActiveRecording {
     stop: Arc<AtomicBool>,
     updates: Receiver<meeting::RecordingUpdate>,
     reported_started: bool,
+    /// A browser's playback stopped counting while the Mac was locked, and
+    /// that was logged once for this recording (#2685); cleared on unlock.
+    playback_locked_noted: bool,
     worker: JoinHandle<Result<meeting::MeetingManifest>>,
 }
 
@@ -877,6 +880,7 @@ fn start_recording(
         stop,
         updates,
         reported_started: false,
+        playback_locked_noted: false,
         worker,
     });
 }
@@ -973,8 +977,31 @@ fn poll_recording(
             crate::app_settings::meeting_stop_when_call_ends(),
             crate::labs::stop_any_call_recording(),
         );
+        // A browser seems to keep its output open after its call while the
+        // Mac is locked (#2685): playback stops counting there, and one note
+        // per recording says so, so the next report shows whether that is
+        // what happened.
+        let locked = crate::audio::system_idle::session_locked();
+        if !locked {
+            active.playback_locked_noted = false;
+        } else if auto_stop
+            && !active.playback_locked_noted
+            && crate::microphone_activity::is_browser_id(Some(application))
+        {
+            active.playback_locked_noted = true;
+            tracing::info!(
+                application,
+                "the Mac is locked; the browser's playback no longer keeps its call present"
+            );
+        }
         let applications = active_microphone_applications();
-        let pass = call_end::watched_pass(application, auto_stop, &applications, call_app_playing);
+        let pass = call_end::watched_pass(
+            application,
+            locked,
+            auto_stop,
+            &applications,
+            call_app_playing,
+        );
         if pass.present {
             detector.keep_snooze_alive();
         }
@@ -1553,6 +1580,7 @@ mod tests {
             stop: Arc::new(AtomicBool::new(false)),
             updates,
             reported_started: true,
+            playback_locked_noted: false,
             worker: thread::spawn(|| Err(eyre!("not recording"))),
         });
         if let Some(active) = recording.as_mut() {
@@ -1593,6 +1621,7 @@ mod tests {
             stop: Arc::new(AtomicBool::new(false)),
             updates,
             reported_started: true,
+            playback_locked_noted: false,
             worker: thread::spawn(|| Err(eyre!("not recording"))),
         }
     }
@@ -1995,6 +2024,7 @@ mod tests {
             stop: Arc::new(AtomicBool::new(false)),
             updates,
             reported_started: true,
+            playback_locked_noted: false,
             worker: thread::spawn(|| Err(eyre!("not recording"))),
         });
         start_import(
