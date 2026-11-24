@@ -2978,7 +2978,11 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   its nine accented vowels held on a e i o u (á é í ó ö ő ú ü ű), the iPhone's `hu`
 │   dictionary behind its autocorrect (a missing accent is the cheapest fix, "koszonom" →
 │   "köszönöm", while a word of its own such as "meg" keeps its spelling), English as its
-│   bilingual partner through the Latin-script rule, and no typing (spatial) model
+│   bilingual partner through the Latin-script rule, and no typing (spatial) model.
+│   Dutch (Nederlands) is one too: QWERTY on the English letters with Apple's Dutch held
+│   accents (ë ï é ó and the rest, j́ on J, no ĳ), AZERTY and QWERTZ offered, the iPhone's
+│   `nl` dictionary behind its autocorrect, English as its bilingual partner, and no typing
+│   model, so no spatial autocorrect or swipe typing in Dutch
 ├── Korean keyboard (두벌식) (off by default, `experiments.koreanKeyboard`): Settings ›
 │   Experiments adds 한국어 to Settings › Keyboard › Languages, typed on the standard two-set
 │   rows (ㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔ / ㅁㄴㅇㄹㅎㅗㅓㅏㅣ / ㅋㅌㅊㅍㅠㅜㅡ, shift's ㅃㅉㄸㄲㅆ and ㅒㅖ, no

@@ -193,7 +193,7 @@ spaces are no less likely than the run; those can replace a run the whole-word m
 would keep. Deutsch keeps the ordinary readings: its lowercase model cannot give a
 split's nouns their capitals.
 Shortcuts, learned fixes, contractions, and words you kept still come first. Other
-layouts (Norsk, Deutsch, Italiano, Français (Canada), Français (Suisse), Português, Polski, Română, Русский, Українська, Ελληνικά) keep the dictionary
+layouts (Norsk, Deutsch, Italiano, Français (Canada), Français (Suisse), Português, Polski, Română, Nederlands, Русский, Українська, Ελληνικά) keep the dictionary
 engine in their own language, and Srpski (no iOS dictionary) none, never the English
 model, except as bilingual autocorrect's second language (below). The
 models (`HEXKeyboard/TypingModel/en.hextm` and `es.hextm`, about 3.6 MB each) are
@@ -515,7 +515,7 @@ tell, both languages', in turn. In the simulator the English
 keyboard alone changed 34 of 77 common French words and the French keyboard alone 27 of
 80 English words; with both chosen, none. Any two Latin-script languages with an iOS
 dictionary pair this way (English with Français, Deutsch, Italiano, Português, Polski,
-Čeština, Norsk, Română, Español, or two of those), whatever their order; Polski's simulator
+Čeština, Norsk, Română, Nederlands, Español, or two of those), whatever their order; Polski's simulator
 dictionary takes every word, so the any-word guard (#2143) leaves it out there. The words before
 count for a language when only its dictionary knows them, or, from three letters, when
 both do but only its typing model has them among its commonest (iOS's French and German
@@ -582,8 +582,8 @@ QWERTZ, (Canada) QWERTY, AZERTY, QWERTZ, (Suisse) QWERTZ, AZERTY, QWERTY (Franç
 AZERTY is Apple's "AZERTY – French", the first layout Apple lists for France and Belgium, with
 the apostrophe key; Canada's QWERTY and Switzerland's QWERTZ are Apple's "QWERTY – French" and
 "QWERTZ – French", the first each lists, with the key ending row 2; every other French layout
-is the plain one); Italiano and Português QWERTY,
-AZERTY, QWERTZ; Polski and Română QWERTY, QWERTZ, AZERTY; Čeština "QWERTZ – Čeština" and
+is the plain one); Italiano, Português and Nederlands QWERTY,
+AZERTY, QWERTZ (Nederlands' list read from the iOS 26.5 and 27.2 runtimes' TextInput_nl); Polski and Română QWERTY, QWERTZ, AZERTY; Čeština "QWERTZ – Čeština" and
 "QWERTY – Čeština", Apple's "QWERTZ – Czech/Slovak" and "QWERTY – Czech/Slovak" (iOS 27.2
 simulator), both its own rows with the ´ and ˇ keys, Z and Y swapped on the second; Magyar
 "QWERTZ – Magyar" and "QWERTY – Magyar", the standard Hungarian QWERTZ with every accented
@@ -683,7 +683,14 @@ pages and their held keys are English's), Magyar (the standard Hungarian QWERTZ,
 `qwertzuiop`, `asdfghjkl`, `yxcvbnm`, on the English keys' QWERTZ; its nine accented vowels
 are all held, á on A, é on E, í on I, ó ö ő on O and ú ü ű on U, the base first and then the
 neighbouring Latin accents, ő and ű the double-acute letters U+0151 and U+0171, and every
-consonant holds nothing; QWERTY is offered too) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
+consonant holds nothing; QWERTY is offered too), Nederlands (QWERTY on the English letters,
+as Apple's Dutch keyboard is; its holds are Apple's, read from the iOS 26.5 and 27.2
+runtimes' `TextInput_nl.bundle/Keyboard-nl.plist` rather than screenshots, the base first
+and then the plist's order, the rule Polish's observed holds follow against its own plist:
+A á ä â à æ ã å ā, C ç, E é ë ê è ę ė ē, I í ï ì î į ī, J j́ (j and the combining acute
+U+0301, for a stressed íj́), N ñ ń, O ó ö ô ò õ œ ø ō, U ú ü û ù ū, and every other letter
+nothing; Apple offers no ĳ ligature, so neither does Hex; its currency key is €, held for
+€ $ £ ¥ ₩ ₽ on the #+= page's € as Polish's is) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
 Serbian Latin keyboard has no keys of its own for č ć đ š ž, they are held on c, d, s
 and z), as Apple's iOS keyboards
 lay them out (`KeyboardLanguage`: letter rows, long-press accents, spelling dictionary).
@@ -712,7 +719,7 @@ S, and Hex's callout shows the options in the system's left-to-right order with 
 letter at the end under the thumb, in one row where the system wraps a long list
 (English A) into two. Autocorrect and suggestions use the layout's
 `UITextChecker` dictionary (`nb`, `es`, `de`, `it`, `fr`, `pt_BR` then
-`pt_PT`, `pl`, `cs`, `hu`, `ro`, `ru`, `uk`, `el`; Serbian would use `sr_Latn`, which iOS 27.2 doesn't have, nor a
+`pt_PT`, `pl`, `cs`, `hu`, `nl` (then `nl_NL`, `nl_BE`), `ro`, `ru`, `uk`, `el`; Serbian would use `sr_Latn`, which iOS 27.2 doesn't have, nor a
 Croatian one); where the iPhone has none
 they stay off except your own text replacements, and the English contractions
 and typo list (`i` → `I`) apply only to English. Neighbouring-key costs follow
