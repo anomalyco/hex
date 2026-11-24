@@ -108,7 +108,14 @@ impl Pane {
             Pane::HudLab | Pane::Activity => false,
             // Labs › Modes editor; scenes render the pane without the lab.
             Pane::Modes => ui.settings.labs.modes_editor,
-            Pane::Meetings => caps.meetings && meetings::available(ui),
+            // On a Mac an ordinary item even while off: the pane itself
+            // offers to turn it on. Elsewhere it shows once it is on.
+            Pane::Meetings => {
+                caps.meetings
+                    && (meetings::available(ui)
+                        || (caps.os == super::platform::Os::Macos
+                            && crate::labs::Feature::Meetings.managed().is_none()))
+            }
             // On from Labs (dev builds), or while its driver is installed.
             Pane::VoiceFilter => caps.fun && fun::running(ui),
             #[cfg(hex_capture)]
