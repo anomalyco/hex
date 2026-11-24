@@ -16,6 +16,10 @@ import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import javax.net.ssl.HttpsURLConnection
 
+/** A Hex screen in front of another app that must make no network request: a model download in progress does not
+ * resume while it shows (Labs › Dictate from Quick Settings' sheet). */
+internal interface OfflineScreen
+
 /** Hex's network operation: an explicit, fixed model GET from Hex's own screens, each file pinned by revision, size and
  * SHA-256 ([small] from setup or Dictation settings, [english] from Labs). The keyboard never calls it. */
 internal class ModelStore private constructor(private val name: String, private val size: Long, private val hash: String,
@@ -94,11 +98,15 @@ internal class ModelStore private constructor(private val name: String, private 
     // A started download keeps its partial file and carries on whenever a Hex screen is in front again.
     private val foreground = object : Application.ActivityLifecycleCallbacks {
         override fun onActivityStarted(activity: Activity) {
+            if (activity is OfflineScreen) return
             synchronized(this@ModelStore) {
                 if (started++ == 0 && !running && (waiting || part(activity).exists()) && installed(activity) == null) download(activity)
             }
         }
-        override fun onActivityStopped(activity: Activity) { synchronized(this@ModelStore) { if (--started == 0) stops++ } }
+        override fun onActivityStopped(activity: Activity) {
+            if (activity is OfflineScreen) return
+            synchronized(this@ModelStore) { if (--started == 0) stops++ }
+        }
         override fun onActivityCreated(activity: Activity, state: Bundle?) = Unit
         override fun onActivityResumed(activity: Activity) = Unit
         override fun onActivityPaused(activity: Activity) = Unit

@@ -159,4 +159,11 @@
     <string name="password_manager_suggestions_detail">Show logins, codes and cards from your autofill service in the suggestion strip</string>
     <string name="voice_only_mode">Voice-only mode</string>
     <string name="voice_only_detail">Lets you switch to Hex just to dictate from another keyboard, then switches back</string>
+    <!-- Labs › Dictate from Quick Settings: the Labs row, the tile's label and the sheet's lines. -->
+    <string name="quick_dictation">Dictate from Quick Settings</string>
+    <string name="quick_dictation_detail">Adds a Hex tile to Quick Settings. Tap it in any app, speak, and Hex copies the text for you to paste. For apps where Hex can’t be your keyboard, such as work apps.</string>
+    <string name="quick_tile">Hex dictation</string>
+    <string name="quick_hint">Speak, then tap Finish dictation</string>
+    <string name="quick_copied">Copied. Paste it where you were typing.</string>
+    <string name="quick_close">Close</string>
 </resources>

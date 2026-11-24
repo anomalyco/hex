@@ -129,6 +129,8 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val swipeDeleteLetters = remember(revision) { typing.swipeDeleteLetters }
     val passwordManager = remember(revision) { typing.passwordManagerSuggestions }
     val voiceOnly = remember(revision) { typing.voiceOnly }
+    // Labs › Dictate from Quick Settings is the tile service's enabled state, not a preference.
+    var quickDictation by remember { mutableStateOf(QuickDictation.enabled(context)) }
     // A hidden field or leaving Labs shows the saved line again, never an unsaved draft.
     LaunchedEffect(page, signature) { if (page != Page.Labs || !signature) signatureDraft = speech.signatureText }
     LaunchedEffect(page, learnFixes) { if (page != Page.Labs || !learnFixes) forgetting = false }
@@ -399,6 +401,11 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                     } else {
                                         Entry(stringResource(R.string.learn_fixes_delete), action = { forgetting = true })
                                     }
+                                }
+                                Rule()
+                                Toggle(stringResource(R.string.quick_dictation), stringResource(R.string.quick_dictation_detail),
+                                    quickDictation, noteLines = Int.MAX_VALUE) {
+                                    QuickDictation.setEnabled(context, it); quickDictation = it
                                 }
                             }
                             Label(stringResource(R.string.labs_output), muted = true, size = 14,

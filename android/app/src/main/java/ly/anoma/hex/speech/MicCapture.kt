@@ -59,7 +59,7 @@ internal class SpeechEdges(private val rate: Int = 16_000) {
 private val jobs = AtomicLong()
 
 /** Where a dictation was made, for Labs › Diagnostics' last dictation. */
-internal enum class DictationPlace { Keyboard, Home }
+internal enum class DictationPlace { Keyboard, Home, QuickSettings }
 
 /** The speech model when ✓ was tapped: loaded before the dictation, loaded while the person spoke, still loading
  * (ready [DictationTimes.modelReadyMs] after ✓), loaded by the decode itself after ✓, or not known. */
