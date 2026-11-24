@@ -18,12 +18,18 @@ pub fn is_dev_build() -> bool {
     )
 }
 
-/// Whether this build was made on this machine rather than published to a
-/// channel: debug, test, `HEX_LOCAL_BUILD=1`, `HEX_TEST_BUILD=1`, or an
-/// unmarked `0.0.0-dev` checkout build. A build stamped with a channel is a
-/// distributed release even when that channel is dev, and the dev channel's
-/// macOS builds are signed with Anomaly's Developer ID exactly like stable
-/// ones, so they are not local.
+/// Whether this build was made on this machine rather than published: debug,
+/// test, `HEX_LOCAL_BUILD=1`, `HEX_TEST_BUILD=1`, or an unstamped
+/// `0.0.0-dev-local` checkout build (`build.rs`, as in Nix). A build stamped
+/// with a channel is a distributed release even when that channel is dev, and
+/// the dev channel's macOS builds are signed with Anomaly's Developer ID
+/// exactly like stable ones, so they are not local.
+///
+/// Nor is a release build of the dev branch: `cargo build --release` and
+/// `scripts/build-app.sh` report the crate version (3.4.0), and a manually
+/// stamped `0.0.0-dev-<N>` from `scripts/release-app.sh` is signed and
+/// notarized, so both count as shipped unless `HEX_LOCAL_BUILD=1` marks them.
+/// They are still `is_dev_build` builds.
 ///
 /// Narrower than `is_dev_build` (the dev channel is a dev build but not a
 /// local one) and wider than `app_paths::is_local_build`, which only reads
@@ -72,10 +78,14 @@ pub(crate) fn is_dev_build_for(
 ) -> bool {
     is_local_build_for(debug, test, local_build, test_build, channel, version)
         || matches!(channel, Some("dev"))
+        // A dev version stamped by hand without HEX_BUILD_CHANNEL is still a
+        // dev build (it was before the split), though it may be a signed
+        // release for the driver install.
+        || (channel.is_none() && version.contains("-dev"))
 }
 
 /// The inputs behind [`is_local_build`]: the build was not stamped with a
-/// channel, and is therefore not a published release.
+/// channel, and carries `build.rs`'s local-only version marker.
 pub(crate) fn is_local_build_for(
     debug: bool,
     test: bool,
@@ -88,7 +98,7 @@ pub(crate) fn is_local_build_for(
         || test
         || local_build == Some("1")
         || test_build == Some("1")
-        || (channel.is_none() && version.contains("-dev"))
+        || (channel.is_none() && version.contains("-dev-local"))
 }
 
 #[cfg(test)]
@@ -230,6 +240,28 @@ mod tests {
             None,
             "0.0.0-dev-local-abc1234"
         ));
+        // A dev version stamped by hand (scripts/release-app.sh with
+        // HEX_VERSION and no HEX_BUILD_CHANNEL) is signed and notarized, so it
+        // is not local, but it stays a dev build.
+        assert!(!is_local_build_for(
+            false,
+            false,
+            None,
+            None,
+            None,
+            "0.0.0-dev-42"
+        ));
+        assert!(is_dev_build_for(
+            false,
+            false,
+            None,
+            None,
+            None,
+            "0.0.0-dev-42"
+        ));
+        // A plain release build of the dev branch reports the crate version
+        // (3.4.0): shipped unless HEX_LOCAL_BUILD marks it.
+        assert!(!is_local_build_for(false, false, None, None, None, "3.4.0"));
         // A dev-channel build stays a dev build; only "local" changed.
         assert!(is_dev_build_for(
             false,

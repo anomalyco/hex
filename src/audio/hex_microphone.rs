@@ -552,16 +552,25 @@ const EXPECTED_DRIVER_BUNDLE_ID: &str = "anomaly.hex.microphone.driver";
 /// signs the driver with the same identity it signs `Hex.app` with.
 const DRIVER_REQUIREMENT: &str = include_str!("../../app/driver-requirement.txt");
 
-/// Fixed AppleScript for driver installation. No user input is ever interpolated
-/// into this script; `osascript` receives the verified bundled `.driver` path
-/// via `argv` and quotes it with `quoted form of (item 1 of argv)`.
+/// Fixed AppleScript for driver installation. Nothing from the machine is
+/// interpolated into the script: `osascript` receives the bundled `.driver`
+/// path and the code-signing requirement (empty when this build does not
+/// verify) via `argv` and quotes each with `quoted form of`.
+///
+/// The root shell refuses a symlinked or non-directory source, copies the
+/// bundle into a staging folder without ACLs or quarantine flags, gives it to
+/// `root:wheel` with no group or other write, and, when it was given a
+/// requirement, checks the staging copy's signature as root. Only then does it
+/// replace the installed driver and restart coreaudiod, so a bundle swapped in
+/// while the authorization prompt was up never lands in the HAL folder.
 #[cfg(target_os = "macos")]
 const INSTALL_DRIVER_APPLESCRIPT: &str = r#"on run argv
     set srcPath to quoted form of (item 1 of argv)
+    set requirement to quoted form of (item 2 of argv)
     set dstDir to "'/Library/Audio/Plug-Ins/HAL'"
     set dstPath to "'/Library/Audio/Plug-Ins/HAL/HexMicrophone.driver'"
     set tmpPath to "'/Library/Audio/Plug-Ins/HAL/.HexMicrophone.driver.staging'"
-    do shell script "/bin/mkdir -p " & dstDir & " && /bin/rm -rf " & tmpPath & " && /usr/bin/ditto " & srcPath & " " & tmpPath & " && /usr/sbin/chown -R root:wheel " & tmpPath & " && /bin/chmod -R a+rX " & tmpPath & " && /bin/rm -rf " & dstPath & " && /bin/mv " & tmpPath & " " & dstPath & " && (/bin/launchctl kickstart -k system/com.apple.audio.coreaudiod || /usr/bin/killall coreaudiod)" with administrator privileges
+    do shell script "/bin/mkdir -p " & dstDir & " && /bin/rm -rf " & tmpPath & " && if [ -d " & srcPath & " ] && [ ! -L " & srcPath & " ]; then :; else echo 'The bundled driver is not a directory' 1>&2; exit 1; fi && /usr/bin/ditto --noacl --noqtn " & srcPath & " " & tmpPath & " && /usr/sbin/chown -R root:wheel " & tmpPath & " && /bin/chmod -R u+rwX,go+rX,go-w " & tmpPath & " && if [ -n " & requirement & " ]; then /usr/bin/codesign --verify --deep --strict -R=" & requirement & " " & tmpPath & " || { echo \"The driver is not signed by Anomaly's Developer ID\" 1>&2; /bin/rm -rf " & tmpPath & "; exit 1; }; fi && /bin/rm -rf " & dstPath & " && /bin/mv " & tmpPath & " " & dstPath & " && (/bin/launchctl kickstart -k system/com.apple.audio.coreaudiod || /usr/bin/killall coreaudiod)" with administrator privileges
 end run"#;
 
 /// Fixed AppleScript for driver removal. Takes no arguments and touches only
@@ -697,9 +706,22 @@ fn shipped_build() -> bool {
     !crate::dev_build::is_local_build()
 }
 
+/// The requirement the root copy re-checks, empty when this build does not
+/// verify signatures (a local build), so installing the driver it built keeps
+/// working.
+#[cfg(target_os = "macos")]
+fn driver_signature_requirement() -> &'static str {
+    if shipped_build() {
+        DRIVER_REQUIREMENT.trim()
+    } else {
+        ""
+    }
+}
+
 /// Checks the bundle the way the updater checks a downloaded `Hex.app`
 /// (`codesign --verify --deep --strict -R`), before the admin prompt copies
 /// it into the HAL folder.
+#[cfg(target_os = "macos")]
 fn verify_driver_signature(bundle: &std::path::Path) -> Result<(), String> {
     crate::codesign::verify(bundle, DRIVER_REQUIREMENT).map_err(|detail| {
         // codesign can explain across lines; Settings shows one.
@@ -718,18 +740,34 @@ fn inspect_driver_candidate(
     path: &std::path::Path,
     verify_signature: bool,
 ) -> DriverCandidate {
-    if !path.exists() {
-        return DriverCandidate::Missing;
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return DriverCandidate::Invalid("Driver bundle is a symlink".into());
+        }
+        Ok(metadata) if !metadata.is_dir() => {
+            return DriverCandidate::Invalid("Driver bundle is not a directory".into());
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return DriverCandidate::Missing;
+        }
+        Err(error) => {
+            return DriverCandidate::Invalid(format!("Driver bundle cannot be read: {error}"));
+        }
     }
     if let Err(reason) = validate_driver_bundle(path) {
         return DriverCandidate::Invalid(reason);
     }
+    #[cfg(target_os = "macos")]
     if verify_signature
         && location == DriverLocation::Bundle
         && let Err(reason) = verify_driver_signature(path)
     {
         return DriverCandidate::Invalid(reason);
     }
+    // Only macOS installs this driver, so nothing verifies it elsewhere.
+    #[cfg(not(target_os = "macos"))]
+    let _ = (location, verify_signature);
     DriverCandidate::Installable
 }
 
@@ -737,9 +775,7 @@ fn inspect_driver_candidate(
 /// then the build script's cache output, then the installed app.
 fn driver_candidate_paths() -> Vec<(DriverLocation, PathBuf)> {
     let mut paths = Vec::new();
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(contents_dir) = exe.parent().and_then(|p| p.parent())
-    {
+    if let Some(contents_dir) = running_bundle_contents() {
         paths.push((
             DriverLocation::Bundle,
             contents_dir.join("Library/HexMicrophone.driver"),
@@ -749,7 +785,7 @@ fn driver_candidate_paths() -> Vec<(DriverLocation, PathBuf)> {
             contents_dir.join("Resources/HexMicrophone.driver"),
         ));
     }
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = crate::app_paths::home_dir() {
         paths.push((
             DriverLocation::Cache,
             home.join("Library/Caches/hex-mic/HexMicrophone.driver"),
@@ -760,6 +796,21 @@ fn driver_candidate_paths() -> Vec<(DriverLocation, PathBuf)> {
         PathBuf::from("/Applications/Hex.app/Contents/Library/HexMicrophone.driver"),
     ));
     paths
+}
+
+/// The `Contents` folder of the `Hex.app` this executable runs from, if it
+/// runs from one: a `.app` bundle with an `Info.plist`, never just any two
+/// folders up from the executable.
+fn running_bundle_contents() -> Option<PathBuf> {
+    let executable = std::env::current_exe().ok()?.canonicalize().ok()?;
+    let contents = executable.parent()?.parent()?;
+    let bundle = contents.parent()?;
+    (contents.file_name() == Some(std::ffi::OsStr::new("Contents"))
+        && bundle
+            .extension()
+            .is_some_and(|extension| extension == "app")
+        && bundle.join("Contents/Info.plist").is_file())
+    .then(|| contents.to_path_buf())
 }
 
 /// Picks the driver bundle to install from `candidates`, in order.
@@ -867,15 +918,13 @@ fn classify_osascript_failure(stderr: &str, stdout: &str) -> DriverActionState {
 #[cfg(target_os = "macos")]
 fn run_driver_osascript(
     script: &str,
-    arg: Option<&std::path::Path>,
+    args: &[&std::ffi::OsStr],
     settled: impl Fn(&HexMicrophoneStatus) -> bool,
     done: impl FnOnce() -> DriverActionState,
 ) -> DriverActionState {
     let mut command = std::process::Command::new("/usr/bin/osascript");
     command.arg("-e").arg(script);
-    if let Some(arg) = arg {
-        command.arg(arg);
-    }
+    command.args(args);
     match command.output() {
         Ok(out) if out.status.success() => {
             crate::audio::notify_audio_service_restarted();
@@ -927,7 +976,10 @@ pub fn install_driver_async() {
                 };
                 let state = run_driver_osascript(
                     INSTALL_DRIVER_APPLESCRIPT,
-                    Some(&src_bundle),
+                    &[
+                        src_bundle.as_os_str(),
+                        std::ffi::OsStr::new(driver_signature_requirement()),
+                    ],
                     |st| st.driver_loaded,
                     || {
                         DriverActionState::DoneInstalled(
@@ -954,7 +1006,7 @@ pub fn uninstall_driver_async() {
             .spawn(|| {
                 let state = run_driver_osascript(
                     UNINSTALL_DRIVER_APPLESCRIPT,
-                    None,
+                    &[],
                     |st| !st.driver_bundle_installed && !st.driver_loaded,
                     || DriverActionState::DoneUninstalled,
                 );
@@ -1782,10 +1834,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_driver_without_anomalys_signature_is_refused_only_when_verified() {
-        let root = std::env::temp_dir().join(format!("hex-mic-candidate-{}", std::process::id()));
-        let bundle = root.join("HexMicrophone.driver");
+    /// A directory that looks like a driver bundle: the right name, a binary,
+    /// and an Info.plist naming the driver.
+    fn minimal_driver_bundle(root: &std::path::Path, name: &str) -> PathBuf {
+        let bundle = root.join(name);
         std::fs::create_dir_all(bundle.join("Contents/MacOS")).unwrap();
         std::fs::write(bundle.join("Contents/MacOS/HexMicrophoneDriver"), []).unwrap();
         std::fs::write(
@@ -1797,6 +1849,13 @@ mod tests {
             ),
         )
         .unwrap();
+        bundle
+    }
+
+    #[test]
+    fn a_driver_without_anomalys_signature_is_refused_only_when_verified() {
+        let root = std::env::temp_dir().join(format!("hex-mic-candidate-{}", std::process::id()));
+        let bundle = minimal_driver_bundle(&root, "HexMicrophone.driver");
 
         // The bundle looks right and carries no signature at all: reading it
         // without a signature check (a local build, and the version read on
@@ -1825,6 +1884,50 @@ mod tests {
             inspect_driver_candidate(DriverLocation::Bundle, &bundle, false),
             DriverCandidate::Invalid(_)
         ));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_symlinked_or_non_directory_driver_candidate_fails_closed() {
+        let root = std::env::temp_dir().join(format!("hex-mic-links-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+
+        // A regular file named like the bundle is not one.
+        let file = root.join("file/HexMicrophone.driver");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, []).unwrap();
+        assert!(matches!(
+            inspect_driver_candidate(DriverLocation::Bundle, &file, false),
+            DriverCandidate::Invalid(_)
+        ));
+
+        #[cfg(unix)]
+        {
+            let real = minimal_driver_bundle(&root.join("real"), "HexMicrophone.driver");
+            // A symlink to a valid bundle is refused, so a link swapped into
+            // the app bundle is never followed.
+            let link = root.join("link/HexMicrophone.driver");
+            std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+            std::os::unix::fs::symlink(&real, &link).unwrap();
+            assert!(matches!(
+                inspect_driver_candidate(DriverLocation::Bundle, &link, false),
+                DriverCandidate::Invalid(_)
+            ));
+            // A dangling symlink fails closed instead of reading as missing,
+            // so it cannot fall through to the cache.
+            let dangling = root.join("dangling/HexMicrophone.driver");
+            std::fs::create_dir_all(dangling.parent().unwrap()).unwrap();
+            std::os::unix::fs::symlink(root.join("nowhere"), &dangling).unwrap();
+            assert!(matches!(
+                inspect_driver_candidate(DriverLocation::Bundle, &dangling, false),
+                DriverCandidate::Invalid(_)
+            ));
+            // The real bundle still passes.
+            assert_eq!(
+                inspect_driver_candidate(DriverLocation::Bundle, &real, false),
+                DriverCandidate::Installable
+            );
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 

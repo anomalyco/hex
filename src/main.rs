@@ -32,6 +32,7 @@ mod caps_lock_dictation;
 mod capture_host;
 #[cfg(hex_capture)]
 mod capture_zip;
+#[cfg(target_os = "macos")]
 mod codesign;
 mod continuation;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]

@@ -1709,10 +1709,12 @@ or the driver installed; off, the pane is hidden  // fun.hex-microphone; macOS, 
 │   │   ├── Pre-Anomaly com.kitlangton driver at the same path -> Update replaces it in place
 │   │   ├── Not installed -> Install -> stable and dev-channel builds check the bundled driver's code signature first
 │   │   │    (`app/driver-requirement.txt`: anomaly.hex.microphone.driver, Anomaly Developer ID team 5NZ4Q7NXJ4)
-│   │   │    -> macOS admin prompt -> copies HexMicrophone.driver + restarts coreaudiod
-│   │   │    (debug, test, HEX_LOCAL_BUILD, HEX_TEST_BUILD, and unmarked -dev checkout builds may also
-│   │   │     install ~/Library/Caches/hex-mic's build output, ad-hoc signed included; a broken bundled
-│   │   │     copy fails instead of falling back to it)
+│   │   │    -> macOS admin prompt -> root copies the bundle to a staging folder (no ACLs, root:wheel, no group or
+│   │   │       other write), refuses a symlinked or non-directory source, re-checks that requirement there, then
+│   │   │       replaces HexMicrophone.driver + restarts coreaudiod; a swapped bundle never lands in the HAL folder
+│   │   │    (debug, test, HEX_LOCAL_BUILD, HEX_TEST_BUILD, and unmarked 0.0.0-dev-local checkout builds may
+│   │   │     also install ~/Library/Caches/hex-mic's build output, ad-hoc signed included; a broken or symlinked
+│   │   │     bundled copy fails instead of falling back to it)
 │   │   └── Inline state -> Installing… / Uninstalling… / Cancelled / Failed with reason
 ├── Live microphone capture -> Raw audio to Hex transcription (unmodified)
 │   ├── Source -> Hex's dictation microphone (System default follows the OS default, never Hex Microphone itself), never a meeting's second stream
@@ -1743,6 +1745,7 @@ and [rune_ui/fun.rs](../../src/rune_ui/fun.rs). Checks:
 `driver_plist_version_and_status_mismatch_are_detected`,
 `a_shipped_build_installs_only_a_valid_bundle_copy`,
 `a_driver_without_anomalys_signature_is_refused_only_when_verified`,
+`a_symlinked_or_non_directory_driver_candidate_fails_closed`,
 `the_driver_requirement_pins_anomalys_team_and_the_driver_identifier`,
 `the_driver_requirement_compiles`, `osascript_failure_classifies_user_cancel_and_errors`,
 `audio_service_restart_interrupts_stream_and_recovers`,
@@ -1764,7 +1767,8 @@ admin authorization prompt or an active Slack/Zoom call. The candidate
 selection is tested without spawning `codesign`; a test checks the
 requirement names the driver's `anomaly.hex.microphone.driver` identifier and
 the team ID `app/update-requirement.txt` pins, and only `csreq`/an install on
-a signed build exercises the signature check itself. The pass-through
+a signed build exercises the signature check itself (before the admin prompt
+and again as root on the staging copy). The pass-through
 checks simulate callback timing and sizes; clock drift between the microphone
 and the virtual device is not corrected, so a skip or zero-fill click every
 minute or two remains possible.
