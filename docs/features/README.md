@@ -3215,11 +3215,12 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 │   localized symbol chooses the character, so the same phone shows the same one in any
 │   language. Holding the key offers $ first, then $'s held symbols without a second copy
 │   of the local one, in their order. The second symbols page always draws $, with ten keys
-│   still: where it drew that currency for £, € and ¥ (¥ stays in $'s holds), and where it
-│   drew ¥ for ₹, ₱, ₩, ₽ and ₴, so that page reads €£$ there and $ is on one of the two
-│   pages. Only the symbol pages read the currency: a number, PIN, phone or date pad,
-│   including the symbols page's own 1234 pad, draws none and reads none. Off, both pages
-│   and every hold are unchanged.
+│   still: where it drew that currency for £, € and ¥ (with £ or € local, ¥ stays in $'s
+│   holds; with ¥ local, $'s holds drop it because ¥ is the ?123 key), and where it drew ¥
+│   for ₹, ₱, ₩, ₽ and ₴, so that page reads €£$ there and $ is on one of the two pages.
+│   Only the symbol pages read the currency: a number, PIN, phone or date pad, including the
+│   symbols page's own 1234 pad, draws none and reads none. Off, both pages and every hold
+│   are unchanged.
 │   Checks: `LocalCurrencyTest` in android/app/src/test (rows, holds and region cases) and
 │   `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` on a GitHub-hosted runner
 │   (https://github.com/anomalyco/hex/actions/runs/45359081407: LocalCurrencyTest 6/6 and
