@@ -309,8 +309,9 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                 row.add(k, at, width); at += width
                 if (!symbols) { letters[c] = k; caseKeys.add(c to k) }
                 val digit = if (symbols) null else page.hint(index, position)
-                // Only the top letter row reads Gboard's symbols: rows 2 and 3 keep SwiftKey's, wherever
-                // a layout draws their letters.
+                // Gboard's top-row set is only a fallback for a row-1 letter with no home- or bottom-row
+                // symbol of its own (AZERTY a/z keep @/_, QWERTZ z keeps _); rows 2 and 3 always keep
+                // SwiftKey's, wherever a layout draws their letters.
                 val symbol = if (letterHolds) LetterFeedback.letterSymbol(c, topRow = index == 0) else null
                 k.hint(digit?.toString() ?: symbol?.toString())
                 fun holds() = if (symbols) LetterFeedback.symbolHolds(c, page.currency)

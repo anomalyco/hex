@@ -140,7 +140,8 @@ internal class LetterFeedback(private val host: ViewGroup) {
         /** What a held letter offers: on row 1 its digit first, under the finger (Gboard types the digit
          * when a held q to p lifts), then its accents with the letter itself. With [symbolsOnLetters], a
          * letter with no digit to show offers its symbol first instead: SwiftKey's on the second and third
-         * rows, Gboard's on the top row while the number row holds its digit. */
+         * rows. On the top row, while the number row holds its digit, Gboard's set only fills in for a
+         * letter with no home- or bottom-row symbol of its own. */
         fun holds(c: Char, language: String, digit: Char?, symbolsOnLetters: Boolean = false,
                   topRow: Boolean = false): List<String> {
             val accents = options(c, language)
@@ -149,7 +150,8 @@ internal class LetterFeedback(private val host: ViewGroup) {
         }
 
         // SwiftKey's symbols on the second and third letter rows, keyed by letter so every layout keeps
-        // them wherever it draws that letter. Row 1's letters keep the digit Hex already offers.
+        // them wherever it draws that letter. A row-1 letter with none of its own keeps the digit Hex
+        // already offers.
         private val letterSymbols = mapOf('a' to '@', 's' to '#', 'd' to '&', 'f' to '*', 'g' to '-',
             'h' to '+', 'j' to '=', 'k' to '(', 'l' to ')', 'z' to '_', 'x' to '$', 'c' to '"', 'v' to '\'',
             'b' to ':', 'n' to ';', 'm' to '/')

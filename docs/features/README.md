@@ -3203,10 +3203,11 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 ├── Labs > Keyboard > Number row (off) -> 1 2 3 4 5 6 7 8 9 0 above the letter rows on
 │   every layout (en, es, nb, de, fr, it), typed like normal keys. The first letter row's
 │   corner digits and digit-first hold are hidden while it shows; accents on hold stay, and
-│   the Symbols on letter keys hints and holds still work, with q to p, the first ten top-row
-│   letters, showing their symbols instead of the digit (q for %, p for }). The keyboard is one
-│   row taller and the Hex menu matches that height; ?123, the symbols pages and the pads keep
-│   their keys and are a row shorter than the letters while it is on. Off, the page is unchanged.
+│   the Symbols on letter keys hints and holds still work: row 1's first ten letters show a
+│   symbol instead of the digit, Gboard's such as q for % and p for }, or its own home- or
+│   bottom-row symbol where it has one, like AZERTY a for @. The keyboard is one row taller
+│   and the Hex menu matches that height; ?123, the symbols pages and the pads keep their keys
+│   and are a row shorter than the letters while it is on. Off, the page is unchanged.
 │   KeyboardPageTest covers it, including the top row's symbols, and passed in
 │   https://github.com/anomalyco/hex/actions/runs/45367619509 (testDebugUnitTest + compileDebugKotlin,
 │   GitHub-hosted); not tried on a device. The repo has no Android CI.
