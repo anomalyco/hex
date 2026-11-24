@@ -4,28 +4,36 @@
     <string name="full_keyboard">全键盘</string>
     <string name="voice_only">仅语音</string>
 
-    <string name="setup_step">第 %1$d 步，共 %2$d 步</string>
     <string name="setup_on_device" formatted="false">100% 设备端处理</string>
     <string name="setup_welcome_title">在任何应用中，\n用说话代替打字。</string>
-    <string name="setup_welcome_detail">Hex 只在下载语音模型（190 MB，以及你在实验室中添加的模型）和你点按“发送”提交反馈时使用网络。你的声音和文字都保留在这台设备上。</string>
-    <string name="setup_get_started">开始使用</string>
-    <string name="setup_title">设置 Hex</string>
-    <string name="setup_detail">允许使用麦克风，然后选择 Hex 作为键盘。</string>
     <string name="setup_microphone">麦克风</string>
-    <string name="setup_microphone_detail">让 Hex 能听见你</string>
-    <string name="setup_allow">允许</string>
-    <string name="setup_settings">设置</string>
+    <string name="setup_microphone_note">只在你按住 Hex 键时使用</string>
+    <string name="setup_microphone_blocked">在“设置”中：权限 › 麦克风</string>
     <string name="setup_keyboard">Hex 键盘</string>
     <string name="setup_keyboard_chosen">当前键盘</string>
     <string name="setup_keyboard_enabled">在列表中选择 Hex</string>
-    <string name="setup_keyboard_off">在“设置”中打开 Hex</string>
-    <string name="setup_enable">打开</string>
-    <string name="setup_choose">选择</string>
+    <string name="setup_keyboard_off">在 Android 的键盘列表中打开它，然后返回</string>
+    <string name="setup_keyboard_warning">Android 会对你打开的每个键盘显示警告。Hex 会把你输入的内容留在这台手机上。</string>
+    <string name="setup_model_size">190 MB，Hex 只需下载这一次</string>
+    <string name="setup_language">语言</string>
+    <string name="setup_language_phone">%1$s，你手机的语言</string>
+    <string name="setup_language_first">%1$s，你手机的首选语言。要用 %2$s 听写，请按住空格键。</string>
+    <string name="setup_language_or">%1$s 或 %2$s</string>
+    <string name="setup_language_unsupported">%1$s。Hex 暂不能用%2$s听写。</string>
     <string name="setup_ready">就绪</string>
-    <string name="setup_continue">继续</string>
+    <string name="setup_next_microphone">允许使用麦克风</string>
+    <string name="setup_next_settings">打开设置</string>
+    <string name="setup_next_keyboard">打开键盘</string>
+    <string name="setup_next_choose">选择键盘</string>
+    <string name="setup_next_try">试一试</string>
     <string name="setup_try_title">试用键盘</string>
     <string name="setup_try_detail">按住 Hex 键，说几句话，然后松开。</string>
     <string name="setup_try_hint">你说的话会显示在这里</string>
+    <string name="setup_try_model_loading">语音模型 %1$d%%。下载完成前，Hex 使用较小的内置模型。</string>
+    <string name="setup_try_done">这就是 Hex。在任何应用中按住 Hex 键即可。</string>
+    <string name="setup_try_built_in">这次试用的是较小的内置模型。</string>
+    <string name="setup_try_built_in_loading">这次试用的是较小的内置模型。完整模型已下载 %1$d%%。</string>
+    <string name="setup_try_built_in_ready">这次试用的是较小的内置模型。完整模型已就绪，再试一次吧。</string>
     <string name="setup_choose_hex">选择 Hex 键盘</string>
     <string name="setup_skip">暂时跳过</string>
     <string name="setup_done">完成</string>
@@ -41,6 +49,7 @@
     <string name="model_try_again">再试一次</string>
 
     <string name="home_ready">就绪</string>
+    <string name="home_ready_downloading">就绪 · 语音模型 %1$d%%</string>
     <plurals name="home_finish_setup">
         <item quantity="other">完成设置 · %d 步</item>
     </plurals>

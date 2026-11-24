@@ -193,7 +193,12 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                     }
                     if (page == Page.Home) {
                         val steps = listOf(setup.mic, setup.chosen).count { !it }
-                        val status = if (steps == 0) stringResource(R.string.home_ready) else pluralStringResource(R.plurals.home_finish_setup, steps, steps)
+                        val status = when {
+                            steps > 0 -> pluralStringResource(R.plurals.home_finish_setup, steps, steps)
+                            // Setup's download still running after it: the first dictations use the smaller built-in model.
+                            model is ModelStore.State.Loading -> stringResource(R.string.home_ready_downloading, model.percent)
+                            else -> stringResource(R.string.home_ready)
+                        }
                         Row((if (steps > 0) Modifier.clickable(role = Role.Button) { setupPage(1) } else Modifier)
                             .heightIn(min = if (steps > 0) 44.dp else 26.dp), verticalAlignment = Alignment.CenterVertically) {
                             if (steps == 0) Image(painterResource(R.drawable.ic_check), null, Modifier.size(16.dp),
@@ -243,7 +248,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                         }
                         Card {
                             Entry(stringResource(R.string.home_keyboard_settings), value = "↗", action = systemSettings)
-                            Rule(); Entry(stringResource(R.string.home_run_setup), action = { setupPage(0) })
+                            Rule(); Entry(stringResource(R.string.home_run_setup), action = { setupPage(1) })
                             if (Feedback.available) { Rule(); Entry(stringResource(R.string.feedback_send_feedback), action = ::sendFeedback) }
                         }
                         Updates.SettingsCard()

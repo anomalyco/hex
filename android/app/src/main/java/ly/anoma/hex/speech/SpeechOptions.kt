@@ -2,6 +2,7 @@ package ly.anoma.hex.speech
 
 import android.content.Context
 import android.content.res.Resources
+import java.util.Locale
 
 internal enum class Style { Polished, Casual, Notes, Verbatim }
 /** A keyboard layout's language: its keys, accents and typing model. Dictation languages are
@@ -43,6 +44,21 @@ internal enum class DictationLanguage(val code: String, val label: String, val l
             entries.firstOrNull { keyboard != null && it.layout == keyboard }
                 ?: system.firstNotNullOfOrNull(::matching) ?: English
     }
+}
+
+/** What setup says about the dictation language: [spoken], the phone's first language in its own name when Hex can't
+ * dictate it ([unsupported]), and the phone's other languages Hex dictates, a hold of the space bar away ([others]).
+ * A language chosen in Settings or a pinned layout is the reason itself ([automatic] false), so neither carries the rest. */
+internal data class PhoneLanguage(val spoken: DictationLanguage, val unsupported: String? = null,
+                                  val others: List<DictationLanguage> = emptyList(), val automatic: Boolean = true)
+
+internal fun phoneLanguage(chosen: DictationLanguage?, pinned: Spoken?, system: List<Locale>): PhoneLanguage {
+    val spoken = chosen ?: DictationLanguage.automatic(pinned, system.map { it.language })
+    if (chosen != null || pinned != null) return PhoneLanguage(spoken, automatic = false)
+    val unsupported = system.firstOrNull()?.takeIf { DictationLanguage.matching(it.language) == null }
+        ?.let { it.getDisplayLanguage(it).replaceFirstChar { c -> c.titlecase(it) } }?.takeIf { it.isNotEmpty() }
+    if (unsupported != null) return PhoneLanguage(spoken, unsupported)
+    return PhoneLanguage(spoken, others = system.mapNotNull { DictationLanguage.matching(it.language) }.distinct() - spoken)
 }
 
 /** The layout whose typing model the keyboard reads: the one pinned in Keyboard › Keyboard layout, else the
@@ -92,6 +108,10 @@ internal class SpeechPreferences(private val context: Context) {
     val spoken: DictationLanguage
         get() = language ?: Resources.getSystem().configuration.locales.let { locales ->
             DictationLanguage.automatic(Spoken.matching(typing.getString("layout", null)), (0 until locales.size()).map { locales[it].language })
+        }
+    val phoneLanguage: PhoneLanguage
+        get() = Resources.getSystem().configuration.locales.let { locales ->
+            phoneLanguage(language, Spoken.matching(typing.getString("layout", null)), (0 until locales.size()).map { locales[it] })
         }
     var clean: Boolean
         get() = prefs.getBoolean("clean", false)

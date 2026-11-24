@@ -1,6 +1,7 @@
 package ly.anoma.hex.keyboard
 
 import java.net.ServerSocket
+import java.util.Locale
 import kotlin.concurrent.thread
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -16,6 +17,7 @@ import ly.anoma.hex.feedback.FeedbackRequest
 import ly.anoma.hex.feedback.FeedbackRetry
 import ly.anoma.hex.feedback.FeedbackSender
 import ly.anoma.hex.speech.DictationLanguage
+import ly.anoma.hex.speech.PhoneLanguage
 import ly.anoma.hex.speech.FrenchSpacing
 import ly.anoma.hex.speech.Spoken
 import ly.anoma.hex.speech.SpokenCleanup
@@ -24,6 +26,7 @@ import ly.anoma.hex.speech.SpokenText
 import ly.anoma.hex.speech.SpeechOptions
 import ly.anoma.hex.speech.Style
 import ly.anoma.hex.speech.typingLayout
+import ly.anoma.hex.speech.phoneLanguage
 import ly.anoma.hex.speech.SpeechEdges
 import ly.anoma.hex.speech.speechSpan
 
@@ -553,6 +556,18 @@ class InsertionTest {
         assertEquals("Fiquei no hotel um dia", format("Fiquei no hotel um dia", Style.Verbatim))
         assertEquals("o ônibus", SpokenText.continuing("O ônibus", "e", "pt"))
         assertEquals("Maria chegou", SpokenText.continuing("Maria chegou", "e", "pt"))
+    }
+    @Test fun setupSaysWhichLanguageAutomaticDictatesAndWhy() {
+        fun phone(vararg tags: String) = phoneLanguage(null, null, tags.map { Locale.forLanguageTag(it) })
+        assertEquals(PhoneLanguage(DictationLanguage.English), phone("en-US"))
+        // Two languages Hex dictates: the first, the other a hold of the space bar away.
+        assertEquals(PhoneLanguage(DictationLanguage.Portuguese, others = listOf(DictationLanguage.English)), phone("pt-BR", "en-US", "pt-PT"))
+        // A first language Hex can't dictate is named in itself; Automatic takes the next one it can.
+        assertEquals(PhoneLanguage(DictationLanguage.German, "日本語"), phone("ja-JP", "de-DE"))
+        assertEquals(PhoneLanguage(DictationLanguage.English, "中文"), phone("zh-CN"))
+        // A language chosen in Settings, or a pinned layout, is its own reason.
+        assertEquals(PhoneLanguage(DictationLanguage.Spanish, automatic = false), phoneLanguage(DictationLanguage.Spanish, null, listOf(Locale.forLanguageTag("ja-JP"))))
+        assertEquals(PhoneLanguage(DictationLanguage.German, automatic = false), phoneLanguage(null, Spoken.German, listOf(Locale.forLanguageTag("pt-BR"), Locale.ENGLISH)))
     }
     @Test fun polishAndRussianAreDictationLanguagesWithoutEnglishRules() {
         // Polish and Russian phones used to fall back to English, and Whisper told "en" translates.
