@@ -43,3 +43,20 @@ if __name__=="__main__":
             rows.append(r);out.writerow(r)
         assert len(rows)==len(corpus) and len({r["id"] for r in rows})==len(corpus)
         print(name,summarize(rows),file=sys.stderr)
+    # The long clips at the app's encoder window against the full one (README, Long clips): fails if any clip is worse.
+    with (base/"long.tsv").open() as f: long={r["id"]:r for r in csv.DictReader(f,delimiter="\t")}
+    errors={}
+    for name in ("long-full","long-app"):
+        if not (data/(name+".tsv")).exists():continue
+        errors[name]={}
+        for x in (data/(name+".tsv")).read_text().splitlines():
+            id,wall,cpu,load,hwm,text=x.split("\t",5); c=long[id]
+            ref=words(" ".join(corpus[i]["reference"] for i in c["clips"].split(",")))
+            e=distance(ref,words(text)); errors[name][id]=(e,len(ref))
+            out.writerow(dict(zip(fields,[name,id,c["lang"],"",len(ref),e,wall,cpu,load,hwm,"","",text.strip(),"ok" if text.strip() else "empty"])))
+        assert set(errors[name])==set(long)
+        print(name,"errors",sum(e for e,_ in errors[name].values()),"of",sum(n for _,n in errors[name].values()),"words",file=sys.stderr)
+    if len(errors)==2:
+        worse=[f"{id} ({errors['long-full'][id][0]} -> {e})" for id,(e,_) in errors["long-app"].items() if e>errors["long-full"][id][0]]
+        print("long clips: no clip worse than the full window" if not worse else "long clips: worse than the full window: "+", ".join(worse),file=sys.stderr)
+        if worse: sys.exit(1)

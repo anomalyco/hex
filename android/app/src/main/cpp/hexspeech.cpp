@@ -164,11 +164,15 @@ Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jlong handle, jboo
     if (!hint.empty()) params.initial_prompt = hint.c_str();
     // The encoder's window, in 20 ms frames: up to 8 s of speech, the speech plus 3.84 s (192 frames),
     // at most the measured 512; the 40-clip benchmark kept the same word errors at 27% less time.
-    // Longer clips keep the full window: every shorter one tried cost them accuracy. The bundled
-    // tiny model keeps the full window too; shortened, it repeats itself.
-    if (small && count <= 8 * 16000) {
-        const int frames = static_cast<int>(std::ceil(count * 50.0 / 16000)) + 192;
-        params.audio_ctx = std::min(512, (frames + 63) / 64 * 64);
+    // Longer, the speech plus 12.8 s (640 frames), rounded up to 64, until that reaches Whisper's full
+    // 1500 (about 16.7 s and more). On 53 long clips in six languages (8.5-30 s) that margin made no clip
+    // worse than the full window; at 576 and less clips start to lose words, so don't lower it without
+    // rerunning the long-clip check (benchmark/README.md). The bundled tiny model keeps the full window;
+    // shortened, it repeats itself.
+    if (small) {
+        const int speech = static_cast<int>(std::ceil(count * 50.0 / 16000));
+        const int frames = count <= 8 * 16000 ? std::min(512, (speech + 192 + 63) / 64 * 64) : (speech + 640 + 63) / 64 * 64;
+        if (frames < 1500) params.audio_ctx = frames;
     }
     // A language the model handles badly (Kazakh told English) repeats itself to Whisper's 220-token limit, then
     // retries with five sampled decoders at each of up to five more temperatures: 2–5× the time, for nonsense.
