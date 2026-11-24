@@ -223,8 +223,10 @@ fn several_titles_in_quick_succession_show_one_at_a_time() {
         if was.title != now.title && was.title.is_some() {
             // The old words had gone (under 5 parts in 100) before the new
             // ones were drawn, and those start from nothing.
+            // The finished meeting's title is its link, which fades in
+            // from its first frame.
             assert!(
-                was.title_shown < 0.05 && now.title_shown < 0.02,
+                was.title_shown < 0.05 && now.title_shown < 0.05,
                 "f{}: {:?} → {:?} at {} → {}",
                 frame + 1,
                 was.title,

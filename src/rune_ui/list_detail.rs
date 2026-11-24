@@ -73,15 +73,18 @@ pub(super) fn notices(children: Vec<El>) -> El {
         .children(children)
 }
 
-/// A group heading inside a list (a task, a day), on the rows' text edge.
-pub(super) fn group(p: Paint, key: &str, label: &str, first: bool) -> El {
+/// A group heading inside a list (a task, a day), on the rows' text edge,
+/// `indent` further in when the rows lead with an icon, so it shares their
+/// words' rail.
+pub(super) fn group(p: Paint, key: &str, label: &str, first: bool, indent: f32) -> El {
     text(label)
         .key(key)
         .role("heading")
         .level(3)
         .font(p.k.ty.small_medium)
         .color(p.faint())
-        .px(METRICS.row_px)
+        .pl(METRICS.row_px + indent)
+        .pr(METRICS.row_px)
         .pt(if first { 0.0 } else { 18.0 })
         .pb(6.0)
 }
@@ -117,6 +120,11 @@ pub(super) struct Item {
 
 /// The size of a row's leading icon, about the meta line's height.
 const LEADING_ICON: f32 = 14.0;
+/// Between a row's leading icon and its words.
+const LEADING_GAP: f32 = 10.0;
+/// Where a list's group headings start when its rows lead with an icon: on
+/// the words' edge, past the icon column.
+pub(super) const LEADING_INDENT: f32 = LEADING_ICON + LEADING_GAP;
 
 /// One selectable list row with a small faint icon before its title when
 /// `leading` is set; assistive technology hears the title alone.
@@ -176,31 +184,19 @@ pub(super) fn item_body(p: Paint, item: Item, leading: Option<&'static Icon>) ->
                 .children(item.hover),
         )
     };
-    let mut row_el = col()
-        .key(item.key)
-        .role("listitem")
-        .label(item.title.clone())
-        .description(described)
-        .px(METRICS.row_px)
-        .py(9.0)
+    let words = col()
+        .key("words")
         .gap(2.0)
-        .radius(p.k.radius.md)
-        .hover(c.hover)
-        .hover_group()
+        .grow(1.0)
+        .shrink()
+        .min_w(0.0)
         .child(
             row()
                 .key("top")
                 .gap(12.0)
                 .center_y()
-                .children(leading.map(|glyph| {
-                    icon(glyph, LEADING_ICON)
-                        .key("leading-icon")
-                        .color(c.icon_faint)
-                        .mr(-6.0)
-                        .a11y_hidden()
-                }))
                 .child(
-                    text(item.title)
+                    text(item.title.clone())
                         .key("title")
                         .font(p.k.ty.ui_medium)
                         .color(p.text())
@@ -227,6 +223,33 @@ pub(super) fn item_body(p: Paint, item: Item, leading: Option<&'static Icon>) ->
                 .truncate()
                 .a11y_hidden()
         }));
+    // The icon in its own column, centred on the title's line,
+    // so the title and the lines under it share one left edge.
+    let mut row_el = row()
+        .key(item.key)
+        .role("listitem")
+        .label(item.title)
+        .description(described)
+        .px(METRICS.row_px)
+        .py(9.0)
+        .gap(LEADING_GAP)
+        .items_start()
+        .radius(p.k.radius.md)
+        .hover(c.hover)
+        .hover_group()
+        .children(leading.map(|glyph| {
+            el().key("leading")
+                .w(LEADING_ICON)
+                .h(p.k.ty.ui_medium.line_px())
+                .center()
+                .child(
+                    icon(glyph, LEADING_ICON)
+                        .key("leading-icon")
+                        .color(c.icon_faint),
+                )
+                .a11y_hidden()
+        }))
+        .child(words);
     if item.selected {
         row_el = row_el.fill(c.layer_02);
     }
@@ -260,6 +283,31 @@ pub(super) fn card_header(title: El, meta: Vec<El>, actions: Vec<El>) -> El {
         )
 }
 
+/// The detail card's heading, a clear step above the 14 pt body.
+pub(super) const CARD_HEADING: rune::TextStyle = rune::TextStyle::new(18.0, 600.0).lh(24.0);
+
+/// [`card_title`] at [`CARD_HEADING`], for the meeting's card.
+pub(super) fn card_heading(p: Paint, title: &str) -> El {
+    text(title)
+        .key("detail-title")
+        .role("heading")
+        .level(2)
+        .font(CARD_HEADING)
+        .color(p.text())
+        .wrap()
+}
+
+/// The hairline between the card's header and its scrolling
+/// body, across the card's whole width.
+pub(super) fn card_rule(p: Paint) -> El {
+    el().key("detail-rule")
+        .h(p.hair)
+        .mt(16.0)
+        .mx(-24.0)
+        .fill(p.k.c.border_weak)
+        .a11y_hidden()
+}
+
 pub(super) fn card_title(p: Paint, title: &str) -> El {
     text(title)
         .key("detail-title")
@@ -276,17 +324,6 @@ pub(super) fn meta_text(p: Paint, meta: &str) -> El {
         .font(DESCRIPTION)
         .color(p.muted())
         .truncate()
-}
-
-/// A meta line of its own under the card header, wrapping rather than
-/// truncating, for text too long to share the header's meta row.
-pub(super) fn meta_note(p: Paint, key: &str, note: &str) -> El {
-    text(note)
-        .key(key)
-        .font(DESCRIPTION)
-        .color(p.muted())
-        .wrap()
-        .mt(3.0)
 }
 
 /// The card's scrolling content under its header, clear of the scroll bar.

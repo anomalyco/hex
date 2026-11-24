@@ -9,20 +9,17 @@
 
 use std::sync::mpsc::{Receiver, sync_channel};
 
-use rune::{El, col, el, row, text};
-use rune_kit::RadioItem;
-
 use super::controls::{
-    ButtonKind, CardRow, METRICS, Paint, button, card, icon_row, modal_sheet, nested, note,
+    ButtonKind, CardRow, METRICS, Paint, button, card, icon_row, modal_sheet, note, setting_row,
     toggle_row,
 };
-use super::platform::Os;
 use super::{Menu, Modal, Pane, Ui, icons};
 use crate::app_settings::{MeetingPolicy, MeetingProviderChoice};
 use crate::calendar::CallProvider;
 use crate::calendar::date::{LocalDate, local_date};
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::meeting::seen_calls::{self, SeenCall};
+use rune::{El, col, el, row, text};
 
 const MODAL_WIDTH: f32 = 560.0;
 const PADDING: f32 = 18.0;
@@ -298,92 +295,59 @@ pub(super) fn settings_row(ui: &Ui, p: Paint) -> El {
     .on_press(open)
 }
 
-/// What each default answer does, under its radio. Only a Mac has a menu
-/// bar to name.
-fn outcome(policy: MeetingPolicy, mac: bool) -> &'static str {
-    match (policy, mac) {
-        (MeetingPolicy::Ask, true) => tr("A small offer appears beside the menu bar"),
-        (MeetingPolicy::Ask, false) => tr("A small offer appears on screen"),
-        (MeetingPolicy::AlwaysRecord, true) => {
-            tr("Recording starts with the call; you'll see it in the menu bar")
-        }
-        (MeetingPolicy::AlwaysRecord, false) => tr("Recording starts with the call"),
-        (MeetingPolicy::NeverOffer, true) => tr("Start recordings yourself from the menu bar"),
-        (MeetingPolicy::NeverOffer, false) => tr("Start recordings yourself from Hex"),
-    }
-}
-
-fn policy_key(policy: MeetingPolicy) -> &'static str {
-    match policy {
-        MeetingPolicy::Ask => "default-ask",
-        MeetingPolicy::AlwaysRecord => "default-record",
-        MeetingPolicy::NeverOffer => "default-never",
-    }
-}
-
 fn set_default(ui: &mut Ui, policy: MeetingPolicy) {
     if ui.settings.meetings.default_policy != policy {
         ui.update(|settings| settings.meetings.set_default_policy(policy));
     }
 }
 
-/// The default's radios, with Stop when the call ends under Record
-/// automatically while anything records on its own.
-fn answers(ui: &Ui, p: Paint) -> Vec<CardRow> {
+/// The default as one row with the same quiet menu as the apps below, and
+/// Stop when the call ends as its sibling row, never under a radio, while
+/// anything records on its own.
+fn default_rows(ui: &Ui, p: Paint, menus: &mut Vec<El>) -> Vec<CardRow> {
     let meetings = &ui.settings.meetings;
     let default = meetings.default_policy;
-    let mac = ui.platform.caps.os == Os::Macos;
     let records = default == MeetingPolicy::AlwaysRecord
         || meetings
             .providers
             .iter()
             .any(|choice| choice.policy == MeetingPolicy::AlwaysRecord);
-    let mut answers: Vec<CardRow> = Vec::new();
-    for policy in MeetingPolicy::ALL {
-        // The radio is the choice assistive technology reads; the row only
-        // widens where a press lands.
-        answers.push(
-            row()
-                .key(policy_key(policy))
-                .role("none")
-                .min_h(METRICS.row_h_described)
-                .px(METRICS.row_px)
-                .py(10.0)
-                .center_y()
-                .on_press(move |ui: &mut Ui| set_default(ui, policy))
-                .child(
-                    RadioItem::new(tr(policy.label()), policy == default)
-                        .description(outcome(policy, mac))
-                        .on_select(move |ui: &mut Ui| set_default(ui, policy))
-                        .build(p.k)
-                        .key("radio")
-                        .grow(1.0),
-                )
-                .into(),
+    let select = super::general::quiet_select(
+        ui,
+        p,
+        Menu::Pick("calls-default"),
+        "calls-default-control".to_owned(),
+        tr("When a call starts"),
+        MeetingPolicy::ALL
+            .iter()
+            .map(|policy| tr(policy.label()).to_owned())
+            .collect(),
+        MeetingPolicy::ALL
+            .iter()
+            .position(|known| *known == default)
+            .unwrap_or(0),
+        |ui, index| set_default(ui, MeetingPolicy::ALL[index]),
+        menus,
+    );
+    let mut rows: Vec<CardRow> =
+        vec![setting_row(p, "calls-default", tr("When a call starts"), None, select).into()];
+    if records {
+        rows.push(
+            toggle_row(
+                p,
+                "meeting-stop-when-call-ends",
+                tr("Stop when the call ends"),
+                None,
+                meetings.stop_when_call_ends,
+                |ui: &mut Ui| {
+                    let on = !ui.settings.meetings.stop_when_call_ends;
+                    ui.update(|settings| settings.meetings.stop_when_call_ends = on);
+                },
+            )
+            .into(),
         );
-        if policy == MeetingPolicy::AlwaysRecord && records {
-            let grace = crate::meeting::detection::AUTO_STOP_GRACE.as_secs();
-            answers.push(
-                nested(toggle_row(
-                    p,
-                    "meeting-stop-when-call-ends",
-                    tr("Stop when the call ends"),
-                    tr_fill(
-                        "{} seconds after the call app leaves the microphone",
-                        &grace.to_string(),
-                    )
-                    .as_str(),
-                    meetings.stop_when_call_ends,
-                    |ui: &mut Ui| {
-                        let on = !ui.settings.meetings.stop_when_call_ends;
-                        ui.update(|settings| settings.meetings.stop_when_call_ends = on);
-                    },
-                ))
-                .into(),
-            );
-        }
     }
-    answers
+    rows
 }
 
 /// One app or website: its icon, name, when Hex last saw a call in it, and
@@ -522,16 +486,14 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Vec<El> {
         // Presses inside the panel stay inside.
         .on_press(|_: &mut Ui| {})
         .child(
+            // On the cards' text rail, over the words below it.
             text(tr("Calls"))
                 .key("title")
                 .font(p.k.ty.body_medium)
-                .color(p.text()),
+                .color(p.text())
+                .mx(METRICS.row_px),
         )
-        .child(section(
-            "default",
-            tr("When a call starts"),
-            card(p, "card", answers(ui, p)),
-        ))
+        .child(card(p, "default", default_rows(ui, p, &mut menus)))
         .child(list)
         .child(footer);
     let mut layers = Vec::from(modal_sheet(p, "calls", panel, close));
