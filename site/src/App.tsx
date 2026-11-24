@@ -94,9 +94,15 @@ export default function App() {
                 appears.
               </span>
             </h1>
-            <p>
+            <p className="hero__device">
               Local voice dictation for {osName}. Hold {shortcut}, say what you mean, and
               Hex pastes it where you are.
+            </p>
+            {/* Scripts off: the line above is only the page's first guess, so name
+                every platform; index.html's <noscript> stylesheet swaps them. */}
+            <p className="hero__any">
+              Local voice dictation for Mac, Windows, and Linux. Hold your shortcut, say
+              what you mean, and Hex pastes it where you are.
             </p>
           </div>
 

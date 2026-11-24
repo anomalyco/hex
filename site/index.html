@@ -53,6 +53,30 @@
       }
     </script>
     <title>Hex: voice dictation for Mac, Windows, and Linux</title>
+    <!-- Scripting off: the hero's platform line is only the page's first guess,
+         and the install switcher's tabs and its architecture and package
+         switches are buttons that cannot work. Name every platform and show
+         every installer at once instead; src/styles.css keeps .hero__any and
+         .install__plain hidden while scripts run. The build puts its stylesheet
+         after this block, hence !important on the display switches. -->
+    <noscript>
+      <style>
+        .keycap,
+        .install__os,
+        .install__panels,
+        .hero__device {
+          display: none !important;
+        }
+
+        .hero__any {
+          display: block !important;
+        }
+
+        .install__plain {
+          display: flex !important;
+        }
+      </style>
+    </noscript>
   </head>
   <body>
     <div id="root"></div>

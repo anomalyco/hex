@@ -262,6 +262,82 @@ function useTabIndicator(list: RefObject<HTMLDivElement | null>, selected: Os) {
   }, [list, selected])
 }
 
+// Every OS, architecture, and package for a visitor without scripts, because
+// the tabs and the switches inside a row are buttons. It is hidden whenever
+// scripts run; index.html's <noscript> stylesheet shows it and hides the
+// switcher.
+interface PlainRow {
+  label: string
+  note?: string
+  file?: string
+  command?: string
+}
+
+const PLAIN_OSES: { id: Os; label: string; rows: PlainRow[] }[] = [
+  {
+    id: "mac",
+    label: "macOS",
+    rows: [
+      { label: "Download", note: "Apple silicon, macOS 15 or later", file: RELEASE.mac.url },
+      { label: "Homebrew", command: RELEASE.homebrew },
+    ],
+  },
+  {
+    id: "windows",
+    label: "Windows",
+    rows: [
+      { label: "Installer x64", file: RELEASE.windowsX64.url },
+      { label: "Installer ARM64", file: RELEASE.windowsArm64.url },
+      { label: "PowerShell", command: RELEASE.windows.command },
+    ],
+  },
+  {
+    id: "linux",
+    label: "Linux",
+    rows: [
+      { label: "Script", command: RELEASE.linux.command },
+      { label: "Debian x64", command: RELEASE.linux.deb.x64 },
+      { label: "Debian ARM64", command: RELEASE.linux.deb.arm64 },
+      { label: "Fedora x64", command: RELEASE.linux.rpm.x64 },
+      { label: "Fedora ARM64", command: RELEASE.linux.rpm.arm64 },
+      ...(RELEASE.linux.aur === undefined ? [] : [{ label: "AUR", command: RELEASE.linux.aur }]),
+      { label: "Nix", command: RELEASE.nix },
+      { label: "Binary x64", file: RELEASE.linux.binary.x64 },
+      { label: "Binary ARM64", file: RELEASE.linux.binary.arm64 },
+    ],
+  },
+]
+
+function PlainInstall() {
+  return (
+    <div className="install__plain">
+      <p className="install__plain-note">JavaScript is off, so every platform is listed.</p>
+      {PLAIN_OSES.map((platform) => (
+        <section key={platform.id} className="stack" aria-label={platform.label}>
+          <h2 className="stack__title">{platform.label}</h2>
+          {platform.rows.map((row) => (
+            <div key={row.label} className="stack__row">
+              <span className="stack__label">{row.label}</span>
+              <span className="stack__value">
+                {row.command === undefined ? (
+                  <>
+                    {row.note !== undefined && <span>{row.note}</span>}
+                    <a className="stack__link" href={row.file}>
+                      Download
+                    </a>
+                  </>
+                ) : (
+                  <code title={row.command}>{row.command}</code>
+                )}
+              </span>
+            </div>
+          ))}
+        </section>
+      ))}
+    </div>
+  )
+}
+
 export default function Download({
   platform,
   os,
@@ -318,6 +394,7 @@ export default function Download({
           </div>
         ))}
       </div>
+      <PlainInstall />
     </div>
   )
 }
