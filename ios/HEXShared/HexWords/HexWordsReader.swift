@@ -67,14 +67,15 @@ nonisolated enum HexWordsReader {
         static let appVersionLength = 32
     }
 
-    /// Reads at most 8 MiB + 1 byte, refusing anything larger before reading it.
-    static func read(contentsOf url: URL) -> HexWordsReadResult {
+    /// Reads at most 8 MiB + 1 byte, refusing anything larger before reading it; nil when the
+    /// file can't be opened or read at all.
+    static func read(contentsOf url: URL) -> HexWordsReadResult? {
         if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > maxBytes {
             return .refused(.tooLarge)
         }
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return .refused(.empty) }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
-        let data = (try? handle.read(upToCount: maxBytes + 1)) ?? Data()
+        guard let data = try? handle.read(upToCount: maxBytes + 1) else { return read(Data()) }
         return read(data)
     }
 

@@ -13,7 +13,8 @@ import UIKit
 @MainActor
 enum HexInbox {
     enum Item {
-        case words(HexWordsReadResult)
+        /// nil: the file couldn't be opened at all.
+        case words(HexWordsReadResult?)
     }
 
     private static let log = Logger(subsystem: "anomaly.hex.mobile", category: "inbox")
@@ -37,7 +38,7 @@ enum HexInbox {
 
         var leftovers: [URL] = []
         if isInInbox(url) { leftovers.append(url) }
-        let result: HexWordsReadResult
+        let result: HexWordsReadResult?
         if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > HexWordsReader.maxBytes {
             result = .refused(.tooLarge)
         } else if let copy = privateCopy(of: url) {
@@ -90,8 +91,10 @@ enum HexInbox {
         }
     }
 
-    private static func logResult(_ result: HexWordsReadResult) {
+    private static func logResult(_ result: HexWordsReadResult?) {
         switch result {
+        case nil:
+            log.notice("words file couldn't be opened")
         case .refused(let reason):
             log.notice("words file refused: \(reason.rawValue, privacy: .public)")
         case .read(let file):

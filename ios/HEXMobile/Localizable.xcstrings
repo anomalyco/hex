@@ -6080,6 +6080,16 @@
           }
         }
       }
+    },
+    "Hex couldn’t open that file." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 无法打开该文件。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

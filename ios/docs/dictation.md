@@ -587,7 +587,8 @@ Hex declares `anomaly.hex.words` (conforming to `public.json`, extension `hexwor
 (the spec's check pass, then `JSONSerialization`), shows the review sheet over whatever is on
 screen and deletes both copies when the sheet closes: after Add, Cancel or a refusal (a launch
 also clears copies a sheet never got to delete; Inbox copies only once an hour old). It logs
-counts and reasons only. A refused file shows one sentence and Done. Otherwise the sheet
+counts and reasons only. A refused file shows one sentence and Done, and so does one that can't
+be opened at all ("Hex couldn’t open that file."). Otherwise the sheet
 (`HexWordsReviewSheet`) shows the file's claimed maker, a Vocabulary and a Word replacements
 switch with what each adds, what's already there and what differs from yours, each clash with
 Keep mine (the default) or Use this one, what can't be used on this iPhone grouped by reason

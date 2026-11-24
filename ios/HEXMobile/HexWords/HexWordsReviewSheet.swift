@@ -10,7 +10,8 @@ extension Notification.Name {
 /// part. Nothing changes until Add. Every string from the file is shown verbatim (no Markdown,
 /// no links), shortened, in its own direction-isolated run. Words as Android's sheet has them.
 struct HexWordsReviewSheet: View {
-    let result: HexWordsReadResult
+    /// nil: the file couldn't be opened at all.
+    let result: HexWordsReadResult?
     let onClose: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -53,6 +54,9 @@ struct HexWordsReviewSheet: View {
     @ViewBuilder
     private var content: some View {
         switch result {
+        case nil:
+            paragraph(String(localized: "Hex couldn’t open that file."))
+            buttons(primary: String(localized: "Done")) { dismiss() }
         case .refused(let reason):
             paragraph(Self.sentence(for: reason))
             buttons(primary: String(localized: "Done")) { dismiss() }
