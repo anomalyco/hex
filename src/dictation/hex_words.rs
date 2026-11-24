@@ -22,7 +22,7 @@ mod write;
 #[cfg(test)]
 mod shared_cases_tests;
 
-pub(crate) use merge::{Clash, Limits, Lists, Merged, Parts, Summary, merge};
+pub(crate) use merge::{Clash, Limits, Lists, Merged, Parts, merge};
 pub(crate) use read::{OpenError, open, read};
 pub(crate) use undo::Undo;
 pub(crate) use write::{Export, export};

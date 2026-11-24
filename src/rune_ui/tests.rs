@@ -3175,20 +3175,23 @@ fn the_language_menu_opens_on_its_chosen_language() {
     );
 }
 
-/// Labs › Vocabulary files adds Import and Export to the sheet, and only
-/// then: off, the sheet is exactly as before.
+/// Labs › Vocabulary and replacement files adds Import, Export, and the
+/// Words file menu to the sheet, and only then: off, the sheet is exactly as
+/// before.
 #[test]
 fn the_vocabulary_sheet_offers_files_only_with_its_lab_on() {
     let mut rt = runtime("mac-settings-vocabulary", true, GOLDEN_SIZE);
     settle(&mut rt);
     assert!(rt.find("add-term").is_some());
-    assert!(rt.find("import-vocabulary").is_none());
-    assert!(rt.find("export-vocabulary").is_none());
+    for key in ["import-vocabulary", "export-vocabulary", "words-file"] {
+        assert!(rt.find(key).is_none(), "{key} shows with the lab off");
+    }
     rt.state.settings.labs.vocabulary_files = true;
     rt.invalidate();
     settle(&mut rt);
     assert!(rt.find("import-vocabulary").is_some());
     assert!(rt.find("export-vocabulary").is_some());
+    assert!(rt.find("words-file").is_some());
     assert!(rt.find("add-term").is_some());
     assert!(rt.find("close-vocabulary").is_some());
 }
@@ -4375,6 +4378,10 @@ fn goldens() {
             // the toast of the file running with its progress.
             "drop-hover",
             "drop-running",
+            // Labs › Vocabulary and replacement files: the sheet with Open…,
+            // Export…, and Undo, and a words file's review.
+            "vocabulary-files",
+            "words-review",
         ] {
             check_golden(scene, dark, PANE_SIZE);
         }

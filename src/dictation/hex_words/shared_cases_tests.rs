@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 use serde_json::{Map, Value, json};
 
-use super::{Limits, Lists, Parts, Replacement, Skip, Term, Undo, export, merge, read};
+use super::read::read;
+use super::{Limits, Lists, Parts, Replacement, Skip, Term, Undo, export, merge};
 use crate::app_settings::{AppSettings, DictationMode};
 use crate::dictation::text_replacements::TextReplacement;
 use crate::dictation::vocabulary::VocabularyEntry;
@@ -325,16 +326,6 @@ fn every_desktop_merge_case_and_its_undo() {
 /// Settings holding the case's lists: the vocabulary, the Global mode's
 /// replacements, and other modes with their own.
 fn settings_from(input: &Value) -> AppSettings {
-    let mut settings = AppSettings::default();
-    settings.vocabulary = input["vocabulary"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|entry| VocabularyEntry {
-            term: text(&entry["term"]),
-            sounds_like: texts(&entry["soundsLike"]),
-        })
-        .collect();
     let rules = |list: &Value| -> Vec<TextReplacement> {
         list.as_array()
             .unwrap()
@@ -345,7 +336,20 @@ fn settings_from(input: &Value) -> AppSettings {
             })
             .collect()
     };
-    settings.dictation_processing.default_mode.replacements = rules(&input["replacements"]);
+    let lists = Lists {
+        vocabulary: input["vocabulary"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| VocabularyEntry {
+                term: text(&entry["term"]),
+                sounds_like: texts(&entry["soundsLike"]),
+            })
+            .collect(),
+        replacements: rules(&input["replacements"]),
+    };
+    let mut settings = AppSettings::default();
+    lists.put(&mut settings);
     settings.dictation_processing.modes = input["modes"]
         .as_array()
         .unwrap()

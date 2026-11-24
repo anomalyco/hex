@@ -34,6 +34,7 @@ pub(super) fn merged(
             super::routing::FRENCH,
             super::meeting_mute::FRENCH,
             super::model_switch::FRENCH,
+            super::words_files::FRENCH,
         ],
         Language::Portuguese => &[
             PORTUGUESE,
@@ -49,6 +50,7 @@ pub(super) fn merged(
             super::routing::PORTUGUESE,
             super::meeting_mute::PORTUGUESE,
             super::model_switch::PORTUGUESE,
+            super::words_files::PORTUGUESE,
         ],
         Language::Russian => &[
             RUSSIAN,
@@ -64,6 +66,7 @@ pub(super) fn merged(
             super::routing::RUSSIAN,
             super::meeting_mute::RUSSIAN,
             super::model_switch::RUSSIAN,
+            super::words_files::RUSSIAN,
         ],
         Language::Hungarian => &[
             HUNGARIAN,
@@ -79,6 +82,7 @@ pub(super) fn merged(
             super::routing::HUNGARIAN,
             super::meeting_mute::HUNGARIAN,
             super::model_switch::HUNGARIAN,
+            super::words_files::HUNGARIAN,
         ],
     };
 

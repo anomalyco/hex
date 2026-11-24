@@ -71,8 +71,10 @@ reviewed by a native speaker. Meeting times in the Meetings pane, the macOS
 calendar card, and the exported transcript and notes are 12-hour ("2:30 PM")
 in English and 24-hour ("14:30") in every other interface language.
 The [vocabulary](vocabulary.md) biases transcription toward names you list; its
-Labs › Vocabulary files toggle (off by default, every OS) imports terms from a
-CSV file into the Vocabulary sheet and exports the list as one.
+Labs › Vocabulary and replacement files toggle (off by default, every OS)
+imports and exports terms as CSV, and opens and exports Hex words files (the
+vocabulary and the Global mode's replacements, shared with Hex for iPhone and
+Android) with a review before anything is added and Undo after.
 [Your own speech models](own-models.md) covers adding a GGUF file and using
 models another app already downloaded; its Labs › Smaller model files toggle
 (off by default, macOS) also accepts imports quantized to Q6_K, Q5_K, or Q4_K.

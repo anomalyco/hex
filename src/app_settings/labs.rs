@@ -282,8 +282,9 @@ pub struct LabsSettings {
     /// Holding Paste Last opens a picker of recent dictations and
     /// annotations, and History lists them together (macOS).
     pub paste_last_picker: bool,
-    /// The Vocabulary sheet imports terms from a CSV file and exports the
-    /// list as one (Labs › Vocabulary files).
+    /// The Vocabulary sheet opens and exports Hex words files (the
+    /// vocabulary and the Global mode's replacements) and imports and exports
+    /// terms as CSV (Labs › Vocabulary and replacement files).
     pub vocabulary_files: bool,
     /// The menu bar's Vocabulary submenu adds a term or opens the sheet, and
     /// lists the last five saved terms (macOS; Labs › Vocabulary menu).

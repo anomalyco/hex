@@ -25,8 +25,9 @@ General › Vocabulary   // vocabulary.settings; after Language
 ├── Add term -> New empty row, focused; the list glides to its end and the row
 │   rises 8 pt as it fades in (SETTLE, bounce 0; Reduce Motion: fade only);
 │   saved once the term has text
-├── Labs › Vocabulary files (off by default, every OS) -> Import… and Export… join
-│   the footer beside Add term; off, the sheet is exactly as before (labs.md)
+├── Labs › Vocabulary and replacement files (off by default, every OS) ->
+│   Import…, Export…, and Words file… join the footer beside Add term; off, the
+│   sheet is exactly as before (labs.md; words files below)
 │   ├── Import… -> one CSV or TXT regular file (at most 1 MiB, UTF-8), Teams' custom
 │   │   dictionary columns: term, then comma-separated "sounds like" spellings; a "Term"
 │   │   header, blank rows, and further columns are ignored. A folder, device, or FIFO, a
@@ -39,10 +40,53 @@ General › Vocabulary   // vocabulary.settings; after Language
 │   │   "Added 3 terms, updated 2", "Updated 2 terms, skipped 1", "No new terms in that
 │   │   file" only when nothing changed, "No terms found in that file", or the error; a
 │   │   failed save says so instead of reporting success
-│   └── Export… -> a save dialog named hex-vocabulary.csv; appends .csv only when the
-│       name has no extension and <name>.csv doesn't exist, writes the four-column
-│       header then term, spellings joined by ", ", and two empty cells, quoting what
-│       needs it, atomically; "Exported N terms"
+│   ├── Export… -> a save dialog named hex-vocabulary.csv; appends .csv only when the
+│   │   name has no extension and <name>.csv doesn't exist, writes the four-column
+│   │   header then term, spellings joined by ", ", and two empty cells, quoting what
+│   │   needs it, atomically; "Exported N terms"
+│   └── Words file… -> a menu: Open words file…, Export words file…, and Undo last
+│       import while an import can be taken back  // vocabulary.words_files
+│       ├── Format -> Hex words file (.hexwords, docs/specs/hex-words.md), shared with
+│       │   Hex for iPhone and Android: the vocabulary with its spellings and the
+│       │   Global mode's replacements (dictation_processing.default_mode); other modes
+│       │   never travel. Reader, merge, writer, Undo: dictation::hex_words
+│       ├── Open words file… -> open dialog filtered to *.hexwords, with All files;
+│       │   reads the file into memory (at most 8 MiB + 1 byte), never copies it, and
+│       │   decides by content. A refused file ("Couldn't open that file: it isn't a
+│       │   Hex words file", …) changes nothing; one with no words says "No words in
+│       │   that file"; logs counts and skip reasons only
+│       ├── Review sheet ("Add words from a file", scene words-review) -> Made by
+│       │   <the file's claim>; a newer file says so; Vocabulary and Replacements
+│       │   switches with counts (new, with new spellings, already there, clashes);
+│       │   each clash (same heard words, other text) with Keep mine (default) or Use
+│       │   this one; what doesn't fit (500 terms, 16 spellings, 1,000 replacements
+│       │   when importing); what the file itself left out, by reason. File strings
+│       │   are drawn verbatim, each in its own text run, past 64 characters with "…"
+│       ├── Add -> merges in file order, vocabulary first, never removing anything:
+│       │   a term already listed (same key: lowercased, final sigma as sigma) gains
+│       │   the spellings it lacks and keeps your casing; a new replacement appends to
+│       │   the Global list; learned is dropped. Both lists save in one settings save
+│       │   (the sheet's rows reloaded, then Ui::update), back in the Vocabulary
+│       │   sheet: "Added 3 terms and 2 replacements · 1 already there · kept yours
+│       │   for 1 · Undo", or "No new words in that file"
+│       ├── Cancel, Escape, or a press outside -> nothing changes; back to the sheet
+│       ├── Undo -> puts both lists back as they were before Add. The copy (both
+│       │   lists, never the file) is hex-words-undo.json in the data folder, written
+│       │   owner-only (durable::write_private), so it survives a restart; it is
+│       │   dropped once either list differs from what Add left or another file is
+│       │   added. Scenes and tests keep it in memory only
+│       └── Export words file… -> save dialog named hex-words.hexwords; writes the
+│           two lists cleaned, leaving out (and naming) what a reader would skip,
+│           atomically (durable::write); "Exported 3 terms and 3 replacements ·
+│           left out 1 with hidden characters · other modes' replacements stay on
+│           this computer"
+│       // checks: dictation::hex_words::shared_cases_tests (every case in
+│       // tests/fixtures/hex-words: 59 read, the 13 desktop merge cases with Undo,
+│       // the 4 desktop write cases against hex-words.schema.json), the words-file
+│       // tests in rune_ui/vocabulary.rs (one save, Undo across a restart and its
+│       // owner-only copy, Cancel, an edit ending Undo, refusals, export); goldens
+│       // vocabulary-files and words-review; the native dialogs and a phone's file
+│       // in a running Hex not yet checked
 ├── Edits -> Debounced drafts, like Modes' corrections -> settings.json `vocabulary`
 ├── × -> Removes that row at any click speed or focus; rows keep an identity,
 │   so a late edit, focus change, or second × for a removed row touches nothing

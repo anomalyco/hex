@@ -591,6 +591,7 @@ enum Modal {
     Explainer,
     SoundSets,
     Vocabulary,
+    WordsReview,
     Calls,
     HistoryStats,
     #[cfg(hex_capture)]
@@ -783,6 +784,7 @@ impl Ui {
             });
         }
         ui.history = history::HistoryPane::shared(store);
+        ui.vocabulary.words = vocabulary::WordsFiles::load();
         ui.output = output::OutputPane::shuffled();
         ui.modes.load_personal_commands();
         ui.platform.developer =
@@ -1183,6 +1185,7 @@ impl Ui {
             Modal::Explainer => {}
             Modal::SoundSets => sound_sets::on_close(self),
             Modal::Vocabulary => vocabulary::on_close(self),
+            Modal::WordsReview => vocabulary::review_closed(self),
             Modal::Calls => calls::on_close(self),
             Modal::HistoryStats => {}
             #[cfg(hex_capture)]
@@ -1292,8 +1295,10 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
         return true;
     }
     if let Some(modal) = ui.modal {
-        // A row's open menu inside Calls or Auto-send rules closes before the sheet itself.
-        let inner_menu = modal == Modal::Calls && matches!(ui.open, Some(Menu::Call(_)));
+        // A row's open menu inside Calls or Auto-send rules, or Vocabulary's
+        // words-file menu, closes before the sheet itself.
+        let inner_menu = (modal == Modal::Calls && matches!(ui.open, Some(Menu::Call(_))))
+            || (modal == Modal::Vocabulary && ui.open == Some(vocabulary::WORDS_MENU));
         #[cfg(hex_capture)]
         let inner_menu = inner_menu
             || (modal == Modal::RoutingRules && scrawl::routing_rules::is_routing_menu(ui.open));
@@ -1592,6 +1597,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         Some(Modal::Explainer) => layer.extend(explainer::modal(ui, cx, p)),
         Some(Modal::SoundSets) => layer.extend(sound_sets::modal(ui, p)),
         Some(Modal::Vocabulary) => layer.extend(vocabulary::modal(ui, p)),
+        Some(Modal::WordsReview) => layer.extend(vocabulary::review_modal(ui, p)),
         Some(Modal::Calls) => layer.extend(calls::modal(ui, p)),
         Some(Modal::HistoryStats) => {
             layer.extend(history::stats_modal(ui, p, cx).into_iter().flatten());

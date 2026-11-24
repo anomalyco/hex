@@ -86,7 +86,7 @@ impl Feature {
             Self::ModesEditor => "Modes editor",
             Self::DropTranscribe => "Transcribe dropped audio",
             Self::PasteLastPicker => "Paste Last picker",
-            Self::VocabularyFiles => "Vocabulary files",
+            Self::VocabularyFiles => "Vocabulary and replacement files",
             Self::VocabularyMenu => "Vocabulary menu",
             Self::AnnotateAgentTools => "Agent tools for captures",
             Self::AnnotateAgentInstall => "Install agent skill from Annotate",
@@ -328,7 +328,7 @@ impl Feature {
                 "Tap Paste Last to paste the newest dictation or annotation; hold it to pick another"
             }
             Self::VocabularyFiles => {
-                "Import terms from a CSV file in the Vocabulary sheet, or save the whole list as one"
+                "Share vocabulary and replacements with your other devices as a Hex words file, or import and export terms as CSV"
             }
             Self::VocabularyMenu => {
                 "Add terms to Vocabulary from the menu bar, or open the Vocabulary sheet"

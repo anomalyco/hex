@@ -437,17 +437,21 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
                                          // a_failed_wsl_request_forgets_the_workspace, a_not_found_wsl_request_forgets_the_workspace,
                                          // a_wsl_request_failure_reads_as_the_capsule_expects,
                                          // opencode_in_wsl_is_its_own_bit_and_windows_only; not run on a real Windows PC with WSL
-├── Vocabulary files no  labs.vocabulary_files           (every OS) the Vocabulary sheet offers Import… and Export…
-│                                        beside Add term; Import merges a CSV or TXT file's terms (Teams' custom dictionary
-│                                        columns) into the list and saves it, and Export writes the list as a CSV file. Off,
-│                                        the sheet is exactly as before
+├── Vocabulary and replacement files no  labs.vocabulary_files (every OS) the Vocabulary sheet offers Import…,
+│                                        Export…, and Words file… beside Add term; Import merges a CSV or TXT file's terms
+│                                        (Teams' custom dictionary columns) into the list and saves it, Export writes the
+│                                        list as a CSV file, and Words file… opens and exports Hex words files (.hexwords:
+│                                        the vocabulary and the Global mode's replacements, shared with Hex for iPhone and
+│                                        Android) with a review sheet before Add and Undo after (vocabulary.md). Off, the
+│                                        sheet is exactly as before
 │                                        // checks: dictation::vocabulary::csv tests (header, quotes and embedded newlines,
 │                                        // an unclosed quote, BOM, CRLF, blank rows, merge, duplicate terms, dropped
 │                                        // spellings, caps, a folder, export→import round trip), merge_status and the
 │                                        // sheet's import and export in rune_ui/vocabulary.rs,
 │                                        // the_vocabulary_sheet_offers_files_only_with_its_lab_on (rune_ui/tests.rs),
-│                                        // vocabulary_files_is_its_own_switch_and_everywhere (labs.rs); the native
-│                                        // dialogs were not opened in a desktop session
+│                                        // vocabulary_files_is_its_own_switch_and_everywhere (labs.rs),
+│                                        // dictation::hex_words::shared_cases_tests and the words-file tests in
+│                                        // rune_ui/vocabulary.rs; the native dialogs were not opened in a desktop session
 ├── Vocabulary menu no  labs.vocabulary_menu             (macOS) the menu bar's Vocabulary ▸ submenu, right under
 │                                        Speech Model ▸, offers Add term… and Open vocabulary… and lists the last five
 │                                        saved terms newest first; off, the row is hidden and the menu is exactly as
@@ -3956,9 +3960,12 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   first, and a `~/.local/bin` link `$PATH` doesn't name says so. While Labs ›
   Agent tools for captures is off, a note names that switch for the skill's
   `zoom`/`inspect`/`frames` commands.
-- Vocabulary files: the Vocabulary sheet gains **Import…** and **Export…**
-  beside Add term (every OS; off by default, `labs.vocabulary_files`). Off,
-  the sheet is exactly as before. Import opens one CSV or TXT file, refuses
+- Vocabulary and replacement files (until this release "Vocabulary files";
+  same id and `labs.vocabulary_files` key): the Vocabulary sheet gains
+  **Import…**, **Export…**, and **Words file…** beside Add term (every OS;
+  off by default). Off, the sheet is exactly as before. Words file… opens and
+  exports Hex words files, the format Hex for iPhone and Android share
+  (`docs/specs/hex-words.md`; see [vocabulary.md](vocabulary.md)). Import opens one CSV or TXT file, refuses
   one over 1 MiB or not UTF-8, and reads Microsoft Teams' custom dictionary
   columns: column 1 is the term and column 2 its comma-separated "sounds
   like" spellings, with a first header row naming the column "Term" or

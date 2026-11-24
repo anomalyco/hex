@@ -39,6 +39,7 @@ mod text_language;
 mod traditional_chinese;
 mod transcript_edits;
 mod voice_isolation;
+mod words_files;
 
 pub(crate) use clock::{clock_time, twelve_hour_clock};
 
@@ -416,6 +417,7 @@ pub(super) fn all_translations() -> impl Iterator<Item = &'static (&'static str,
         .chain(history::TRANSLATIONS)
         .chain(screenshots::TRANSLATIONS)
         .chain(routing::TRANSLATIONS)
+        .chain(words_files::TRANSLATIONS)
 }
 
 #[cfg(test)]
@@ -715,6 +717,8 @@ mod tests {
         include_str!("../rune_ui/meeting_capsules/offer.rs"),
         include_str!("../rune_ui/speech_model.rs"),
         include_str!("../rune_ui/vocabulary.rs"),
+        include_str!("../rune_ui/vocabulary/words_file.rs"),
+        include_str!("../rune_ui/vocabulary/words_file/review.rs"),
         include_str!("../rune_ui/windows_host.rs"),
         include_str!("tray_menu.rs"),
         include_str!("../updater/presentation.rs"),
