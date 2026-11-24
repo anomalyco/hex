@@ -13,6 +13,8 @@
 // The dictation the person discarded (✕, or Home's Cancel), by MicCapture's job number, as in hexspeech.cpp.
 // transcribe.cpp asks before each stretch of speech it decodes, so a discarded dictation ends there.
 static std::atomic<jlong> abandoned{0};
+// Why the last load failed (transcribe_status), so the app can tell running out of memory from an unusable file.
+static std::atomic<int> failure{TRANSCRIBE_OK};
 
 extern "C" JNIEXPORT jlong JNICALL
 Java_ly_anoma_hex_speech_Parakeet_load(JNIEnv *env, jobject, jstring file, jint threads) {
@@ -20,7 +22,7 @@ Java_ly_anoma_hex_speech_Parakeet_load(JNIEnv *env, jobject, jstring file, jint 
     static const bool quiet = [] { transcribe_log_set([](transcribe_log_level, const char *, void *) {}, nullptr); return true; }();
     (void) quiet;
     const char *path = env->GetStringUTFChars(file, nullptr);
-    if (!path) return 0;
+    if (!path) { failure.store(TRANSCRIBE_ERR_OOM); return 0; }
     transcribe_model_load_params load;
     transcribe_model_load_params_init(&load);
     load.backend = TRANSCRIBE_BACKEND_CPU;
@@ -30,8 +32,12 @@ Java_ly_anoma_hex_speech_Parakeet_load(JNIEnv *env, jobject, jstring file, jint 
     transcribe_session *session = nullptr;
     const transcribe_status status = transcribe_open(path, &load, &options, &session);
     env->ReleaseStringUTFChars(file, path);
+    failure.store(status);
     return status == TRANSCRIBE_OK ? reinterpret_cast<jlong>(session) : 0;
 }
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_ly_anoma_hex_speech_Parakeet_outOfMemory(JNIEnv *, jobject) { return failure.load() == TRANSCRIBE_ERR_OOM; }
 
 extern "C" JNIEXPORT void JNICALL
 Java_ly_anoma_hex_speech_Parakeet_free(JNIEnv *, jobject, jlong handle) {

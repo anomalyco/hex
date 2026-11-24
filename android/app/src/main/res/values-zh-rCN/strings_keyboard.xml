@@ -12,6 +12,7 @@
     <string name="keyboard_note_no_speech">没有听到说话</string>
     <string name="keyboard_note_model">语音模型不可用</string>
     <string name="keyboard_note_minute">已录满 1 分钟，录音停止</string>
+    <string name="keyboard_note_low_memory">手机内存不足，本次使用了标准听写。</string>
     <string name="keyboard_cancel_dictation">取消听写</string>
     <string name="keyboard_finish_dictation">完成听写</string>
     <string name="keyboard_undo_dictation">撤销听写</string>

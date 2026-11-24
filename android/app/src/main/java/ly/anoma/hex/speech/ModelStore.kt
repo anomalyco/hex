@@ -48,9 +48,12 @@ internal class ModelStore private constructor(private val name: String, private 
     private var stops = 0
     /** Bumped by [delete], so a transfer in progress stops and leaves nothing behind. */
     @Volatile private var generation = 0
-    private fun path(context: Context) = File(context.noBackupFilesDir, "$name-$hash.$extension")
+    /** The installed file's name, after its SHA-256. */
+    internal val fileName get() = "$name-$hash.$extension"
+    private fun path(context: Context) = File(context.noBackupFilesDir, fileName)
     private fun part(context: Context) = File(context.noBackupFilesDir, "$name-$hash.part")
-    fun installed(context: Context) = path(context).takeIf { it.isFile && it.length() == size }
+    fun installed(context: Context) = installedIn(context.noBackupFilesDir)
+    internal fun installedIn(dir: File) = File(dir, fileName).takeIf { it.isFile && it.length() == size }
     /** The download's size, said before it starts. */
     val megabytes get() = ((size + 500_000) / 1_000_000).toInt()
     /** The file checked against its SHA-256 in this process, so it is hashed once, not at every load. */
@@ -58,8 +61,9 @@ internal class ModelStore private constructor(private val name: String, private 
 
     /** [installed], once its contents match the pinned SHA-256 (hashed the first time in each process, on the caller's
      * thread). A file that doesn't is deleted, so its row offers the download again. */
-    fun verified(context: Context): File? {
-        val file = installed(context) ?: return null
+    fun verified(context: Context) = verifiedIn(context.noBackupFilesDir)
+    internal fun verifiedIn(dir: File): File? {
+        val file = installedIn(dir) ?: return null
         if (checked == file) return file
         val digest = MessageDigest.getInstance("SHA-256")
         val ok = runCatching { file.inputStream().use { input -> pump(input) { buffer, count -> digest.update(buffer, 0, count) } } }.isSuccess &&
