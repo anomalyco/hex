@@ -66,6 +66,7 @@ pub(super) fn merged(
             HUNGARIAN,
             super::agents::HUNGARIAN,
             super::signature::HUNGARIAN,
+            super::clipboard_phrase::HUNGARIAN,
             super::style::HUNGARIAN,
             super::hud_height::HUNGARIAN,
             super::voice_isolation::HUNGARIAN,

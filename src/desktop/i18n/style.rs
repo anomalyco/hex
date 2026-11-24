@@ -104,5 +104,5 @@ pub(super) const HUNGARIAN: &[(&str, &str)] = &[
     ("Short lines, a list for several items", "Rövid sorok, lista több elem esetén"),
     ("Exact words from the model", "A modell pontos szavai"),
     ("Style", "Stílus"),
-    ("After the rewrite", "Az újraírás után"),
+    ("After the rewrite", "Az átfogalmazás után"),
 ];
