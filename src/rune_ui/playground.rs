@@ -90,6 +90,14 @@ const PATHS: &[(&str, &str)] = &[
         "words-review-long",
         "Window/General/Vocabulary · long words file review",
     ),
+    (
+        "words-review-from-iphone",
+        "Window/General/Vocabulary · words file from iPhone",
+    ),
+    (
+        "words-review-from-android",
+        "Window/General/Vocabulary · words file from Android",
+    ),
     ("shortcut-row", "Window/General/Shortcut/Left Option"),
     ("shortcut-row-right", "Window/General/Shortcut/Right Option"),
     (

@@ -1,0 +1,15 @@
+{
+  "format": "hex.words",
+  "version": 1,
+  "madeBy": {"app": "Hex for iPhone", "version": "9.0.0"},
+  "vocabulary": [
+    {"term": "OpenCode"},
+    {"term": "Rune"},
+    {"term": "Next.js"}
+  ],
+  "replacements": [
+    {"heard": "jet hub", "write": "GitHub"},
+    {"heard": "cloud code", "write": "Claude Code"},
+    {"heard": "pie torch", "write": "PyTorch", "learned": true}
+  ]
+}

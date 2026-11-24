@@ -22,8 +22,9 @@ use crate::dictation::vocabulary::{self, VocabularyEntry};
 mod words_file;
 
 pub(super) use words_file::{
-    MENU as WORDS_MENU, WordsFiles, fixture as words_fixture, long_fixture as words_long_fixture,
-    modal as review_modal, on_close as review_closed,
+    FROM_ANDROID, FROM_IPHONE, MENU as WORDS_MENU, WordsFiles, fixture as words_fixture,
+    long_fixture as words_long_fixture, modal as review_modal, on_close as review_closed,
+    received_fixture as words_received_fixture,
 };
 /// One term row: a regular text field and its padding.
 const ROW_HEIGHT: f32 = 36.0;
@@ -1164,22 +1165,6 @@ mod tests {
         ui
     }
 
-    /// The cross-check's file from Hex for iPhone.
-    fn iphone() -> String {
-        serde_json::json!({
-            "format": "hex.words",
-            "version": 1,
-            "madeBy": {"app": "Hex for iPhone", "version": "1.0.3"},
-            "vocabulary": [{"term": "OpenCode"}, {"term": "Rune"}, {"term": "Next.js"}],
-            "replacements": [
-                {"heard": "jet hub", "write": "GitHub"},
-                {"heard": "cloud code", "write": "Claude Code"},
-                {"heard": "pie torch", "write": "PyTorch", "learned": true},
-            ],
-        })
-        .to_string()
-    }
-
     fn lists(ui: &Ui) -> (Vec<&str>, Vec<(&str, &str)>) {
         (
             ui.settings
@@ -1206,7 +1191,7 @@ mod tests {
     fn a_words_file_adds_after_its_review_in_one_save_and_undo_survives_a_restart() {
         let scratch = Scratch::new("words-add");
         let path = scratch.path("iphone.hexwords");
-        std::fs::write(&path, iphone()).unwrap();
+        std::fs::write(&path, FROM_IPHONE).unwrap();
         let store = scratch.path("hex-words-undo.json");
         let mut ui = words_ui();
         ui.vocabulary.words = words_file::WordsFiles::at(Some(store.clone()));
@@ -1260,11 +1245,95 @@ mod tests {
         assert!(!store.exists());
     }
 
+    /// The cross-check: the files Hex for iPhone and Hex for Android exported,
+    /// read and merged by the real reader and merger over the receiving lists,
+    /// give the counts, clash, and lists after Add that the cross-check's
+    /// expected.json gives for the desktop, and Undo gives the lists back.
+    #[test]
+    fn the_phones_files_review_add_and_undo_as_the_cross_check_expects() {
+        let scratch = Scratch::new("words-cross-check");
+        for (name, bytes, added, clashes, after) in [
+            (
+                "iphone",
+                FROM_IPHONE,
+                (3, 2, 1),
+                vec![("jet hub", "Git Hub", "GitHub")],
+                (
+                    vec!["NextJS", "OpenCode", "Rune", "Next.js"],
+                    vec![
+                        ("jet hub", "Git Hub"),
+                        ("cloud code", "Claude Code"),
+                        ("pie torch", "PyTorch"),
+                    ],
+                ),
+            ),
+            (
+                "android",
+                FROM_ANDROID,
+                (3, 2, 0),
+                vec![],
+                (
+                    vec!["NextJS", "Hex", "Zoë", "שלום"],
+                    vec![
+                        ("jet hub", "Git Hub"),
+                        ("toda", "תודה"),
+                        ("open code", "OpenCode"),
+                    ],
+                ),
+            ),
+        ] {
+            let path = scratch.path(&format!("{name}.hexwords"));
+            std::fs::write(&path, bytes).unwrap();
+            let mut ui = words_ui();
+            let before = format!("{:?}", lists(&ui));
+            words_file::opened(&mut ui, Ok(Some(path)));
+            words_file::finish_reading(&mut ui);
+            let preview = words_file::preview(&ui).expect("the review is open");
+            let (terms, replacements, kept) = added;
+            let summary = preview.summary;
+            assert_eq!(
+                (
+                    summary.added_terms,
+                    summary.updated_terms,
+                    summary.already_have_terms,
+                    summary.added_replacements,
+                    summary.changed_replacements,
+                    summary.kept_yours,
+                    summary.already_have_replacements,
+                ),
+                (terms, 0, 0, replacements, 0, kept, 0),
+                "{name}"
+            );
+            assert!(preview.over_limit.is_empty(), "{name}");
+            let found: Vec<_> = preview
+                .clashes
+                .iter()
+                .map(|clash| {
+                    (
+                        clash.index,
+                        clash.heard.as_str(),
+                        clash.yours.as_str(),
+                        clash.theirs.as_str(),
+                    )
+                })
+                .collect();
+            let expected: Vec<_> = clashes
+                .iter()
+                .map(|&(heard, yours, theirs)| (0, heard, yours, theirs))
+                .collect();
+            assert_eq!(found, expected, "{name}");
+            words_file::add(&mut ui);
+            assert_eq!(lists(&ui), after, "{name}");
+            words_file::undo(&mut ui);
+            assert_eq!(format!("{:?}", lists(&ui)), before, "{name}: Undo");
+        }
+    }
+
     #[test]
     fn cancel_changes_nothing_and_an_edit_ends_undo() {
         let scratch = Scratch::new("words-cancel");
         let path = scratch.path("iphone.hexwords");
-        std::fs::write(&path, iphone()).unwrap();
+        std::fs::write(&path, FROM_IPHONE).unwrap();
         let mut ui = words_ui();
         words_file::opened(&mut ui, Ok(Some(path.clone())));
         words_file::finish_reading(&mut ui);

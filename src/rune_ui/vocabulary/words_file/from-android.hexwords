@@ -1,0 +1,14 @@
+{
+  "format": "hex.words",
+  "version": 1,
+  "madeBy": {"app": "Hex for Android", "version": "0.2.2"},
+  "vocabulary": [
+    {"term": "Hex"},
+    {"term": "Zoë"},
+    {"term": "שלום"}
+  ],
+  "replacements": [
+    {"heard": "toda", "write": "תודה"},
+    {"heard": "open code", "write": "OpenCode"}
+  ]
+}

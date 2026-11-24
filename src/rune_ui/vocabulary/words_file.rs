@@ -302,6 +302,12 @@ pub(super) fn read_done(ui: &mut Ui, result: Result<WordsFile, OpenError>) {
     }
 }
 
+/// What the open review would do with both parts on.
+#[cfg(test)]
+pub(super) fn preview(ui: &Ui) -> Option<&Merged> {
+    Some(&ui.vocabulary.words.review.as_ref()?.preview)
+}
+
 /// Waits for the read `opened` started, as the window's poll would take it.
 #[cfg(test)]
 pub(super) fn finish_reading(ui: &mut Ui) {
@@ -757,6 +763,40 @@ pub(in crate::rune_ui) fn long_fixture(ui: &mut Ui) {
         "replacements": rules,
     });
     if let Ok(file) = hex_words::read(file.to_string().as_bytes()) {
+        show_review(ui, file);
+    }
+}
+
+/// The cross-check's files exported by Hex for iPhone and Hex for Android
+/// (`words_file/from-*.hexwords`, byte for byte): scenes and tests read
+/// them with the real reader and merger.
+pub(in crate::rune_ui) const FROM_IPHONE: &[u8] = include_bytes!("words_file/from-iphone.hexwords");
+pub(in crate::rune_ui) const FROM_ANDROID: &[u8] =
+    include_bytes!("words_file/from-android.hexwords");
+
+/// Scenes and tests: the cross-check's receiving lists (vocabulary NextJS,
+/// Global jet hub → Git Hub) with the lab on and the Vocabulary sheet open.
+pub(in crate::rune_ui) fn receiving_fixture(ui: &mut Ui) {
+    use crate::dictation::text_replacements::TextReplacement;
+    use crate::dictation::vocabulary::VocabularyEntry;
+    ui.settings.labs.vocabulary_files = true;
+    ui.settings.vocabulary = vec![VocabularyEntry {
+        term: "NextJS".into(),
+        sounds_like: Vec::new(),
+    }];
+    ui.settings.dictation_processing.default_mode.replacements = vec![TextReplacement {
+        matched_phrase: "jet hub".into(),
+        output: "Git Hub".into(),
+    }];
+    ui.vocabulary.reload(&ui.settings.vocabulary);
+    ui.modes = crate::rune_ui::modes::ModesPane::new(&ui.settings);
+    super::open(ui);
+}
+
+/// Scenes: `bytes` read and reviewed over the receiving lists.
+pub(in crate::rune_ui) fn received_fixture(ui: &mut Ui, bytes: &[u8]) {
+    receiving_fixture(ui);
+    if let Ok(file) = hex_words::read(bytes) {
         show_review(ui, file);
     }
 }

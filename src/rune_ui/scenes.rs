@@ -580,6 +580,16 @@ pub(super) const SCENES: &[Scene] = &[
         *ui = mac_fixture();
         vocabulary::words_long_fixture(ui);
     }),
+    // The cross-check: the files Hex for iPhone and Hex for Android
+    // exported, reviewed over the receiving lists.
+    ("words-review-from-iphone", |ui| {
+        *ui = mac_fixture();
+        vocabulary::words_received_fixture(ui, vocabulary::FROM_IPHONE);
+    }),
+    ("words-review-from-android", |ui| {
+        *ui = mac_fixture();
+        vocabulary::words_received_fixture(ui, vocabulary::FROM_ANDROID);
+    }),
     ("mac-settings-recording", |ui| {
         *ui = mac_fixture();
         let held = crate::app_settings::HotkeyModifiers {
