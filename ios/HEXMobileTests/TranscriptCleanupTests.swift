@@ -1385,11 +1385,12 @@ final class SpokenCleanupRulesTests: XCTestCase {
     /// but everything is still lowercase"): the whole pipeline keeps Polished's capitals, for a
     /// speech model's capitalised text and for all-lowercase text alike, while Casual starts its
     /// sentences lowercase and writes "i" for "I" whatever the switch says, as its hint promises.
+    @MainActor
     func testLowercaseOffKeepsPolishedCapitalsAndCasualStillStartsLowercase() async {
         let capitalised = "Hey, I just got home. Are you free tomorrow?"
         let lowercase = "hey i just got home are you free tomorrow"
         func run(_ style: DictationStyle, _ text: String, lowercase: Bool = false) async -> String {
-            await DictationPipeline(style: style, language: "en-US", lowercase: lowercase).run(text)
+            await DictationPipeline(style: style, language: "en-US", lowercase: lowercase).run(text).formatted
         }
         for text in [capitalised, lowercase] {
             let polished = await run(.polished, text)
