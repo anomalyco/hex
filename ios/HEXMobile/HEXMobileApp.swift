@@ -20,6 +20,7 @@ struct HEXMobileApp: App {
         MultilingualParakeetSettings().applyLaunchArguments()
         KeyboardParakeetSettings().applyLaunchArguments()
         SettingsSnapshotFixture.applyDefaults()
+        HexInbox.sweep()
     }
 
     private static var initialOpenedFromKeyboard: Bool {
@@ -50,6 +51,8 @@ struct HEXMobileApp: App {
                     openPage: $openPage
                 )
                 .onOpenURL { url in
+                    // A Hex words file from AirDrop, Files or Open in Hex: its review sheet.
+                    if HexInbox.open(url) { return }
                     guard let request = KeyboardLaunchRequest(url: url) else { return }
                     if case .setup = request {
                         openedFromKeyboard = false

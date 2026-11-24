@@ -93,6 +93,9 @@ struct CustomVocabularyEditor: View {
         .onAppear {
             terms = settings.terms
         }
+        .onReceive(NotificationCenter.default.publisher(for: .hexWordsListsDidChange)) { _ in
+            terms = settings.terms
+        }
     }
 
     private func add() {

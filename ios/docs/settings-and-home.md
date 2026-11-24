@@ -33,8 +33,11 @@ list starts at the top. The pages, one file each in `HEXMobile/Settings/`
   stored in Show what I say's and Type as I speak's two App Group keys (`LiveDictationMode`:
   Into field when Type as I speak's is on, In bar when only Show what I say's is, Off when
   neither; picking one writes both, so the two together, which 1.0.4 allowed, keep working
-  until another is picked); then Clean up what I say and Custom vocabulary (its list below
-  the switch); and last Speech model in keyboard, then **Model**: **English** (the
+  until another is picked); then Clean up what I say and Custom vocabulary (below the
+  switch while it's on: its list, then the **Word replacements** and **Words file** rows,
+  and **Undo last import** while an import can still be undone; see
+  [dictation.md](dictation.md#word-replacements-and-hex-words-files-settings--dictation--custom-vocabulary));
+  and last Speech model in keyboard, then **Model**: **English** (the
   default) or **Multilingual** (`SpeechModelChoice`, from Experiments until 2026-11-24, on
   iPhones with 6 GB or more), with what the picked one means and its status below,
   Keep mic warm and Microphone.
