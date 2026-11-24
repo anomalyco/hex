@@ -109,7 +109,7 @@ internal object Feedback {
         val metadata = linkedMapOf(
             "screen" to screen,
             "channel" to if (BuildConfig.BUILD_TYPE == "preview") "preview" else "play",
-            "speech_model" to if (ModelStore.installed(context) != null) "whisper-small-q5_1" else "whisper-tiny-q5_1",
+            "speech_model" to if (ModelStore.small.installed(context) != null) "whisper-small-q5_1" else "whisper-tiny-q5_1",
             "dictation_language" to SpeechPreferences(context).spoken.code)
         if (BuildConfig.DEBUG) metadata["build_type"] = BuildConfig.BUILD_TYPE
         return FeedbackContext(info.versionName.orEmpty(), info.longVersionCode.toString(), "Android ${Build.VERSION.RELEASE}",

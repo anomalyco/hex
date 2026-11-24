@@ -122,7 +122,7 @@ internal object SpeechModel {
 
     /** Returns whether the downloaded model is the one loaded. */
     private fun load(app: Context): Boolean {
-        val path = ModelStore.installed(app)?.absolutePath
+        val path = ModelStore.small.installed(app)?.absolutePath
         if (handle != 0L && loaded == (path ?: "")) return path != null
         unload()
         if (path != null && open(app, path)) return true
