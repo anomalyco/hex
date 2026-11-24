@@ -5087,12 +5087,12 @@
         }
       }
     },
-    "Hex sends nothing unless you tap Send in Send feedback. Then it sends your message and the pictures you kept, your email if you add one, and details about Hex and this iPhone to Anomaly's feedback inbox. Your dictations, what you type, and what Hex learned are never included." : {
+    "Hex sends nothing unless you tap Send in Send feedback. Then it sends your message and the pictures you kept, your email if you add one, and details about Hex and this iPhone to Anomaly's feedback inbox. With an email, Hex also sends a random install ID so your reports stay together. Your dictations, what you type, and what Hex learned are never included." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "除非你在“发送反馈”中轻点“发送”，否则 Hex 不会发送任何内容。轻点后，它会把你的留言和保留的图片、你填写的邮箱（如有），以及 Hex 和这台 iPhone 的相关信息发送到 Anomaly 的反馈收件箱。你的听写、输入的内容以及 Hex 学到的内容都不会包含在内。"
+            "value" : "除非你在“发送反馈”中轻点“发送”，否则 Hex 不会发送任何内容。轻点后，它会把你的留言和保留的图片、你填写的邮箱（如有），以及 Hex 和这台 iPhone 的相关信息发送到 Anomaly 的反馈收件箱。填写邮箱时，Hex 还会发送一个随机安装 ID，把你的反馈归在一起。你的听写、输入的内容以及 Hex 学到的内容都不会包含在内。"
           }
         }
       }
