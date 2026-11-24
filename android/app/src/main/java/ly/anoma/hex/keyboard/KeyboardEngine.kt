@@ -350,8 +350,8 @@ internal class KeyboardEngine(
      * Keyboard tools on leaves the strip's line to the tools instead of sentence starters. */
     private fun showPredictions(before: String?) {
         val w = word
-        val emptyField = before != null && KeyboardTools.showsInEmptyField(feedback.keyboardTools, before) { target.after(1) }
-        surface?.suggestions(if (w != null && before != null && !emptyField && !symbols && canEndWord())
+        surface?.suggestions(if (w != null && before != null && !symbols && canEndWord() &&
+            !KeyboardTools.showsInEmptyField(feedback.keyboardTools, before) { target.after(1) })
             w.predictions(before, capitalize = capsWanted()).map { shown(Suggestion(it, Suggestion.Kind.Next)) } else emptyList())
     }
 
