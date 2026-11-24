@@ -606,6 +606,7 @@ enum Modal {
     SoundSets,
     Vocabulary,
     Calls,
+    HistoryStats,
 }
 
 /// The one anchored menu or popover that is open.
@@ -1177,9 +1178,10 @@ impl Ui {
         self.modal == Some(modal)
     }
 
-    /// Opens `modal` alone, closing any open sheet and any open menu first so
-    /// two sheets can never be open at once.
+    /// Opens `modal` alone, stopping any shortcut recording and closing any open
+    /// sheet or menu first so two sheets can never be open at once.
     fn open_modal(&mut self, modal: Modal) {
+        settings::cancel_capture(self);
         self.close_modal();
         self.open = None;
         self.modal = Some(modal);
@@ -1196,6 +1198,7 @@ impl Ui {
             Modal::SoundSets => sound_sets::on_close(self),
             Modal::Vocabulary => vocabulary::on_close(self),
             Modal::Calls => calls::on_close(self),
+            Modal::HistoryStats => {}
         }
     }
 
@@ -1210,7 +1213,6 @@ impl Ui {
     fn close_dialogs(&mut self) {
         find_popover::close(self);
         self.close_modal();
-        history::close_stats(self);
     }
 
     /// Switches panes at once: the new pane replaces the old without a fade,
@@ -1284,7 +1286,6 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
     if let rune::Key::Command(digit @ '1'..='9') = event.key
         && !event.mods.alt
         && ui.modal.is_none()
-        && !ui.history.stats_open
         && ui.tour.is_none()
     {
         let index = digit as usize - '1' as usize;
@@ -1385,14 +1386,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
             && (ui.pane == Pane::Modes || platform_settings::summary_model_shown(ui))
             && ui.window.as_ref().is_some_and(rune::AppHandle::is_visible),
     );
-    changed |= ui.history.poll(
-        ui.pane == Pane::History
-            && !ui.labs_open
-            && ui.window.as_ref().is_none_or(rune::AppHandle::is_visible),
-        ui.settings.labs.keep_recordings,
-        ui.settings.labs.history_stats,
-        ui.settings.typing_wpm,
-    );
+    changed |= history::poll(ui);
     #[cfg(hex_capture)]
     let mut changed = ui.captures.poll(ui.pane == Pane::Captures && !ui.labs_open) | changed;
     #[cfg(all(target_os = "macos", hex_capture))]
@@ -1545,7 +1539,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
             output::pane(ui, p, cx.is_reduced_motion(), &mut layer),
         ),
         Pane::Modes => modes::pane(ui, p, &mut layer),
-        Pane::History => history::pane(ui, p, cx, &mut layer),
+        Pane::History => history::pane(ui, p, &mut layer),
         #[cfg(hex_capture)]
         Pane::Captures => (Vec::new(), captures::pane(ui, p)),
         Pane::Meetings => meetings::pane(ui, p, &mut layer),
@@ -1603,6 +1597,9 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         Some(Modal::SoundSets) => layer.extend(sound_sets::modal(ui, p)),
         Some(Modal::Vocabulary) => layer.extend(vocabulary::modal(ui, p)),
         Some(Modal::Calls) => layer.extend(calls::modal(ui, p)),
+        Some(Modal::HistoryStats) => {
+            layer.extend(history::stats_modal(ui, p, cx).into_iter().flatten());
+        }
         None => {}
     }
     #[cfg(all(target_os = "macos", hex_capture))]

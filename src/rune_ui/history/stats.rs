@@ -7,13 +7,11 @@
 use rune::{Align, Cx, El, col, el, row, text};
 use rune_kit::Progress;
 
-use super::super::Ui;
-use super::super::controls::{
-    ButtonKind, Paint, STATS_NUMBER, button, modal_scrim_transition, modal_transition,
-};
+use super::super::controls::{ButtonKind, Paint, STATS_NUMBER, button, modal_sheet};
 use super::super::list_detail::HANG;
 use super::super::lists::{inline_slider, section_label};
 use super::super::meetings::length;
+use super::super::{Modal, Ui};
 use crate::desktop::i18n::numbers;
 use crate::desktop::i18n::{clock_time, tr, tr_fill, tr_named};
 use crate::history::stats::{DayCount, HistoryStats, ProfileOutputTime};
@@ -51,8 +49,8 @@ const STRIP_BOTTOM: f32 = 12.0;
 /// body scrolls while the window is too short for the sections, and takes
 /// the sections' own height when they fit, so the title and Close stay put
 /// without a scroll bar or a gap.
-pub(super) fn modal(ui: &Ui, p: Paint, cx: &mut Cx<Ui>) -> Option<[El; 2]> {
-    if !ui.history.stats_open || !ui.settings.labs.history_stats {
+pub(in crate::rune_ui) fn modal(ui: &Ui, p: Paint, cx: &mut Cx<Ui>) -> Option<[El; 2]> {
+    if !ui.settings.labs.history_stats {
         return None;
     }
     let stats = ui.history.stats.as_ref()?;
@@ -119,7 +117,7 @@ pub(super) fn modal(ui: &Ui, p: Paint, cx: &mut Cx<Ui>) -> Option<[El; 2]> {
         // counts end on the Close button's edge.
         col().key("history-stats-body").child(sections)
     };
-    let mut panel = col()
+    let panel = col()
         .key("history-stats-dialog")
         .role("dialog")
         .label(tr("Dictation stats"))
@@ -147,38 +145,17 @@ pub(super) fn modal(ui: &Ui, p: Paint, cx: &mut Cx<Ui>) -> Option<[El; 2]> {
                     "history-stats-close",
                     tr("Close"),
                     ButtonKind::Secondary,
-                    |ui: &mut Ui, _| close_stats(ui),
+                    |ui: &mut Ui, _| close(ui),
                 )
                 .default_button(),
             ),
         );
-    for shadow in &p.k.elevation.overlay {
-        panel = panel.box_shadow(*shadow);
-    }
-    let layer = |key: &str| {
-        el().key(key)
-            .role("none")
-            .absolute(0.0, 0.0)
-            .w_full()
-            .h_full()
-    };
-    Some([
-        layer("history-stats-scrim")
-            .fill(c.scrim)
-            .on_press(close_stats)
-            .transition(modal_scrim_transition(p)),
-        layer("history-stats-layer")
-            .center()
-            .transition(modal_transition(p))
-            // Keys stay inside, Escape or a press outside closes, and focus
-            // returns to the Stats button that opened it.
-            .child(panel.modal(true, close_stats)),
-    ])
+    Some(modal_sheet(p, "history-stats", panel, close))
 }
 
 /// Closes the stats dialog, from its button, Escape, or the scrim.
-pub(crate) fn close_stats(ui: &mut Ui) {
-    ui.history.stats_open = false;
+fn close(ui: &mut Ui) {
+    ui.close_modal_if(Modal::HistoryStats);
 }
 
 /// The six headline numbers' inputs, read from the window's History: the

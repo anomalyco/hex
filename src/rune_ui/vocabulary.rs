@@ -9,9 +9,7 @@ use rune::tok::motion::{SETTLE, SETTLE_EXIT};
 use rune::{El, SpringPair, TextEdit, Transition, Tx, col, edit_access, el, row, text};
 use rune_kit::{ControlSize, TextInput};
 
-use super::controls::{
-    ButtonKind, DESCRIPTION, METRICS, Paint, button, modal_scrim_transition, modal_transition, note,
-};
+use super::controls::{ButtonKind, DESCRIPTION, METRICS, Paint, button, modal_sheet, note};
 use super::lists::remove_button;
 use super::{Modal, Ui};
 use crate::desktop::file_dialog::{Dialog, Filter, Pending, Target};
@@ -50,8 +48,7 @@ struct Status {
     failed: bool,
 }
 
-/// The term rows, whether the sheet is open, and the file dialogs its
-/// footer asked for.
+/// The term rows and the file dialogs the sheet's footer asked for.
 #[derive(Default)]
 pub(super) struct VocabularyEditor {
     rows: Vec<TermRow>,
@@ -187,7 +184,6 @@ fn budget_note(ui: &Ui) -> Option<String> {
 /// Opens the sheet alone, with an empty row to type into when the list is
 /// empty.
 pub(crate) fn open(ui: &mut Ui) {
-    super::settings::cancel_capture(ui);
     ui.open_modal(Modal::Vocabulary);
     ui.vocabulary.status = None;
     if ui.vocabulary.rows.is_empty() {
@@ -701,29 +697,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
             .mx(-METRICS.row_px),
         );
     }
-    panel = panel.child(footer);
-    for shadow in &p.k.elevation.overlay {
-        panel = panel.box_shadow(*shadow);
-    }
-    let layer = |key: &str| {
-        el().key(key)
-            .role("none")
-            .absolute(0.0, 0.0)
-            .w_full()
-            .h_full()
-    };
-    [
-        layer("vocabulary-scrim")
-            .fill(c.scrim)
-            .on_press(close)
-            .transition(modal_scrim_transition(p)),
-        layer("vocabulary-layer")
-            .center()
-            .transition(modal_transition(p))
-            // Keys stay inside, Escape or a press outside closes, and focus
-            // returns to the row's button that opened it.
-            .child(panel.modal(true, close)),
-    ]
+    modal_sheet(p, "vocabulary", panel.child(footer), close)
 }
 
 /// A few terms, one with spellings, with the sheet open.

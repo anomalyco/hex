@@ -10,7 +10,7 @@ use std::time::Duration;
 use rune::{El, Tx, col, el, row, text};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
-use super::controls::{ButtonKind, Paint, button, modal_scrim_transition, modal_transition};
+use super::controls::{ButtonKind, Paint, button, modal_sheet};
 use super::lists::{inline_slider, list_row, source_list};
 use super::settings::sound_volume;
 use super::{Modal, Ui};
@@ -49,7 +49,6 @@ impl SoundSets {
 /// Opens the sheet over General, alone: it ends a shortcut recording and
 /// closes the model picker, the shortcut explainer and any menu.
 pub(super) fn open(ui: &mut Ui) {
-    super::settings::cancel_capture(ui);
     ui.open_modal(Modal::SoundSets);
     ui.sound_sets.playing = None;
     ui.sound_sets.volume_drag = None;
@@ -209,7 +208,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
         )
         .default_button(),
     );
-    let mut panel = col()
+    let panel = col()
         .key("sound-sets")
         .role("dialog")
         .label(tr("Sounds"))
@@ -232,28 +231,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
         .child(volume_row)
         .child(sets.mx(-ROW_BLEED))
         .child(footer);
-    for shadow in &p.k.elevation.overlay {
-        panel = panel.box_shadow(*shadow);
-    }
-    let layer = |key: &str| {
-        el().key(key)
-            .role("none")
-            .absolute(0.0, 0.0)
-            .w_full()
-            .h_full()
-    };
-    [
-        layer("sound-sets-scrim")
-            .fill(c.scrim)
-            .on_press(close)
-            .transition(modal_scrim_transition(p)),
-        layer("sound-sets-layer")
-            .center()
-            .transition(modal_transition(p))
-            // Keys stay inside, Escape or a press outside closes, and focus
-            // returns to the row's button that opened it.
-            .child(panel.modal(true, close)),
-    ]
+    modal_sheet(p, "sound-sets", panel, close)
 }
 
 /// The chosen set's check, or the empty column that keeps every name on

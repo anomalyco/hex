@@ -1298,6 +1298,14 @@ fn the_explainer_picker_and_shortcut_recording_never_share_the_window() {
         rt.state.is_modal(Modal::Picker),
         "the picker replaces the explainer"
     );
+    picker::close(&mut rt.state);
+    tap(&mut rt, "dictation-hotkey");
+    assert!(matches!(
+        rt.state.capture,
+        settings::Capture::Listening { .. }
+    ));
+    picker::open(&mut rt.state);
+    assert!(matches!(rt.state.capture, settings::Capture::Idle));
     explainer::open(&mut rt.state);
     assert!(
         rt.state.is_modal(Modal::Explainer),
