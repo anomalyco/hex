@@ -93,16 +93,21 @@ internal object DictationFixes {
     fun apply(fixes: List<DictationFix>, text: String): String {
         if (fixes.isEmpty() || text.isEmpty()) return text
         val table = HashMap<List<String>, String>()
-        var longest = 1
         for (fix in fixes) {
             val keys = DictationText.words(fix.heard).map { DictationText.key(it.text) }
             val meant = fix.meant.trim()
             if (keys.isEmpty() || keys.size > DictationEdits.maxPairWords ||
                 DictationText.words(meant).size > DictationEdits.maxPairWords || meant.isEmpty() || table.containsKey(keys)) continue
             table[keys] = meant
-            longest = maxOf(longest, keys.size)
         }
-        if (table.isEmpty()) return text
+        return replace(table, text)
+    }
+
+    /** Replaces each run of words whose keys are a key of [table] (longest first) with its value, by [apply]'s
+     * whole-word and case rules. Word replacements share it. */
+    fun replace(table: Map<List<String>, String>, text: String): String {
+        if (table.isEmpty() || text.isEmpty()) return text
+        val longest = table.keys.maxOf { it.size }
         val words = DictationText.words(text)
         val out = StringBuilder(text.length)
         var copied = 0
@@ -207,10 +212,10 @@ internal object DictationFixes {
         return if (first?.isUpperCase() == true) meant.replaceFirstChar { it.uppercaseChar() } else meant
     }
 
-    private fun escape(value: String) = value.replace("\\", "\\\\").replace("\n", "\\n")
+    fun escape(value: String) = value.replace("\\", "\\\\").replace("\n", "\\n")
         .replace("\t", "\\t").replace("\r", "\\r")
 
-    private fun unescape(value: String): String {
+    fun unescape(value: String): String {
         val out = StringBuilder(value.length)
         var i = 0
         while (i < value.length) {
