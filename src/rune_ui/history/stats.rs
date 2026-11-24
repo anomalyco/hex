@@ -7,7 +7,9 @@
 use rune::{Align, Cx, El, col, el, row, text};
 use rune_kit::Progress;
 
-use super::super::controls::{ButtonKind, Paint, STATS_NUMBER, button, modal_sheet};
+use super::super::controls::{
+    ButtonKind, METRICS, MODAL, ModalWidth, Paint, button, modal_panel, modal_sheet,
+};
 use super::super::list_detail::HANG;
 use super::super::lists::{inline_slider, section_label};
 use super::super::meetings::length;
@@ -17,11 +19,6 @@ use crate::desktop::i18n::{clock_time, tr, tr_fill, tr_named};
 use crate::history::stats::{DayCount, HistoryStats, ProfileOutputTime};
 use crate::history::usage::Usage;
 
-/// The stats dialog's width and padding.
-const STATS_WIDTH: f32 = 460.0;
-const PADDING: f32 = 18.0;
-/// The least clear space the dialog leaves above and below itself.
-const DIALOG_MARGIN: f32 = 24.0;
 /// A window's first frame has no measured title or footer yet; these stand
 /// in until they are.
 const TITLE_HEIGHT: f32 = 20.0;
@@ -31,11 +28,8 @@ const MIN_BODY_HEIGHT: f32 = 120.0;
 /// The daily chart's height and the gap between its day bars.
 const CHART_HEIGHT: f32 = 44.0;
 const BAR_GAP: f32 = 3.0;
-/// A top app's name, and its count on the trailing edge.
-const APP_NAME_WIDTH: f32 = 120.0;
+/// A top app's count on the trailing edge.
 const COUNT_WIDTH: f32 = 34.0;
-/// A headline tile: three per row inside the dialog's width.
-const TILE_WIDTH: f32 = 136.0;
 /// Room beside the body's scroll bar.
 const SCROLL_BAR_INSET: f32 = 12.0;
 /// The Labs › Stats on History strip's inner padding, gaps, and room above
@@ -57,7 +51,6 @@ pub(in crate::rune_ui) fn modal(ui: &Ui, p: Paint, cx: &mut Cx<Ui>) -> Option<[E
     if !ui.history.has_stats() {
         return None;
     }
-    let c = &p.k.c;
     let numbers = headline_inputs(ui, stats);
     // The window is the layer the panel centers in; the title and footer are
     // measured so their real heights set the body's room.
@@ -65,21 +58,21 @@ pub(in crate::rune_ui) fn modal(ui: &Ui, p: Paint, cx: &mut Cx<Ui>) -> Option<[E
         .layout_size("history-stats-layer")
         .map_or(super::super::MIN_WINDOW_SIZE.1, |size| size[1]);
     let title_height = cx
-        .layout_size("history-stats-title")
+        .layout_size("history-stats-dialog/title")
         .map_or(TITLE_HEIGHT, |size| size[1]);
     let footer_height = cx
-        .layout_size("history-stats-footer")
+        .layout_size("history-stats-dialog/footer")
         .map_or(FOOTER_HEIGHT, |size| size[1]);
     let content_height = cx.layout_size("history-stats-sections").map(|size| size[1]);
-    let chrome = PADDING + title_height + 16.0 + 16.0 + footer_height + 14.0;
-    let room = (window_height - 2.0 * DIALOG_MARGIN - chrome).max(MIN_BODY_HEIGHT);
+    let chrome = MODAL.top + title_height + 2.0 * MODAL.gap + footer_height + MODAL.bottom;
+    let room = (window_height - 2.0 * MODAL.margin - chrome).max(MIN_BODY_HEIGHT);
     let (fade_top, fade_bottom) = super::super::SCROLL_FADE;
     // The measured sections set the mode; the first frame, with no measure
     // yet, draws them whole and settles into scrolling if they don't fit.
     let scrolling = content_height.is_some_and(|height| height + fade_top + fade_bottom > room);
     let mut sections = col().key("history-stats-sections").w_full().gap(16.0);
     if scrolling {
-        // Keep the bar off the counts and timings.
+        // Keep the bar off the counts and timings while preserving the text rail.
         sections = sections.pr(SCROLL_BAR_INSET);
     }
     let mut sections = sections.child(tiles(p, &numbers));
@@ -106,6 +99,8 @@ pub(in crate::rune_ui) fn modal(ui: &Ui, p: Paint, cx: &mut Cx<Ui>) -> Option<[E
     let body = if scrolling {
         col()
             .key("history-stats-body-frame")
+            .pl(METRICS.row_px)
+            .pr(METRICS.row_px - SCROLL_BAR_INSET)
             .h(room)
             .child(super::super::scroll_body(
                 p.k,
@@ -115,41 +110,28 @@ pub(in crate::rune_ui) fn modal(ui: &Ui, p: Paint, cx: &mut Cx<Ui>) -> Option<[E
     } else {
         // No viewport at all: no scroll bar, no fade padding, and the
         // counts end on the Close button's edge.
-        col().key("history-stats-body").child(sections)
+        col()
+            .key("history-stats-body")
+            .px(METRICS.row_px)
+            .child(sections)
     };
-    let panel = col()
-        .key("history-stats-dialog")
-        .role("dialog")
-        .label(tr("Dictation stats"))
-        .w(STATS_WIDTH)
-        .pt(PADDING)
-        .px(PADDING)
-        .pb(14.0)
-        .gap(16.0)
-        .radius(p.k.radius.xl)
-        .fill(c.bg_base)
-        .border(p.hair, c.border_weak)
-        // Presses inside the panel stay inside.
-        .on_press(|_: &mut Ui| {})
-        .child(
-            text(tr("Dictation stats"))
-                .key("history-stats-title")
-                .font(p.k.ty.body_medium)
-                .color(p.text()),
-        )
-        .child(body)
-        .child(
-            row().key("history-stats-footer").justify_end().child(
-                button(
-                    p,
-                    "history-stats-close",
-                    tr("Close"),
-                    ButtonKind::Secondary,
-                    |ui: &mut Ui, _| close(ui),
-                )
-                .default_button(),
-            ),
-        );
+    let panel = modal_panel(
+        p,
+        "history-stats-dialog",
+        tr("Dictation stats"),
+        ModalWidth::Narrow,
+        vec![body],
+        vec![
+            button(
+                p,
+                "history-stats-close",
+                tr("Close"),
+                ButtonKind::Secondary,
+                |ui: &mut Ui, _| close(ui),
+            )
+            .default_button(),
+        ],
+    );
     Some(modal_sheet(p, "history-stats", panel, close))
 }
 
@@ -227,12 +209,19 @@ fn headline(input: &Headline) -> [(&'static str, String, &'static str); 6] {
     ]
 }
 
-/// The six headline numbers, each a large value over a muted label.
+/// The six headline numbers, two rows of three equal-width tiles.
 fn tiles(p: Paint, input: &Headline) -> El {
-    headline(input).into_iter().fold(
-        row().key("tiles").w_full().gap(8.0).flex_wrap(),
-        |tiles, value| tiles.child(tile(p, value.0, &value.1, value.2)),
-    )
+    let items = headline(input);
+    col()
+        .key("tiles")
+        .w_full()
+        .gap(8.0)
+        .children(items.chunks(3).enumerate().map(|(index, chunk)| {
+            chunk.iter().fold(
+                row().key(format!("tiles-row-{index}")).w_full().gap(8.0),
+                |line, (key, value, label)| line.child(tile(p, key, value, label)),
+            )
+        }))
 }
 
 /// Labs › Stats on History: the dialog's six headline numbers as one
@@ -331,17 +320,18 @@ fn typing_speed(p: Paint, typing_wpm: u32) -> El {
 fn tile(p: Paint, key: &str, value: &str, label: &str) -> El {
     col()
         .key(format!("tile-{key}"))
-        .w(TILE_WIDTH)
-        .min_w(TILE_WIDTH)
+        .grow(1.0)
+        .shrink()
+        .min_w(0.0)
         .gap(2.0)
-        .px(10.0)
+        .px(12.0)
         .py(8.0)
         .radius(p.k.radius.md)
         .fill(p.k.c.layer_01)
         .child(
             text(value.to_owned())
                 .key("value")
-                .font(STATS_NUMBER)
+                .font(p.tabular(p.display()))
                 .color(p.text())
                 .truncate(),
         )
@@ -395,7 +385,7 @@ fn daily(p: Paint, stats: &HistoryStats) -> Option<El> {
                     .child(
                         row()
                             .key("legend")
-                            .gap(5.0)
+                            .gap(4.0)
                             .center_y()
                             .child(
                                 el().key("swatch")
@@ -456,14 +446,14 @@ fn top_apps(p: Paint, stats: &HistoryStats) -> Option<El> {
                 row()
                     .key(format!("app-{}", app.application))
                     .w_full()
-                    .gap(10.0)
+                    .gap(8.0)
                     .center_y()
                     .child(
                         text(app.application.clone())
                             .key("name")
                             .font(p.k.ty.small)
                             .color(p.text())
-                            .w(APP_NAME_WIDTH)
+                            .w(METRICS.fact_label_w)
                             .truncate(),
                     )
                     .child(
