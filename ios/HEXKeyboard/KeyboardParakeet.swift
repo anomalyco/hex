@@ -6,7 +6,7 @@ import Foundation
 /// Settings › Dictation › Speech model in keyboard (on unless turned off): the keyboard's own dictation
 /// transcribed with Parakeet on the Neural Engine, in the keyboard's process, so Hex needn't be
 /// open or warm.
-/// English uses Parakeet V2; a language Experiments › Multilingual model dictates uses Parakeet
+/// English uses Parakeet V2; a language Settings › Dictation › Model: Multilingual dictates uses Parakeet
 /// Ultra. Both load from the App Group (`SpeechModelStore`), after the keyboard's first frame
 /// and launch work (`warmUp`), and stay loaded while the keyboard's process lives, until a
 /// memory warning. The first load compiles the model for the Neural Engine (17 s for V2, 12 s
@@ -94,6 +94,11 @@ final class KeyboardParakeet {
             return
         }
         if loaded != nil { release(reason: "language changed") }
+        // Hex removed the model the person switched away from: its compiled copy goes too.
+        if settings.purgesCompiled {
+            settings.purgesCompiled = false
+            Self.purgeCompiledModels()
+        }
         settings.setKeyboardState(.preparing)
         KeyboardProbeLog.shared.write("parakeet: loading \(choice.label) \(memory)")
         let started = Date()
@@ -122,6 +127,7 @@ final class KeyboardParakeet {
                 let cold = seconds >= Self.compilingLoad
                 self.loaded = Loaded(multilingual: choice.multilingual, manager: manager, seconds: seconds, cold: cold, at: Date())
                 settings.setKeyboardState(.ready, multilingual: choice.multilingual)
+                settings.setLoadedOnce(true, multilingual: choice.multilingual)
                 KeyboardProbeLog.shared.write(
                     "parakeet: \(choice.label) loaded in \(String(format: "%.1f", seconds)) s (\(cold ? "cold" : "warm")) \(after)"
                 )
@@ -228,6 +234,24 @@ final class KeyboardParakeet {
         guard message != lastNote else { return }
         lastNote = message
         KeyboardProbeLog.shared.write(message)
+    }
+
+    /// Removes Core ML's compiled copies in the keyboard's Caches (`com.apple.e5rt.e5bundlecache`,
+    /// 234 MB for English's model on an iPhone 17 Pro), once Hex removed the model the person
+    /// switched away from (`KeyboardParakeetSettings.purgesCompiled`). Only before a load, with
+    /// nothing loaded: the picked model compiles again (12 to 17 s, Apple's speech recognition
+    /// meanwhile). The Neural Engine's own cache is iOS's (`com.apple.aned`), out of reach.
+    nonisolated static func purgeCompiledModels() {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        var folders = [caches.appendingPathComponent("com.apple.e5rt.e5bundlecache", isDirectory: true)]
+        if let bundle = Bundle.main.bundleIdentifier {
+            folders.append(caches.appendingPathComponent(bundle, isDirectory: true)
+                .appendingPathComponent("com.apple.e5rt.e5bundlecache", isDirectory: true))
+        }
+        for folder in folders where FileManager.default.fileExists(atPath: folder.path) {
+            let removed = (try? FileManager.default.removeItem(at: folder)) != nil
+            KeyboardProbeLog.shared.write("parakeet: compiled copies \(removed ? "removed" : "not removed") at \(folder.lastPathComponent)")
+        }
     }
 
     // MARK: - Loading

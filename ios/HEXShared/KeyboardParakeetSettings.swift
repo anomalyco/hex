@@ -2,7 +2,7 @@ import Foundation
 
 /// Settings › Dictation › Speech model in keyboard, in the App Group so the keyboard reads it. On unless
 /// the person turned it off. While it's on, the keyboard's own dictation transcribes with Hex's
-/// speech model (Parakeet V2 for English, Parakeet Ultra where Experiments › Multilingual model
+/// speech model (Parakeet V2 for English, Parakeet Ultra where Settings › Dictation › Model: Multilingual
 /// dictates) on the Neural Engine, without opening Hex, once the files are in the App Group and
 /// the keyboard has compiled the model. Whenever that isn't so, or isn't safe, it uses Apple's
 /// speech recognition exactly as with the switch off. Hex downloads the model by itself only
@@ -61,6 +61,34 @@ nonisolated struct KeyboardParakeetSettings {
         }
         let at = defaults?.double(forKey: Self.keyboardStateAtKey) ?? 0
         return (state, Date(timeIntervalSince1970: at))
+    }
+
+    /// Settings › Dictation › Model keeps only the picked model: the other goes once the
+    /// picked one has loaded once, here (the keyboard) or in Hex (`SpeechModelChoice.unpicked`).
+    func hasLoadedOnce(multilingual: Bool) -> Bool {
+        defaults?.bool(forKey: Self.loadedOnceKey(multilingual)) == true
+    }
+
+    func setLoadedOnce(_ loaded: Bool, multilingual: Bool) {
+        defaults?.set(loaded, forKey: Self.loadedOnceKey(multilingual))
+    }
+
+    private static func loadedOnceKey(_ multilingual: Bool) -> String {
+        multilingual ? "experiments.keyboardParakeet.loadedOnce.ultra" : "experiments.keyboardParakeet.loadedOnce.v2"
+    }
+
+    /// Hex removed a model the keyboard may have compiled: the keyboard clears its compiled
+    /// copies the next time it starts, before it loads the picked one (`KeyboardParakeet`).
+    static let purgeCompiledKey = "experiments.keyboardParakeet.purgeCompiled"
+
+    var purgesCompiled: Bool {
+        get { defaults?.bool(forKey: Self.purgeCompiledKey) == true }
+        nonmutating set { defaults?.set(newValue, forKey: Self.purgeCompiledKey) }
+    }
+
+    /// Whether `keyboardState` is about the multilingual model rather than English's.
+    var keyboardStateIsMultilingual: Bool {
+        defaults?.bool(forKey: Self.keyboardStateMultilingualKey) == true
     }
 
     func setKeyboardState(_ state: KeyboardState?, multilingual: Bool = false, now: Date = Date()) {

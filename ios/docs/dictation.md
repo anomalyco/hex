@@ -339,18 +339,42 @@ misheard words and spoken self-corrections, within a 2 s budget. A
 timeout, error, empty or implausible output keeps the raw transcript, and
 the toggle is disabled with a reason when Apple Intelligence is unusable.
 
-## Multilingual model (Settings › Experiments › Multilingual model (Parakeet), iOS 18+)
+## Multilingual model (Settings › Dictation › Model: Multilingual, iOS 18+)
 
-Off by default, and disabled on iPhones under 6 GB
-(`MultilingualParakeetSettings`, in the App Group). While on, Hex dictates
+Settings › Dictation's speech model card has **Model: English · Multilingual**
+(`SpeechModelChoice`, `SpeechModelChoiceRow`) under Speech model in keyboard, English
+until Multilingual is picked, on iPhones with 6 GB or more (under that the switch above
+says it needs 6 GB, and the row doesn't show). It moved there from Experiments on
+2026-11-24. Each choice says what it means before anything downloads: English, "For
+English. A 464.4 MB download on Wi-Fi."; Multilingual, its 25 languages by name, "A 632.2 MB
+download as soon as you pick it. Hex dictates them with it too."; both, that other languages
+use Apple's speech recognition and that only the picked model stays on the iPhone. Only the
+picked one is kept, but the other goes only once the picked one is downloaded and has loaded
+once, in Hex or the keyboard (`SpeechModelChoice.unpicked`, checked whenever Hex comes to the
+front and when Hex has loaded the multilingual model; `KeyboardParakeetSettings.hasLoadedOnce`),
+and never while Hex dictates with it; until then it stays and keeps dictating English
+(`KeyboardParakeetPlan`: `readyV2` while the multilingual model downloads,
+`awaitingV2DownloadUsingUltra` while English's does), so a download that fails or stops leaves
+the old one in use. Removing a model clears its "loaded once", its compile record and the
+keyboard's state about it, and asks the keyboard to clear its compiled copies
+(`KeyboardParakeetSettings.purgesCompiled`): before its next load it removes
+`Library/Caches/<bundle>/com.apple.e5rt.e5bundlecache` (234 MB for English's model on an
+iPhone 17 Pro; the picked model then compiles again, 12 to 17 s). The Neural Engine's own
+cache (`/var/mobile/Library/Caches/com.apple.aned`) and Hex's own compiled copy are iOS's to
+purge. Picking English stops a multilingual download and deletes it if it isn't complete. On
+the iPhone, English takes about 700 MB (464 MB and the keyboard's 234 MB compiled copy) and
+Multilingual about 0.9 to 1.2 GB (632 MB and compiled copies not yet measured), both for a
+while during a switch. Multilingual is
+`MultilingualParakeetSettings` (App Group `experiments.multilingualParakeet`, the key
+Experiments used). While Multilingual is picked, Hex dictates
 Parakeet Ultra's 25 languages (Moondream's post-training of NVIDIA Parakeet TDT
 0.6B v3) with it, which hears them mixed within a sentence (Dutch with English
 words, a TestFlight request); any other dictation language keeps the engine Hex
 picks without it. The language Ultra takes is the one set, else the one Automatic
-follows on the keyboard, else the iPhone's first. The experiment never takes
+follows on the keyboard, else the iPhone's first. Picking it never takes
 dictation away: until Ultra is ready, Hex and the keyboard dictate as they would
 with it off, and Hex switches to Ultra once it has loaded (a dictation in flight
-isn't interrupted). Turning it on downloads
+isn't interrupted). Picking it downloads
 FluidInference's Core ML build (632 MB, pinned to revision `95eaa59`, each file
 checked against its SHA-256 and resumed from its `.partial`) into Application
 Support, out of backups, beside that engine (`ParakeetUltraDownload`): home and the
@@ -363,15 +387,15 @@ refused request or a full iPhone, it says what happened in plain words with Try 
 and Turn off. Once downloaded, Ultra's first load (Core ML's compile, a minute or
 more) runs beside the usual engine too, except where Parakeet V2 dictates and leaves
 no room for it (English before iOS 26), where Ultra takes V2's place for that load;
-later launches load it directly when Core ML has compiled it for this iOS. Turning it off stops the download, then deletes it;
-a launch deletes a leftover only when the switch reads off as stored, never when the
-App Group can't be read (a launch before the first unlock). FluidAudio 0.15.5 has no
+later launches load it directly when Core ML has compiled it for this iOS. Picking English stops the download, then deletes it
+unless it is complete; a launch deletes a part-way leftover only when English reads as
+stored, never when the App Group can't be read (a launch before the first unlock). FluidAudio 0.15.5 has no
 `.ultra`, so `ParakeetUltraModel` loads the four models itself and hands
 FluidAudio v3 `AsrModels` (its own loader would replace a folder it can't load
 with v3's download). It is chosen only with 1.5 GB left to load it
 (`os_proc_available_memory`), and never again after a load that ended Hex
-(`ParakeetLoadGuard`, its own keys) until Try again beside the status, or the switch
-turned off and on. The keyboard dictates its languages itself, as it does English: with
+(`ParakeetLoadGuard`, its own keys) until Try again beside the status, or English
+picked and Multilingual again. The keyboard dictates its languages itself, as it does English: with
 it once Settings › Dictation › Speech model in keyboard has it loaded there (below), and
 with Apple's speech recognition until then or wherever it can't load. Which model is picked
 never opens Hex (until 2026-11-24, once Hex had it ready, Dictate and the Hex key opened
@@ -405,7 +429,7 @@ dictation". Home shows the same status under "New: Hex's own speech model" where
 keyboard would use it (`SpeechModelHomeCard`: the switch on, an iPhone that fits, English
 and no other engine); once it's ready in the keyboard the card can be dismissed, for good. The keyboard's own dictation transcribes with Parakeet in
 the keyboard's process (`HEXKeyboard/KeyboardParakeet.swift`), with the app closed:
-V2 for English, and Parakeet Ultra for a language Experiments › Multilingual model
+V2 for English, and Parakeet Ultra for a language Settings › Dictation › Model: Multilingual
 dictates once its files are there. Parakeet's files moved from the app's Application Support into the App
 Group (`SpeechModelStore`), renamed in place at launch (`moveLegacyDownloads`) rather
 than downloaded again; each folder is marked complete (`.hex-complete`) once every file
