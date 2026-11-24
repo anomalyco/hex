@@ -20,12 +20,14 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 add_compile_options(-fvisibility=hidden -ffunction-sections -fdata-sections)
 # A keyboard's process should not carry code that forks, executes programs, sets a ptracer or loads shared objects from
 # a path: the patch keeps ggml_abort's backtrace in process (stock ggml forks gdb or lldb). A bump it no longer fits fails.
+# whisper-state-timings.patch reads a decode's encoder and decoder time from its own state, for Labs › Diagnostics.
 find_program(PATCH_EXECUTABLE patch REQUIRED)
 FetchContent_Declare(whisper_cpp
     URL https://codeload.github.com/ggml-org/whisper.cpp/tar.gz/d1be6fde11ac6e0407606b4e42fe72d34add8037
     URL_HASH SHA256=645445da884df6dbd52b30f82d7be7c01d1767c938714e477e786b88d529e9f4
     TLS_VERIFY ON
-    PATCH_COMMAND ${PATCH_EXECUTABLE} -p1 -N -t -F0 -i ${CMAKE_CURRENT_LIST_DIR}/ggml-no-debugger.patch)
+    PATCH_COMMAND ${PATCH_EXECUTABLE} -p1 -N -t -F0 -i ${CMAKE_CURRENT_LIST_DIR}/ggml-no-debugger.patch
+          COMMAND ${PATCH_EXECUTABLE} -p1 -N -t -F0 -i ${CMAKE_CURRENT_LIST_DIR}/whisper-state-timings.patch)
 FetchContent_MakeAvailable(whisper_cpp)
 
 add_library(hexspeech SHARED hexspeech.cpp)

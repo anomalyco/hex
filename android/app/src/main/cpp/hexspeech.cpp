@@ -1,4 +1,5 @@
 #include <android/asset_manager_jni.h>
+#include <dlfcn.h>
 #include <jni.h>
 #ifndef NDEBUG
 #include <android/log.h>
@@ -9,6 +10,8 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstring>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <vector>
@@ -65,6 +68,27 @@ static std::atomic<jlong> abandoned{0};
 
 extern "C" JNIEXPORT void JNICALL
 Java_ly_anoma_hex_speech_Whisper_abort(JNIEnv *, jobject, jlong job) { abandoned.store(job); }
+
+// The last decode's timings, for Labs › Diagnostics: microseconds spent sampling, in the encoder, decoding one token at a
+// time, decoding in batches and on the prompt, then the encoder window (0: the full 30 s) and the thread count. Written
+// by decode and read by timings, both under SpeechModel's lock.
+static jlong last[7];
+
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_ly_anoma_hex_speech_Whisper_timings(JNIEnv *env, jobject) {
+    auto result = env->NewLongArray(7);
+    if (result) env->SetLongArrayRegion(result, 0, 7, last);
+    return result;
+}
+
+// The name of the file this code was loaded from (libhexspeech.so, or another build of it), for Labs › Diagnostics.
+extern "C" JNIEXPORT jstring JNICALL
+Java_ly_anoma_hex_speech_Whisper_library(JNIEnv *env, jobject) {
+    Dl_info info{};
+    if (!dladdr(reinterpret_cast<void *>(&Java_ly_anoma_hex_speech_Whisper_library), &info) || !info.dli_fname) return nullptr;
+    const char *name = std::strrchr(info.dli_fname, '/');
+    return env->NewStringUTF(name ? name + 1 : info.dli_fname);
+}
 
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jlong handle, jboolean small, jshortArray samples,
@@ -132,6 +156,12 @@ Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jlong handle, jboo
     const auto started = std::chrono::steady_clock::now();
 #endif
     const int status = whisper_full_with_state(ctx, state.get(), params, pcm.data(), count);
+    whisper_timings spent{};
+    hex_whisper_state_timings(state.get(), &spent);
+    const jlong now[7] = {static_cast<jlong>(spent.sample_ms * 1000), static_cast<jlong>(spent.encode_ms * 1000),
+                          static_cast<jlong>(spent.decode_ms * 1000), static_cast<jlong>(spent.batchd_ms * 1000),
+                          static_cast<jlong>(spent.prompt_ms * 1000), params.audio_ctx, params.n_threads};
+    std::copy(std::begin(now), std::end(now), std::begin(last));
 #ifndef NDEBUG
     // Diagnostics identify the engine and task only; no audio or recognized text is logged.
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();

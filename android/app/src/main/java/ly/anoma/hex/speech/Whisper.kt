@@ -37,7 +37,7 @@ internal object SpeechModel {
     /** One thread per fast core, at most four: the work is split evenly, so a slow core holds up the
      * rest. A core is fast with at least half the strongest core's capacity as the kernel rates it
      * (cpu_capacity: 2 of 8 on a Snapdragon 695, all 8 on an 8 Elite); unrated cores all count. */
-    private val threads: Int by lazy {
+    internal val threads: Int by lazy {
         val cores = Runtime.getRuntime().availableProcessors()
         val capacity = (0 until cores).mapNotNull {
             runCatching { File("/sys/devices/system/cpu/cpu$it/cpu_capacity").readText().trim().toInt() }.getOrNull()
@@ -62,6 +62,24 @@ internal object SpeechModel {
         keep()
         return bytes?.decodeToString()?.trim()
     }
+
+    /** Labs › Diagnostics' speed test: decodes [pcm] as English on [threads] threads, as a dictation does, the model
+     * already loaded, and returns the text and whisper.cpp's timings, or null when it failed. */
+    @Synchronized fun measure(app: Context, pcm: ShortArray, threads: Int, job: Long): Measured? {
+        val small = load(app)
+        if (handle == 0L) return null
+        val cpu = android.os.Process.getElapsedCpuTime()
+        val started = System.nanoTime()
+        val bytes = Whisper.decode(handle, small, pcm, pcm.size, threads, "en", false, null, job)
+        val wall = (System.nanoTime() - started) / 1_000_000
+        val processor = android.os.Process.getElapsedCpuTime() - cpu
+        val timings = Whisper.timings()
+        keep()
+        return if (bytes == null || timings == null) null
+            else Measured(small, wall, processor, timings, bytes.decodeToString().trim())
+    }
+    /** [wallMs] and [cpuMs] (the whole process's processor time) cover the decode alone. */
+    class Measured(val downloaded: Boolean, val wallMs: Long, val cpuMs: Long, val timings: LongArray, val text: String)
 
     /** Ends [job]'s decode at whisper.cpp's next check (after an encoder pass or a token). Not under the lock,
      * which that decode holds. */
@@ -103,4 +121,8 @@ internal object Whisper {
     external fun decode(handle: Long, small: Boolean, pcm: ShortArray, count: Int, threads: Int,
                         language: String, translate: Boolean, prompt: String?, job: Long): ByteArray?
     external fun abort(job: Long)
+    /** The last decode's timings, for Labs › Diagnostics (hexspeech.cpp says what each is). */
+    external fun timings(): LongArray?
+    /** The file this library loaded from, for Labs › Diagnostics. */
+    external fun library(): String?
 }

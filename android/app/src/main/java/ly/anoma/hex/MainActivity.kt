@@ -55,6 +55,8 @@ class MainActivity : ComponentActivity() {
         /** The keyboard's Settings tool opens Hex on this page, not Home: [PAGE_KEYBOARD] names it. */
         const val EXTRA_PAGE = "ly.anoma.hex.extra.page"
         const val PAGE_KEYBOARD = "keyboard"
+        /** The keyboard's "Speed test done" line opens Labs › Diagnostics. */
+        const val PAGE_DIAGNOSTICS = "diagnostics"
     }
     private val prefs by lazy { getSharedPreferences("setup", MODE_PRIVATE) }
     private val imm by lazy { getSystemService(InputMethodManager::class.java) }
