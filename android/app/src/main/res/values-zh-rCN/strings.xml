@@ -114,6 +114,8 @@
     <string name="letter_symbols_detail">长按字母输入符号，例如长按 m 输入 /</string>
     <string name="number_row">数字行</string>
     <string name="number_row_detail">在字母上方显示 1–0</string>
+    <string name="local_currency">本地货币</string>
+    <string name="local_currency_detail">在 ?123 页面上用你所在地区的货币符号代替 $</string>
     <string name="keyboard_tools">键盘工具</string>
     <string name="keyboard_tools_detail">在建议栏中显示表情、粘贴、设置和撤销</string>
     <string name="smart_quotes">智能引号</string>

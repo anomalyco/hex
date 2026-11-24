@@ -22,8 +22,13 @@ internal object KeyboardLetters {
     /** Row 1's digits, 1 to 0 on its first ten keys, as Gboard draws and holds them. */
     fun digit(row: Int, index: Int): Char? = if (row == 0 && index < 10) DIGITS[index] else null
 
-    /** The 123 page and the second symbols page; Spanish puts ¿ and ¡ on the second page's last row. */
-    fun numbers(layoutCode: String) = listOf("1234567890", "-/:;()$&@\"", punctuation(layoutCode, more = false))
-    fun symbols(layoutCode: String) = listOf("[]{}#%^*+=", "_\\|~<>€£¥•", punctuation(layoutCode, more = true))
+    /** The 123 page and the second symbols page; Spanish puts ¿ and ¡ on the second page's last row. A Labs
+     * local currency takes $'s place on the 123 page, and the second page then shows $ instead of it. */
+    fun numbers(layoutCode: String, currency: Char? = null) =
+        listOf("1234567890", "-/:;()${currency ?: '$'}&@\"", punctuation(layoutCode, more = false))
+    fun symbols(layoutCode: String, currency: Char? = null): List<String> {
+        val money = if (currency != null && currency in "€£¥") "€£¥".replace(currency, '$') else "€£¥"
+        return listOf("[]{}#%^*+=", "_\\|~<>$money•", punctuation(layoutCode, more = true))
+    }
     private fun punctuation(layoutCode: String, more: Boolean) = if (more && layoutCode == "es") ".,¿¡'" else ".,?!'"
 }
