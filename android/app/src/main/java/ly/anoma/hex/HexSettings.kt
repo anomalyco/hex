@@ -326,8 +326,9 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 mod = Modifier.padding(start = 16.dp))
                             Card {
                                 val size = ModelStore.english.megabytes
+                                // Its line says what the download is and what stays as it was, so it may take three.
                                 Toggle(stringResource(R.string.fast_english), stringResource(R.string.fast_english_detail, size),
-                                    fastEnglish) {
+                                    fastEnglish, noteLines = 3) {
                                     speech.fastEnglish = it
                                     // Off stops a download under way and drops its partial file; a finished one stays
                                     // until Delete download.
@@ -490,10 +491,10 @@ private fun reflow(lines: List<String>) = buildString {
 @Composable internal fun Rule() {
     Spacer(Modifier.fillMaxWidth().padding(start = 16.dp).height(1.dp).background(colorResource(R.color.rule)))
 }
-@Composable private fun RowScope.RowTitle(title: String, note: String?) {
+@Composable private fun RowScope.RowTitle(title: String, note: String?, noteLines: Int = 2) {
     Column(Modifier.weight(1f)) {
         Label(title, weight = FontWeight.Medium)
-        if (note != null) Label(note, size = 13, muted = true, lines = 2)
+        if (note != null) Label(note, size = 13, muted = true, lines = noteLines)
     }
 }
 @Composable internal fun Entry(title: String, note: String? = null, value: String = "›", action: (() -> Unit)? = null) {
@@ -504,11 +505,12 @@ private fun reflow(lines: List<String>) = buildString {
         if (action != null && value.isNotEmpty()) Label(value, muted = true, size = if (value == "›") 22 else 15)
     }
 }
-@Composable internal fun Toggle(title: String, note: String, on: Boolean, enabled: Boolean = true, change: (Boolean) -> Unit) {
+@Composable internal fun Toggle(title: String, note: String, on: Boolean, enabled: Boolean = true, noteLines: Int = 2,
+                                change: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().toggleable(on, enabled = enabled, role = Role.Switch, onValueChange = change)
         .heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        RowTitle(title, note)
+        RowTitle(title, note, noteLines)
         Box(Modifier.size(38.dp, 23.dp).background(colorResource(if (on) R.color.ink else R.color.modifier), RoundedCornerShape(50))
             .padding(3.dp), contentAlignment = if (on) Alignment.CenterEnd else Alignment.CenterStart) {
             Spacer(Modifier.size(17.dp).background(colorResource(if (on) R.color.page else R.color.key), RoundedCornerShape(50)))

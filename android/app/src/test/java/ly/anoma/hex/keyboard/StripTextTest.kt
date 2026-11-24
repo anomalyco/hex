@@ -18,7 +18,10 @@ import ly.anoma.hex.diagnostics.parseCpuList
 import ly.anoma.hex.diagnostics.cpuRanges
 import ly.anoma.hex.diagnostics.fastCores
 import ly.anoma.hex.diagnostics.frequency
+import ly.anoma.hex.diagnostics.FASTER_MODE
+import ly.anoma.hex.diagnostics.fasterEnglishLine
 import ly.anoma.hex.diagnostics.libraryLabel
+import ly.anoma.hex.speech.Engine
 import ly.anoma.hex.diagnostics.report
 import ly.anoma.hex.diagnostics.taskStat
 import ly.anoma.hex.diagnostics.wavSamples
@@ -30,6 +33,7 @@ import ly.anoma.hex.speech.modelAtTick
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StripTextTest {
@@ -221,5 +225,19 @@ class StripTextTest {
         assertEquals(ModelAtTick.LoadedWhileSpeaking, modelAtTick(tick = 0, prepared = 150, prepareLoaded = true, decodeLoaded = false))
         assertEquals(ModelAtTick.LoadedAfter, modelAtTick(tick = 100, prepared = 0, prepareLoaded = false, decodeLoaded = true))
         assertEquals(ModelAtTick.Unknown, modelAtTick(tick = 100, prepared = 0, prepareLoaded = false, decodeLoaded = false))
+    }
+    @Test fun diagnosticsReportTheFasterModelsTextOnItsOwnLine() {
+        val top = Sched("/top-app", "0::/uid_*/pid_*", "0-7", 0)
+        val standard = Run("as now", 1, true, 2_676, 10_091, longArrayOf(20_000, 2_423_000, 194_000, 0, 0, 0, 4),
+            "And so my fellow Americans, ask not.", top, top, "cpu 0-3")
+        val faster = Run(FASTER_MODE, 1, true, 190, 697, LongArray(0), "And so, my fellow Americans, ask not.", top, top, "cpu 0-3")
+        val report = report(null, Diagnostics.Speed.Done(listOf(standard, faster), 11.0), Diagnostics.Speed.Idle)
+        assertTrue(report.contains("  faster English dictation, run 1: 190 ms, processor 697 ms\n"))
+        assertTrue(report.contains("  text: And so my fellow Americans, ask not. (every run)\n"))
+        assertTrue(report.contains("  faster English dictation text: And so, my fellow Americans, ask not. (every run)\n"))
+        assertEquals("Faster English dictation: on, downloaded; the dictation language now uses faster dictation",
+            fasterEnglishLine(true, true, Engine.English))
+        assertEquals("Faster English dictation: on, not downloaded; the dictation language now uses standard dictation",
+            fasterEnglishLine(true, false, Engine.English))
     }
 }

@@ -67,7 +67,7 @@ internal object Diagnostics {
         return listOfNotNull(Mode("as now", threads, 0), Mode("threads kept ready", threads, threads),
             Mode("threads kept ready, 6", 6, 6).takeIf { fastCores(capacities) >= 6 },
             // Labs › Faster English dictation's model, once it is downloaded, whether or not its switch is on.
-            Mode("faster English dictation", threads, 0, english = true).takeIf { ModelStore.english.installed(c) != null })
+            Mode(FASTER_MODE, threads, 0, english = true).takeIf { ModelStore.english.installed(c) != null })
     }
 
     sealed interface Speed {
@@ -416,6 +416,9 @@ internal fun clusterSummary(cores: List<Core>): String =
 internal fun cgroupSummary(text: String) = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
     .joinToString(" ") { it.replace(Regex("(uid|pid)_\\d+"), "$1_*") }
 
+/** The speed test's mode with Faster English dictation's model. */
+internal const val FASTER_MODE = "faster English dictation"
+
 /** Labs › Faster English dictation in the report: the switch, its download, and what the dictation language now uses,
  * "faster" or "standard". The only line of the report that says "faster". */
 internal fun fasterEnglishLine(on: Boolean, downloaded: Boolean, engine: Engine) =
@@ -541,8 +544,13 @@ internal fun report(facts: List<String>?, app: Diagnostics.Speed, keyboard: Diag
                 val shared = all.first().filter { (name, value) -> all.all { it[name] == value } }
                 if (shared.isNotEmpty()) append("  same for every run: ").append(schedLine(shared)).append('\n')
                 speed.runs.forEach { append("  ").append(runLines(it, shared.keys)).append('\n') }
-                append("  text: ").append(first.text)
-                append(if (speed.runs.all { it.text == first.text }) " (every run)\n" else " (runs differ)\n")
+                // Each model's text once: the faster model's punctuation needn't match today's.
+                val (standard, faster) = speed.runs.partition { it.mode != FASTER_MODE }
+                for ((label, runs) in listOf("text" to standard, "$FASTER_MODE text" to faster)) {
+                    if (runs.isEmpty()) continue
+                    append("  ").append(label).append(": ").append(runs.first().text)
+                    append(if (runs.all { it.text == runs.first().text }) " (every run)\n" else " (runs differ)\n")
+                }
             }
         }
     }
