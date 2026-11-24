@@ -159,7 +159,12 @@ internal class LetterFeedback(private val host: ViewGroup) {
             '7' to "7⅞", '0' to "0∅ⁿ", '#' to "№", '$' to "¢€£₹¥₱", '-' to "_—–·", '+' to "±", '(' to "<[{",
             ')' to ">]}", '*' to "†★‡", '"' to "”„“«»", '\'' to "’‚‘‹›", '!' to "¡", '?' to "¿‽", '.' to "…",
             '%' to "‰℅", '^' to "↑←↓→", '=' to "≠∞≈", '<' to "≤«‹⟨", '>' to "≥⟩»›", '•' to "♪♣♠♥♦")
-        fun symbolHolds(c: Char): List<String> = symbols[c].orEmpty().map { it.toString() }
+        /** A symbol key's held options. With a Labs local currency in [currency]'s place, that key offers the
+         * $ it replaced first and the list has no duplicate of itself. */
+        fun symbolHolds(c: Char, currency: Char? = null): List<String> {
+            val held = if (currency != null && c == currency) "\$" + symbols.getValue('$') else symbols[c].orEmpty()
+            return held.filter { it != currency }.map { it.toString() }
+        }
 
         /** The period key's held punctuation on the letters page, as Gboard's three rows (nearest the key
          * first), with the comma under the finger. */

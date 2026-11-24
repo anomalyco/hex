@@ -44,13 +44,16 @@ internal data class KeyboardPage(
     val pad: Pad? = null,
     /** Labs › Keyboard › Number row: the letter pages draw 1 to 0 above their letters too. */
     val numberRow: Boolean = false,
+    /** Labs › Keyboard › Local currency: the phone's symbol, read once for the page, that the 123 page shows
+     * in place of $, or null for $. */
+    val currency: Char? = null,
 ) {
     val lines: List<String> get() {
         val code = language.layoutCode
         return when {
             !symbols -> KeyboardLetters.rows(code)
-            more -> KeyboardLetters.symbols(code)
-            else -> KeyboardLetters.numbers(code)
+            more -> KeyboardLetters.symbols(code, currency)
+            else -> KeyboardLetters.numbers(code, currency)
         }
     }
 

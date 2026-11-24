@@ -40,6 +40,10 @@ internal class TypingPreferences(context: Context) {
     var numberRow: Boolean
         get() = prefs.getBoolean(NUMBER_ROW, false)
         set(value) { prefs.edit().putBoolean(NUMBER_ROW, value).apply() }
+    /** Labs › Keyboard › Local currency: the phone's own currency on the 123 page instead of $. Off by default. */
+    var localCurrency: Boolean
+        get() = prefs.getBoolean(LOCAL_CURRENCY, false)
+        set(value) { prefs.edit().putBoolean(LOCAL_CURRENCY, value).apply() }
     /** Labs › Keyboard › Emoji suggestions: the word being typed's emoji in the strip, off by default. */
     var emojiSuggestions: Boolean
         get() = prefs.getBoolean(EMOJI_SUGGESTIONS, false)
@@ -71,6 +75,7 @@ internal class TypingPreferences(context: Context) {
     companion object {
         const val SUGGEST_SWEAR_WORDS = "suggestSwearWords"
         const val NUMBER_ROW = "numberRow"
+        const val LOCAL_CURRENCY = "localCurrency"
         const val EMOJI_SUGGESTIONS = "emojiSuggestions"
         const val KEYBOARD_TOOLS = "keyboardTools"
         const val SMART_QUOTES = "smartQuotes"

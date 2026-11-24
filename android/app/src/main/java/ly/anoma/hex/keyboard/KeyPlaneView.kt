@@ -311,7 +311,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                 val digit = if (symbols) null else page.hint(index, position)
                 val symbol = if (letterHolds) LetterFeedback.letterSymbol(c) else null
                 k.hint(digit?.toString() ?: symbol?.toString())
-                fun holds() = if (symbols) LetterFeedback.symbolHolds(c)
+                fun holds() = if (symbols) LetterFeedback.symbolHolds(c, page.currency)
                     else LetterFeedback.holds(cased(c).single(), language.layoutCode, digit, letterHolds)
                 if (holds().isNotEmpty()) {
                     k.setOnLongClickListener { host.openAccents(holds(), it); true }
