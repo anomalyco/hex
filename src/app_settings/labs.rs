@@ -261,6 +261,9 @@ pub struct LabsSettings {
     /// the call's own audio keeps recording and transcribing (macOS; Labs ›
     /// Mute the microphone while recording).
     pub meeting_microphone_mute: bool,
+    /// The meeting recording indicator stays on the display it was dragged
+    /// to, instead of only the primary display (macOS and Windows).
+    pub meeting_indicator_display: bool,
     /// With `labs.annotate_replay` on, keeps a rolling 15 s display buffer via `SCClipBufferingOutput` (macOS 27+).
     pub annotate_replay: bool,
     /// An OpenCode service running in the default WSL distribution is used
@@ -582,6 +585,7 @@ impl Default for LabsSettings {
             transcript_edits: false,
             stop_any_call_recording: false,
             meeting_microphone_mute: false,
+            meeting_indicator_display: false,
             groups: std::collections::BTreeMap::new(),
             stop_when_call_ends: None,
             meeting_descriptive_filenames: None,

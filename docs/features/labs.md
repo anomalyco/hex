@@ -305,6 +305,12 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        stay put. Unmute microphone puts it back, and turning the lab off restores it
 │                                        at once without stopping, clearing the switch so turning it back on does not
 │                                        re-mute (see meetings.md)
+├── Indicator on any display no labs.meeting_indicator_display (macOS, Windows) dragging the meeting recording
+│                                        capsule (or a panel capsule) and letting go over another display lands it in
+│                                        that display's nearest corner, and every capsule shows there from then on,
+│                                        with `meetings.recording_indicator_display` keeping the OS's own name for it;
+│                                        a display that is gone falls back to the primary one, and off, every capsule
+│                                        stays on the primary display in the saved corner (see meetings.md)
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
 ├── Transform typed text no labs.typed_text + typed_text_hotkey (Linux) Settings › Output shows a Typed text section whose shortcut is unbound by
@@ -4281,6 +4287,43 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   ([capture.rs](../../src/meeting/capture.rs)); not observed on a real Mac call,
   and the menu bar, capsule, and pane controls are macOS-only code this Linux
   build never compiled.
+- Indicator on any display (macOS and Windows, with Meetings on): letting go
+  of a dragged meeting capsule over another display lands it in that
+  display's corner nearest where the throw would come to rest, and every
+  capsule shows there from then on. A capsule's release already measured
+  the primary display only (`primary_screen_size` in
+  [screen.rs](../../src/rune_ui/meeting_capsules/screen.rs)); on, the release
+  measures the display under the pointer instead (`screen::release`), pins
+  the window to it with Rune's `DisplayTarget::Native`
+  (`placement::place_on`), and the drag's corner is measured on that
+  display's own size, so the pill's side and the panel's edges stay right
+  there. Landing on another display jumps rather than gliding, since a glide
+  is measured within one display; landing on the same display glides as
+  before. `meetings.recording_indicator_display` keeps the landed display
+  as the OS names it (`\\.\DISPLAY2` from the monitor's own device name on
+  Windows, the `CGDirectDisplayID` on macOS), next to
+  `meetings.recording_indicator_corner`, and is left out of `settings.json`
+  while it is the primary display. A saved display that is no longer
+  connected places the capsule on the primary display without clearing the
+  setting, which is also what Rune does with a native display id it cannot
+  find. Off, every release and every show takes exactly the primary-display
+  path it took before, and the saved display is ignored. Checks:
+  `the_meeting_indicator_display_lab_is_a_desktop_meetings_lab_off_by_default`
+  ([labs.rs](../../src/labs.rs)),
+  `a_saved_file_without_the_indicator_display_stays_on_the_primary`
+  ([meetings.rs](../../src/app_settings/meetings.rs)), the tests in
+  [screen.rs](../../src/rune_ui/meeting_capsules/screen.rs) (a release in its
+  own display's corner and cell, a throw across two displays, a saved display
+  that is gone, which display holds a pointer, and the missing saved id),
+  `the_display_lab_lands_a_release_on_the_pointer_s_display`, and
+  `without_the_display_lab_a_release_keeps_the_primary_display`
+  ([meeting_capsules.rs](../../src/rune_ui/meeting_capsules.rs)). **Not
+  verified on real multi-monitor hardware on either OS, and the macOS and
+  Windows halves were not compiled**: this Linux host has no macOS SDK, and
+  Hex's C dependencies need `ml64.exe` for `x86_64-pc-windows-msvc`, though
+  `cargo check --target x86_64-pc-windows-msvc -p scrawl-capture` did check
+  the monitor helper's new device name. A native Wayland capsule still has no
+  display to measure, which is why Linux does not list the card.
 - Import audio (macOS): Meetings offers **Import audio…** beside Start
   recording. A local WAV, M4A, MP3, AIFF, or CAF file is decoded to 16 kHz
   mono float WAV by the AVFoundation bridge, then transcribed with the

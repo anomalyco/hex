@@ -51,6 +51,8 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Release notes link", ["Łącze do informacji o wydaniu", "发行说明链接", "リリースノートのリンク", "Link zu Versionshinweisen", "Enlace a las notas de la versión", "Посилання на примітки до випуску"]),
     ("Release notes", ["Informacje o wydaniu", "发行说明", "リリースノート", "Versionshinweise", "Notas de la versión", "Примітки до випуску"]),
     ("OpenCode in WSL", ["OpenCode w WSL", "WSL 中的 OpenCode", "WSL の OpenCode", "OpenCode in WSL", "OpenCode en WSL", "OpenCode у WSL"]),
+    ("Indicator on any display", ["Wskaźnik na dowolnym ekranie", "指示器可放在任意显示器", "任意のディスプレイに表示", "Anzeige auf jedem Bildschirm", "Indicador en cualquier pantalla", "Індикатор на будь-якому екрані"]),
+    ("Drag the meeting recording indicator to another display and it stays there", ["Przeciągnij wskaźnik nagrywania spotkania na inny ekran, a tam zostanie", "把会议录制指示器拖到另一个显示器，它就会留在那里", "会議の録音インジケーターを別のディスプレイにドラッグすると、そのままそこに表示されます", "Ziehe die Aufnahmeanzeige für Besprechungen auf einen anderen Bildschirm; sie bleibt dort", "Arrastra el indicador de grabación de reuniones a otra pantalla y se queda allí", "Перетягніть індикатор запису зустрічі на інший екран, і він там залишиться"]),
     ("Process API transcripts", ["Przetwarzaj transkrypcje API", "处理 API 转写", "API の文字起こしを処理", "API-Transkripte verarbeiten", "Procesar transcripciones de la API", "Обробляти транскрипти API"]),
     ("Timestamps in API transcripts", ["Znaczniki czasu w transkrypcjach API", "API 转写的时间戳", "API の文字起こしのタイムスタンプ", "Zeitstempel in API-Transkripten", "Marcas de tiempo en las transcripciones de la API", "Позначки часу в транскриптах API"]),
     ("Appearance", ["Wygląd", "外观", "外観", "Darstellung", "Apariencia", "Вигляд"]),
