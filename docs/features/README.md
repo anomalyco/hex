@@ -305,9 +305,11 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   │   │       Allow asks with `CGRequestPostEventAccess` so macOS can list Hex and post
 │   │   │       its Privacy & Security notification. The preflight keeps its launch-time
 │   │   │       answer, so a row that stays untrusted after a grant reads "Needs a restart"
-│   │   │       and offers Restart Hex, never the TCC reset (which would drop the grant).
+│   │   │       and offers Restart Hex once, never the TCC reset that would drop the grant;
+│   │   │       a row still untrusted after that restart falls back to "Still grey? Fix it".
 │   │   │       Checks: `macos_27_3_needs_the_post_event_preflight_not_ax_trust`,
-│   │   │       `a_stale_split_grant_offers_a_restart_instead_of_a_tcc_reset`
+│   │   │       `a_stale_split_grant_offers_a_restart_only_once`,
+│   │   │       `macos_27_3_stale_accessibility_restarts_once_then_resets`
 │   │   ├── On in System Settings, unusable until relaunch -> "Needs a restart"
 │   │   │   └── Every permission on -> "Restart Hex" -> relaunch at setup  // setup.restart
 │   │   └── Each grant -> a beat with its check -> the card floats off -> on
@@ -380,13 +382,23 @@ or untrusted in System Settings. Checks:
 macOS 27.3's split is known from Apple's 2026-11-16 developer post and from a
 third-party dictation app's diagnostics on the same beta: the Accessibility
 grant reads trusted while posting key events is refused, and `CGEventPost`
-silently does nothing. Nothing here has run on a 27.3 device, so
-the request's Privacy & Security notification, the guide's `Privacy_Accessibility`
-anchor opening System & App Protection Override, and a grant reading true only
-after a restart are documented but unverified. The refused paste's HUD error,
-the text staying for Paste last dictation, and History staying empty are covered
-by unit tests only. Check: `a_split_paste_needs_the_post_event_grant` in
-[paste.rs](../../src/paste.rs) and the two onboarding checks above.
+silently does nothing. Nothing here has run on a 27.3 device, so the request's
+Privacy & Security notification, the guide's `Privacy_Accessibility` anchor
+opening System & App Protection Override, a grant reading true only after a
+restart, and the refusal ever being what a person sees are documented but
+unverified.
+
+What the person sees when posting is refused, and what is covered where: every
+paste path (dictation, Paste last dictation, and captures) fails before the
+clipboard changes, and the HUD explains it even with Labs › Failure notices off
+(`a_refused_paste_is_shown_with_failure_notices_off` in
+[rune_ui/live_text.rs](../../src/rune_ui/live_text.rs); the notice text is
+translated in `failures.rs`). The text staying for Paste last dictation and
+History staying empty are the shared failed-insert policy, covered by
+`failed_insert_remembers_signed_text_for_paste_last_and_skips_history` in
+[dictation/modes/output.rs](../../src/dictation/modes/output.rs), not by a
+paste-path test. The refusal decision itself is
+`a_split_paste_needs_the_post_event_grant` in [paste.rs](../../src/paste.rs).
 
 Apple silicon, macOS 15+. Choices come from the compiled model/language catalog;
 Apple Speech is currently excluded from the desktop picker.

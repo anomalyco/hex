@@ -32,7 +32,7 @@ unsafe extern "C" {
     /// Asks macOS for that privilege and shows its request. macOS 27.3 moved
     /// the grant to System & App Protection Override, where an app appears
     /// only after it asks.
-    fn CGRequestPostEventAccess() -> bool;
+    safe fn CGRequestPostEventAccess() -> bool;
 }
 
 const fn code(kind: PermissionKind) -> i32 {
@@ -112,18 +112,17 @@ pub(crate) fn post_event_access() -> bool {
 /// Asks macOS to allow this process to post key events, and shows its request
 /// (on macOS 27.3 the Privacy & Security notification that adds Hex to System
 /// & App Protection Override). Below 27.3 the Accessibility grant already
-/// covers posting, so nothing is asked. Returns whether posting is allowed
-/// now; a fresh grant can read as refused until Hex restarts.
-pub(crate) fn request_post_event_access() -> bool {
+/// covers posting, so nothing is asked. The answer is logged: a fresh grant
+/// can read as refused until Hex restarts, so no caller can act on it.
+pub(crate) fn request_post_event_access() {
     if !split_accessibility() {
-        return false;
+        return;
     }
-    let granted = unsafe { CGRequestPostEventAccess() };
+    let granted = CGRequestPostEventAccess();
     tracing::info!(
         granted = granted,
         "asked macOS for permission to post key events (System & App Protection Override)"
     );
-    granted
 }
 
 /// Whether System Settings has an open window, whether it is frontmost, and

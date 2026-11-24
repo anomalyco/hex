@@ -2518,10 +2518,11 @@ Finish
   │       // synthetic ⌘V resolves on any active layout: it uses the layout's
   │       // Command layer ("Dvorak – QWERTY ⌘"), and a non-Latin layout
   │       // falls back to the ASCII-capable layout like AppKit itself
-  │       // macOS 27.3+ asks for the posting grant (System & App Protection
-  │       // Override) before the clipboard is touched: a refused grant fails
-  │       // the paste with a HUD error instead of a silent no-op, keeps the
-  │       // text for Paste last dictation, and writes no History entry
+  │       // macOS 27.3+ checks the posting grant (System & App Protection
+  │       // Override) before the clipboard is touched, on every paste path:
+  │       // a refused grant fails the paste with a HUD notice (shown even
+  │       // with Labs › Failure notices off) instead of a silent no-op, keeps
+  │       // the text for Paste last dictation, and writes no History entry
   └── Queue full -> Explicit rejection                // bounded admission
 
 A pending -> Start capture B                          // dictate.overlap

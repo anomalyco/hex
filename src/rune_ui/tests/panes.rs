@@ -2142,9 +2142,10 @@ fn stale_permissions_offer_fix_it_and_reset_entries_across_panes() {
 }
 
 #[test]
-fn macos_27_3_stale_accessibility_restarts_instead_of_resetting_tcc() {
-    // The post-event preflight keeps its launch-time answer there, so a stale
-    // row can only be settled by a restart: a reset would drop the grant.
+fn macos_27_3_stale_accessibility_restarts_once_then_resets() {
+    // The post-event preflight keeps its launch-time answer there, so the
+    // first stale row can only be settled by a restart: a reset would drop
+    // the grant.
     let mut rt = runtime("mac-settings-permissions-stale", true, PANE_SIZE);
     rt.state.platform.accessibility_split = true;
     refresh(&mut rt);
@@ -2160,6 +2161,23 @@ fn macos_27_3_stale_accessibility_restarts_instead_of_resetting_tcc() {
     assert_eq!(
         asked(&rt),
         [PlatformRequest::Permission(PermissionAction::Restart)]
+    );
+
+    // That restart was spent and the row still reads untrusted: the existing
+    // reset-and-prompt flow comes back instead of a second restart.
+    let mut rt = runtime("mac-settings-permissions-stale", true, PANE_SIZE);
+    rt.state.platform.accessibility_split = true;
+    rt.state.platform.accessibility_restart_done = true;
+    refresh(&mut rt);
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == "Still grey? Fix it"));
+    assert!(!shown.iter().any(|text| text == "Restart Hex"));
+    tap(&mut rt, "permission-accessibility-allow");
+    assert_eq!(
+        asked(&rt),
+        [PlatformRequest::Permission(
+            PermissionAction::ResetAndPrompt(PermissionKind::Accessibility)
+        )]
     );
 }
 

@@ -348,6 +348,10 @@ pub(super) struct PlatformState {
     /// after a grant until Hex restarts, so a stale row offers a restart
     /// rather than a TCC reset that would drop the grant.
     pub(super) accessibility_split: bool,
+    /// Whether that one restart was already used (`onboarding::
+    /// post_event_restart_recorded`). A row that still reads stale then takes
+    /// the reset flow, so a grant that never lands cannot restart forever.
+    pub(super) accessibility_restart_done: bool,
     /// The Hex Microphone's live filter tuning
     /// (`hex_microphone::current_tuned_config`).
     pub(super) tuning: TunedFilterConfig,
@@ -436,6 +440,7 @@ impl PlatformState {
             accessibility_renamed: false,
             accessibility_drag_supported: true,
             accessibility_split: false,
+            accessibility_restart_done: false,
             tuning: TunedFilterConfig::default(),
             demo: None,
             hud: HudLab::default(),
@@ -544,11 +549,14 @@ impl PlatformState {
         self.permissions_stale.retain(|entry| *entry != kind);
     }
 
-    /// Whether a stale row can only be settled by restarting Hex, not by
-    /// resetting TCC: macOS 27.3's post-event preflight keeps its launch-time
-    /// answer, and a reset there would drop a grant that may already be on.
+    /// Whether a stale row should offer Restart Hex rather than resetting TCC:
+    /// macOS 27.3's post-event preflight keeps its launch-time answer, so a
+    /// reset there would drop a grant that may already be on. One restart is
+    /// offered per pending grant; a row stale after it takes the reset flow.
     fn restart_on_stale(&self, kind: PermissionKind) -> bool {
-        self.accessibility_split && kind == PermissionKind::Accessibility
+        self.accessibility_split
+            && !self.accessibility_restart_done
+            && kind == PermissionKind::Accessibility
     }
 
     pub(super) fn control_for(

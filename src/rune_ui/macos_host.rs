@@ -711,6 +711,9 @@ impl NativeHost for MacHost {
                 }
             }
             PlatformRequest::Permission(PermissionAction::Restart) => {
+                // One restart per pending 27.3 keystroke grant: after it, a
+                // stale row takes the reset flow instead (onboarding marker).
+                crate::desktop::onboarding::record_post_event_restart();
                 if !crate::desktop::onboarding::spawn_relaunch() {
                     return Err("could not restart Hex".into());
                 }
@@ -867,6 +870,14 @@ impl NativeHost for MacHost {
         let system_audio = crate::meeting::system_audio_ready();
         changed |= update(&mut state.permissions, permissions);
         changed |= update(&mut state.system_audio, system_audio);
+        if state.accessibility_split && permissions.accessibility == PermissionState::Ready {
+            // The grant is in: a later revocation may spend another restart.
+            crate::desktop::onboarding::clear_post_event_restart();
+        }
+        changed |= update(
+            &mut state.accessibility_restart_done,
+            crate::desktop::onboarding::post_event_restart_recorded(),
+        );
         // A Screen Recording guide has nothing left to point at once Hex can
         // record, or knows it must restart to: the guide's own preflight
         // keeps the answer it read at launch, so the read that saw the grant

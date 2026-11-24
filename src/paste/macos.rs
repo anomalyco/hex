@@ -524,15 +524,12 @@ fn chromium_major_version(version: &str) -> Option<u32> {
 /// Refuses to post a keystroke when macOS 27.3 has not granted posting, before
 /// anything touches the clipboard. Below 27.3 the Accessibility grant covers
 /// posting and a stale preflight must not block a paste, so nothing changes.
-fn ensure_keystroke_access() -> Result<()> {
+pub(super) fn ensure_keystroke_access() -> Result<()> {
     if super::keystroke_refused(
         crate::desktop::permission_guide::split_accessibility(),
         crate::desktop::permission_guide::post_event_access(),
     ) {
-        return Err(eyre!(
-            "macOS isn't letting Hex paste. Add Hex in System Settings > Privacy & Security > \
-             System & App Protection Override, then restart Hex."
-        ));
+        return Err(eyre!(super::POST_EVENT_REFUSED));
     }
     Ok(())
 }

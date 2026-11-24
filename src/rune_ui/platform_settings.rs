@@ -120,7 +120,8 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
             // macOS 27.3's post-event preflight reads stale until Hex restarts,
             // so a TCC reset there would drop a grant that is already on: only
             // a restart can settle the row.
-            let restart = stale && ui.platform.accessibility_split;
+            let restart =
+                stale && ui.platform.accessibility_split && !ui.platform.accessibility_restart_done;
             let description = if restart {
                 tr("Turns on when Hex restarts")
             } else if stale {
