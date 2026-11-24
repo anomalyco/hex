@@ -40,7 +40,8 @@ internal class TypingPreferences(context: Context) {
     var numberRow: Boolean
         get() = prefs.getBoolean(NUMBER_ROW, false)
         set(value) { prefs.edit().putBoolean(NUMBER_ROW, value).apply() }
-    /** Labs › Keyboard › Local currency: the phone's own currency on the 123 page instead of $. Off by default. */
+    /** Labs › Keyboard › Local currency: the phone's own currency on the ?123 page and d's held symbol
+     * instead of $. Off by default. */
     var localCurrency: Boolean
         get() = prefs.getBoolean(LOCAL_CURRENCY, false)
         set(value) { prefs.edit().putBoolean(LOCAL_CURRENCY, value).apply() }

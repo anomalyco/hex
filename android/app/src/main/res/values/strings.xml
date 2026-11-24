@@ -120,11 +120,11 @@
     <string name="signature_one_line">Use one line</string>
     <string name="signature_too_long">Use 200 characters or fewer</string>
     <string name="letter_symbols">Symbols on letter keys</string>
-    <string name="letter_symbols_detail">Hold a letter to type a symbol, like m for /</string>
+    <string name="letter_symbols_detail">Hold a letter to type a symbol, like m for ?</string>
     <string name="number_row">Number row</string>
     <string name="number_row_detail">Shows 1–0 above the letters</string>
     <string name="local_currency">Local currency</string>
-    <string name="local_currency_detail">Puts your region’s currency on the ?123 page instead of $</string>
+    <string name="local_currency_detail">Uses your region’s currency on the ?123 page and d’s held symbol instead of $</string>
     <string name="keyboard_tools">Keyboard tools</string>
     <string name="keyboard_tools_detail">Emoji, paste, settings and undo in the suggestion strip</string>
     <string name="smart_quotes">Smart quotes</string>
