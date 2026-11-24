@@ -232,7 +232,7 @@ pub(super) const HUNGARIAN: &[(&str, &str)] = &[
     ("No rules", "Nincsenek szabályok"),
     ("Auto-send rules", "Automatikus küldés szabályai"),
     ("Auto-send with Jev", "Automatikus küldés Jevvel"),
-    ("When no rule matches, send if Jev is sure; every send waits 3 seconds with Undo", "Ha egyik szabály sem illik, küldd el, ha Jev biztos benne; minden küldés 3 másodpercet vár Visszavonás lehetőséggel"),
+    ("When no rule matches, send if Jev is sure; every send waits 3 seconds with Undo", "Ha egyik szabály sem illik, a Hex elküldi, ha Jev biztos benne; minden küldés 3 másodpercet vár Visszavonás lehetőséggel"),
     ("Each send waits 3 seconds first, so you can Undo it.", "Minden küldés előbb 3 másodpercet vár, hogy visszavonhasd."),
     ("Saved rules and Jev", "Mentett szabályok és Jev"),
     ("Send matching annotations automatically", "A megfelelő annotációk automatikus küldése"),

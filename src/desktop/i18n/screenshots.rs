@@ -38,6 +38,7 @@ pub(super) fn merged(
             HUNGARIAN,
             super::agents::HUNGARIAN,
             super::signature::HUNGARIAN,
+            super::clipboard_phrase::HUNGARIAN,
             super::style::HUNGARIAN,
             super::hud_height::HUNGARIAN,
             super::voice_isolation::HUNGARIAN,
@@ -189,7 +190,7 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
 pub(super) const HUNGARIAN: &[(&str, &str)] = &[
     ("Scale Retina to 1x", "Retina méretezése 1x-re"),
     ("Max resolution", "Max. felbontás"),
-    ("Frame rate", "Képsebesség"),
+    ("Frame rate", "Képkockasebesség"),
     ("Quality", "Minőség"),
     ("30 fps", "30 fps"),
     ("60 fps", "60 fps"),

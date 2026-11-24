@@ -46,3 +46,12 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
         "Скажите «my clipboard» во время диктовки, и Hex вставит туда скопированное в кавычках",
     ),
 ];
+
+#[rustfmt::skip]
+pub(super) const HUNGARIAN: &[(&str, &str)] = &[
+    ("Clipboard phrase", "Vágólap-kifejezés"),
+    (
+        "Say \"my clipboard\" while dictating and Hex pastes what you copied there, in quotes",
+        "Mondd, hogy „my clipboard” diktálás közben, és a Hex idézőjelben beilleszti oda, amit kimásoltál",
+    ),
+];

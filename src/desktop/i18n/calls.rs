@@ -77,9 +77,9 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
 
 #[rustfmt::skip]
 pub(super) const HUNGARIAN: &[(&str, &str)] = &[
-    ("Ask each time", "Kérdezz minden alkalommal"),
-    ("Don't offer", "Ne ajánld fel"),
-    ("Always record", "Mindig vegyél fel"),
+    ("Ask each time", "Rákérdezés minden alkalommal"),
+    ("Don't offer", "Nincs felajánlás"),
+    ("Always record", "Mindig felvétel"),
     ("Calls", "Hívások"),
     ("When a call starts", "Amikor hívás indul"),
     ("Apps and websites", "Alkalmazások és webhelyek"),

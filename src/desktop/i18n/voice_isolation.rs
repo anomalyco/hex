@@ -29,9 +29,9 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
 
 #[rustfmt::skip]
 pub(super) const HUNGARIAN: &[(&str, &str)] = &[
-    ("Voice isolation", "Hangszigetelés"),
+    ("Voice isolation", "Beszédhang izolálása"),
     (
         "Record dictation through Apple's voice processing so Mic Mode can turn on Voice Isolation and cut background noise.",
-        "Diktálj az Apple hangfeldolgozásán keresztül, hogy a Mikrofon mód bekapcsolhassa a Hangszigetelést és csökkenthesse a háttérzajt.",
+        "Diktálj az Apple hangfeldolgozásán keresztül, hogy a Mikrofonmód bekapcsolhassa a Beszédhang izolálását, és csökkentse a háttérzajt.",
     ),
 ];
