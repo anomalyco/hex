@@ -3179,9 +3179,11 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 ├── Keyboard > Suggest swear words (off) -> opt in to profanity; listed slurs never offered
 ├── Type a listed word in full -> keep its spelling on space or tap its literal chip
 ├── Fields that ask for no suggestions, completions or filtering (a search box; the Google app's
-│   TEXT|MULTI_LINE|NO_SUGGESTIONS is 0xa0001) -> suggestions, next words, swipe typing, tap
-│   correction and double-space period stay, and only an automatic autocorrection on space or a
-│   mark is off, since the field asked for no suggestions.
+│   TEXT|MULTI_LINE|NO_SUGGESTIONS is 0xa0001) -> suggestions, next words, emoji suggestions, swipe
+│   typing, tap correction, text replacements and double-space period stay; only an automatic
+│   autocorrection on space or punctuation is off, and its fix is not highlighted in the strip, since
+│   the field asked for none of its own suggestions.
+│   Checks: `FieldTypingTest` (7/7) in android/app/src/test.
 ├── Fields marked private or no-learning (a browser's incognito tab) -> normal suggestions,
 │   next words, autocorrection, swipe typing and double-space period, because Android's
 │   `IME_FLAG_NO_PERSONALIZED_LEARNING` only says that nothing typed there is learned. Undoing
