@@ -30,7 +30,7 @@ export const IPHONE_CARD_PATH = withBase(`/iphone.png?v=${CARD_VERSION}`)
 export const PRIVACY_CARD_PATH = withBase(`/privacy.png?v=${CARD_VERSION}`)
 export const ANDROID_CARD_PATH = withBase(`/android.png?v=${CARD_VERSION}`)
 // The date the privacy policy last changed in substance; change it with the policy.
-export const PRIVACY_UPDATED = "November 23, 2026"
+export const PRIVACY_UPDATED = "November 24, 2026"
 const ISSUES = "https://github.com/anomalyco/hex/issues"
 // Each Hex Preview build's SHA-256 and signing certificate, beside its download.
 const ANDROID_BUILDS = "https://github.com/anomalyco/hex/blob/android-preview/README.md"
@@ -246,8 +246,8 @@ export function renderPrivacy(origin: string): string {
 <ul>
 <li><strong>Typing.</strong> Hex Keyboard uses the text around your cursor and where you tap to suggest and correct words on your phone, and keeps no log of what you type. In password and PIN fields it types exactly what you press, without reading the field, suggesting words, or dictating.</li>
 <li><strong>Dictation.</strong> Hex uses the microphone only while you dictate. It turns speech into text in memory on your phone, never saves a recording, and keeps no history of what you said. Clean up and translation also run on your phone.</li>
-<li><strong>The speech model.</strong> During setup, Hex downloads one public speech model (190 MB) from Hugging Face over HTTPS. The request carries none of your words, audio, or device identifiers; like any download, the server sees your IP address. If it fails, Hex uses the smaller model it comes with.</li>
-<li><strong>What Hex keeps.</strong> Your settings, setup progress, and the speech model, in Hex's private storage. When you undo an autocorrection, Hex keeps a count against a hash of that word pair, never the words, so it doesn't make the same correction again. Clearing Hex's storage or uninstalling Hex removes all of it, and you can turn off microphone access in Android's settings.</li>
+<li><strong>Speech models.</strong> During setup, Hex downloads one public speech model (190 MB) from Hugging Face over HTTPS, and a second one (135 MB) only if you turn on Faster English dictation in Labs and tap Download. Neither request carries your words, audio, or device identifiers; like any download, the server sees your IP address. If the first fails, Hex uses the smaller model it comes with.</li>
+<li><strong>What Hex keeps.</strong> Your settings, setup progress, and the speech models you downloaded, in Hex's private storage; Delete download in Labs removes the second one. When you undo an autocorrection, Hex keeps a count against a hash of that word pair, never the words, so it doesn't make the same correction again. Clearing Hex's storage or uninstalling Hex removes all of it, and you can turn off microphone access in Android's settings.</li>
 <li><strong>Hex Preview.</strong> <a href="${ANDROID_PATH}">Hex Preview</a>, the build you install outside Google Play, also asks GitHub for its latest version when you open it and at most once a day from the keyboard. When you tap Download update, your browser downloads the new build from GitHub. Those requests carry nothing about you or what you type; like any download, the server sees your IP address. Turn the check off with Check for updates automatically.</li>
 </ul>
 </section>
