@@ -345,6 +345,12 @@ impl Flow {
         self.post_event_restart_done = done;
     }
 
+    /// Whether the Restart Hex the tour offers now is the one for macOS 27.3's
+    /// keystroke grant, rather than another permission's restart.
+    pub fn restarts_for_post_event(&self) -> bool {
+        self.stale_after_grant()
+    }
+
     pub fn on(&mut self, input: Input) -> Effect {
         match input {
             Input::Continue => self.primary(),
@@ -2355,6 +2361,13 @@ mod tests {
             after.on(Input::Grant(SetupItem::Accessibility)),
             Effect::ResetPermission(PermissionKind::Accessibility)
         );
+
+        // The reset clears the one-restart marker (the host clears it when the
+        // reset-and-prompt runs), so the next grant may restart once again.
+        after.set_post_event_restart_done(false);
+        after.set_accessibility_stale(true);
+        assert_eq!(after.view().accessibility, ItemStatus::Restart);
+        assert!(after.view().restart, "a new cycle offers Restart Hex again");
     }
 
     #[test]

@@ -141,7 +141,15 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
                 &format!("{key}-allow"),
                 ui.platform.control_for(warning.kind, false),
                 ButtonKind::Secondary,
-                move |ui: &mut Ui| ui.ask(PlatformRequest::Permission(action)),
+                move |ui: &mut Ui| {
+                    if restart {
+                        // Only the stale Accessibility row's restart spends
+                        // the one 27.3 keystroke restart; another permission's
+                        // restart (Screen Recording, a microphone) does not.
+                        crate::desktop::onboarding::record_post_event_restart();
+                    }
+                    ui.ask(PlatformRequest::Permission(action));
+                },
             );
             setting_row(p, key, name, Some(description), control)
         })

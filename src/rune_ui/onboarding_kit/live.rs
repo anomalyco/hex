@@ -923,7 +923,13 @@ pub(super) fn paste_later(ui: &mut Ui) {
 /// 27.3 this spends the one restart offered for the keystroke grant, so a row
 /// that stays untrusted afterward takes the reset flow instead.
 pub(super) fn restart_hex(ui: &mut Ui) {
-    crate::desktop::onboarding::record_post_event_restart();
+    if ui
+        .tour
+        .as_ref()
+        .is_some_and(|tour| tour.flow.restarts_for_post_event())
+    {
+        crate::desktop::onboarding::record_post_event_restart();
+    }
     onboarding::input(ui, Input::Restart);
 }
 

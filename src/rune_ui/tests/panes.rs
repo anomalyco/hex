@@ -2179,6 +2179,14 @@ fn macos_27_3_stale_accessibility_restarts_once_then_resets() {
             PermissionAction::ResetAndPrompt(PermissionKind::Accessibility)
         )]
     );
+
+    // The reset clears the one-restart marker (host) and the person tries
+    // again, still untrusted: Restart Hex is offered once more.
+    rt.state.platform.accessibility_restart_done = false;
+    rt.state.platform.note_stale(PermissionKind::Accessibility);
+    refresh(&mut rt);
+    assert!(texts(&rt).iter().any(|text| text == "Restart Hex"));
+    assert!(!texts(&rt).iter().any(|text| text == "Still grey? Fix it"));
 }
 
 #[test]

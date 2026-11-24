@@ -306,7 +306,8 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   │   │       its Privacy & Security notification. The preflight keeps its launch-time
 │   │   │       answer, so a row that stays untrusted after a grant reads "Needs a restart"
 │   │   │       and offers Restart Hex once, never the TCC reset that would drop the grant;
-│   │   │       a row still untrusted after that restart falls back to "Still grey? Fix it".
+│   │   │       a row still untrusted after that restart falls back to "Still grey? Fix it",
+│   │   │       and a reset starts a new cycle with one restart again.
 │   │   │       Checks: `macos_27_3_needs_the_post_event_preflight_not_ax_trust`,
 │   │   │       `a_stale_split_grant_offers_a_restart_only_once`,
 │   │   │       `macos_27_3_stale_accessibility_restarts_once_then_resets`
@@ -390,12 +391,15 @@ unverified.
 
 What the person sees when posting is refused, and what is covered where: every
 paste path (dictation, Paste last dictation, and captures) fails before the
-clipboard changes, and the HUD explains it even with Labs › Failure notices off
-(`a_refused_paste_is_shown_with_failure_notices_off` in
-[rune_ui/live_text.rs](../../src/rune_ui/live_text.rs); the notice text is
-translated in `failures.rs`). The text staying for Paste last dictation and
-History staying empty are the shared failed-insert policy, covered by
-`failed_insert_remembers_signed_text_for_paste_last_and_skips_history` in
+clipboard changes. Dictation and Paste last show the HUD notice even with
+Labs › Failure notices off (`a_refused_paste_is_shown_with_failure_notices_off`
+in [rune_ui/live_text.rs](../../src/rune_ui/live_text.rs),
+`a_refused_paste_last_reaches_the_hud_notice` in
+[recognition.rs](../../src/recognition.rs)); a refused capture hand-off only
+logs a warning (`hand_off` in [capture_host.rs](../../src/capture_host.rs)).
+The notice text is translated in `failures.rs`. The text staying for Paste last
+dictation and History staying empty are the shared failed-insert policy, covered
+by `failed_insert_remembers_signed_text_for_paste_last_and_skips_history` in
 [dictation/modes/output.rs](../../src/dictation/modes/output.rs), not by a
 paste-path test. The refusal decision itself is
 `a_split_paste_needs_the_post_event_grant` in [paste.rs](../../src/paste.rs).
