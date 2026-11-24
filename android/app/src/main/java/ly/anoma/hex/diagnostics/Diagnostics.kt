@@ -472,7 +472,7 @@ private fun schedLine(parts: Map<String, String>) = parts.entries.joinToString("
 
 /** The last real dictation's durations (MicCapture's [DictationTimes]), or that there was none since Hex started. */
 internal fun lastDictationLines(t: DictationTimes?): String = buildString {
-    append("Last dictation (durations only, held in memory until Hex's process ends; nothing said or typed):")
+    append("Last dictation (durations only, held in memory until Hex's process ends; a dictation discarded with ✕ isn't counted; nothing said or typed):")
     if (t == null) { append(" none since Hex started\n"); return@buildString }
     append('\n')
     val mark = if (t.tick) "✓" else "the 1-minute stop"

@@ -167,7 +167,7 @@ class StripTextTest {
             Hex diagnostics
             Build: Hex 0.2.2 (build 5), preview
 
-            Last dictation (durations only, held in memory until Hex's process ends; nothing said or typed): none since Hex started
+            Last dictation (durations only, held in memory until Hex's process ends; a dictation discarded with ✕ isn't counted; nothing said or typed): none since Hex started
 
             Speed test in the app: bundled 11.0 s English clip, downloaded model
               same for every run: cgroup 0::/uid_*/pid_*, cpus allowed 0-7, nice 0
@@ -196,7 +196,7 @@ class StripTextTest {
     @Test fun diagnosticsReportTheLastDictationsSteps() {
         val timings = longArrayOf(30_000, 6_100_000, 3_300_000, 0, 80_000, 0, 4)
         assertEquals("""
-            Last dictation (durations only, held in memory until Hex's process ends; nothing said or typed):
+            Last dictation (durations only, held in memory until Hex's process ends; a dictation discarded with ✕ isn't counted; nothing said or typed):
               in the keyboard, 10.4 s recorded, 9.8 s kept; 4 threads, encoder window full; model still loading at ✓, ready 1240 ms after
               after ✓: recording stopped 31 ms, decode started 52 ms, decode finished 9870 ms, text inserted 9884 ms
               decode 9818 ms; encoder 6100 ms, decoder 3330 ms, prompt 80 ms, other 308 ms; processor 30436 ms, 3.1× the decode's wall time
@@ -205,7 +205,7 @@ class StripTextTest {
             true, 31, 52, 9_870, 9_884, 30_436, timings)))
         // Stopped at 1 minute without ✓, the model loaded by the decode, no text, and nothing readable from the decode.
         assertEquals("""
-            Last dictation (durations only, held in memory until Hex's process ends; nothing said or typed):
+            Last dictation (durations only, held in memory until Hex's process ends; a dictation discarded with ✕ isn't counted; nothing said or typed):
               on Home, 60.0 s recorded, 58.2 s kept; model loaded after the 1-minute stop
               after the 1-minute stop: recording stopped 0 ms, decode started 1250 ms, decode finished 1300 ms, no text inserted
               decode 50 ms; processor not readable
