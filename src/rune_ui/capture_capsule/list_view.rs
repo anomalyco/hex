@@ -126,36 +126,73 @@ pub(super) fn list_view(p: Paint, list: &List, x: f32, w: f32, reduced: bool) ->
     }
     let sendable = !list.rows.is_empty();
     let footer = match (&list.always, list.footer) {
-        (_, Footer::Suggesting) => None,
+        (_, Footer::Suggesting) => Some(suggesting_footer(p, list.queued)),
         (Some((site, true)), _) => Some(saving_hint(p, list, site, w)),
-        (_, Footer::Search { remember }) => {
-            Some(search_hints(p, remember && sendable, sendable, w))
-        }
+        (_, Footer::Search { remember }) => Some(search_hints(
+            p,
+            remember && sendable,
+            sendable,
+            list.queued,
+            w,
+        )),
     };
     list_panel(p, body, footer, x, w, h, blur)
 }
 
+/// A quiet clickable footer action in the Send-to list.
+fn footer_action(p: Paint, key: &str, text_label: &'static str, id: Id) -> El {
+    row()
+        .key(key.to_owned())
+        .h(22.0)
+        .px(6.0)
+        .center_y()
+        .radius(ROW_RADIUS - 2.0)
+        .hover(p.k.c.hover)
+        .press(p.k.c.pressed)
+        .role("button")
+        .label(text_label)
+        .hit()
+        .on_press_tx(press(id))
+        .child(label(text_label, small(), p.muted()))
+}
+
+/// Footer for the suggesting Send-to list: optional `Cancel send` (when opened
+/// from Queued) and `All rules…` opening `Modal::RoutingRules`.
+fn suggesting_footer(p: Paint, queued: bool) -> El {
+    row()
+        .center_y()
+        .gap(HINTS_GAP)
+        .children(queued.then(|| footer_action(p, "cancel-queued", tr("Cancel send"), Id::Undo)))
+        .child(el().grow(1.0))
+        .child(footer_action(
+            p,
+            "all-rules",
+            tr("All rules…"),
+            Id::OpenRules,
+        ))
+}
+
 /// The search's hints, as one quiet line: what each key does, then the
-/// key ("Send ⏎"); the highlighted row already says where. The capture
-/// shortcut, which records anew from here, sits on the right.
-pub(super) fn search_hints(p: Paint, remember: bool, send: bool, w: f32) -> El {
+/// key ("Send ⏎"); the highlighted row already says where. `All rules…`
+/// (and `Cancel send` when opened from Queued) sits on the right.
+pub(super) fn search_hints(p: Paint, remember: bool, send: bool, queued: bool, w: f32) -> El {
     const SEND: [&str; 1] = ["⏎"];
     const REMEMBER: [&str; 2] = ["⇧", "⏎"];
     let room = w - 2.0 * LIST_PAD - 2.0 * ROW_PX;
-    let shortcut = surface::shortcut_keycaps();
+    let rules_w = measure(tr("All rules…"), small()) + 12.0;
+    let cancel_w = if queued {
+        measure(tr("Cancel send"), small()) + 12.0 + HINTS_GAP
+    } else {
+        0.0
+    };
+    let right_w = rules_w + cancel_w;
     let used = if send {
         hint_width(tr("Send"), &SEND) + HINTS_GAP
     } else {
         0.0
     };
-    let remember = remember && used + hint_width(tr("Remember"), &REMEMBER) <= room;
-    let used = used
-        + if remember {
-            hint_width(tr("Remember"), &REMEMBER)
-        } else {
-            0.0
-        };
-    let capture = used + HINTS_GAP + hint_width(tr("New annotation"), &shortcut) <= room;
+    let remember =
+        remember && used + hint_width(tr("Remember"), &REMEMBER) + HINTS_GAP + right_w <= room;
     // Send and Remember share a growing row, so the gaps drawn are the
     // gaps measured: no spacer with a gap on each side.
     let left = row()
@@ -169,7 +206,13 @@ pub(super) fn search_hints(p: Paint, remember: bool, send: bool, w: f32) -> El {
         .center_y()
         .gap(HINTS_GAP)
         .child(left)
-        .children(capture.then(|| hint(p, tr("New annotation"), &shortcut).key("capture")))
+        .children(queued.then(|| footer_action(p, "cancel-queued", tr("Cancel send"), Id::Undo)))
+        .child(footer_action(
+            p,
+            "all-rules",
+            tr("All rules…"),
+            Id::OpenRules,
+        ))
 }
 
 /// The suggestions' header line for what ⇧ does, cut to `room`: before
@@ -453,10 +496,6 @@ pub(crate) fn list_height(list: &List) -> f32 {
         .len()
         .max(list.min_rows)
         .max(usize::from(unmatched(list))) as f32;
-    let footer = if list.suggesting() {
-        LIST_PAD
-    } else {
-        footer_height()
-    };
+    let footer = footer_height();
     LIST_PAD + header + rows * ROW_H + footer
 }

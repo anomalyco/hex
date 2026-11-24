@@ -295,6 +295,7 @@ fn lone_rule() -> Route {
         suggested: Vec::new(),
         recent: Vec::new(),
         site: Some("docs.example.com".into()),
+        by: crate::capture_host::AutoSendBy::Rule,
     }
 }
 
@@ -392,6 +393,7 @@ fn rule() -> Route {
         suggested: vec![to],
         recent: recent(),
         site: Some("example.com".into()),
+        by: crate::capture_host::AutoSendBy::Rule,
     }
 }
 
@@ -457,7 +459,9 @@ impl Playground {
             | Action::Paste(_)
             | Action::Pen
             | Action::Hold(_)
-            | Action::Inspect => {}
+            | Action::Inspect
+            | Action::SaveRule { .. }
+            | Action::OpenRules => {}
         }
     }
 

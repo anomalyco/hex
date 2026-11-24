@@ -77,7 +77,7 @@ pub(crate) use microphone::recording_level;
 pub(crate) mod paste_source;
 mod permissions;
 mod replay;
-mod routing;
+pub(crate) mod routing;
 #[cfg(target_os = "macos")]
 mod screen_access;
 mod sink;
@@ -121,17 +121,18 @@ pub use permissions::{
     restart as restart_for_permission, state_of as permission_state,
 };
 pub use replay::available as replay_available;
-pub use routing::CaptureRoute;
-pub use routing::{RouteAnswer, RouteDelivery, RouteDest, SEND_HOLD};
 #[cfg(target_os = "macos")]
-pub use routing::{recent_sessions, send_image};
+pub use routing::send_image;
+pub use routing::{
+    AutoSendBy, CaptureRoute, RouteAnswer, RouteDelivery, RouteDest, RuleMatch, SEND_HOLD,
+    jev_available, recent_sessions,
+};
 #[cfg(target_os = "macos")]
 pub use screen_access::*;
 #[cfg(target_os = "macos")]
-pub use sink::CaptureSink;
 #[cfg(not(target_os = "macos"))]
 pub use sink::ListenerTimeline;
-pub use sink::{CaptureAudio, CaptureSinkClosed};
+pub use sink::{CaptureAudio, CaptureSink, CaptureSinkClosed};
 use timeline::Timeline;
 use words::ChosenTranscriber;
 
@@ -304,27 +305,19 @@ pub enum TargetKind {
 pub enum CaptureCommand {
     /// Starts a capture on the picker's pick; nothing while one records.
     Start(CaptureTarget),
-    /// Labs › Screenshots' recording: a capture of `target` that, once
-    /// written, goes to the screenshot card ([`on_clip_written`]) rather
-    /// than the clipboard and the router.
+    /// Labs › Screenshots' recording: goes to [`on_clip_written`] instead of clipboard/router.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Clip(CaptureTarget),
-    /// Looks for a cabled iPhone off the listener's thread;
-    /// [`CaptureSnapshot::phone`] follows. Each start also looks.
+    /// Looks for a cabled iPhone off the listener's thread ([`CaptureSnapshot::phone`]).
     FindPhone,
-    /// Drops the recording capture: its bundle is removed and it never
-    /// settles, so the capsule can turn into the picker in its place.
+    /// Drops the recording capture and removes its bundle without settling.
     Discard,
-    /// Scrawl's `switch_recording`: drops the recording capture as
-    /// [`Self::Discard`] does and starts `target` in the same step, so no
-    /// snapshot shows nothing recording in between. With nothing recording,
-    /// only starts.
+    /// Drops the recording capture and starts `target` atomically.
     Switch(CaptureTarget),
-    /// Sends the newest written capture (`snapshot().last`) to `to` now: a
-    /// session ID, or a name its route lists, suggestions first. A send
-    /// already elsewhere is taken back first. `always` also saves a rule
-    /// sending its site or app there from now on.
+    /// Sends `snapshot().last` to `to` (taking back any prior send); `always` saves a rule.
     Send { to: String, always: bool },
+    /// Saves a routing rule chosen from the post-send `Always…` configurator.
+    SaveRule(scrawl_capture::RuleKind, String, String),
     /// Takes back the newest capture's send: one OpenCode took is
     /// withdrawn unless the session already acted on it.
     Undo,
@@ -1362,6 +1355,9 @@ impl CaptureHost {
             CaptureCommand::Switch(target) => self.switch(now, audio, target),
             CaptureCommand::Send { to, always } => {
                 Ok(self.route(routing::Job::Send { to, always }))
+            }
+            CaptureCommand::SaveRule(kind, key, target) => {
+                Ok(self.route(routing::Job::SaveRule { kind, key, target }))
             }
             CaptureCommand::Undo => Ok(self.route(routing::Job::Undo)),
             CaptureCommand::Hold(on) => Ok(self.route(routing::Job::Hold(on))),

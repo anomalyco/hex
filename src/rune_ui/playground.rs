@@ -246,6 +246,10 @@ const PATHS: &[(&str, &str)] = &[
     #[cfg(hex_capture)]
     ("mac-scrawl", "Window/Annotate/On"),
     #[cfg(hex_capture)]
+    ("mac-routing-rules", "Window/Annotate/Auto-send rules"),
+    #[cfg(hex_capture)]
+    ("mac-routing-add", "Window/Annotate/New rule"),
+    #[cfg(hex_capture)]
     ("mac-scrawl-open", "Window/Annotate/Folds open"),
     #[cfg(hex_capture)]
     ("mac-scrawl-off", "Window/Annotate/Off"),

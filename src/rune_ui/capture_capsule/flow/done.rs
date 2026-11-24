@@ -57,6 +57,8 @@ pub(super) fn hold_until(phase: &Phase) -> Option<f64> {
         Phase::Queued { at, .. } | Phase::TooLate { at, .. } => {
             Some(at + tuning::get().brief_hold_s)
         }
+        // Pause dismiss while the inline `Always…` configurator is open.
+        Phase::Sent(sent) if sent.always.is_some() => None,
         // A send leaves once its Undo window ends (a send with none, and
         // a queued one, after the brief hold).
         Phase::Sent(sent) if sent.undoable => Some(sent.at + undo_s()),
@@ -125,6 +127,10 @@ pub(super) fn backspace(edit: &mut TextEdit) {
 /// searching, every session with each word of the query in its title,
 /// folder, or id, those with every word in the title first.
 pub(super) fn list(route: &Route, open: &Open) -> List {
+    list_for(route, open, false)
+}
+
+pub(super) fn list_for(route: &Route, open: &Open, queued: bool) -> List {
     let (suggested, recent) = sections(route);
     let site = match route {
         Route::Guess { site, .. } | Route::Rule { site, .. } => site.clone(),
@@ -161,6 +167,7 @@ pub(super) fn list(route: &Route, open: &Open) -> List {
             Footer::Suggesting
         },
         always,
+        queued,
     };
     // Shift down, the target row is where the rule would send it.
     if list.always.as_ref().is_some_and(|(_, shift)| *shift)
@@ -230,6 +237,7 @@ pub(super) fn send(
     row: Option<usize>,
     always: bool,
     now: f64,
+    rule_match: Option<RuleMatch>,
     actions: &mut Vec<Action>,
 ) -> Phase {
     let Some(open) = &routed.open else {
@@ -261,6 +269,34 @@ pub(super) fn send(
         site.is_some(),
         now,
         Some(routed.route.clone()),
+        rule_match,
+    ))
+}
+
+/// Immediate one-click send from the `[→ ACME  ⌄]` split chip to the top
+/// suggested session.
+pub(super) fn quick_send(
+    routed: Routed,
+    now: f64,
+    rule_match: Option<RuleMatch>,
+    actions: &mut Vec<Action>,
+) -> Phase {
+    let Route::Guess { suggested, .. } = &routed.route else {
+        return Phase::Routed(routed);
+    };
+    let Some(dest) = suggested.first().cloned() else {
+        return Phase::Routed(routed);
+    };
+    actions.push(Action::Send {
+        to: dest.session.clone(),
+        always: None,
+    });
+    Phase::Sent(Sent::picked(
+        &dest,
+        false,
+        now,
+        Some(routed.route),
+        rule_match,
     ))
 }
 
@@ -335,6 +371,7 @@ pub(super) fn offered_again(route: Route, from: &Dest, too_late: bool, now: f64)
         taken_from: Some(from.clone()),
         delivered: false,
         sending: false,
+        queued: false,
     })
 }
 
@@ -365,6 +402,7 @@ pub(super) fn lone_back(from: &Dest, now: f64) -> Routed {
         taken_from: Some(from.clone()),
         delivered: false,
         sending: false,
+        queued: false,
     }
 }
 
@@ -387,7 +425,9 @@ pub(super) fn routed_done(routed: &Routed, now: f64) -> Done {
                 },
             )
         },
-        Route::Rule { to, .. } => Done {
+        Route::Rule { to, by, .. } => Done {
+            strong_text: true,
+            why: (!routed.delivered).then(|| tr(by.label()).into()),
             undo: !going,
             countdown,
             window,
@@ -401,6 +441,8 @@ pub(super) fn routed_done(routed: &Routed, now: f64) -> Done {
             )
         },
         Route::ResolvingRule { name } => Done {
+            strong_text: true,
+            why: Some(tr(AutoSendBy::Rule.label()).into()),
             undo: !going,
             countdown,
             window,
@@ -408,15 +450,26 @@ pub(super) fn routed_done(routed: &Routed, now: f64) -> Done {
         },
         // An explicit send can arrive while suggestions are still open.
         // Its destination isn't part of this suggestions list's selection.
-        _ if routed.delivered => Done::plain(Lead::Check, tr("Sent")),
-        _ if routed.sending => Done::plain(Lead::Check, tr("Sending…")),
-        // The suggestions are the ask (closed, Send to… opens them).
+        _ if routed.delivered => Done {
+            strong_text: true,
+            ..Done::plain(Lead::Check, tr("Sent"))
+        },
+        _ if routed.sending => Done {
+            strong_text: true,
+            ..Done::plain(Lead::Check, tr("Sending…"))
+        },
+        // Saved with a suggestion: compact `Copied  [→ ACME  ⌄]  ✕` split chip
+        // when closed; when the list opens, keep `Copied` + Search/list.
+        Route::Guess { suggested, .. } if !suggested.is_empty() && routed.open.is_none() => Done {
+            split: Some(SplitChip::suggest(short(&suggested[0].name))),
+            ..Done::plain(Lead::Check, tr("Copied"))
+        },
         Route::Guess { .. } => Done {
             ask: Some(tr("Send to…").into()),
             ..Done::plain(Lead::Check, annotation())
         },
-        Route::Nothing { .. } => Done {
-            ask: Some(tr("Send to…").into()),
+        Route::Nothing { recent } => Done {
+            ask: (!recent.is_empty()).then(|| tr("Send to…").into()),
             ..Done::plain(Lead::Check, annotation())
         },
         Route::NoAnswer { .. } => Done {
@@ -438,18 +491,22 @@ pub(super) fn routed_done(routed: &Routed, now: f64) -> Done {
     match &routed.open {
         // The suggestions hang under a finished capsule that keeps Paste
         // and Inspect, and its note.
-        Some(open) if !open.typing => offered(base, list(&routed.route, open)),
+        Some(open) if !open.typing => offered(base, list_for(&routed.route, open, routed.queued)),
         // Searching, the field takes the chips' place.
         Some(open) => Done {
             why: None,
             undo: false,
             countdown: None,
+            split: None,
             ask: None,
-            open: Some((*open.query.clone(), list(&routed.route, open))),
+            open: Some((
+                *open.query.clone(),
+                list_for(&routed.route, open, routed.queued),
+            )),
             ..base
         },
         None => Done {
-            inspect: true,
+            inspect: base.split.is_none(),
             ..base
         },
     }
