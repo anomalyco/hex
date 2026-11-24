@@ -48,13 +48,16 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private val density = resources.displayMetrics.density
     private fun dp(value: Int) = (value * density).roundToInt()
     private fun px(value: Float) = (value * density).roundToInt()
-    private val caps = KeyCaps(context) { ime.feedback.haptics }
+    private val caps = KeyCaps(context, KeyRows.labelBase(resources)) { ime.feedback.haptics }
     private val ink = caps.ink
     private val modifier = caps.modifier
     private val quiet = context.getColor(R.color.quiet)
     private val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-    private val rowHeight = px(if (landscape) KeyboardMetrics.ROW_LANDSCAPE else KeyboardMetrics.ROW)
-    private val keyHeight = px(if (landscape) KeyboardMetrics.KEY_HEIGHT_LANDSCAPE else KeyboardMetrics.KEY_HEIGHT)
+    // Gboard's rows for this screen ([KeyRows]). Each key's touch target is its row's full height (KeyRowLayout), so
+    // the targets, and the keycap centres the typing model and swipe read (geometry()), follow the rows.
+    private val rowSize = KeyRows.of(resources)
+    private val rowHeight = px(rowSize.pitch)
+    private val keyHeight = px(rowSize.key)
     private val insetTop = (rowHeight - keyHeight) / 2
     private val insetBottom = rowHeight - keyHeight - insetTop
     private val bottomExtra = px(if (landscape) KeyboardMetrics.BOTTOM_LANDSCAPE else KeyboardMetrics.BOTTOM)
@@ -157,7 +160,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         emojiKey = caps.icon(R.drawable.ic_emoji, context.getString(R.string.keyboard_emoji), caps.key,
             { if (current?.symbols == true) ime.engine.pad(Pad.Symbols) else host.openEmoji() })
         emojiKey.face.addView(TextView(context).apply {
-            text = context.getString(R.string.keyboard_pad_label); textSize = 13f; useInter(500); setTextColor(ink)
+            text = context.getString(R.string.keyboard_pad_label); setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP, 13f); useInter(500); setTextColor(ink)
             gravity = Gravity.CENTER; includeFontPadding = false; setLineSpacing(0f, 0.9f); visibility = GONE
         }, FrameLayout.LayoutParams(-1, -1))
         emojiKey.textEntry = false
@@ -367,7 +370,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         modeKey.contentDescription = context.getString(if (symbols) R.string.keyboard_letters else R.string.keyboard_numbers)
         val commaLabel = page.commaText
         comma.label?.text = commaLabel
-        comma.label?.textSize = if (commaLabel == "@") 21f else 26f
+        comma.labelSize = if (commaLabel == "@") 21f else 26f
         comma.longClickLabel = if (page.more) context.getString(R.string.keyboard_more_characters) else null
         comma.setOnLongClickListener(if (page.more) commaHolds else null)
         comma.isLongClickable = page.more
@@ -382,7 +385,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         period.contentDescription = if (periodLabel == ".") context.getString(R.string.keyboard_period) else periodLabel
         // An app's own label, else Gboard's symbol for the editor's action.
         val label = page.enter.label
-        enterKey.label?.text = label.orEmpty()
+        enterKey.label?.text = label.orEmpty(); enterKey.requestLayout()
         enterIcon.setImageResource(actionIcon(page.enter.action))
         enterIcon.visibility = if (label == null) View.VISIBLE else View.GONE
         enterKey.contentDescription = label ?: actionLabel(page.enter.action) ?: context.getString(R.string.keyboard_return)
@@ -866,7 +869,8 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         spaceKey.longClickLabel = context.getString(R.string.keyboard_space_language_action,
             if (next.translate) context.getString(R.string.keyboard_space_translate, next.spoken.label) else next.spoken.label)
         spaceKey.label?.text = if (next.translate) context.getString(R.string.keyboard_space_translate, next.spoken.label) else next.spoken.label
-        spaceKey.label?.textSize = if (next.translate) 12f else 14f
+        spaceKey.labelSize = if (next.translate) 12f else 14f
+        spaceKey.requestLayout() // A longer language name is fitted to the bar again.
     }
     fun cancelGestures() {
         cancelSwipe()

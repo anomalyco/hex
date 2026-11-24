@@ -3267,6 +3267,11 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   `:app:assembleDebug` built the arm64 libraries (the native import check included) on 2026-11-24 on
 │   OpenJDK 21 and Android SDK 36 (NDK 27.2.12479018); the repo has no Android CI, and nothing was tried
 │   on a device or emulator.
+├── Key rows and labels -> Gboard 15.1's (Pixel 8 emulator, 13 screen sizes): rows follow the
+│   smallest width only (46.9 dp keys every 59 dp from 400 dp, 40.3/50.3 from 360, 37.7/48 below;
+│   turned 39/43), letters and hints are the same share of the key everywhere and ignore font
+│   scale; a label shrinks to fit (no "…") and a letter clears its corner hint (KeyRows, KeyLabels).
+│   KeyboardPageTest; emulator screenshots at 360 and 411 dp, font scale 1.0/1.3/2.0.
 ├── Symbol pages -> Gboard's ?123 and =< pages (Pixel 8 emulator, API 36), the same on every
 │   layout: ?123 draws 1–0, then @ # $ _ & - + ( ) /, then * " ' : ; ! ? between the page switch
 │   and delete, and =< draws ~ ` | • √ π ÷ × § Δ, then £ ¢ € ¥ ^ ° = { } \, then % © ® ™ ✓ [ ]
