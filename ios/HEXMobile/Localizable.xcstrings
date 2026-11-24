@@ -6005,44 +6005,6 @@
         }
       }
     },
-    "%lld replacements remove words instead of writing something, which this iPhone can’t do yet: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%#@n@ words instead of writing something, which this iPhone can’t do yet: %2$@"
-          },
-          "substitutions" : {
-            "n" : {
-              "argNum" : 1,
-              "formatSpecifier" : "lld",
-              "variations" : {
-                "plural" : {
-                  "one" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg replacement removes"
-                    }
-                  },
-                  "other" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg replacements remove"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 条替换是删除词语而不是改写，这台 iPhone 暂不支持：%@"
-          }
-        }
-      }
-    },
     "%lld spellings repeat words the file already replaces, so the first one is used: %@" : {
       "localizations" : {
         "en" : {
@@ -6087,6 +6049,44 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hex 无法打开该文件。"
+          }
+        }
+      }
+    },
+    "%lld replacements write nothing, or only spaces or line breaks, which this iPhone can't do yet: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@n@ nothing, or only spaces or line breaks, which this iPhone can't do yet: %2$@"
+          },
+          "substitutions" : {
+            "n" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg replacement writes"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg replacements write"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 项替换不写入任何内容，或只写入空格或换行，这台 iPhone 暂时做不到：%@"
           }
         }
       }

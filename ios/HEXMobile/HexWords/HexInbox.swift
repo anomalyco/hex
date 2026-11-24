@@ -2,8 +2,9 @@ import OSLog
 import SwiftUI
 import UIKit
 
-/// Files other apps hand to Hex: AirDrop, Files and Open in Hex arrive here as a copy in
-/// `Documents/Inbox` (`LSSupportsOpeningDocumentsInPlace` is NO). Today that is only Hex words
+/// Files other apps hand to Hex: AirDrop, Files and Open in Hex arrive here as a copy iOS makes
+/// in Hex's own container (`LSSupportsOpeningDocumentsInPlace` is NO): `Documents/Inbox`, or
+/// `tmp/<bundle id>-Inbox` on iOS 27. Today that is only Hex words
 /// files; another kind (a typing config, #2529) would add its own `Item` case and sheet.
 ///
 /// Each file is copied to a private temporary folder under a name Hex picks, read there, shown
@@ -24,9 +25,16 @@ enum HexInbox {
         FileManager.default.temporaryDirectory.appendingPathComponent(folderName, isDirectory: true)
     }
 
-    private static var inboxFolder: URL? {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("Inbox", isDirectory: true)
+    /// Where iOS puts the copies it hands Hex.
+    private static var inboxFolders: [URL] {
+        var folders: [URL] = []
+        if let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            folders.append(documents.appendingPathComponent("Inbox", isDirectory: true))
+        }
+        if let bundle = Bundle.main.bundleIdentifier {
+            folders.append(FileManager.default.temporaryDirectory.appendingPathComponent(bundle + "-Inbox", isDirectory: true))
+        }
+        return folders
     }
 
     /// Handles a file URL Hex was asked to open; false for any other URL.
@@ -61,21 +69,21 @@ enum HexInbox {
     /// are cleared only once they are an hour old, so a file that is arriving now stays.
     static func sweep(now: Date = Date()) {
         try? FileManager.default.removeItem(at: privateFolder)
-        guard let inbox = inboxFolder,
-              let files = try? FileManager.default.contentsOfDirectory(
+        for inbox in inboxFolders {
+            guard let files = try? FileManager.default.contentsOfDirectory(
                 at: inbox, includingPropertiesForKeys: [.contentModificationDateKey]
-              ) else { return }
-        for file in files {
-            let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-            if let modified, now.timeIntervalSince(modified) < 3600 { continue }
-            try? FileManager.default.removeItem(at: file)
+            ) else { continue }
+            for file in files {
+                let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                if let modified, now.timeIntervalSince(modified) < 3600 { continue }
+                try? FileManager.default.removeItem(at: file)
+            }
         }
     }
 
     private static func isInInbox(_ url: URL) -> Bool {
-        guard let inbox = inboxFolder?.standardizedFileURL.resolvingSymlinksInPath().path else { return false }
         let path = url.standardizedFileURL.resolvingSymlinksInPath().path
-        return path.hasPrefix(inbox + "/")
+        return inboxFolders.contains { path.hasPrefix($0.standardizedFileURL.resolvingSymlinksInPath().path + "/") }
     }
 
     /// A copy under a name Hex picks: a file's own name is never used as a path.

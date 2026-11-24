@@ -333,7 +333,7 @@ struct HexWordsReviewSheet: View {
         case .overDeviceLimit:
             String(localized: "\(count) didn’t fit, as this iPhone keeps up to 100 terms and 1,000 replacements: \(examples)")
         case .deletionNotSupported:
-            String(localized: "\(count) replacements remove words instead of writing something, which this iPhone can’t do yet: \(examples)")
+            String(localized: "\(count) replacements write nothing, or only spaces or line breaks, which this iPhone can't do yet: \(examples)")
         case .duplicate:
             String(localized: "\(count) spellings repeat words the file already replaces, so the first one is used: \(examples)")
         }

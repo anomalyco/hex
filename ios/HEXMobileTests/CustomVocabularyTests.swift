@@ -370,7 +370,11 @@ final class WordReplacementsTests: XCTestCase {
         )
         XCTAssertEqual(
             HexWordsReviewSheet.notUsable(.deletionNotSupported, count: 2, examples: "um, uh"),
-            "2 replacements remove words instead of writing something, which this iPhone can’t do yet: um, uh"
+            "2 replacements write nothing, or only spaces or line breaks, which this iPhone can't do yet: um, uh"
+        )
+        XCTAssertEqual(
+            HexWordsReviewSheet.notUsable(.deletionNotSupported, count: 1, examples: "um"),
+            "1 replacement writes nothing, or only spaces or line breaks, which this iPhone can't do yet: um"
         )
         var summary = HexWordsSummary()
         summary.addedTerms = 2

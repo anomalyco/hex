@@ -582,7 +582,8 @@ learned fix for words a replacement already covers is left out. `madeBy.version`
 Hex declares `anomaly.hex.words` (conforming to `public.json`, extension `hexwords`, MIME type
 `application/vnd.anomaly.hex-words+json`) and owns it as a document type that is copied in
 (`LSSupportsOpeningDocumentsInPlace` NO), so AirDrop, Files and Open in Hex all arrive in
-`onOpenURL` as a copy in `Documents/Inbox`; Open a words file… arrives the same way.
+`onOpenURL` as a copy iOS makes in Hex's container (`Documents/Inbox`, or `tmp/<bundle id>-Inbox`
+on iOS 27); Open a words file… arrives the same way.
 `HexInbox` copies the file to a private temporary folder under a name Hex picks, reads it there
 (the spec's check pass, then `JSONSerialization`), shows the review sheet over whatever is on
 screen and deletes both copies when the sheet closes: after Add, Cancel or a refusal (a launch
