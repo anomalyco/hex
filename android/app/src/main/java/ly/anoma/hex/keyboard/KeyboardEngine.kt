@@ -837,7 +837,7 @@ internal class KeyboardEngine(
     private fun deleteSwiped(): Boolean {
         val s = swiped ?: return false
         val b = before()
-        if (swipeAnchor != b || !b.endsWith(s.word) || !replace(s.word, "")) return false
+        if (!SwipeText.takesBack(b, swipeAnchor, s.word, feedback.swipeDeleteLetters) || !replace(s.word, "")) return false
         if (dictated != null) offerUndo(null)
         continuation.clear(); clearSpaces(); resetTyping()
         val left = before()

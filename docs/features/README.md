@@ -3381,6 +3381,12 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
     tests (including `SmartQuotesTest`'s 12) on 2026-11-24, on OpenJDK 21 and Android SDK 36
     (platform 36, build-tools 35/36, NDK 27.2.12479018); the repo has no Android CI, and nothing was
     tried on a device or emulator. `python3 scripts/code-shape.py --check` passes.
+├── Labs > Keyboard > Delete swiped words letter by letter (off) -> iPhone Hex's experiment (#2323):
+    Delete right after a swipe removes one letter, not the swiped word, and the swipe is forgotten
+    with it: the strip stops offering the word back, the next swipe there types a new word rather
+    than the next reading, and what's left is ordinary text. Held, Delete repeats letter by letter
+    from the first; its slide still selects whole words. Off, Delete takes the word back as before
+    (`SwipeText.takesBack`).
 ├── Labs > Keyboard > Password manager suggestions (off) -> while Android's autofill service —
     Bitwarden, 1Password or Google Password Manager, which must itself support Android 11's inline
     suggestions — offers logins, one-time codes or cards for the focused field, its own chips take

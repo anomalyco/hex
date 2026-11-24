@@ -119,6 +119,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val emojiSuggestions = remember(revision) { typing.emojiSuggestions }
     val keyboardTools = remember(revision) { typing.keyboardTools }
     val smartQuotes = remember(revision) { typing.smartQuotes }
+    val swipeDeleteLetters = remember(revision) { typing.swipeDeleteLetters }
     val passwordManager = remember(revision) { typing.passwordManagerSuggestions }
     val voiceOnly = remember(revision) { typing.voiceOnly }
     // A hidden field or leaving Labs shows the saved line again, never an unsaved draft.
@@ -400,6 +401,9 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 Rule()
                                 Toggle(stringResource(R.string.smart_quotes), stringResource(R.string.smart_quotes_detail),
                                     smartQuotes) { typing.smartQuotes = it }
+                                Rule()
+                                Toggle(stringResource(R.string.swipe_delete_letters), stringResource(R.string.swipe_delete_letters_detail),
+                                    swipeDeleteLetters) { typing.swipeDeleteLetters = it }
                                 Rule()
                                 Toggle(stringResource(R.string.password_manager_suggestions),
                                     stringResource(R.string.password_manager_suggestions_detail),
