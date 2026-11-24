@@ -5,6 +5,8 @@
 #[cfg(target_os = "macos")]
 pub(crate) mod browser_media;
 mod call_input;
+#[cfg(target_os = "windows")]
+mod default_endpoint;
 mod devices;
 pub(crate) mod effect_holds;
 mod fixture;
@@ -65,6 +67,29 @@ pub(crate) use stream::STREAM_STALL_TIMEOUT;
 pub use stream::{AudioInput, AudioInputEvent, Opened, Selection};
 
 pub use instant::{CaptureInstant, duration_for_frames};
+
+/// The system default output as one of cpal's listed devices, on Windows:
+/// its default-output handle would leave Windows thread-pool threads STA and
+/// break every later default-handle activation (`default_endpoint`).
+#[cfg(target_os = "windows")]
+pub(crate) fn default_output_device() -> Option<cpal::Device> {
+    default_endpoint::default_output(&cpal::default_host())
+}
+
+/// Opens the system default output as a rodio sink. Windows opens the
+/// endpoint's own listed device so no default-device monitor is registered;
+/// every other OS keeps rodio's default handle.
+pub(crate) fn open_default_output_sink()
+-> std::result::Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
+    #[cfg(target_os = "windows")]
+    if let Some(device) = default_output_device()
+        && let Ok(sink) =
+            rodio::DeviceSinkBuilder::from_device(device).and_then(|builder| builder.open_stream())
+    {
+        return Ok(sink);
+    }
+    rodio::DeviceSinkBuilder::open_default_sink()
+}
 
 /// Whether `HEX_AUDIO_FIXTURE` names a WAV file that stands in for every
 /// microphone (benchmarks and tests; see `audio/fixture.rs`).

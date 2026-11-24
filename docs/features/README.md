@@ -2495,7 +2495,12 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │       swallowed a key of that chord (Paste Last's V re-arms the mask)
 ├── Microphone switched off in Settings › Privacy -> Onboarding Microphone row -> Allow opens it
 ├── Microphone -> System default or a saved device
-│   ├── Windows default input changes -> Switch once capture is idle // cpal's default-device report
+│   ├── Windows System default -> The default endpoint's listed cpal device, never
+│   │   cpal's default handle: its monitor leaves thread-pool threads STA, which
+│   │   then fails ActivateAudioInterfaceAsync (RPC_E_CHANGED_MODE)
+│   ├── Windows default input changes -> Switch once capture is idle // endpoint
+│   │   notification client bumps the input route; cpal's default-device report stays
+│   │   for a default-handle stream resolution had to fall back to
 │   └── Windows default input reports no default format -> Hex's own WASAPI paths
 │       (the endpoint by id, as when picked by name), then other formats it lists;
 │       the read error keeps its cause (#1845, unverified on real Windows)

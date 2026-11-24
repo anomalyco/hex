@@ -243,10 +243,12 @@ impl AudioInput {
         )
     }
 
-    /// Opens `device`. `follows_default` marks cpal's default-input handle,
-    /// whose Windows stream reports a default change as invalidation while
-    /// it keeps running on the old device. `renegotiate_rate` makes the
-    /// device change its sample rate before the stream opens (#1575).
+    /// Opens `device`. `follows_default` marks an input that follows the
+    /// system default: on Windows cpal's default-input handle reports a
+    /// default change as invalidation while it keeps running on the old
+    /// device, and the same reporter covers a resolved specific device.
+    /// `renegotiate_rate` makes the device change its sample rate before the
+    /// stream opens (#1575).
     /// `voice_processing` opens it through Apple's voice processing instead
     /// (Labs › Voice isolation), falling back to the raw stream when the
     /// engine refuses.

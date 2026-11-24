@@ -1167,7 +1167,19 @@ fn open_output() -> Result<Opened<MixerDeviceSink>> {
             }
         }
     };
-    let mut opened = DeviceSinkBuilder::from_default_device()
+    // Windows opens one of cpal's listed outputs instead of the default
+    // handle: the handle's default-device monitor leaves Windows thread-pool
+    // threads STA, which later fails every default-handle activation in the
+    // process (see `audio::default_endpoint`). Resolution failing falls back
+    // to the handle as before.
+    #[cfg(target_os = "windows")]
+    let default_builder = || match crate::audio::default_output_device() {
+        Some(device) => DeviceSinkBuilder::from_device(device),
+        None => DeviceSinkBuilder::from_default_device(),
+    };
+    #[cfg(not(target_os = "windows"))]
+    let default_builder = DeviceSinkBuilder::from_default_device;
+    let mut opened = default_builder()
         .and_then(|builder| {
             builder
                 .with_buffer_size(BufferSize::Fixed(OUTPUT_BUFFER_FRAMES))

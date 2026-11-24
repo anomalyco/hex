@@ -225,8 +225,16 @@ pub(super) fn input_devices_of(host: &cpal::Host) -> Result<(Vec<Device>, Vec<St
 }
 
 /// The system default input with its name, or `None` when there is none or
-/// its name cannot be read.
+/// its name cannot be read. Windows opens the endpoint as one of the listed
+/// devices, because cpal's default-input handle registers a monitor whose
+/// callbacks leave the process's thread-pool threads STA
+/// (`super::default_endpoint`); only when that resolution fails does it fall
+/// back to cpal's handle.
 pub(super) fn default_input_of(host: &cpal::Host) -> Option<(Device, String)> {
+    #[cfg(target_os = "windows")]
+    let device =
+        super::default_endpoint::default_input(host).or_else(|| host.default_input_device());
+    #[cfg(not(target_os = "windows"))]
     let device = host.default_input_device()?;
     let name = device_name(&device)?;
     Some((device, name))

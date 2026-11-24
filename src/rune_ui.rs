@@ -1428,8 +1428,8 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     let login_unknown = ui.platform.login_item.is_none();
     changed |= settings::poll_microphones(ui);
     // General names the input in use; list again when the OS reports an
-    // input change. Windows reports a default change only to an open
-    // default stream, so there the list is also refreshed every few seconds.
+    // input change. Windows' endpoint watcher reports default changes; the
+    // periodic refresh stays as a fallback.
     if ui.pane == Pane::General
         && ui.live()
         && ui.window.as_ref().is_some_and(rune::AppHandle::is_visible)

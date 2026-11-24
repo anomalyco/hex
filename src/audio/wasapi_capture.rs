@@ -21,7 +21,7 @@ use windows::Win32::Media::Audio::{
     ActivateAudioInterfaceAsync, DEVINTERFACE_AUDIO_CAPTURE, IActivateAudioInterfaceAsyncOperation,
     IActivateAudioInterfaceCompletionHandler, IActivateAudioInterfaceCompletionHandler_Impl,
     IAudioCaptureClient, IAudioClient, IAudioClient3, IMMDevice, IMMDeviceEnumerator,
-    MMDeviceEnumerator, WAVEFORMATEX, eCapture, eConsole,
+    MMDeviceEnumerator, WAVEFORMATEX,
 };
 use windows::Win32::System::Com::{
     APTTYPE, APTTYPE_MAINSTA, APTTYPE_MTA, APTTYPE_NA, APTTYPE_STA, APTTYPEQUALIFIER, CLSCTX_ALL,
@@ -248,7 +248,8 @@ fn run(id: &str, name: &str, stop: &AtomicBool, ready: &SyncSender<Ready>, strea
 fn open(id: &str, name: &str) -> std::result::Result<Opened, String> {
     let device = endpoint(id)
         .map_err(|error| format!("could not find the microphone: {}", hresult(&error)))?;
-    let is_default = default_capture_id().is_some_and(|default| default == id);
+    let is_default =
+        super::default_endpoint::default_capture_id().is_some_and(|default| default == id);
     let mut failures = Vec::new();
     let mut format_text = None;
     for path in PATHS {
@@ -504,17 +505,6 @@ fn endpoint(id: &str) -> windows::core::Result<IMMDevice> {
         unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)? };
     let id = HSTRING::from(id);
     unsafe { enumerator.GetDevice(PCWSTR(id.as_ptr())) }
-}
-
-/// The current default capture endpoint's id.
-fn default_capture_id() -> Option<String> {
-    let enumerator: IMMDeviceEnumerator =
-        unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }.ok()?;
-    let device = unsafe { enumerator.GetDefaultAudioEndpoint(eCapture, eConsole) }.ok()?;
-    let id = unsafe { device.GetId() }.ok()?;
-    let text = unsafe { id.to_string() }.ok();
-    unsafe { CoTaskMemFree(Some(id.as_ptr().cast_const().cast())) };
-    text
 }
 
 /// The device interface path of the capture endpoint `id`, as
