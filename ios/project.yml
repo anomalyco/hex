@@ -158,6 +158,10 @@ targets:
       - HEXMobileTests
       - path: ../tests/fixtures/vocabulary/audio/term-hex-1.wav
         buildPhase: resources
+      # The Hex words file's shared cases, read in place (HexWordsSharedCasesTests).
+      - path: ../tests/fixtures/hex-words
+        type: folder
+        buildPhase: resources
     dependencies:
       - target: HEXMobile
     settings:
