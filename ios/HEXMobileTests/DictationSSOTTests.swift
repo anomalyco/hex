@@ -351,8 +351,10 @@ final class DictationSSOTTests: XCTestCase {
         XCTAssertFalse(DictationEngine.undecided.keyboardSpeechFollowsApp(keyboardNeedsHex: true))
         XCTAssertFalse(DictationEngine.parakeetV2.keyboardSpeechFollowsApp(keyboardNeedsHex: false))
         XCTAssertFalse(DictationEngine.parakeetV2.keyboardSpeechFollowsApp(keyboardNeedsHex: true))
-        XCTAssertTrue(DictationEngine.parakeetUltra.keyboardSpeechFollowsApp(keyboardNeedsHex: false))
-        XCTAssertTrue(DictationEngine.parakeetUltra.keyboardSpeechFollowsApp(keyboardNeedsHex: true))
+        // The keyboard dictates the multilingual model's languages itself, with Apple's model
+        // until it has the multilingual one loaded: Hex gets that model ready for it.
+        XCTAssertFalse(DictationEngine.parakeetUltra.keyboardSpeechFollowsApp(keyboardNeedsHex: false))
+        XCTAssertFalse(DictationEngine.parakeetUltra.keyboardSpeechFollowsApp(keyboardNeedsHex: true))
         XCTAssertTrue(DictationEngine.appleSpeech.keyboardSpeechFollowsApp(keyboardNeedsHex: false))
         XCTAssertFalse(DictationEngine.appleSpeech.keyboardSpeechFollowsApp(keyboardNeedsHex: true))
         XCTAssertTrue(DictationEngine.onDeviceRecognizer.keyboardSpeechFollowsApp(keyboardNeedsHex: false))

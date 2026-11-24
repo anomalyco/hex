@@ -101,9 +101,9 @@ final class KeyboardSpeechPreparation {
             try? await Task.sleep(for: .milliseconds(100))
         }
         guard !Task.isCancelled else { return }
-        // Parakeet Ultra (Experiments › Multilingual model): the Hex key hands its dictations to Hex.
-        // Apple Speech in Hex is the keyboard's model too, unless the keyboard is handing its
-        // dictations to Hex: then it checks, so a model in place ends that.
+        // Apple Speech in Hex is the keyboard's model too, unless the keyboard couldn't get it:
+        // then it checks, so a model in place ends that. With Parakeet in Hex (English, or the
+        // multilingual model) the keyboard needs Apple's model of its own all the same.
         let needsHex = LanguageSettings().keyboardNeedsHex()
         if appEngine().keyboardSpeechFollowsApp(keyboardNeedsHex: needsHex) {
             publish(.followsApp, generation: generation)
