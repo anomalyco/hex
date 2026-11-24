@@ -214,4 +214,22 @@ class KeyboardPageTest {
         assertTrue(label.advance * s.label <= 45f * d - 2 * KeyLabels.SIDE * d)
         assertTrue(s.label > 0f)
     }
+
+    @Test fun theNumberRowTakesGboardsHeightNotAWholeLetterRow() {
+        // A Pixel 8 upright: letters every 56.4 dp, digits every 52.6 dp; the keyboard grows by 45 dp, not 59.
+        val upright = KeyRows.of(411.4f, false)
+        val on = KeyRows.withNumberRow(upright, landscape = false)
+        assertEquals(56.4f, on.letters.pitch, 0.1f)
+        assertEquals(52.6f, on.digits.pitch, 0.1f)
+        assertEquals(upright.key, on.letters.key, 0.01f)
+        assertEquals(on.letters.gap, on.digits.gap, 0.01f)
+        assertEquals(45f, on.digits.pitch + 3 * on.letters.pitch - 3 * upright.pitch, 0.5f)
+        // Turned: 35 dp digits over 41.1 dp letters, about 30 dp more where a whole row was 43.
+        val turned = KeyRows.of(411.4f, true)
+        val turnedOn = KeyRows.withNumberRow(turned, landscape = true)
+        assertEquals(35f, turnedOn.digits.pitch, 0.1f)
+        assertEquals(30f, turnedOn.digits.pitch + 3 * turnedOn.letters.pitch - 3 * turned.pitch, 1f)
+        // Every screen step keeps a gap under its keys.
+        for (w in listOf(320f, 375f, 411f)) assertTrue(KeyRows.withNumberRow(KeyRows.of(w, false), false).letters.gap > 0f)
+    }
 }

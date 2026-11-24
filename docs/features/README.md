@@ -3384,9 +3384,13 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   corner digits and digit-first hold are hidden while it shows; accents on hold stay, and
 │   the Symbols on letter keys hints and holds still work: row 1's first ten letters show a
 │   symbol instead of the digit, Gboard's such as q for % and p for }, or its own home- or
-│   bottom-row symbol where it has one, like AZERTY a for @. The keyboard is one row taller
-│   and the Hex menu matches that height; ?123, the symbols pages and the pads keep their keys
-│   and are a row shorter than the letters while it is on. Off, the page is unchanged.
+│   bottom-row symbol where it has one, like AZERTY a for @. The keyboard grows as Gboard's
+│   does (letters close up to 0.956 of their step, digits every 0.892 of it, 0.814 turned):
+│   45 dp on a Pixel 8, 30 dp turned, not a whole row (KeyRows.withNumberRow). ?123, =< and
+│   the symbol pad stretch their three rows over the same height, so the keyboard never
+│   changes height between pages; the Hex menu and emoji panel match it; a number or phone
+│   field's pad keeps its own. Off, the page is unchanged. Emulator: before, letters 395 dp
+│   and ?123 336 dp; after, both the same height.
 │   KeyboardPageTest covers it, including the top row's symbols, and passed in
 │   https://github.com/anomalyco/hex/actions/runs/45450568457 (testDebugUnitTest + compileDebugKotlin,
 │   GitHub-hosted); not tried on a device. The repo has no Android CI.
