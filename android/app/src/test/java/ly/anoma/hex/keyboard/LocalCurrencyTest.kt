@@ -34,8 +34,11 @@ class LocalCurrencyTest {
         assertEquals(10, symbols.length)
         // The $ it shows there holds the rest too, without another £.
         assertEquals(listOf("¢", "€", "₹", "¥", "₱"), LetterFeedback.symbolHolds('$', '£'))
-        // A symbol the page never draws leaves it as it was.
-        assertEquals("_\\|~<>€£¥•", page('₹', more = true).lines[1])
+        // A currency it never drew puts $ where ¥ was, so $ stays on one of the two pages with ten keys.
+        assertEquals("_\\|~<>€£$•", page('₹', more = true).lines[1])
+        assertEquals("_\\|~<>€£$•", page('₩', more = true).lines[1])
+        // That $ keeps ¥ reachable, offers every other symbol, and never a second copy of the local one.
+        assertEquals(listOf("¢", "€", "£", "₹", "¥", "₱"), LetterFeedback.symbolHolds('$', '₩'))
     }
 
     @Test fun germanyAndFrancePutEurosOnThe123Page() {
@@ -60,7 +63,11 @@ class LocalCurrencyTest {
     }
 
     @Test fun aRegionWithoutACurrencyKeepsDollars() {
-        // Antarctica has a country and no currency: Currency.getInstance returns null for it.
-        assertNull(LocalCurrency.symbol(listOf(Locale("en", "AQ"))))
+        // Antarctica has a country and no currency: the lookup either returns null for it or rejects the
+        // region, and either way Hex keeps $. A region that is not a country (Latin America's 419) keeps it
+        // the same way.
+        assertNull(LocalCurrency.symbol(listOf(Locale.forLanguageTag("en-AQ"))))
+        assertNull(LocalCurrency.symbol(listOf(Locale.forLanguageTag("es-419"))))
+        assertEquals(listOf("1234567890", "-/:;()$&@\"", ".,?!'"), page().lines)
     }
 }

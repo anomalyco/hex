@@ -3209,15 +3209,22 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 ├── Labs > Keyboard > Local currency (off) -> the phone's region picks the ?123 page's
 │   currency symbol in $'s place from a fixed set of single-character symbols: GBP £, EUR €,
 │   JPY and CNY ¥, INR ₹, PHP ₱, KRW ₩, RUB ₽ and UAH ₴. USD, a locale with no country, a
-│   region with no currency (Antarctica) and every other currency keep $. Only the first
+│   region with no currency (Antarctica), a first language whose region is not a country
+│   (Latin American Spanish, es-419) and every other currency keep $. Only the first
 │   system locale with a country is read, and its `Currency.currencyCode` rather than a
 │   localized symbol chooses the character, so the same phone shows the same one in any
 │   language. Holding the key offers $ first, then $'s held symbols without a second copy
-│   of the local one, in their order; the second symbols page shows $ where it showed that
-│   currency, with ten keys still. Off, both pages and every hold are unchanged.
+│   of the local one, in their order. The second symbols page always draws $, with ten keys
+│   still: where it drew that currency for £, € and ¥ (¥ stays in $'s holds), and where it
+│   drew ¥ for ₹, ₱, ₩, ₽ and ₴, so that page reads €£$ there and $ is on one of the two
+│   pages. Only the symbol pages read the currency: a number, PIN, phone or date pad,
+│   including the symbols page's own 1234 pad, draws none and reads none. Off, both pages
+│   and every hold are unchanged.
 │   Checks: `LocalCurrencyTest` in android/app/src/test (rows, holds and region cases) and
-│   `python3 scripts/code-shape.py --check`; no Gradle run observed for this change, and the
-│   repo has no Android CI. Not tried on a device or emulator.
+│   `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` on a GitHub-hosted runner
+│   (https://github.com/anomalyco/hex/actions/runs/45359081407: LocalCurrencyTest 6/6 and
+│   KeyboardPageTest 7/7 passed, 156 tests in all, the latest observed verification); not
+│   tried on a device or emulator, and the repo has no Android CI.
 ├── Labs > Keyboard > Emoji suggestions (off) -> on the English layout, while a word
 │   that names an emoji is being typed (smile -> 😊, joy/haha -> 😂, heart -> ❤️), the
 │   strip's last slot offers it beside the word suggestions, padded to that slot even when
