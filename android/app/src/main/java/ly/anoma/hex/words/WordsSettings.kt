@@ -157,7 +157,7 @@ internal fun WordsFilePage(speech: SpeechPreferences, store: WordsStore, revisio
         Label(status ?: stringResource(R.string.words_export_detail), muted = true, size = 13, lines = Int.MAX_VALUE,
             mod = Modifier.padding(horizontal = 16.dp))
     }
-    if (canUndo) Card { Entry(stringResource(R.string.words_undo_last), action = { store.undo() }) }
+    if (canUndo) Card { Entry(stringResource(R.string.words_undo_last), value = "", action = { store.undo() }) }
 }
 
 /** Learned fixes as the export sees them: none unless Labs › Learn from my fixes is on, since only then are they
