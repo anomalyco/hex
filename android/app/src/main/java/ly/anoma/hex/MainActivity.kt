@@ -92,6 +92,11 @@ class MainActivity : ComponentActivity() {
         // Debug builds only: am start --ez feedback_drop_first_response true loses Send feedback's first answer, to
         // show that the retry, with the same Idempotency-Key, gets the same issue back.
         if (BuildConfig.DEBUG) ly.anoma.hex.feedback.Feedback.dropFirstResponse = intent.getBooleanExtra("feedback_drop_first_response", false)
+        // Debug builds only: am start --es cpu_capacity 300,300,1024,1024 (right after a force-stop, before any dictation)
+        // rates the cores as given, so an emulator, which the kernel doesn't rate, keeps dictation's threads pinned.
+        if (BuildConfig.DEBUG) intent.getStringExtra("cpu_capacity")?.let { given ->
+            SpeechModel.capacityOverride = given.split(',').map { it.trim().toIntOrNull() }
+        }
         for (name in listOf(Settings.Secure.DEFAULT_INPUT_METHOD, Settings.Secure.ENABLED_INPUT_METHODS))
             contentResolver.registerContentObserver(Settings.Secure.getUriFor(name), false, changed)
         refresh()

@@ -27,6 +27,12 @@ import ly.anoma.hex.diagnostics.report
 import ly.anoma.hex.diagnostics.taskStat
 import ly.anoma.hex.diagnostics.wavSamples
 import ly.anoma.hex.diagnostics.lastDictationLines
+import ly.anoma.hex.diagnostics.DICTATION_ROW
+import ly.anoma.hex.diagnostics.KEPT_ANY
+import ly.anoma.hex.diagnostics.KEPT_FAST
+import ly.anoma.hex.diagnostics.poolWords
+import ly.anoma.hex.diagnostics.processorLine
+import ly.anoma.hex.diagnostics.threadWords
 import ly.anoma.hex.speech.DictationPlace
 import ly.anoma.hex.speech.DictationTimes
 import ly.anoma.hex.speech.ModelAtTick
@@ -68,6 +74,12 @@ class StripTextTest {
         assertEquals("cpu 0-1: capacity not readable, top frequency not reported", clusterSummary(listOf(Core(0, null, null), Core(1, null, null))))
         // An emulator's cpufreq says 2 (kHz): no real core runs at that.
         assertEquals("cpu 0-3: capacity 1024, top frequency not reported", clusterSummary((0..3).map { Core(it, 1024, 2) }))
+        // A debug build's stand-in ratings (the emulator check) say so on the Processor line; a phone's line is unchanged.
+        val emulator = (0..3).map { Core(it, null, 2) }
+        assertEquals("Processor: Google Ranchu, 4 cores; cpu 0-3: capacity not readable, top frequency not reported " +
+            "(debug core ratings: 300, 300, 1024, 1024)", processorLine("Google Ranchu", emulator, listOf(300, 300, 1024, 1024)))
+        assertEquals("Processor: QTI SM8750, 8 cores; cpu 0-5: capacity 870, up to 3.53 GHz; cpu 6-7: capacity 1024, up to 4.32 GHz",
+            processorLine("QTI SM8750", cores, null))
     }
     @Test fun diagnosticsCountFastCoresForTheSixThreadRun() {
         assertEquals(8, fastCores(List(6) { 870 } + List(2) { 1024 })) // Snapdragon 8 Elite
@@ -179,10 +191,13 @@ class StripTextTest {
     }
     @Test fun diagnosticsReportEachRunAndWhereItRan() {
         val top = Sched("/top-app", "0::/uid_*/pid_*", "0-7", 0)
-        fun run(n: Int, after: Sched) = Run("as now", n, true, 5_812, 19_340, longArrayOf(20_000, 4_100_000, 1_400_000, 0, 80_000, 0, 4),
+        // The fast-cores row, which this build's dictation uses: pinned to cpu 4-7 in the app; in the keyboard the kernel
+        // refused, so the decoding thread read back any core.
+        fun run(n: Int, after: Sched, cores: Long = 0xF0) = Run("$KEPT_FAST $DICTATION_ROW", n, true, 5_812, 19_340,
+            longArrayOf(20_000, 4_100_000, 1_400_000, 0, 80_000, 0, 4, cores),
             "And so, my fellow Americans.", top, after, "cpu 4-7", "cpu 4-7 1.80 GHz–3.53 GHz, 40% of 20 samples below its top 3.53 GHz")
         val done = Diagnostics.Speed.Done(listOf(run(1, top), run(2, top.copy(cpuset = "/foreground"))), 11.0)
-        val steady = Diagnostics.Speed.Done(listOf(run(1, top), run(2, top)), 11.0)
+        val steady = Diagnostics.Speed.Done(listOf(run(1, top, 0), run(2, top, 0)), 11.0)
         assertEquals("""
             Hex diagnostics
             Build: Hex 0.2.2 (build 5), preview
@@ -191,11 +206,11 @@ class StripTextTest {
 
             Speed test in the app: bundled 11.0 s English clip, downloaded model
               same for every run: cgroup 0::/uid_*/pid_*, cpus allowed 0-7, nice 0
-              as now, run 1: 5812 ms, processor 19340 ms; encoder 4100 ms, decoder 1500 ms, other 212 ms; 4 threads, encoder window full
+              threads kept ready, fast cores (what dictation uses), run 1: 5812 ms, processor 19340 ms; encoder 4100 ms, decoder 1500 ms, other 212 ms; 4 threads kept ready on cpu 4-7, encoder window full
                 cpuset /top-app
                 ran on cpu 4-7
                 clocks while it ran: cpu 4-7 1.80 GHz–3.53 GHz, 40% of 20 samples below its top 3.53 GHz
-              as now, run 2: 5812 ms, processor 19340 ms; encoder 4100 ms, decoder 1500 ms, other 212 ms; 4 threads, encoder window full
+              threads kept ready, fast cores (what dictation uses), run 2: 5812 ms, processor 19340 ms; encoder 4100 ms, decoder 1500 ms, other 212 ms; 4 threads kept ready on cpu 4-7, encoder window full
                 cpuset /top-app; at the end cpuset /foreground
                 ran on cpu 4-7
                 clocks while it ran: cpu 4-7 1.80 GHz–3.53 GHz, 40% of 20 samples below its top 3.53 GHz
@@ -203,10 +218,10 @@ class StripTextTest {
 
             Speed test in the keyboard, open in another app: bundled 11.0 s English clip, downloaded model
               same for every run: cpuset /top-app, cgroup 0::/uid_*/pid_*, cpus allowed 0-7, nice 0
-              as now, run 1: 5812 ms, processor 19340 ms; encoder 4100 ms, decoder 1500 ms, other 212 ms; 4 threads, encoder window full
+              threads kept ready, fast cores (what dictation uses), run 1: 5812 ms, processor 19340 ms; encoder 4100 ms, decoder 1500 ms, other 212 ms; 4 threads kept ready on any core, encoder window full
                 ran on cpu 4-7
                 clocks while it ran: cpu 4-7 1.80 GHz–3.53 GHz, 40% of 20 samples below its top 3.53 GHz
-              as now, run 2: 5812 ms, processor 19340 ms; encoder 4100 ms, decoder 1500 ms, other 212 ms; 4 threads, encoder window full
+              threads kept ready, fast cores (what dictation uses), run 2: 5812 ms, processor 19340 ms; encoder 4100 ms, decoder 1500 ms, other 212 ms; 4 threads kept ready on any core, encoder window full
                 ran on cpu 4-7
                 clocks while it ran: cpu 4-7 1.80 GHz–3.53 GHz, 40% of 20 samples below its top 3.53 GHz
               text: And so, my fellow Americans. (every run)
@@ -214,10 +229,10 @@ class StripTextTest {
         """.trimIndent(), report(listOf("Build: Hex 0.2.2 (build 5), preview"), done, steady))
     }
     @Test fun diagnosticsReportTheLastDictationsSteps() {
-        val timings = longArrayOf(30_000, 6_100_000, 3_300_000, 0, 80_000, 0, 4)
+        val timings = longArrayOf(30_000, 6_100_000, 3_300_000, 0, 80_000, 0, 4, 0xF0)
         assertEquals("""
             Last dictation (durations only, held in memory until Hex's process ends; a dictation discarded with ✕ isn't counted; nothing said or typed):
-              in the keyboard, 10.4 s recorded, 9.8 s kept; standard dictation; 4 threads, encoder window full; model still loading at ✓, ready 1240 ms after
+              in the keyboard, 10.4 s recorded, 9.8 s kept; standard dictation; 4 threads kept ready on cpu 4-7, encoder window full; model still loading at ✓, ready 1240 ms after
               after ✓: recording stopped 31 ms, decode started 52 ms, decode finished 9870 ms, text inserted 9884 ms
               decode 9818 ms; encoder 6100 ms, decoder 3330 ms, prompt 80 ms, other 308 ms; processor 30436 ms, 3.1× the decode's wall time
 
@@ -244,7 +259,15 @@ class StripTextTest {
         // Short of memory, today's model wrote it, and says why.
         assertTrue(lastDictationLines(DictationTimes(DictationPlace.Home, 5_000, 4_800, ModelAtTick.Loaded, 0, true, 20, 25, 2_025,
             2_030, 7_000, timings, RanOn.LowMemory, 4)).contains(
-            "4.8 s kept; standard dictation, as the phone was low on memory for faster English dictation; 4 threads, encoder window full;"))
+            "4.8 s kept; standard dictation, as the phone was low on memory for faster English dictation; 4 threads kept ready on cpu 4-7, encoder window full;"))
+        // Where a dictation's threads were kept, in the words the report uses: no pool, a pool on any core, a pinned one,
+        // and a report from a build before that slot existed.
+        assertEquals("started for every graph", poolWords(-1))
+        assertEquals("kept ready on any core", poolWords(0))
+        assertEquals("kept ready on cpu 4-7", poolWords(0xF0))
+        assertEquals("kept ready on cpu 0,6-7", poolWords(0xC1))
+        assertEquals("4 threads started for every graph", threadWords(longArrayOf(0, 0, 0, 0, 0, 0, 4, -1)))
+        assertEquals("4 threads", threadWords(longArrayOf(0, 0, 0, 0, 0, 0, 4)))
     }
     @Test fun diagnosticsSayWhereTheModelWasAtTheTick() {
         assertEquals(ModelAtTick.Loaded, modelAtTick(tick = 100, prepared = 50, prepareLoaded = false, decodeLoaded = false))
@@ -257,7 +280,7 @@ class StripTextTest {
     }
     @Test fun diagnosticsReportTheFasterModelsTextOnItsOwnLine() {
         val top = Sched("/top-app", "0::/uid_*/pid_*", "0-7", 0)
-        val standard = Run("as now", 1, true, 2_676, 10_091, longArrayOf(20_000, 2_423_000, 194_000, 0, 0, 0, 4),
+        val standard = Run(KEPT_ANY, 1, true, 2_676, 10_091, longArrayOf(20_000, 2_423_000, 194_000, 0, 0, 0, 4, 0),
             "And so my fellow Americans, ask not.", top, top, "cpu 0-3")
         val faster = Run(FASTER_MODE, 1, true, 190, 697, LongArray(0), "And so, my fellow Americans, ask not.", top, top, "cpu 0-3",
             "cpu 0-3 1.8–2.4 GHz", threads = 4)
