@@ -3178,6 +3178,15 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 │   tried on a device.
 ├── Keyboard > Suggest swear words (off) -> opt in to profanity; listed slurs never offered
 ├── Type a listed word in full -> keep its spelling on space or tap its literal chip
+├── Fields marked private or no-learning (a browser's incognito tab) -> normal suggestions,
+│   next words, autocorrection, swipe typing and double-space period, because Android's
+│   `IME_FLAG_NO_PERSONALIZED_LEARNING` only says that nothing typed there is learned. Undoing
+│   an autocorrection there still restores what was typed, but the rejection is not remembered
+│   for later sessions, and a picked emoji does not join the picker's recents. Checks:
+│   `FieldTypingTest` in android/app/src/test (4/4) and
+│   `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` passed on 2026-11-24 (162
+│   tests in all, on Temurin JDK 21 and Android SDK 36); the repo has no Android CI, and
+│   nothing was tried on a device or emulator.
 ├── Labs > Keyboard > Symbols on letter keys (off) -> hold a letter from QWERTY's home or
 │   bottom row for its symbol first, SwiftKey-style (m for /, a for @), with the letter's
 │   accents after it; symbols follow the letter, so AZERTY q/w and QWERTZ y get none where
