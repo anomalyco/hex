@@ -58,14 +58,10 @@ pub(crate) fn read(bytes: &[u8]) -> Result<WordsFile, Refusal> {
     {
         return Err(Refusal::Empty);
     }
-    let huge = super::check::check(text)?;
-    let parsed = if huge.is_empty() {
-        serde_json::from_str::<Value>(text)
-    } else {
-        serde_json::from_str::<Value>(&with_nulls(text, &huge))
-    };
+    super::check::check(text)?;
     // The check pass already refused everything serde_json would.
-    let Value::Object(top) = parsed.map_err(|_| Refusal::NotJson)? else {
+    let parsed = serde_json::from_str::<Value>(text).map_err(|_| Refusal::NotJson)?;
+    let Value::Object(top) = parsed else {
         return Err(Refusal::NotAnObject);
     };
     if top.get("format").and_then(Value::as_str) != Some(FORMAT) {
@@ -117,19 +113,6 @@ pub(crate) fn read(bytes: &[u8]) -> Result<WordsFile, Refusal> {
     Ok(file)
 }
 
-/// `text` with each number too large for a double replaced by `null`.
-fn with_nulls(text: &str, huge: &[std::ops::Range<usize>]) -> String {
-    let mut patched = String::with_capacity(text.len());
-    let mut from = 0;
-    for range in huge {
-        patched.push_str(&text[from..range.start]);
-        patched.push_str("null");
-        from = range.end;
-    }
-    patched.push_str(&text[from..]);
-    patched
-}
-
 /// A whole number of at least 1; `1.0` is 1.
 fn whole_version(value: &Value) -> Option<u64> {
     let number = value.as_number()?;
@@ -137,7 +120,7 @@ fn whole_version(value: &Value) -> Option<u64> {
         return (whole >= 1).then_some(whole);
     }
     let float = number.as_f64()?;
-    // A float this large saturates, still newer than any version.
+    // A whole float past u64 saturates, still newer than any version.
     (float >= 1.0 && float.fract() == 0.0).then_some(float as u64)
 }
 

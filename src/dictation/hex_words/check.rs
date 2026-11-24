@@ -1,12 +1,14 @@
 //! The check pass: one walk over the text before any parser builds values
 //! (the spec's "Reading, step by step", step 5). It refuses with the first
 //! problem it meets: nesting deeper than [`MAX_DEPTH`], an object that
-//! repeats a key (compared after escapes are decoded), or anything strict
-//! JSON (RFC 8259) doesn't allow. The walk keeps its own stack of open
-//! brackets and never recurses, so no depth of nesting can exhaust a stack.
+//! repeats a key (compared after escapes are decoded) at its second
+//! appearance, or anything strict JSON (RFC 8259) doesn't allow, including a
+//! number a 64-bit float can't hold, where the text stops being that. The
+//! walk keeps its own stack of open brackets and never recurses, so no depth
+//! of nesting can exhaust a stack. `serde_json` then parses only text this
+//! pass accepted, so between them the earliest problem is the one reported.
 
 use std::collections::HashSet;
-use std::ops::Range;
 
 use super::{MAX_DEPTH, Refusal};
 
@@ -16,20 +18,14 @@ enum Open {
     List,
 }
 
-/// Checks `text`. On success, returns where the numbers too large for a
-/// double are (`1e400`): RFC 8259 allows them, but `serde_json` refuses
-/// to build them, so the reader reads each as a value of the wrong type,
-/// as a reader that holds it as infinity would.
-pub(super) fn check(text: &str) -> Result<Vec<Range<usize>>, Refusal> {
-    let mut walk = Walk {
+pub(super) fn check(text: &str) -> Result<(), Refusal> {
+    Walk {
         text,
         bytes: text.as_bytes(),
         at: 0,
         open: Vec::new(),
-        huge: Vec::new(),
-    };
-    walk.run()?;
-    Ok(walk.huge)
+    }
+    .run()
 }
 
 struct Walk<'a> {
@@ -37,7 +33,6 @@ struct Walk<'a> {
     bytes: &'a [u8],
     at: usize,
     open: Vec<Open>,
-    huge: Vec<Range<usize>>,
 }
 
 impl Walk<'_> {
@@ -232,8 +227,9 @@ impl Walk<'_> {
         Ok(value)
     }
 
-    /// `-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?`; what follows it is
-    /// checked as whatever comes after a value.
+    /// `-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?`, within a 64-bit
+    /// float's range (`1e400` and a 400-digit integer are refused); what
+    /// follows it is checked as whatever comes after a value.
     fn number(&mut self) -> Result<(), Refusal> {
         let start = self.at;
         self.eat(b'-');
@@ -256,13 +252,10 @@ impl Walk<'_> {
                 return Err(Refusal::NotJson);
             }
         }
-        if self.text[start..self.at]
-            .parse::<f64>()
-            .is_ok_and(f64::is_infinite)
-        {
-            self.huge.push(start..self.at);
+        match self.text[start..self.at].parse::<f64>() {
+            Ok(number) if number.is_finite() => Ok(()),
+            _ => Err(Refusal::NotJson),
         }
-        Ok(())
     }
 
     /// Skips digits; false when there were none.
