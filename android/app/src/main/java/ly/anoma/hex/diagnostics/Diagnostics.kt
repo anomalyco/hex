@@ -184,7 +184,7 @@ internal object Diagnostics {
         val memory = ActivityManager.MemoryInfo().also { c.getSystemService(ActivityManager::class.java).getMemoryInfo(it) }
         val cores = cores()
         val channel = when (BuildConfig.BUILD_TYPE) { "preview" -> "preview"; "release" -> "play"; else -> BuildConfig.BUILD_TYPE }
-        val library = runCatching { libraryLabel(Whisper.library()) }.getOrDefault("didn't load")
+        val library = runCatching { libraryLabel(Whisper.library()) }.getOrDefault("speech library didn't load")
         return listOf(
             "Build: Hex ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE}), $channel",
             // Build.ID is the public build number every phone on that release shares; Build.DISPLAY can carry a self-built
@@ -193,7 +193,7 @@ internal object Diagnostics {
                 "build ${Build.ID}, security patch ${Build.VERSION.SECURITY_PATCH}",
             "Processor: ${Build.SOC_MANUFACTURER} ${Build.SOC_MODEL}, ${cores.size} cores; ${clusterSummary(cores)}",
             "Memory: ${gb(memory.totalMem)} total, ${gb(memory.availMem)} available" + if (memory.lowMemory) ", low" else "",
-            "Speech: ${SpeechModel.threads} threads, $library library, downloaded model " +
+            "Speech: ${SpeechModel.threads} threads, $library, downloaded model " +
                 if (ModelStore.small.installed(c) != null) "installed" else "not installed",
             fasterEnglishLine(SpeechPreferences(c).fastEnglish, ModelStore.english.installed(c) != null,
                 engineFor(SpeechPreferences(c).options(null))),
@@ -417,17 +417,18 @@ internal fun cgroupSummary(text: String) = text.lines().map { it.trim() }.filter
     .joinToString(" ") { it.replace(Regex("(uid|pid)_\\d+"), "$1_*") }
 
 /** Labs › Faster English dictation in the report: the switch, its download, and what the dictation language now uses,
- * "faster" or "standard", in plain words like the library's. */
+ * "faster" or "standard". The only line of the report that says "faster". */
 internal fun fasterEnglishLine(on: Boolean, downloaded: Boolean, engine: Engine) =
     "Faster English dictation: ${if (on) "on" else "off"}, ${if (downloaded) "downloaded" else "not downloaded"}; " +
         "the dictation language now uses ${if (engine == Engine.English && downloaded) "faster" else "standard"} dictation"
 
-/** People read "standard" or "faster" for the speech library, never an engine's name. */
+/** Which build of the speech library runs, in words that can't be read as Faster English dictation (whose own line says
+ * "faster") or name an engine. */
 internal fun libraryLabel(file: String?) = when {
-    file == null -> "unknown"
-    file.contains("v82") -> "faster"
-    file.startsWith("libhexspeech") -> "standard"
-    else -> "other"
+    file == null -> "unknown build"
+    file.contains("v82") -> "newer-processor build"
+    file.startsWith("libhexspeech") -> "standard build"
+    else -> "other build"
 }
 
 /** A PCM16 mono 16 kHz WAV's samples, or null for anything else. */

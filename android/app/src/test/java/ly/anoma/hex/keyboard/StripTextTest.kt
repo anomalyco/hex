@@ -143,9 +143,9 @@ class StripTextTest {
         assertEquals("0::/uid_*/pid_* 4:cpuset:/top-app", cgroupSummary("0::/uid_10234/pid_5678\n4:cpuset:/top-app\n"))
     }
     @Test fun diagnosticsNameTheSpeechLibraryPlainly() {
-        assertEquals("standard", libraryLabel("libhexspeech.so"))
-        assertEquals("faster", libraryLabel("libhexspeech_v82.so"))
-        assertEquals("unknown", libraryLabel(null))
+        assertEquals("standard build", libraryLabel("libhexspeech.so"))
+        assertEquals("newer-processor build", libraryLabel("libhexspeech_v82.so"))
+        assertEquals("unknown build", libraryLabel(null))
     }
     @Test fun diagnosticsReadTheClipPastOtherChunks() {
         fun le(value: Int, bytes: Int) = ByteArray(bytes) { (value shr (8 * it)).toByte() }
