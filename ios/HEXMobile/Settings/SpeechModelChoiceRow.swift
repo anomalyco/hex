@@ -23,9 +23,9 @@ enum SpeechModelChoice: String, CaseIterable, Hashable {
     var detail: String {
         switch self {
         case .english:
-            String(localized: "For English. A \(KeyboardParakeetDownload.format(KeyboardParakeetDownload.bytes)) download, once, on Wi-Fi.")
+            String(localized: "For English. A \(KeyboardParakeetDownload.format(KeyboardParakeetDownload.bytes)) download on Wi-Fi.")
         case .multilingual:
-            String(localized: "25 languages, even mixed in one sentence: \(Self.multilingualLanguages). A \(ParakeetUltraTranscriber.downloadSize) download, once, as soon as you pick it. Hex dictates them with it too.")
+            String(localized: "25 languages, even mixed in one sentence: \(Self.multilingualLanguages). A \(ParakeetUltraTranscriber.downloadSize) download as soon as you pick it. Hex dictates them with it too.")
         }
     }
 
@@ -36,14 +36,39 @@ enum SpeechModelChoice: String, CaseIterable, Hashable {
     }
 
     /// Picked in Settings: Multilingual downloads at once beside the engine Hex dictates with;
-    /// English stops that download (a complete one stays for a switch back) and gets English's
-    /// model as Speech model in keyboard does.
+    /// English stops that download (deleted unless complete) and gets English's model as
+    /// Speech model in keyboard does. The model picked before stays, and keeps dictating
+    /// English, until the new one is downloaded and has loaded once (`unpicked`).
     @MainActor
     func select() {
         guard self != Self.current else { return }
         MultilingualParakeetSettings().isEnabled = self == .multilingual
         DictationController.shared.multilingualParakeetChanged()
         DictationController.shared.startKeyboardParakeetDownloadIfWanted()
+    }
+}
+
+extension SpeechModelChoice {
+    /// The model to remove now, if any: Settings › Dictation › Model keeps only the picked one,
+    /// but the other goes only once the picked one is downloaded and has loaded once (in Hex
+    /// or the keyboard), so nobody is left with neither; a download that fails or stops leaves
+    /// the other in place and in use. Never one Hex itself dictates with now.
+    static func unpicked(
+        picked: SpeechModelChoice,
+        englishDownloaded: Bool,
+        englishLoaded: Bool,
+        multilingualDownloaded: Bool,
+        multilingualLoaded: Bool,
+        hexDictatesWith: KeyboardParakeetPlan.Model?
+    ) -> KeyboardParakeetPlan.Model? {
+        switch picked {
+        case .multilingual:
+            guard englishDownloaded, multilingualDownloaded, multilingualLoaded, hexDictatesWith != .parakeetV2 else { return nil }
+            return .parakeetV2
+        case .english:
+            guard multilingualDownloaded, englishDownloaded, englishLoaded, hexDictatesWith != .parakeetUltra else { return nil }
+            return .parakeetUltra
+        }
     }
 }
 
@@ -70,7 +95,7 @@ struct SpeechModelChoiceRow: View {
                 .foregroundStyle(HexTheme.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("speech-model-choice-detail")
-            Text("Other languages use Apple's speech recognition. A downloaded model stays, so switching back is instant.")
+            Text("Other languages use Apple's speech recognition. Only the picked model stays on this iPhone: switching downloads the new one, and the old one goes once the new one is ready.")
                 .font(.system(size: 12))
                 .foregroundStyle(HexTheme.textFaint)
                 .fixedSize(horizontal: false, vertical: true)

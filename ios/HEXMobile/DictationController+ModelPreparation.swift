@@ -241,6 +241,7 @@ extension DictationController {
         isInBackground = false
         refreshWarmDuration()
         multilingualDownload.appBecameActive()
+        keepOnlyThePickedSpeechModel()
         guard preparationFailedInBackground else { return }
         preparationFailedInBackground = false
         if case .failed = phase, !isModelReady {

@@ -158,6 +158,10 @@ nonisolated enum ParakeetUltraModel {
     /// Removes the download, partial files included, and any copy left where it was before.
     static func remove(from directory: URL = directory) {
         try? FileManager.default.removeItem(at: directory)
+        if directory == Self.directory {
+            // What Core ML compiled was for these files: a new download compiles again.
+            ParakeetCompileRecord(key: ParakeetUltraTranscriber.compileRecordKey).forget()
+        }
         if directory == Self.directory, legacyDirectory != directory {
             try? FileManager.default.removeItem(at: legacyDirectory)
         }

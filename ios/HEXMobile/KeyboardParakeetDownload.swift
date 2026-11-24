@@ -84,7 +84,7 @@ final class KeyboardParakeetDownload {
             return .keyboardNotMeasured
         case .tooSmall:
             return .keyboardTooSmall
-        case .off, .awaitingV2Download, .readyV2:
+        case .off, .awaitingV2Download, .awaitingV2DownloadUsingUltra, .readyV2:
             guard unmetered == true else { return .notOnWiFi }
             if let freeBytes, freeBytes < freeSpaceNeeded { return .needsSpace }
             return nil

@@ -342,17 +342,25 @@ Settings › Dictation's speech model card has **Model: English · Multilingual*
 until Multilingual is picked, on iPhones with 6 GB or more (under that the switch above
 says it needs 6 GB, and the row doesn't show). It moved there from Experiments on
 2026-11-24. Each choice says what it means before anything downloads: English, "For
-English. A 464.4 MB download, once, on Wi-Fi."; Multilingual, its 25 languages by name, "A
-632.2 MB download, once, as soon as you pick it. Hex dictates them with it too."; both, that
-other languages use Apple's speech recognition and that a downloaded model stays, so
-switching back is instant. Picking English stops a multilingual download and deletes it
-only if it isn't complete (`ParakeetUltraModel.removeUnlessComplete`; a launch with English
-picked does the same), and English's model, once downloaded, stays while Multilingual is
-picked. Both kept take about 1.1 GB of downloads plus the keyboard's compiled copies
-(234 MB measured for English; the multilingual one's unmeasured). With Multilingual picked
-the card shows its download (`MultilingualModelStatus`, whose failure offers Try again and
-Use English) and, with Speech model in keyboard on, what the keyboard does with it
-(`KeyboardParakeetStatus.multilingualLine`). Multilingual is
+English. A 464.4 MB download on Wi-Fi."; Multilingual, its 25 languages by name, "A 632.2 MB
+download as soon as you pick it. Hex dictates them with it too."; both, that other languages
+use Apple's speech recognition and that only the picked model stays on the iPhone. Only the
+picked one is kept, but the other goes only once the picked one is downloaded and has loaded
+once, in Hex or the keyboard (`SpeechModelChoice.unpicked`, checked whenever Hex comes to the
+front and when Hex has loaded the multilingual model; `KeyboardParakeetSettings.hasLoadedOnce`),
+and never while Hex dictates with it; until then it stays and keeps dictating English
+(`KeyboardParakeetPlan`: `readyV2` while the multilingual model downloads,
+`awaitingV2DownloadUsingUltra` while English's does), so a download that fails or stops leaves
+the old one in use. Removing a model clears its "loaded once", its compile record and the
+keyboard's state about it, and asks the keyboard to clear its compiled copies
+(`KeyboardParakeetSettings.purgesCompiled`): before its next load it removes
+`Library/Caches/<bundle>/com.apple.e5rt.e5bundlecache` (234 MB for English's model on an
+iPhone 17 Pro; the picked model then compiles again, 12 to 17 s). The Neural Engine's own
+cache (`/var/mobile/Library/Caches/com.apple.aned`) and Hex's own compiled copy are iOS's to
+purge. Picking English stops a multilingual download and deletes it if it isn't complete. On
+the iPhone, English takes about 700 MB (464 MB and the keyboard's 234 MB compiled copy) and
+Multilingual about 0.9 to 1.2 GB (632 MB and compiled copies not yet measured), both for a
+while during a switch. Multilingual is
 `MultilingualParakeetSettings` (App Group `experiments.multilingualParakeet`, the key
 Experiments used). While Multilingual is picked, Hex dictates
 Parakeet Ultra's 25 languages (Moondream's post-training of NVIDIA Parakeet TDT

@@ -417,6 +417,22 @@ final class DictationSSOTTests: XCTestCase {
         let ultraMissing = plan(multilingual: "nl-NL", limit: largeLimit, ultraDownloaded: false)
         XCTAssertNil(ultraMissing.modelChoice)
 
+        // Settings › Dictation › Model switched: the model picked before keeps dictating English
+        // until the new one is here (it goes only once the new one has loaded once).
+        let multilingualPickedEnglishStill = plan(multilingual: "en-US", v2Downloaded: true, ultraDownloaded: false)
+        XCTAssertEqual(multilingualPickedEnglishStill, .readyV2(language: "en-US"))
+        XCTAssertEqual(multilingualPickedEnglishStill.modelChoice?.model, .parakeetV2)
+        XCTAssertEqual(plan(multilingual: "en-US", v2Downloaded: true, ultraDownloaded: true).modelChoice?.model, .parakeetUltra)
+        XCTAssertNil(plan(multilingual: "nl-NL", v2Downloaded: true, ultraDownloaded: false).modelChoice, "English's model only takes English")
+        let englishPickedUltraStill = plan(v2Downloaded: false, ultraDownloaded: true)
+        XCTAssertEqual(englishPickedUltraStill, .awaitingV2DownloadUsingUltra(language: "en-US"))
+        XCTAssertEqual(englishPickedUltraStill.modelChoice?.model, .parakeetUltra)
+        XCTAssertNil(
+            KeyboardParakeetDownload.hold(plan: englishPickedUltraStill, unmetered: true, freeBytes: 8_000_000_000),
+            "English's model still downloads by itself"
+        )
+        XCTAssertEqual(plan(v2Downloaded: true, ultraDownloaded: true).modelChoice?.model, .parakeetV2)
+
         // Non-English and nil wanted language.
         XCTAssertEqual(plan(wanted: "es-ES"), .notEnglish)
         XCTAssertEqual(plan(wanted: nil), .notEnglish)
@@ -493,6 +509,33 @@ final class DictationSSOTTests: XCTestCase {
             multilingual(takes: false, .ready),
             "Not for this dictation language, so the keyboard uses Apple's speech recognition."
         )
+        // Only the picked model stays, and the other goes only once the picked one is downloaded
+        // and has loaded once, and never while Hex dictates with it.
+        func unpicked(
+            _ picked: SpeechModelChoice,
+            english: (Bool, Bool) = (true, true),
+            multilingual: (Bool, Bool) = (true, true),
+            hex: KeyboardParakeetPlan.Model? = nil
+        ) -> KeyboardParakeetPlan.Model? {
+            SpeechModelChoice.unpicked(
+                picked: picked,
+                englishDownloaded: english.0,
+                englishLoaded: english.1,
+                multilingualDownloaded: multilingual.0,
+                multilingualLoaded: multilingual.1,
+                hexDictatesWith: hex
+            )
+        }
+        XCTAssertEqual(unpicked(.multilingual), .parakeetV2)
+        XCTAssertNil(unpicked(.multilingual, multilingual: (false, false)), "still downloading: English's stays and dictates")
+        XCTAssertNil(unpicked(.multilingual, multilingual: (true, false)), "downloaded, not loaded yet")
+        XCTAssertNil(unpicked(.multilingual, english: (false, false)), "nothing to remove")
+        XCTAssertNil(unpicked(.multilingual, hex: .parakeetV2), "Hex dictates with English's")
+        XCTAssertEqual(unpicked(.english), .parakeetUltra)
+        XCTAssertNil(unpicked(.english, english: (true, false)))
+        XCTAssertNil(unpicked(.english, english: (false, false)), "a download that failed leaves the multilingual one")
+        XCTAssertNil(unpicked(.english, hex: .parakeetUltra))
+
         let names = SpeechModelChoice.multilingualLanguages
         XCTAssertTrue(names.contains("Dutch") && names.contains("Ukrainian") && names.contains("English"), names)
     }

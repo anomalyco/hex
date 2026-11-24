@@ -5121,36 +5121,6 @@
         }
       }
     },
-    "For English. A %@ download, once, on Wi-Fi." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "用于英语。需下载 %@，只下载一次，仅在 Wi-Fi 下进行。"
-          }
-        }
-      }
-    },
-    "25 languages, even mixed in one sentence: %@. A %@ download, once, as soon as you pick it. Hex dictates them with it too." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "支持 25 种语言，一句话里混着说也行：%1$@。需下载 %2$@，选择后立即下载，只下载一次。Hex 自己听写这些语言时也会使用它。"
-          }
-        }
-      }
-    },
-    "Other languages use Apple's speech recognition. A downloaded model stays, so switching back is instant." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "其他语言使用 Apple 的语音识别。已下载的模型会保留，切换回来可立即使用。"
-          }
-        }
-      }
-    },
     "The keyboard dictates with the model below. Until it's ready, it uses Apple's speech recognition." : {
       "localizations" : {
         "zh-Hans" : {
@@ -5167,6 +5137,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "不适用于当前听写语言，因此键盘使用 Apple 的语音识别。"
+          }
+        }
+      }
+    },
+    "Other languages use Apple's speech recognition. Only the picked model stays on this iPhone: switching downloads the new one, and the old one goes once the new one is ready." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其他语言使用 Apple 的语音识别。这台 iPhone 上只保留所选的模型：切换时会下载新模型，等新模型准备好后再删除旧的。"
+          }
+        }
+      }
+    },
+    "For English. A %@ download on Wi-Fi." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用于英语。通过 Wi-Fi 下载 %@。"
+          }
+        }
+      }
+    },
+    "25 languages, even mixed in one sentence: %@. A %@ download as soon as you pick it. Hex dictates them with it too." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "支持 25 种语言，一句话里混着说也行：%1$@。选择后立即下载 %2$@。Hex 自己听写这些语言时也会使用它。"
           }
         }
       }
