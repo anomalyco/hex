@@ -85,7 +85,7 @@ class MainActivity : ComponentActivity() {
         set(value) { prefs.edit().putBoolean("enabling", value).apply() }
     private lateinit var capture: MicCapture
     private val changed = object : ContentObserver(Handler(Looper.getMainLooper())) {
-        override fun onChange(selfChange: Boolean) { refresh(); comeBack() }
+        override fun onChange(selfChange: Boolean) = refresh()
     }
     private val permission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { refresh() }
 
@@ -157,14 +157,6 @@ class MainActivity : ComponentActivity() {
         val granted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         setup = Setup(granted, id != null, id != null && id == selected,
             prefs.getBoolean("asked", false) && !granted && !shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO))
-    }
-
-    /** Hex turned on in Android's keyboard list, opened from setup: setup comes back by itself, closing the list (opened
-     * in Hex's task), where Android lets an app do that; elsewhere the person goes back and the picker opens as before. */
-    private fun comeBack() {
-        if (enabling && page == 1 && setup.enabled && !setup.chosen && !hasWindowFocus())
-            runCatching { startActivity(Intent(this, MainActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)) }
     }
 
     private fun askForMic() {
