@@ -187,6 +187,8 @@ const PATHS: &[(&str, &str)] = &[
     ),
     ("meetings-failed", "Window/Meetings/Failed"),
     ("meetings-empty", "Window/Meetings/Empty"),
+    ("meetings-audio-off", "Window/Meetings/System audio off"),
+    ("meetings-off-sidebar", "Window/Meetings/Off in the sidebar"),
     ("meetings-off", "Window/Meetings/Off"),
     ("meetings-settings", "Window/Meetings/Settings"),
     ("meetings-calls", "Window/Meetings/Calls"),

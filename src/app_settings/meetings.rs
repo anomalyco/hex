@@ -84,7 +84,7 @@ pub struct MeetingSettings {
     pub calendar: CalendarSettings,
     /// How long finished meetings are kept before they move to the Trash.
     /// `None` until the user chooses: meetings recorded since the default
-    /// began are kept 24 hours, and older ones stay. Left out of the file
+    /// began are kept 7 days, and older ones stay. Left out of the file
     /// while unchosen: a build from before it can't read `null` (#744).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retention: Option<MeetingRetention>,
@@ -204,7 +204,7 @@ impl MeetingRetention {
     }
 
     /// The default for meetings recorded since it began.
-    pub const DEFAULT: Self = Self::Day;
+    pub const DEFAULT: Self = Self::Week;
 
     pub(super) const fn encode(retention: Option<Self>) -> u8 {
         match retention {

@@ -3031,6 +3031,10 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   dictionary behind its autocorrect (a missing accent is the cheapest fix, "koszonom" →
 │   "köszönöm", while a word of its own such as "meg" keeps its spelling), English as its
 │   bilingual partner through the Latin-script rule, and no typing (spatial) model.
+│   Svenska is a normal language too: Apple's "QWERTY-Swedish-Finnish" (å ending row 1, ö ä
+│   row 2), Apple's Swedish holds (Ø on Ö, Æ on Ä, kr on $), ” and ’ opening and closing
+│   quotes, the iPhone's `sv` dictionary behind autocorrect ("kottbullar" → "köttbullar"),
+│   sv-SE dictation through `DictationTranscriber`, and no typing model.
 │   Slovenčina is a normal language too: Czech's keys (Apple's Slovak keyboard uses its
 │   "Czech-Slovak" layouts), its ´ and ˇ accenting the letter before them (ˇ after u types
 │   itself), Apple's Slovak holds (ô ó on O, á ä on A, ľ ĺ on L), the iPhone's `sk`

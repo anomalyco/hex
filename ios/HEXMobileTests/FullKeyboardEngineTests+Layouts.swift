@@ -131,6 +131,28 @@ extension FullKeyboardEngineTests {
         XCTAssertNil(view.plane.spaceLabel, "without Full Access the keyboard can't dictate")
     }
 
+    /// Svenska types on Apple's Swedish keys: å, ö and ä of their own (Å Ö Ä with shift), Ø held on
+    /// Ö, and the iPhone's sv dictionary behind autocorrect.
+    func testTypesOnTheSwedishLayout() {
+        engine.language = .swedish
+        XCTAssertEqual(engine.autocorrect.language, .swedish)
+        XCTAssertNil(engine.layout.key(.character("ø")))
+        tap(.shift)
+        tap(.character("å"))
+        tap(.character("l"))
+        tap(.character("ö"))
+        tap(.character("ä"))
+        XCTAssertEqual(target.text, "Ålöä")
+        let o = engine.layout.key(.character("ö"))!
+        engine.touchBegan(id: 7, at: CGPoint(x: o.frame.midX, y: o.frame.midY))
+        XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: 7))
+        XCTAssertEqual(engine.activeAccentMenu?.options, ["ø", "ö"])
+        engine.touchCancelled(id: 7)
+        XCTAssertNotNil(engine.layout.key(.character("å")))
+        engine.language = .norwegian
+        XCTAssertNil(engine.layout.key(.character("ö")))
+    }
+
     func testTypesOnTheNorwegianLayout() {
         engine.language = .norwegian
         XCTAssertNotNil(engine.layout.key(.character("å")))

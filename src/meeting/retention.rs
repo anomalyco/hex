@@ -6,9 +6,8 @@ use std::path::Path;
 use color_eyre::eyre::{Result, eyre};
 
 use super::{
-    FINAL_PENDING_FILE, MeetingManifest, MeetingStatus, exported_markdown, file_sha256, list_all,
-    meeting_is_active, notes_in_progress, now_ms, os, pending_final_transcripts, read_manifest,
-    root, write_manifest,
+    FINAL_PENDING_FILE, MeetingManifest, MeetingStatus, list_all, meeting_is_active,
+    notes_in_progress, now_ms, os, pending_final_transcripts, read_manifest, root, write_manifest,
 };
 use crate::app_settings::MeetingRetention;
 
@@ -79,8 +78,8 @@ pub(super) fn readable(
             })
 }
 
-/// Moves every expired meeting to the Trash: its folder, and its exported
-/// Markdown while that is still the copy Hex wrote. One that is recording,
+/// Moves every expired meeting's recording folder to the Trash. Its exported
+/// Markdown and notes file are the person's and stay. One that is recording,
 /// transcribing, writing notes, or waiting for its final transcript stays
 /// for a later pass. Returns how many moved.
 pub fn expire(chosen: Option<MeetingRetention>) -> Result<usize> {
@@ -124,8 +123,9 @@ pub(super) fn expired_meetings<'a>(
         .collect()
 }
 
-/// [`super::trash_meeting`] for expiry: an exported Markdown the user changed
-/// is left where it is.
+/// Expiry's trash: only the recording folder in Application Support. The
+/// exported Markdown and notes file in the meetings folder are the person's
+/// copies and are never moved here; Delete moves them explicitly.
 pub(super) fn trash_expired(
     directory: &Path,
     mut move_to_trash: impl FnMut(&Path) -> Result<()>,
@@ -136,28 +136,6 @@ pub(super) fn trash_expired(
     }
     if notes_in_progress(&manifest.id) {
         return Err(eyre!("its notes are being written"));
-    }
-    if let Some(path) = exported_markdown(&manifest) {
-        if manifest.export_sha256.is_some() && file_sha256(&path) == manifest.export_sha256 {
-            move_to_trash(&path)?;
-        } else {
-            tracing::info!(
-                meeting = manifest.id,
-                "kept the meeting's Markdown, which changed since Hex wrote it"
-            );
-        }
-    }
-    if let Some(path) = super::notes_file::tracked(&manifest) {
-        if manifest.notes_export_sha256.is_some()
-            && file_sha256(&path) == manifest.notes_export_sha256
-        {
-            move_to_trash(&path)?;
-        } else {
-            tracing::info!(
-                meeting = manifest.id,
-                "kept the meeting's notes file, which changed since Hex wrote it"
-            );
-        }
     }
     move_to_trash(directory)
 }
