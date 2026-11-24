@@ -295,11 +295,19 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   │   │   │   "An older Hex entry can keep this off" + "Still grey? Fix it"
 │   │   │   │   -> resets the running bundle ID + retired IDs, prompts, and reopens the guide
 │   │   │   ├── macOS 27 names the list "Device Control and Data Access"; the row follows
-│   │   │   └── macOS 27.3 renames it "System & App Protection Override" and takes no
-│   │   │       dragged tile: a compact bar sits below System Settings (above it when there
-│   │   │       is no room) out of the pane's + controls, and says to click the Privacy &
-│   │   │       Security notification or add Hex with +; the row and the pane's name follow.
-│   │   │       Check: `macos_27_3_names_accessibility_without_a_dragged_tile`
+│   │   │   ├── macOS 27.3 renames it "System & App Protection Override" and takes no
+│   │   │   │   dragged tile: a compact bar sits below System Settings (above it when there
+│   │   │   │   is no room) out of the pane's + controls, and says to click the Privacy &
+│   │   │   │   Security notification or add Hex with +; the row and the pane's name follow.
+│   │   │   │   Check: `macos_27_3_names_accessibility_without_a_dragged_tile`
+│   │   │   └── macOS 27.3+ splits Accessibility from posting key events: setup counts
+│   │   │       only the post-event preflight (AX trust no longer proves a paste), and
+│   │   │       Allow asks with `CGRequestPostEventAccess` so macOS can list Hex and post
+│   │   │       its Privacy & Security notification. The preflight keeps its launch-time
+│   │   │       answer, so a row that stays untrusted after a grant reads "Needs a restart"
+│   │   │       and offers Restart Hex, never the TCC reset (which would drop the grant).
+│   │   │       Checks: `macos_27_3_needs_the_post_event_preflight_not_ax_trust`,
+│   │   │       `a_stale_split_grant_offers_a_restart_instead_of_a_tcc_reset`
 │   │   ├── On in System Settings, unusable until relaunch -> "Needs a restart"
 │   │   │   └── Every permission on -> "Restart Hex" -> relaunch at setup  // setup.restart
 │   │   └── Each grant -> a beat with its check -> the card floats off -> on
@@ -368,6 +376,17 @@ or untrusted in System Settings. Checks:
 `stale_permissions_offer_fix_it_and_reset_entries_across_panes` in
 [rune_ui/tests/panes.rs](../../src/rune_ui/tests/panes.rs). Scenes:
 `mac-onboarding-stale`, `mac-settings-permissions-stale`.
+
+macOS 27.3's split is known from Apple's 2026-11-16 developer post and from a
+third-party dictation app's diagnostics on the same beta: the Accessibility
+grant reads trusted while posting key events is refused, and `CGEventPost`
+silently does nothing. Nothing here has run on a 27.3 device, so
+the request's Privacy & Security notification, the guide's `Privacy_Accessibility`
+anchor opening System & App Protection Override, and a grant reading true only
+after a restart are documented but unverified. The refused paste's HUD error,
+the text staying for Paste last dictation, and History staying empty are covered
+by unit tests only. Check: `a_split_paste_needs_the_post_event_grant` in
+[paste.rs](../../src/paste.rs) and the two onboarding checks above.
 
 Apple silicon, macOS 15+. Choices come from the compiled model/language catalog;
 Apple Speech is currently excluded from the desktop picker.

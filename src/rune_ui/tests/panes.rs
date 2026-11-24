@@ -2142,6 +2142,28 @@ fn stale_permissions_offer_fix_it_and_reset_entries_across_panes() {
 }
 
 #[test]
+fn macos_27_3_stale_accessibility_restarts_instead_of_resetting_tcc() {
+    // The post-event preflight keeps its launch-time answer there, so a stale
+    // row can only be settled by a restart: a reset would drop the grant.
+    let mut rt = runtime("mac-settings-permissions-stale", true, PANE_SIZE);
+    rt.state.platform.accessibility_split = true;
+    refresh(&mut rt);
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == "Restart Hex"));
+    assert!(
+        shown
+            .iter()
+            .any(|text| text == "Turns on when Hex restarts")
+    );
+    assert!(!shown.iter().any(|text| text == "Still grey? Fix it"));
+    tap(&mut rt, "permission-accessibility-allow");
+    assert_eq!(
+        asked(&rt),
+        [PlatformRequest::Permission(PermissionAction::Restart)]
+    );
+}
+
+#[test]
 fn visible_untrusted_permission_rows_are_reported_for_legacy_cleanup() {
     let mut rt = runtime("mac-onboarding-permissions", true, PANE_SIZE);
     refresh(&mut rt);

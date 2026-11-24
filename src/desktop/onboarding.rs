@@ -274,6 +274,11 @@ pub struct Flow {
     download_held: bool,
     advance_due: bool,
     relaunch: RelaunchState,
+    /// macOS 27.3 split Accessibility from System & App Protection Override,
+    /// where posting key events (pasting) lives. The post-event preflight can
+    /// stay false after a grant until Hex restarts, so a stale row offers a
+    /// restart there rather than a TCC reset that would drop the grant.
+    post_event_split: bool,
 }
 
 impl Flow {
@@ -294,6 +299,7 @@ impl Flow {
             download_held: false,
             advance_due: false,
             relaunch: RelaunchState::Idle,
+            post_event_split: false,
         };
         // `status` is read fresh at launch, so a tour resumed after macOS's
         // Quit & Reopen passes a setup whose grants are now real, and one
@@ -320,6 +326,12 @@ impl Flow {
     /// or lose focus without a grant.
     pub fn set_accessibility_stale(&mut self, stale: bool) {
         self.accessibility_stale = stale && self.asked[1] && grantable(self.status.accessibility);
+    }
+
+    /// Whether macOS 27.3 split Accessibility from System & App Protection
+    /// Override, so a grant there reads as untrusted until Hex restarts.
+    pub fn set_post_event_split(&mut self, split: bool) {
+        self.post_event_split = split;
     }
 
     pub fn on(&mut self, input: Input) -> Effect {
@@ -379,7 +391,22 @@ impl Flow {
         }
     }
 
+    /// A macOS 27.3 grant the post-event preflight cannot see yet: the
+    /// preflight keeps its launch-time answer, so only a fresh launch can read
+    /// it. A TCC reset here would drop the grant the person just made, so the
+    /// tour offers Restart Hex instead.
+    fn stale_after_grant(&self) -> bool {
+        self.post_event_split
+            && self.accessibility_stale
+            && self.status.microphone == PermissionState::Ready
+            && grantable(self.status.accessibility)
+            && !matches!(self.relaunch, RelaunchState::InFlight { .. })
+    }
+
     fn restart_needed(&self) -> bool {
+        if self.stale_after_grant() {
+            return true;
+        }
         let states = [self.status.microphone, self.status.accessibility];
         !matches!(self.relaunch, RelaunchState::InFlight { .. })
             && states.contains(&PermissionState::NeedsRestart)
@@ -474,6 +501,7 @@ impl Flow {
         match self.status.accessibility {
             PermissionState::Ready => ItemStatus::Ready,
             PermissionState::NeedsRestart => ItemStatus::Restart,
+            _ if self.stale_after_grant() => ItemStatus::Restart,
             _ if self.asked[1] && self.accessibility_stale => ItemStatus::Stale,
             _ if self.asked[1] => ItemStatus::Waiting,
             _ => ItemStatus::Todo,
@@ -538,9 +566,12 @@ impl Flow {
             }
             SetupItem::Accessibility if grantable(self.status.accessibility) => {
                 self.asked[1] = true;
-                if std::mem::take(&mut self.accessibility_stale) {
+                if std::mem::take(&mut self.accessibility_stale) && !self.post_event_split {
                     Effect::ResetPermission(PermissionKind::Accessibility)
                 } else {
+                    // macOS 27.3's preflight can't see a fresh grant until Hex
+                    // restarts, so resetting its TCC entry would only drop the
+                    // grant; the row's Restart Hex is the way forward.
                     Effect::ShowGuide(PermissionKind::Accessibility)
                 }
             }
@@ -1079,8 +1110,14 @@ pub fn status_with_transcription_model(transcription_model: bool) -> SetupStatus
     SetupStatus {
         microphone: microphone_state(),
         // Accessibility also grants the listen-event access Hex's shortcut
-        // taps need, so Input Monitoring is never asked for.
-        accessibility: accessibility_state(CGPreflightPostEventAccess(), AXIsProcessTrusted()),
+        // taps need, so Input Monitoring is never asked for. macOS 27.3
+        // moved posting key events (the paste) to System & App Protection
+        // Override, where AX trust alone proves nothing.
+        accessibility: accessibility_state(
+            crate::desktop::permission_guide::post_event_access(),
+            AXIsProcessTrusted(),
+            crate::desktop::permission_guide::split_accessibility(),
+        ),
         transcription_model,
     }
 }
@@ -1249,12 +1286,23 @@ unsafe extern "C" {
 /// Accessibility reaches a running Hex: `AXIsProcessTrusted` follows the
 /// switch, and the listener's event taps, created only once setup is ready,
 /// are allowed (macOS offers no "Quit & Reopen" for it, as it does for Input
-/// Monitoring). Only `CGPreflightPostEventAccess` keeps its launch-time answer,
+/// Monitoring). Only the post-event preflight keeps its launch-time answer,
 /// so it must not hold setup at a restart. If macOS still refuses the taps,
 /// the listener-failure relaunch takes over.
+///
+/// macOS 27.3 split the old grant: the Accessibility list now holds assistive
+/// technologies, and posting key events (pasting) needs System & App
+/// Protection Override. There AX trust no longer proves Hex can paste, so only
+/// the post-event preflight counts. That preflight can stay false after a
+/// grant until Hex restarts, so the tour offers a restart instead of a TCC
+/// reset there (see `Flow::stale_after_grant`).
 #[cfg(any(target_os = "macos", test))]
-const fn accessibility_state(post_event_preflight: bool, trusted: bool) -> PermissionState {
-    if post_event_preflight || trusted {
+const fn accessibility_state(
+    post_event_preflight: bool,
+    trusted: bool,
+    split: bool,
+) -> PermissionState {
+    if post_event_preflight || (trusted && !split) {
         PermissionState::Ready
     } else {
         PermissionState::NeedsSettings
@@ -1279,12 +1327,6 @@ const fn microphone_authorization_state(status: isize, preflight: i32) -> Permis
 #[link(name = "AVFoundation", kind = "framework")]
 unsafe extern "C" {
     static AVMediaTypeAudio: *const NSString;
-}
-
-#[cfg(target_os = "macos")]
-#[link(name = "CoreGraphics", kind = "framework")]
-unsafe extern "C" {
-    safe fn CGPreflightPostEventAccess() -> bool;
 }
 
 #[cfg(target_os = "macos")]
@@ -2123,15 +2165,21 @@ mod tests {
 
     #[test]
     fn an_accessibility_grant_applies_without_a_restart() {
-        assert_eq!(accessibility_state(true, true), PermissionState::Ready);
-        assert_eq!(accessibility_state(true, false), PermissionState::Ready);
         assert_eq!(
-            accessibility_state(false, true),
+            accessibility_state(true, true, false),
+            PermissionState::Ready
+        );
+        assert_eq!(
+            accessibility_state(true, false, false),
+            PermissionState::Ready
+        );
+        assert_eq!(
+            accessibility_state(false, true, false),
             PermissionState::Ready,
             "the launch-time preflight is stale; trust is live"
         );
         assert_eq!(
-            accessibility_state(false, false),
+            accessibility_state(false, false, false),
             PermissionState::NeedsSettings
         );
 
@@ -2150,7 +2198,7 @@ mod tests {
         assert_eq!(
             flow.on(Input::Status(
                 SetupStatus {
-                    accessibility: accessibility_state(false, true),
+                    accessibility: accessibility_state(false, true, false),
                     ..ready_status()
                 },
                 downloading(0.5),
@@ -2159,6 +2207,54 @@ mod tests {
         );
         assert!(!flow.view().restart);
         assert!(flow.setup_ready());
+    }
+
+    #[test]
+    fn macos_27_3_needs_the_post_event_preflight_not_ax_trust() {
+        assert_eq!(
+            accessibility_state(false, true, true),
+            PermissionState::NeedsSettings,
+            "27.3: AX trust no longer proves Hex may post ⌘V"
+        );
+        assert_eq!(
+            accessibility_state(true, false, true),
+            PermissionState::Ready,
+            "the post-event preflight alone is the grant"
+        );
+        assert_eq!(
+            accessibility_state(false, false, true),
+            PermissionState::NeedsSettings
+        );
+    }
+
+    #[test]
+    fn a_stale_split_grant_offers_a_restart_instead_of_a_tcc_reset() {
+        let mut flow = Flow::new(Step::Setup, fresh_status(), true, true);
+        flow.set_post_event_split(true);
+        flow.on(Input::Status(
+            SetupStatus {
+                accessibility: PermissionState::NeedsSettings,
+                ..ready_status()
+            },
+            downloading(0.5),
+        ));
+        assert_eq!(
+            flow.on(Input::Grant(SetupItem::Accessibility)),
+            Effect::ShowGuide(PermissionKind::Accessibility)
+        );
+        // Back from System Settings, still untrusted: on 27.3 the preflight
+        // keeps its launch-time answer, so only a restart can read the grant.
+        flow.set_accessibility_stale(true);
+        assert_eq!(flow.view().accessibility, ItemStatus::Restart);
+        assert!(flow.view().restart, "Restart Hex is the way forward");
+        assert_eq!(
+            flow.on(Input::Grant(SetupItem::Accessibility)),
+            Effect::ShowGuide(PermissionKind::Accessibility),
+            "no TCC reset that would drop the grant"
+        );
+        flow.set_accessibility_stale(true);
+        assert_eq!(flow.on(Input::Restart), Effect::Relaunch);
+        assert!(!flow.view().restart, "one restart per tour");
     }
 
     #[test]

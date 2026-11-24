@@ -572,6 +572,9 @@ impl MacHost {
                     != PermissionState::Ready
                 {
                     let _ = crate::desktop::permission_guide::prompt_accessibility_trust();
+                    // macOS 27.3 moved posting key events to System & App
+                    // Protection Override, which lists Hex only after it asks.
+                    crate::desktop::permission_guide::request_post_event_access();
                     crate::desktop::permission_guide::show(PermissionKind::Accessibility);
                 }
             }
@@ -683,6 +686,13 @@ impl NativeHost for MacHost {
                         == crate::capture_host::ScreenAccess::Off
                 {
                     self.note_permission_asked(kind);
+                    if kind == PermissionKind::Accessibility {
+                        // macOS 27.3 adds an app to System & App Protection
+                        // Override only after it requests posting key events
+                        // (and may show its Privacy & Security notification).
+                        // Below 27.3 the guide's switch already covers it.
+                        crate::desktop::permission_guide::request_post_event_access();
+                    }
                     crate::desktop::permission_guide::show(kind);
                 }
             }
@@ -840,6 +850,10 @@ impl NativeHost for MacHost {
         changed |= update(
             &mut state.accessibility_drag_supported,
             crate::desktop::permission_guide::drag_supported(PermissionKind::Accessibility),
+        );
+        changed |= update(
+            &mut state.accessibility_split,
+            crate::desktop::permission_guide::split_accessibility(),
         );
         changed |= update(
             &mut state.activity_log,

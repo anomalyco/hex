@@ -240,6 +240,7 @@ impl Paster {
             return Ok(inserted);
         }
         if matches!(mode, PasteMode::Return) {
+            ensure_keystroke_access()?;
             keyboard::post_return()?;
             return Ok(String::new());
         }
@@ -260,6 +261,10 @@ impl Paster {
         mode: PasteMode,
         target: Option<&dyn Fn() -> bool>,
     ) -> Result<String> {
+        // Before the clipboard is touched: macOS 27.3 drops ⌘V silently for a
+        // process without the posting grant, which would otherwise look like
+        // a paste that landed.
+        ensure_keystroke_access()?;
         // Before anything reaches the app: a watch still reading another
         // field may only learn from text taken before this paste.
         note_paste();
@@ -514,6 +519,22 @@ fn chromium_major_version(version: &str) -> Option<u32> {
         [major, _, _, _] => Some(major),
         _ => None,
     }
+}
+
+/// Refuses to post a keystroke when macOS 27.3 has not granted posting, before
+/// anything touches the clipboard. Below 27.3 the Accessibility grant covers
+/// posting and a stale preflight must not block a paste, so nothing changes.
+fn ensure_keystroke_access() -> Result<()> {
+    if super::keystroke_refused(
+        crate::desktop::permission_guide::split_accessibility(),
+        crate::desktop::permission_guide::post_event_access(),
+    ) {
+        return Err(eyre!(
+            "macOS isn't letting Hex paste. Add Hex in System Settings > Privacy & Security > \
+             System & App Protection Override, then restart Hex."
+        ));
+    }
+    Ok(())
 }
 
 fn complete_paste(

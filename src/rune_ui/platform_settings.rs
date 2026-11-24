@@ -117,12 +117,20 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
             }
             let stale =
                 warning.kind == PermissionKind::Accessibility && ui.platform.stale(warning.kind);
-            let description = if stale {
+            // macOS 27.3's post-event preflight reads stale until Hex restarts,
+            // so a TCC reset there would drop a grant that is already on: only
+            // a restart can settle the row.
+            let restart = stale && ui.platform.accessibility_split;
+            let description = if restart {
+                tr("Turns on when Hex restarts")
+            } else if stale {
                 tr("An older Hex entry can keep this off")
             } else {
                 description
             };
-            let action = if stale {
+            let action = if restart {
+                PermissionAction::Restart
+            } else if stale {
                 PermissionAction::ResetAndPrompt(warning.kind)
             } else {
                 warning.action
