@@ -114,7 +114,7 @@ internal class StrictJson private constructor(private val text: String, private 
     private fun digits() { if (!digit()) fail(); while (digit()) at++ }
 
     // RFC 8259: -?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?. A leading zero ends the number, so "01" fails
-    // on the "1" that follows it.
+    // on the "1" that follows it. A number a 64-bit float can't hold (1e400, a 400-digit integer) is refused too.
     private fun number(): Json {
         val start = at
         if (next('-')) at++
@@ -125,7 +125,9 @@ internal class StrictJson private constructor(private val text: String, private 
             if (next('+') || next('-')) at++
             digits()
         }
-        return Json.Num(text.substring(start, at))
+        val number = text.substring(start, at)
+        if (number.toDouble().isInfinite()) fail()
+        return Json.Num(number)
     }
 
     private fun string(): String {
