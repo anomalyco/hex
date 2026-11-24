@@ -207,6 +207,10 @@ builder.MAX_WORDS["pt"] = 100_000
 builder.EXTRA_WORDS["pt"] = "pt-extra-words.tsv"
 PT_WORD = re.compile(f"[{PT_LETTERS}]+")
 PT_TOKEN = re.compile(r"\w+|[^\w\s]")
+# An infinitive written for the pronoun after its hyphen ("fazê-lo", "ajudá-la") is no word of its own,
+# and with it counted the strip offered "obrigá" for "obrig".
+PT_HOST_ENDINGS = "áéêíô"
+PT_ENCLITICS = {"lo", "la", "los", "las"}
 # The only one-letter words; any other letter alone is an initial or an abbreviation.
 PT_ONE_LETTER = {"a", "à", "e", "é", "o", "ó"}
 # The fewest times a pair is seen to be kept: the corpus is a few hundred million words, the books'
@@ -269,7 +273,8 @@ class PtCounts:
     """Words (lowercase: all uses, then lowercase and capitalised uses, a sentence's first word left
     out of those two) and word pairs, one counter per country. A pair may span a comma or a hyphen,
     which people typing leave out or type as a key of its own ("sexta-feira"), never other
-    punctuation or a word with other characters. Pairs spill to sorted runs on disk."""
+    punctuation or a word with other characters; an infinitive before "-lo" or "-la" isn't counted.
+    Pairs spill to sorted runs on disk."""
     SPILL = 6_000_000
 
     def __init__(self, work, name):
@@ -281,10 +286,15 @@ class PtCounts:
     def sentence(self, region, text):
         uni, pairs = self.uni[region], self.pairs[region]
         prev, first, n = None, True, 0
-        for t in PT_TOKEN.findall(text):
+        tokens = PT_TOKEN.findall(text)
+        for i, t in enumerate(tokens):
             if t == "," or t == "-":
                 continue
             key = t.lower()
+            if key[-1] in PT_HOST_ENDINGS and tokens[i + 1:i + 2] == ["-"] and i + 2 < len(tokens) \
+                    and tokens[i + 2].lower() in PT_ENCLITICS:
+                prev, first = None, False
+                continue
             if PT_WORD.fullmatch(key):
                 n += 1
                 e = uni.get(key)
