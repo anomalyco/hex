@@ -487,7 +487,8 @@ final class KeyboardViewController: UIInputViewController {
                 TypingLogField("autocorrect", .bool(FullKeyboardSettings().autocorrect)),
                 TypingLogField("spatialAutocorrect", .bool(FullKeyboardSettings().spatialAutocorrect)),
                 TypingLogField("swipeTyping", .bool(FullKeyboardSettings().swipeTyping)),
-                TypingLogField("emoji", .bool(FullKeyboardSettings().emoji)),
+                TypingLogField("emoji", .bool(FullKeyboardSettings().emojiKey)),
+                TypingLogField("emojiSuggestions", .bool(FullKeyboardSettings().emojiSuggestions)),
                 TypingLogField("key_popups", .bool(FullKeyboardSettings().keyPopups)),
                 TypingLogField("haptics", .bool(FullKeyboardSettings().haptics)),
                 TypingLogField("learnHowIType", .bool(TypingJournalSettings().isEnabled)),
@@ -1431,7 +1432,7 @@ final class KeyboardViewController: UIInputViewController {
             guard case .keys(let kind, _) = KeyboardFieldRouting.route(for: textDocumentProxy.keyboardType), kind.takesWords else { return false }
             return textDocumentProxy.keyboardType != .asciiCapable
         }()
-        let showsEmoji = FullKeyboardSettings().emoji && takesEmoji
+        let showsEmoji = FullKeyboardSettings().emojiKey && takesEmoji
         if viewModel.showsEmojiKey != showsEmoji {
             viewModel.showsEmojiKey = showsEmoji
         }
