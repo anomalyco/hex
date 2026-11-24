@@ -7,6 +7,9 @@ import android.text.InputType
 import android.view.KeyEvent
 import android.view.inputmethod.EditorInfo
 import java.util.concurrent.Executor
+import ly.anoma.hex.speech.DictationEdit
+import ly.anoma.hex.speech.DictationEdits
+import ly.anoma.hex.speech.DictationText
 import ly.anoma.hex.speech.Spoken
 import ly.anoma.hex.speech.SpokenText
 import ly.anoma.hex.typing.KeyGrid
@@ -77,6 +80,9 @@ internal class KeyboardEngine(
     private val emoji: EmojiWords? = null,
     private val clock: () -> Long = { SystemClock.uptimeMillis() },
     private val main: Handler = Handler(Looper.getMainLooper()),
+    /** Labs › Learn from my fixes: what became of a tracked dictation. Null reports nothing; the tracker
+     * only follows a dictation when [insertDictation] is told to learn. */
+    private val learned: ((DictationEdit) -> Unit)? = null,
 ) {
     private companion object {
         /** The fix and the decoder's readings wait for this pause in typing: working them out costs a
@@ -132,6 +138,15 @@ internal class KeyboardEngine(
     private var dictated: Dictated? = null
     private val dropDictation = Runnable { offerUndo(null) }
     private val continuation = DictationContinuation()
+    // Labs › Learn from my fixes: the dictation just inserted, followed by anchors until it settles (60 s, a new
+    // dictation, or leaving the field). It holds text only in memory and reports only what it saw in place.
+    private val tracker = DictationTracker(target, clock) { learned?.invoke(it) }
+    private val checkDictation = object : Runnable {
+        override fun run() {
+            tracker.observe()
+            if (tracker.isTracking) main.postDelayed(this, DictationTracker.checkInterval)
+        }
+    }
     // Keyboard › Swipe typing (SwipeTyping.kt). The word a swipe just typed, until anything else changes the text:
     // the strip offers its other readings, any of which takes its place, and delete takes it back.
     private data class Swiped(val word: String, val alternatives: List<String>)
@@ -147,6 +162,7 @@ internal class KeyboardEngine(
         private set
 
     fun startInput(attribute: EditorInfo) {
+        tracker.finish()
         edited()
         editor = attribute
         val field = FieldTyping.of(attribute.inputType, attribute.imeOptions)
@@ -165,6 +181,7 @@ internal class KeyboardEngine(
     }
 
     fun updateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int) {
+        tracker.observe()
         selStart = newSelStart; selEnd = newSelEnd
         dictated?.let { if (!undoable(it)) offerUndo(null) }
         if (oldSelStart != newSelStart || oldSelEnd != newSelEnd) {
@@ -633,11 +650,18 @@ internal class KeyboardEngine(
     }
 
     /** Dictation starts: the word in progress is left as typed. The signed dictation before still makes this
-     * one stand alone, so its continuation is kept. */
-    fun clearForDictation() { offerUndo(null); resetTyping(); clearSpaces(); surface?.suggestions(emptyList()) }
+     * one stand alone, so its continuation is kept. The dictation before is judged now, before this one's text
+     * reaches the field. */
+    fun clearForDictation() {
+        tracker.settle(); scheduleDictationCheck()
+        offerUndo(null); resetTyping(); clearSpaces(); surface?.suggestions(emptyList())
+    }
 
     /** The editor or the keyboard went away: forget the word, never carry it to the next field. */
-    fun leave() { edited(); resetTyping(); clearSpaces(); word = null; surface?.suggestions(emptyList()) }
+    fun leave() {
+        tracker.finish(); main.removeCallbacks(checkDictation)
+        edited(); resetTyping(); clearSpaces(); word = null; surface?.suggestions(emptyList())
+    }
 
     /** Dictated text with only the separators missing at the cursor; mid-sentence its first word loses
      * the capital Whisper gave it ([SpokenText.continuing], [language] as dictated or "en" translated).
@@ -645,9 +669,12 @@ internal class KeyboardEngine(
      * usual, with the signature on a line of its own. The next dictation starts on a new line below that
      * signature while the signed text is still right before the cursor, so it is never lowercased or
      * spaced onto the signature line. */
-    fun insertDictation(text: String, language: String?, signature: Boolean = false) {
+    fun insertDictation(text: String, language: String?, signature: Boolean = false, heard: String? = null,
+                        learn: Boolean = false) {
         if (!target.connected) return
         val before = if (secure) null else target.before(maxOf(64, continuation.reach))
+        // The lab's anchors; off, the single character spacing has always read.
+        val after = target.after(if (learn) DictationTracker.anchorLength else 1)
         val standalone = continuation.standalone(before)
         val joinable = !signature && !standalone
         val shaped = if (!joinable) text else {
@@ -660,12 +687,25 @@ internal class KeyboardEngine(
         }
         // Spacing is decided on the straight quotes, as it always was, so a dictation's spacing is
         // unchanged: the same smart quotes as the keys and the strip then go in with their spacing.
-        val spaced = dictationInsertion(shaped, before, target.after(1)?.firstOrNull(), standalone)
+        val spaced = dictationInsertion(shaped, before, after?.firstOrNull(), standalone)
         val result = if (smartQuotesHere()) SmartQuotes.text(spaced, before?.lastOrNull()) else spaced
+        // The dictation before is judged against the field as it is now, never the one this call is about to add.
+        tracker.settle()
         if (result.isNotEmpty() && target.commit(result)) {
             continuation.record(if (signature) result else null)
             if (!secure) offerUndo(Dictated(result, target.after(16).orEmpty()))
+            val words = DictationText.words(result).size
+            // A signed dictation carries a line Hex added, not just what was said: it is never tracked.
+            if (learn && !signature && heard != null && !secure && wordField && !keyEventEditor && learnsTyping &&
+                words in 1..DictationEdits.maxWords) tracker.inserted(heard, result, before, after)
+            scheduleDictationCheck()
         }
+    }
+
+    /** Keeps the tracker's clock while it follows a dictation or holds one for a redictation. */
+    private fun scheduleDictationCheck() {
+        main.removeCallbacks(checkDictation)
+        if (tracker.isTracking) main.postDelayed(checkDictation, DictationTracker.checkInterval)
     }
 
     /** Whether the strip's Undo tool can revert the last autocorrection: it is still right before the
@@ -700,6 +740,7 @@ internal class KeyboardEngine(
         val d = dictated ?: return
         offerUndo(null)
         if (undoable(d) && replace(d.text, "")) {
+            tracker.undone()
             resetTyping(); clearSpaces(); showPredictions(before())
         }
     }

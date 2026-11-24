@@ -33,6 +33,7 @@ import ly.anoma.hex.R
 import ly.anoma.hex.diagnostics.Diagnostics
 import ly.anoma.hex.speech.LOW_MEMORY_NOTE
 import ly.anoma.hex.speech.LocalSpeech
+import ly.anoma.hex.speech.DictationFixStore
 import ly.anoma.hex.speech.DictationPlace
 import ly.anoma.hex.speech.MicCapture
 import ly.anoma.hex.speech.Signature
@@ -84,6 +85,8 @@ class HexKeyboard : InputMethodService() {
         feedback.voiceOnly && VoiceOnly.shows(true, subtype?.mode ?: subtypeMode())
     private lateinit var capture: MicCapture
     internal val preferences by lazy { SpeechPreferences(this) }
+    /** Labs › Learn from my fixes: the word pairs and counts this phone keeps, and the tracker's reports. */
+    private val fixes by lazy { DictationFixStore(this) }
     internal var nextEnglish: Boolean? = null
     /** The options the dictation in flight started with: its language decides mid-sentence case. */
     internal val feedback by lazy { TypingPreferences(this) }
@@ -100,7 +103,8 @@ class HexKeyboard : InputMethodService() {
         KeyboardEngine(InputConnectionTarget(this), feedback, { layoutLanguage }, { typingLanguage },
             { SpatialDecoder(TypingModel.asset(assets, it)) },
             readPersonal = { PersonalWords.read(contentResolver, it) }, background = words,
-            emoji = EmojiWords(assets, words))
+            emoji = EmojiWords(assets, words),
+            learned = { if (preferences.learnFixes) fixes.record(it) })
     }
     private val typingChanged = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == TypingPreferences.SUGGEST_SWEAR_WORDS) engine.swearWordsChanged()
@@ -384,13 +388,14 @@ class HexKeyboard : InputMethodService() {
     private fun showLevel(level: Float) {
         bar?.setLevel(level); view?.setLevel(level)
     }
-    private fun commitSpeech(text: String, options: SpeechOptions) {
+    private fun commitSpeech(text: String, heard: String, options: SpeechOptions) {
         if (currentInputConnection == null || engine.secure || !isInputViewShown) { leaveVoiceOnly(); return }
         // Read now, so a toggle or text changed while it transcribed applies to this dictation. Hex's own
         // fields, such as Settings' practice box, never get the signature.
         val own = currentInputEditorInfo?.packageName == packageName
         val signed = if (own) null else Signature.append(text, preferences.signatureText, preferences.signature)
-        engine.insertDictation(signed ?: text, if (options.translate) "en" else options.spoken.code, signed != null)
+        engine.insertDictation(signed ?: text, if (options.translate) "en" else options.spoken.code, signed != null,
+            heard, options.learnFixes && preferences.learnFixes && !options.translate)
         leaveVoiceOnly()
     }
     private fun leaveEditor() {

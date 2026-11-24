@@ -81,7 +81,7 @@ class MainActivity : ComponentActivity() {
         capture = MicCapture(LocalSpeech(applicationContext), DictationPlace.Home,
             // Home's Dictate bar too: onStop cancels, so the screen mustn't sleep mid-dictation.
             update = { next, reason -> phase = next; notice = speechNote(reason); window.keepAwake(next) },
-            meter = {}, insert = { text, _ -> transcript = text })
+            meter = {}, insert = { text, _, _ -> transcript = text })
         page = prefs.getInt("page", 0).coerceIn(0, 3)
         // The keyboard's Settings tool opens Hex on its Keyboard page for the launch that carried the extra.
         // The task keeps its base intent, so a Recents relaunch still carries it: a restored or history
