@@ -214,7 +214,7 @@ pub(super) fn shell(p: Paint, surface: &Surface, meter: &Meter) -> El {
                 .opacity(if surface.shell_on { 1.0 } else { 0.0 })
                 .opacity_motion(surface.shell_fade);
         }
-        return body.role("group").label(tr("Capture"));
+        return body.role("group").label(tr("Annotate"));
     }
     body = body.fill(k.c.bg_base);
     for shadow in &k.elevation.overlay {
@@ -244,7 +244,7 @@ pub(super) fn shell(p: Paint, surface: &Surface, meter: &Meter) -> El {
         .motion(surface.shell_motion)
         .opacity_motion(surface.shell_fade)
         .role("group")
-        .label(tr("Capture"))
+        .label(tr("Annotate"))
 }
 
 pub(super) fn label(content: &str, style: rune::TextStyle, color: Color) -> El {
@@ -418,7 +418,7 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                     .press(c.pressed)
                     .role("button")
                     .label(format!("{} · {}", shown.ident, tr("Inspect")))
-                    .help(tr("Open the capture"))
+                    .help(tr("Open the annotation"))
                     .hit()
                     .on_press_tx(press(Id::Inspect));
             }
@@ -439,16 +439,27 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
         Id::Why => placed(row().center_y(), shown)
             .trace_name("why")
             .child(quiet(p, shown.text(), done_style())),
-        // The quiet way out of a send that just went.
+        // The quiet way out of a send that just went, matching Paste's button
+        // box height and corners.
         // Click only: Escape meant for another app was taking sends back.
         Id::Undo => {
-            let [_, _, w, h] = shown.rect;
+            let bw = shown.rect[2] - 2.0 * surface::BUTTON_INSET;
             let ground = if surface.anchor == surface::Anchor::Notch {
                 c.black
             } else {
                 c.bg_base
             };
-            undo_ring::chip(p, base, [w, h], ground, live.ring.as_ref()).on_press_tx(press(id))
+            base.child(undo_ring::chip(
+                p,
+                button_box(p, bw),
+                [bw, BUTTON_H],
+                ground,
+                live.ring.as_ref(),
+            ))
+            .role("button")
+            .label(surface::undo_label())
+            .hit()
+            .on_press_tx(press(id))
         }
         Id::Search => {
             let keys = chord(&surface::shortcut_keycaps());
@@ -492,6 +503,16 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 .hit()
                 .on_press_tx(press(id))
         }
+        Id::Ask if shown.active => base
+            .child(
+                button_box(p, shown.rect[2] - 2.0 * surface::BUTTON_INSET)
+                    .fill(c.layer_02)
+                    .child(label(&shown.ident, medium(), p.text())),
+            )
+            .role("button")
+            .label(shown.ident.clone())
+            .hit()
+            .on_press_tx(press(id)),
         Id::Ask => keyed(p, base, &[], &shown.ident, medium()).on_press_tx(press(id)),
         // The line's one worded action: a filled button the height of the
         // icon buttons beside it, so the three are one row of boxes 6 pt
@@ -512,7 +533,7 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 .child(mark(id, 16.0, p.muted()))
                 .role("button")
                 .label(tr("Inspect"))
-                .help(tr("Open the capture"))
+                .help(tr("Open the annotation"))
                 .hit()
                 .on_press_tx(press(id)),
         ),
@@ -650,7 +671,9 @@ pub(super) fn glyph(p: Paint, lead: Lead, thumb: Option<&rune::Pixels>) -> El {
         (Lead::Check | Lead::Thumbnail, _) => {
             rune::icon(p.k.glyph.check_small, CHECK).color(p.success())
         }
-        (Lead::Warning, _) => mark(Id::Why, CHECK, p.k.c.warning.fg),
+        (Lead::Warning, _) => {
+            rune::icon(&rune_theme_opencode::icons::WARNING_BOLD, CHECK).color(p.k.c.warning.icon)
+        }
     };
     glyph.absolute(8.0, (CHIP_H - CHECK) * 0.5)
 }

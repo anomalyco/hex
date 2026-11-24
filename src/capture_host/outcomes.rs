@@ -397,6 +397,16 @@ impl Outcomes {
         }
     }
 
+    /// A capture whose initial copy failed has now reached the clipboard.
+    pub(super) fn copied(&mut self, bundle: &Path) {
+        if let Some(last) = self.last.as_mut()
+            && last.bundle == bundle
+            && last.copy_error.take().is_some()
+        {
+            self.publish();
+        }
+    }
+
     pub(super) fn settle_with(
         &mut self,
         bundle: PathBuf,

@@ -204,7 +204,7 @@ On Linux                                 // capture.linux
 │   each with Hex's own Ctrl+V (linux/paste). An app that takes no image (a
 │   terminal) gets only the summary, which names the contact sheet; the Mac
 │   pastes a terminal the sheet's path instead
-├── Finished capsule -> "Annotation" with Paste and, if there are destinations, Send to…;
+├── Finished capsule -> "Annotation copied" with Paste and, if there are destinations, Send to…;
 │   unlike the Mac, a guess doesn't open its suggestions by itself
 │   (Flow::suggesting_on_route(false)): Send to… is a click away
 ├── Shortcuts -> F9 (tap to start and stop, hold to draw) through the
@@ -294,8 +294,11 @@ On Windows                               // capture.windows
 │   a dictation records, Escape cancels that first, as it does everywhere on
 │   Windows, so it never reaches the search. Check:
 │   `windows::input::capsule`'s mapping tests; not observed on a Windows PC
-└── Gaps: no `hex annotate` (Windows has no control transport yet), no
-    iPhone, keys pressed in the app are not logged. Checked only by
+├── CLI -> `hex annotate` (start, stop, cancel, toggle, status, list, show,
+│   send, undo, route) runs through the running Hex's `/control` endpoint
+│   (`WindowsControl::annotate`); `inspect`, `zoom`, `frames`, and `skill` run
+│   directly in the CLI process
+└── Gaps: no iPhone, keys pressed in the app are not logged. Checked only by
     cross-compiling (`cargo xwin clippy`, x86_64 and aarch64); never run on
     a Windows machine
 
@@ -503,12 +506,13 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   recording still shows, but never over a newer recording, and a capture
 │   already under way that fails in the background never takes it over
 ├── Permission helper (capture.permission) -> "Hex needs Screen Recording ·
-│   to see your screen · Allow ✕" (Microphone, Accessibility alike)
+│   Allow ✕" (Microphone adds "to hear you", Accessibility "to follow your clicks")
 │   ├── Allow -> macOS's microphone prompt, else System Settings with the
 │   │   floating guide beside it (permission_guide), never at launch
 │   ├── Followed once a second (feed::watch_grant, screen_access_watched) ->
-│   │   "… is on · Restart Hex" when macOS needs one, then "… is on ·
-│   │   Capture ⌥⇧S"; Capture or the shortcut records the pointer's display
+│   │   "… allowed · restart Hex to start annotating · Restart Hex" when macOS
+│   │   needs one, then "… is on · Annotate ⌥⇧S"; Annotate or the shortcut
+│   │   records the pointer's display
 │   ├── ✕ closes it; unanswered it folds after 2 min; the shortcut brings it
 │   │   back as it stood
 │   ├── A capture written with no frames -> sent with only the voice and
@@ -591,10 +595,11 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │       `capture_host::routing` `an_always_rule_from_a_terminal_keys_on_its_folder`.
 │   │       The process walk was measured once against a real Ghostty; no
 │   │       end-to-end capture of a TUI was run
-├── A finished capture reads "Annotation". While routing is pending it reads
-│   "Looking for sessions…" instead. Copy failure has its own warning
+├── A finished capture reads "Annotation copied". While routing is pending it
+│   reads "Looking for sessions…" instead. Copy failure warns "Couldn't copy"
+│   with "Try again" (re-copies without offering Paste) and Inspect
 │   ├── Anything else with somewhere to go (a guess, nothing fitting, no
-│   │   answer) -> macOS: "Annotation", Paste, a magnifier and ✕. The
+│   │   answer) -> macOS: "Annotation copied", Paste, a magnifier and ✕. The
 │   │   magnifier is named Search with the current binding. Suggestions open under
 │   │   it; nothing sends until Kit picks. Linux: closed,
 │   │   with Paste and Send to…, which opens them on a click
@@ -1107,9 +1112,11 @@ Where it goes                            // capture.route; capture.routing's aut
 │   │   `why`, the router's leading reason; `hex capture route` prints it
 │   ├── Nothing / NoAnswer -> recent sessions only
 │   └── Unreachable -> the look read no sessions (OpenCode slow past the look's
-│       deadline, down, or refusing); a warning in process.log with the error, and
-│       the capsule reads "Couldn't reach OpenCode" with why ("OpenCode didn't
-│       answer"), or "OpenCode isn't running" alone, keeping Paste. A reason is
+│       deadline, down, or refusing); a warning in process.log with the error.
+│       When OpenCode simply isn't running and no send or rule was attempted,
+│       the capsule finishes cleanly as "Annotation copied" with Paste; other
+│       failures (timeout, auth refused) or a rule/explicit send that couldn't
+│       reach OpenCode warn on the capsule. A reason is
 │       shown only in plain words: one with a path, URL, OS error or code goes
 │       to process.log and the capsule shows none
 │       └── OpenCode refusing Hex's password (HTTP 401/403) -> "OpenCode needs a

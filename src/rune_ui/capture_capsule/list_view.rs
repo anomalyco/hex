@@ -155,7 +155,7 @@ pub(super) fn search_hints(p: Paint, remember: bool, send: bool, w: f32) -> El {
         } else {
             0.0
         };
-    let capture = used + HINTS_GAP + hint_width(tr("New capture"), &shortcut) <= room;
+    let capture = used + HINTS_GAP + hint_width(tr("New annotation"), &shortcut) <= room;
     // Send and Remember share a growing row, so the gaps drawn are the
     // gaps measured: no spacer with a gap on each side.
     let left = row()
@@ -169,7 +169,7 @@ pub(super) fn search_hints(p: Paint, remember: bool, send: bool, w: f32) -> El {
         .center_y()
         .gap(HINTS_GAP)
         .child(left)
-        .children(capture.then(|| hint(p, tr("New capture"), &shortcut).key("capture")))
+        .children(capture.then(|| hint(p, tr("New annotation"), &shortcut).key("capture")))
 }
 
 /// The suggestions' header line for what ⇧ does, cut to `room`: before

@@ -13,28 +13,31 @@ pub(super) fn permission_done(need: CaptureNeed, grant: Grant) -> Done {
 pub(super) fn permission_lines(need: CaptureNeed, grant: Grant) -> Done {
     let name = tr(need.name());
     let why = match need {
-        CaptureNeed::ScreenRecording => tr("to see your screen"),
-        CaptureNeed::Microphone => tr("to hear you"),
-        CaptureNeed::Accessibility => tr("to follow your clicks"),
+        CaptureNeed::ScreenRecording => None,
+        CaptureNeed::Microphone => Some(tr("to hear you")),
+        CaptureNeed::Accessibility => Some(tr("to follow your clicks")),
     };
     match grant {
         Grant::Off => Done {
-            why: Some(why.into()),
+            why: why.map(Into::into),
             ask: Some(tr("Allow").into()),
+            ask_button: true,
             ..Done::plain(Lead::Warning, tr_fill("Hex needs {}", name))
         },
         Grant::Asked => Done {
             why: Some(tr("turn Hex on in System Settings").into()),
             ask: Some(tr("Allow").into()),
+            ask_button: true,
             ..Done::plain(Lead::Warning, tr_fill("Hex needs {}", name))
         },
         Grant::Restart => Done {
-            why: Some(tr("turns on when Hex restarts").into()),
+            why: Some(tr("restart Hex to start annotating").into()),
             ask: Some(tr("Restart Hex").into()),
-            ..Done::plain(Lead::Warning, tr_fill("{} is on", name))
+            ask_button: true,
+            ..Done::plain(Lead::Warning, tr_fill("{} allowed", name))
         },
         Grant::Ready => Done {
-            ask: Some(tr("Capture").into()),
+            ask: Some(tr("Annotate").into()),
             ask_keys: true,
             ..Done::plain(Lead::Check, tr_fill("{} is on", name))
         },
@@ -422,8 +425,10 @@ pub(super) fn routed_done(routed: &Routed, now: f64) -> Done {
             ..Done::plain(Lead::Check, annotation())
         },
         // Still copied, so Paste and Inspect stay; there's nothing to list.
+        // Without an explicit send or a rule's send, OpenCode not running is
+        // the normal state for users who don't use OpenCode.
         Route::Unreachable { why } => match plain_reason(why) {
-            Some(why) if why == not_running() => Done::plain(Lead::Warning, not_running()),
+            Some(why) if why == not_running() => Done::plain(Lead::Check, annotation()),
             why => Done {
                 why,
                 ..Done::plain(Lead::Warning, tr("Couldn't reach OpenCode"))

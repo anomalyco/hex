@@ -378,7 +378,7 @@ fn dest(name: &str, why: &str, folder: &str) -> Dest {
 
 fn recent() -> Vec<Dest> {
     vec![
-        dest("RUNE", "2 min ago", "rune"),
+        dest("RUNE", "2m ago", "rune"),
         dest("SCRAWL", "an hour ago", "hex"),
         dest("HOME", "yesterday", "home"),
     ]
@@ -453,6 +453,7 @@ impl Playground {
             | Action::Discard
             | Action::OpenScreenshots { .. }
             | Action::Send { .. }
+            | Action::Copy(_)
             | Action::Paste(_)
             | Action::Pen
             | Action::Hold(_)
