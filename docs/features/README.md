@@ -3271,6 +3271,7 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   smallest width only (46.9 dp keys every 59 dp from 400 dp, 40.3/50.3 from 360, 37.7/48 below;
 │   turned 39/43), letters and hints are the same share of the key everywhere and ignore font
 │   scale; a label shrinks to fit (no "…") and a letter clears its corner hint (KeyRows, KeyLabels).
+│   The strip's words are in dp too, as Gboard's suggestions ignore font scale (StripView).
 │   KeyboardPageTest; emulator screenshots at 360 and 411 dp, font scale 1.0/1.3/2.0.
 ├── Keyboard > Height -> Extra short, Short, Mid-short, Normal (default), Mid-tall, Tall, Extra
 │   tall: 0.75 to 1.25 of the screen's row step, the gaps kept (Gboard 15.1's Resize spans

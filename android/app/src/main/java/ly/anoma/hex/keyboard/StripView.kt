@@ -120,14 +120,14 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         clipChildren = false
 
         statusText.apply {
-            useInter(500); setTextColor(quiet); textSize = 14f; maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+            useInter(500); setTextColor(quiet); setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14f); maxLines = 1; ellipsize = TextUtils.TruncateAt.END
             gravity = Gravity.CENTER_VERTICAL; setPadding(dp(10), 0, dp(4), 0)
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
             setOnClickListener { if (choosing) host.backInMenu() }
         }
         idleRow.addView(statusText, LinearLayout.LayoutParams(0, -1, 1f))
         noticeText.apply {
-            useInter(500); setTextColor(ink); textSize = 14f; maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+            useInter(500); setTextColor(ink); setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14f); maxLines = 1; ellipsize = TextUtils.TruncateAt.END
             gravity = Gravity.CENTER_VERTICAL; setPadding(dp(10), 0, dp(4), 0); isFocusable = true
             setOnClickListener { notice?.let { notice = null; update(); it.tap() } }
         }
@@ -144,7 +144,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
             if (i > 0) slotRow.addView(dividers[i - 1].apply { setBackgroundColor(color(R.color.rule)) },
                 LinearLayout.LayoutParams(maxOf(1, dp(1) / 2 + 1), dp(20)).apply { gravity = Gravity.CENTER_VERTICAL })
             words[i].apply {
-                useInter(450); gravity = Gravity.CENTER; setTextColor(ink); textSize = StripText.SIZE
+                useInter(450); gravity = Gravity.CENTER; setTextColor(ink); setTextSize(TypedValue.COMPLEX_UNIT_DIP, StripText.SIZE)
                 maxLines = 1; ellipsize = TextUtils.TruncateAt.END; includeFontPadding = false
                 setPadding(dp(10), 0, dp(10), 0); importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
             }
@@ -174,7 +174,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         idleRow.addView(toolsRow, LinearLayout.LayoutParams(0, -1, 1f))
         undoBox.apply {
             undoChip.apply {
-                text = context.getString(R.string.keyboard_undo_dictation); useInter(500); textSize = 14f; setTextColor(ink)
+                text = context.getString(R.string.keyboard_undo_dictation); useInter(500); setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14f); setTextColor(ink)
                 gravity = Gravity.CENTER; includeFontPadding = false; isFocusable = true
                 background = shape(key, dp(15).toFloat()); setPadding(dp(12), 0, dp(14), 0)
                 compoundDrawablePadding = dp(6)
@@ -188,7 +188,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         }
         idleRow.addView(undoBox, LinearLayout.LayoutParams(0, -1, 1f))
         menuKey.apply {
-            useInter(550); gravity = Gravity.CENTER; textSize = 14f; setTextColor(ink)
+            useInter(550); gravity = Gravity.CENTER; setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14f); setTextColor(ink)
             setOnClickListener { if (choosing) host.closeMenu() else host.openMenu() }
             setPadding(dp(8), 0, dp(8), 0); isFocusable = true; minimumWidth = dp(40)
         }
@@ -309,7 +309,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
     /** [word]'s width at the strip's own size, whatever size it shrank to for its last slot. */
     private fun naturalWidth(word: TextView): Float {
         measurePaint.set(word.paint)
-        measurePaint.textSize = spToPx(StripText.SIZE, resources.displayMetrics)
+        measurePaint.textSize = dpToPx(StripText.SIZE, resources.displayMetrics)
         return measurePaint.measureText(word.text, 0, word.text.length)
     }
     /** Undo dictation shows in the slots' place, or goes. */
@@ -448,10 +448,10 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
                 val available = MeasureSpec.getSize(widthMeasureSpec) - compoundPaddingLeft - compoundPaddingRight
                 measure.set(paint)
                 val fitted = fitTextSize(available.toFloat(), StripText.SIZE, StripText.MIN) { sp ->
-                    measure.textSize = spToPx(sp, resources.displayMetrics)
+                    measure.textSize = dpToPx(sp, resources.displayMetrics)
                     ceil(measure.measureText(text, 0, text.length))
                 }
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, fitted)
+                setTextSize(TypedValue.COMPLEX_UNIT_DIP, fitted)
             }
             super.onMeasure(widthMeasureSpec, heightMeasureSpec)
         }
@@ -473,7 +473,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
     }
 }
 
-/** [size] in sp as pixels through the conversion [TextView.setTextSize] uses: Android 14+ makes it
- * non-linear above a 1.0 font scale, so a cached pixel-per-sp never matches a size set in sp. */
-private fun spToPx(size: Float, metrics: DisplayMetrics): Float =
-    TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, size, metrics)
+/** [size] in dp as pixels. The strip's words are in dp, not sp: as Gboard's suggestions (Gboard 15.1, emulator),
+ * they keep their size whatever the system font size, so a larger font never crowds the strip. */
+private fun dpToPx(size: Float, metrics: DisplayMetrics): Float =
+    TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, size, metrics)
