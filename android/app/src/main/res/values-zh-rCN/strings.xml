@@ -116,4 +116,6 @@
     <string name="number_row_detail">在字母上方显示 1–0</string>
     <string name="keyboard_tools">键盘工具</string>
     <string name="keyboard_tools_detail">在建议栏中显示表情、粘贴、设置和撤销</string>
+    <string name="smart_quotes">智能引号</string>
+    <string name="smart_quotes_detail">用 ’ ‘ “ ” 代替 \' 和 \"</string>
 </resources>

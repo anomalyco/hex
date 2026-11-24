@@ -48,10 +48,18 @@ internal class TypingPreferences(context: Context) {
     var keyboardTools: Boolean
         get() = prefs.getBoolean(KEYBOARD_TOOLS, false)
         set(value) { prefs.edit().putBoolean(KEYBOARD_TOOLS, value).apply() }
+    /** Labs › Keyboard › Smart quotes: typographic ’ ‘ “ ” for the quote keys, suggestions and
+     * dictation, off by default. */
+    var smartQuotes: Boolean
+        get() = prefs.getBoolean(SMART_QUOTES, false)
+        set(value) { prefs.edit().putBoolean(SMART_QUOTES, value).apply() }
 
     // Remember only explicit rejection of this exact pair in this language; never save typed text.
     private fun pair(language: String, original: String, replacement: String): String {
-        val bytes = (language + "\u0000" + original.lowercase() + "\u0000" + replacement.lowercase()).toByteArray()
+        // A smart apostrophe counts as the straight one it replaces, so rejecting a fix twice still
+        // blocks it when the keyboard inserts the fix's curly spelling.
+        val bytes = (language + "\u0000" + original.lowercase().replace('\u2019', '\'') + "\u0000" +
+            replacement.lowercase().replace('\u2019', '\'')).toByteArray()
         return android.util.Base64.encodeToString(MessageDigest.getInstance("SHA-256").digest(bytes), android.util.Base64.NO_WRAP)
     }
     fun blocked(language: String, original: String, replacement: String) =
@@ -65,5 +73,6 @@ internal class TypingPreferences(context: Context) {
         const val NUMBER_ROW = "numberRow"
         const val EMOJI_SUGGESTIONS = "emojiSuggestions"
         const val KEYBOARD_TOOLS = "keyboardTools"
+        const val SMART_QUOTES = "smartQuotes"
     }
 }

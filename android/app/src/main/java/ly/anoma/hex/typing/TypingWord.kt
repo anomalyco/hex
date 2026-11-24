@@ -96,14 +96,14 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
      * as shift would be, by default at a sentence's start. */
     fun predictions(before: String, capitalize: Boolean? = null): List<String> {
         if (standIn) return emptyList()
-        val text = if (before.lastOrNull()?.let { it.isLetter() || it == '\'' } == true) "$before " else before
+        val text = if (before.lastOrNull()?.let { it.isLetter() || it == '\'' || it == '\u2019' } == true) "$before " else before
         val words = when {
             startsSentence(text) -> sentenceStarters[model.language]
             !text.last().isWhitespace() -> return emptyList()
             text.dropLast(1).lastOrNull()?.let { it in midSentenceMarks } == true -> clauseStarters[model.language]
             else -> {
                 val finished = currentToken(text.dropLast(1)) ?: return emptyList()
-                val previous = finished.lowercase()
+                val previous = lookup(finished.lowercase())
                 val index = model.context(previous)
                 val next = if (index >= 0) model.nextWords(index, suggestSwearWords, fill = false) else emptyList()
                 (next + commonWords[model.language].orEmpty()).filter {
@@ -140,10 +140,10 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         if (token.length !in 1..MAX_LENGTH) return emptyList()
         val typed = Suggestion(token, Suggestion.Kind.Typed)
         // Your shortcut: what you typed and its phrase, which space puts in whatever autocorrect does.
-        decoder.personal?.shortcut(token)?.let { return listOf(typed, Suggestion(it, Suggestion.Kind.Fix)) }
+        decoder.personal?.shortcut(lookup(token))?.let { return listOf(typed, Suggestion(it, Suggestion.Kind.Fix)) }
         val fix = if (autocorrect && !standIn) replacement() else null
         val pool = ArrayList<String>(4)
-        val lower = token.lowercase()
+        val lower = lookup(token.lowercase())
         val showTyped = standIn || fix != null || blocked(token) || knows(lower)
         val size = if (showTyped) 2 else 3
         val lowered = !addsCapitals && token.none { it.isUpperCase() }
@@ -156,7 +156,7 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         if (autocorrect && fix == null && !standIn && model.language == "en") suggestOnly[lower]?.let { add(matchCase(token, it)) }
         // Your own word, completed once two letters match, before the dictionary's: a word you added is
         // likelier what you mean than a reading's runner-up ("zor" offers "Zorbex" beside the fix "or").
-        if (token.length >= 2) decoder.personal?.completions(token)?.firstOrNull()?.let { add(yours(it)) }
+        if (token.length >= 2) decoder.personal?.completions(lookup(token))?.firstOrNull()?.let { add(yours(it)) }
         val short = if (!standIn && token.length <= 3) model.completionsAfter(lower, previous, suggestSwearWords).map { shown(model.text(it)) } else emptyList()
         if (fix == null) short.firstOrNull { s -> pool.none { it.equals(s, ignoreCase = true) } }?.let(::add)
         val readings = autocorrect && !standIn && spatial && token.length >= 2 && !protected()
@@ -164,7 +164,7 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         if (readings && token.length >= 3) for (r in decision().readings) add(reading(r.text))
         for (s in short) add(s)
         // Your own words before the rest of the dictionary's (iOS lists UILexicon terms with them).
-        decoder.personal?.completions(token)?.forEach { add(yours(it)) }
+        decoder.personal?.completions(lookup(token))?.forEach { add(yours(it)) }
         if (!standIn) for (w in model.completions(lower, suggestSwearWords, previous)) add(shown(model.text(w)))
         if (readings && token.length < 3) for (r in decision().readings) add(reading(r.text))
         if (pool.isEmpty()) return listOf(typed)
@@ -187,9 +187,9 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         if (taps.size == token.length) taps.removeAt(taps.lastIndex)
         token = token.dropLast(1); decision = null
     }
-    private fun decision() = decision ?: decoder.decide(token.lowercase(), taps, previous, suggestSwearWords).also { decision = it }
+    private fun decision() = decision ?: decoder.decide(lookup(token.lowercase()), taps, previous, suggestSwearWords).also { decision = it }
     // Your own words are always yours to offer, as iOS offers UILexicon terms.
-    private fun blocked(spelling: String) = model.neverSuggest.blocks(spelling.lowercase(), suggestSwearWords, previous) &&
+    private fun blocked(spelling: String) = model.neverSuggest.blocks(lookup(spelling.lowercase()), suggestSwearWords, previous) &&
         decoder.personal?.owns(spelling) != true
     /** The key a touch near a key's edge presses (iOS FullKeyboardEngine.key(at:), #2091): the key it
      * landed on ([hit]), or a neighbouring letter whose touch area is within [REACH] of it and which
@@ -201,8 +201,8 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
     fun likelierKey(before: String, hit: Char, near: Map<Char, Double>, keys: Collection<Char>): Char {
         if (standIn || near.isEmpty()) return hit
         val token = currentToken(before)
-        if (token == null && before.lastOrNull()?.let { it.isLetterOrDigit() || it == '\'' } == true) return hit
-        val continuations = model.continuations((token ?: "").lowercase()) ?: return hit
+        if (token == null && before.lastOrNull()?.let { it.isLetterOrDigit() || it == '\'' || it == '\u2019' } == true) return hit
+        val continuations = model.continuations(lookup((token ?: "").lowercase())) ?: return hit
         val keyed = keys.mapTo(HashSet()) { model.code(it.lowercaseChar()) }
         val mass = DoubleArray(continuations.size)
         for (code in 1 until continuations.size) if (continuations[code] > 0)
@@ -210,7 +210,7 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         val total = mass.sum()
         // Right after an elided article or pronoun ("l", "qu"), the apostrophe key is the likeliest: the
         // books split the commonest elisions off ("l'", "d'"), so the word list can't say so itself.
-        val elided = token != null && token.lowercase() in ELISIONS[model.language].orEmpty() &&
+        val elided = token != null && lookup(token.lowercase()) in ELISIONS[model.language].orEmpty() &&
             before.dropLast(token.length).lastOrNull().let { boundary(it) }
         if (elided && model.apostrophe != 0) mass[model.apostrophe] = maxOf(mass[model.apostrophe], total)
         fun odds(c: Char) = model.code(c.lowercaseChar()).takeIf { it != 0 }?.let { kotlin.math.ln(mass[it] + total * 1e-4) }
@@ -260,17 +260,17 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         // for a layout or a language with a model. Your shortcuts go in through textReplacement before it.
         if (standIn || token.isEmpty()) return null
         val personal = decoder.personal
-        personal?.shortcut(token)?.let { return it }
+        personal?.shortcut(lookup(token))?.let { return it }
         // Your own word: never corrected into another, and spelled your way ("github" -> "GitHub").
-        personal?.index(token)?.takeIf { it >= 0 }?.let { return yours(personal.text(it)).takeIf { s -> s != token } }
+        personal?.index(lookup(token))?.takeIf { it >= 0 }?.let { return yours(personal.text(it)).takeIf { s -> s != token } }
         if (literalOnly || blocked(token)) return null
-        val lower = token.lowercase()
+        val lower = lookup(token.lowercase())
         val allCaps = token.length >= 2 && token.all { it.isUpperCase() }
         if (token.drop(1).any { it.isUpperCase() } && !allCaps) return null
         if (model.language == "en" && lower in shorthand) return null
         // A word the same letters spell with an apostrophe or an accent, or one that sounds alike,
         // chosen by the word before when it says so clearly ("yes id" -> "yes I'd", "the id" stays).
-        if (!allCaps && '\'' !in token) ContextWords.choice(model, token, previousText, null, sentenceStart)
+        if (!allCaps && '\'' !in token && '\u2019' !in token) ContextWords.choice(model, token, previousText, null, sentenceStart)
             ?.takeUnless(::blocked)?.let { return it }
         if (model.language == "en") {
             englishFixes[lower]?.takeUnless(::blocked)?.let { return if (allCaps) {
@@ -325,8 +325,11 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
      * the word before revised now that this one follows ("well see" -> "we'll see"), or both words
      * joined when the space between them was tapped for a letter ("deli ate" -> "delicate"). Null
      * leaves the text as typed. [space] is where the space bar was tapped, in [grid]'s coordinates.
+     * [commit] spells a replacement as it will actually go in (Labs › Keyboard › Smart quotes turns
+     * its apostrophes into ’), so the word kept for the next word's revision is the one inserted.
      * Call it once per space or mark, then `reset` with the text after it. */
-    fun finish(ending: Char = ' ', space: KeyPoint? = null, grid: KeyGrid? = null): Correction? {
+    fun finish(ending: Char = ' ', space: KeyPoint? = null, grid: KeyGrid? = null,
+               commit: (String) -> String = { it }): Correction? {
         val word = finished
         finished = null; pending = null
         if (standIn || token.isEmpty() || (ending == '.' && token.lowercase() in abbreviations)) return null
@@ -342,10 +345,13 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         if (result == null) {
             val fix = replacement()
             val now = fix ?: token
-            val revised = if (word != null && '\'' !in word.typed) revision(word.text, now) else null
+            // A word typed or corrected with an apostrophe is left as it is, whether that apostrophe
+            // is straight or the smart ’ (Labs › Keyboard › Smart quotes).
+            val revised = if (word != null && '\'' !in lookup(word.typed)) revision(word.text, now) else null
             if (fix != null || revised != null)
                 result = Correction((if (revised != null) word!!.text + " " else "") + token, (revised?.let { "$it " } ?: "") + now)
         }
+        result = result?.let { Correction(it.original, commit(it.replacement)) }
         if (ending == ' ') remember(result, space, grid)
         return result
     }
@@ -354,16 +360,19 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
     // (`ContextWords`); a word typed with its own apostrophe never gets here.
     private fun revision(text: String, next: String): String? {
         if (!ContextWords.decides(model.language) || text.isEmpty() || (model.language == "en" && text.length < 2)) return null
+        // ContextWords knows the straight spellings, so a word inserted with a smart apostrophe
+        // ("it’s") is looked up by the straight one ("it's").
+        val key = lookup(text)
         // Typed in capitals, left alone; one capital letter is a sentence's start ("E andato" -> "È andato").
-        if (text.length >= 2 && text == text.uppercase() && text != text.lowercase() && !text.startsWith("I'")) return null
+        if (text.length >= 2 && text == text.uppercase() && text != text.lowercase() && !key.startsWith("I'")) return null
         val rest = before.dropLast(text.length + 1)
         val prev = previousWord(rest).takeIf { it.isNotEmpty() }
-        val choice = ContextWords.choice(model, text, prev, next.substringBefore(' ').lowercase(), startsSentence(rest)) ?: return null
+        val choice = ContextWords.choice(model, key, prev, next.substringBefore(' ').lowercase(), startsSentence(rest)) ?: return null
         if (model.neverSuggest.blocks(choice.lowercase(), suggestSwearWords, model.context(prev.orEmpty()))) return null
-        return if (addsCapitals || text.first().isUpperCase()) choice else choice.lowercase().takeIf { it != text }
+        return if (addsCapitals || text.first().isUpperCase()) choice else choice.lowercase().takeIf { it != key }
     }
 
-    private fun knows(spelling: String) = spelling.lowercase().let {
+    private fun knows(spelling: String) = lookup(spelling.lowercase()).let {
         model.index(it) >= 0 || model.known(it) || it in shorthand || (decoder.personal?.index(it) ?: -1) >= 0
     }
 
@@ -372,9 +381,9 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
     private fun remember(result: Correction?, space: KeyPoint?, grid: KeyGrid?) {
         val full = before + token
         val after = (if (result == null) full else full.dropLast(result.original.length) + result.replacement) + " "
-        val text = after.dropLast(1).takeLastWhile { it.isLetter() || it == '\'' }
+        val text = after.dropLast(1).takeLastWhile { it.isLetter() || it == '\'' || it == '\u2019' }
         if (text.isEmpty()) return
-        val sameLetters = text.count { it != '\'' } == token.length
+        val sameLetters = text.count { it != '\'' && it != '\u2019' } == token.length
         val wordTaps = if (sameLetters && spatial && !literalOnly && taps.size == token.length) ArrayList(taps) else null
         val spaceTap = if (wordTaps != null && space != null && grid != null) decoder.score(grid, space.x, space.y) else null
         val reach = if (spaceTap != null) decoder.rowCost(grid!!, space!!.x, space.y) else Double.POSITIVE_INFINITY
@@ -383,7 +392,7 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
     fun suggestions(): List<String> {
         if (standIn || token.length !in 1..MAX_LENGTH) return emptyList()
         val options = LinkedHashMap<String, Int>()
-        for (w in model.completions(token.lowercase(), suggestSwearWords, previous)) options[model.text(w)] = model.frequencyCost(w)
+        for (w in model.completions(lookup(token.lowercase()), suggestSwearWords, previous)) options[model.text(w)] = model.frequencyCost(w)
         if (spatial && options.size < 3 && token.length >= 2 && !protected()) for (r in decision().readings)
             options.putIfAbsent(r.text, r.frequency)
         return options.entries.sortedWith(compareBy<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
@@ -416,14 +425,15 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
             var start = before.length
             while (start > 0) {
                 val c = before[start - 1]
-                if (c.isLetter() || (c == '\'' && start < before.length && start >= 2 && before[start - 2].isLetter())) start-- else break
+                if (c.isLetter() || ((c == '\'' || c == '\u2019') && start < before.length && start >= 2 &&
+                        before[start - 2].isLetter())) start-- else break
             }
             if (start == before.length) return null
             if (start > 0 && before[start - 1].let { it in "@/.#_-:" || it.isDigit() }) return null
             return before.substring(start).takeIf { it.first().isLetter() }
         }
         /** Marks that close a word and correct it as space does. */
-        fun endsWord(c: Char) = c in ",.!?;:)\""
+        fun endsWord(c: Char) = c in ",.!?;:)\"\u201D"
         // A period after these makes an abbreviation ("approx.", "etc."), never a typo.
         private val abbreviations = ("approx appt apt assn asst ave blvd cf co corp dept dr eg est etc fig govt ie inc jr lb " +
             "lbs ltd misc mr mrs ms mt no nr oz pp prof pt rd sr st vol vs wk yr").split(' ').toSet()
@@ -456,6 +466,9 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
             else -> target
         }
         private val shorthand = "ok okay ty thx pls plz tmrw tbh idk imo imho lol lmao omg brb btw afaik fyi nvm rn irl jk np yw smh ikr ngl fr gg dm pr prs ci ui ux ios macos api apis url urls json sql ssh cli gpu cpu ram sdk hex wisp seer rune kit gonna wanna gotta kinda sorta yeah yep nope nah hey yo".split(' ').toSet()
+        /** [text] with a smart apostrophe as the straight one the model and the personal dictionary store, so
+         * a word typed with ’ completes and corrects as the same word typed with '. */
+        private fun lookup(text: String) = text.replace('\u2019', '\'')
         // The word before the cursor, lowercase; an elided one without its apostrophe ("l'" as "l").
         fun previousWord(before: String) = before.trimEnd().takeLastWhile { it.isLetter() || it == '\'' || it == '\u2019' }
             .lowercase().replace('\u2019', '\'').trimEnd('\'')

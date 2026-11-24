@@ -3223,7 +3223,7 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 │   Checks: `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` (includes
 │   `EmojiKeywordsTest`) and `python3 scripts/code-shape.py --check`; the repo has no
 │   Android CI.
-└── Labs > Keyboard > Keyboard tools (off) -> while the strip has nothing else to show (no
+├── Labs > Keyboard > Keyboard tools (off) -> while the strip has nothing else to show (no
     suggestion chips, Undo dictation, notice or dictation) and the field is not a password,
     PIN or other secure field, the "Hold Hex to talk" hint becomes up to four icon buttons
     without making the keyboard taller: Emoji (the bottom row's emoji key, so only on the
@@ -3239,6 +3239,21 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
     Checks: `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` (includes
     `KeyboardToolsTest`) and `python3 scripts/code-shape.py --check`; the repo has no
     Android CI. Not tried on a device or emulator.
+└── Labs > Keyboard > Smart quotes (off) -> in a plain-text field (not a password, email or URL
+    field, or a TYPE_NULL field such as a terminal), the ' and " keys type ’ ‘ “ ”: an opening
+    quote — ‘ or “ — at the start, after whitespace, or after an opening bracket or quote, and
+    the closing quote or apostrophe — ’ or ” — after anything else. A word a suggestion,
+    autocorrection or swipe commits goes in with ’ for its straight apostrophe ("don't" becomes
+    "don’t"), your own text replacements get ’ for each straight apostrophe they contain (a " in
+    one stays straight), and a dictation's straight quotes are placed by the same rules, after its
+    spacing is decided, in the same plain-text fields as the keys. The strip shows the ’ a
+    suggestion will insert. A quote key's held alternates still type exactly the character they
+    show. Off, keys, picks and dictation insert the straight characters they did before, and
+    existing ’ and ” are treated like ' and " for word boundaries, spacing and lookups. Checks:
+    `./gradlew :app:compileDebugKotlin :app:testDebugUnitTest` passed with 150 tests (including
+    `SmartQuotesTest`'s 12) on 2026-11-24, on Temurin JDK 21 and Android SDK 36 (platform 36,
+    build-tools 35/36, NDK 27.2.12479018); the repo has no Android CI, and nothing was tried on a
+    device or emulator. `python3 scripts/code-shape.py --check` passes.
 Unmerged Windows / deferred features -> Not part of this map
 ```
 

@@ -12,6 +12,7 @@ import ly.anoma.hex.speech.SpokenText
 import ly.anoma.hex.typing.KeyGrid
 import ly.anoma.hex.typing.KeyPoint
 import ly.anoma.hex.typing.PersonalWords
+import ly.anoma.hex.typing.SmartQuotes
 import ly.anoma.hex.typing.SpatialDecoder
 import ly.anoma.hex.typing.Suggestion
 import ly.anoma.hex.typing.SwipeReader
@@ -291,7 +292,7 @@ internal class KeyboardEngine(
     private fun showSuggestions(w: TypingWord?) {
         cancelChip()
         if (w != null && w.token.isNotEmpty()) {
-            surface?.suggestions(Suggestion.withEmoji(w.strip(autocorrect = false), emojiFor(w)))
+            surface?.suggestions(Suggestion.withEmoji(w.strip(autocorrect = false).map(::shown), emojiFor(w)))
             // A stand-in's strip already is the finished one: nothing there changes after the pause.
             if (!feedback.autocorrect || w.standIn || !canEndWord()) return
             val token = w.token
@@ -300,7 +301,7 @@ internal class KeyboardEngine(
                 if (word === w && w.token == token) surface?.suggestions(Suggestion.withEmoji(w.strip(autocorrect = true).map {
                     if (it.kind == Suggestion.Kind.Fix && feedback.blocked(w.decoder.model.language, token, it.text))
                         Suggestion(it.text, Suggestion.Kind.Word) else it
-                }, emojiFor(w)))
+                }.map(::shown), emojiFor(w)))
             }.also { main.postDelayed(it, CHIP_PAUSE_MS) }
             return
         }
@@ -329,12 +330,18 @@ internal class KeyboardEngine(
     private fun showPredictions(before: String?) {
         val w = word
         surface?.suggestions(if (w != null && before != null && !symbols && canEndWord())
-            w.predictions(before, capitalize = capsWanted()).map { Suggestion(it, Suggestion.Kind.Next) } else emptyList())
+            w.predictions(before, capitalize = capsWanted()).map { shown(Suggestion(it, Suggestion.Kind.Next)) } else emptyList())
     }
+
+    /** A slot as the strip shows it: with Labs › Keyboard › Smart quotes on, a word shows the ’ it
+     * will insert ("I'm" shows "I’m"). A pick runs [smartWord] over this text again, which leaves a
+     * curly apostrophe unchanged. */
+    private fun shown(slot: Suggestion) =
+        if (smartQuotesHere()) Suggestion(SmartQuotes.word(slot.text), slot.kind) else slot
     private fun before() = if (secure) "" else target.before(96).orEmpty()
     private fun endsWith(suffix: String) = !secure && target.before(suffix.length) == suffix
     private fun canEndWord() = !secure && (target.after(1)?.firstOrNull()?.let {
-        !it.isLetterOrDigit() && it !in "'_/@#"
+        !it.isLetterOrDigit() && it !in "'’_/@#"
     } ?: true)
     private fun inputDone() {
         val was = shift.uppercase
@@ -410,13 +417,27 @@ internal class KeyboardEngine(
         if (old.isEmpty() && !w.startsWord(before())) return
         val holds = SpaceRules.separates(target.after(1))
         clearSpaces()
-        if (replace(old, if (holds) text else "$text ")) {
+        val committed = smartWord(text)
+        if (replace(old, if (holds) committed else "$committed ")) {
             resetTyping()
             val b = before()
             if (holds) heldAnchor = b else pickedAnchor = b
             showPredictions(b)
             inputDone()
         }
+    }
+
+    /** A word a pick, autocorrection or swipe commits: with Labs › Keyboard › Smart quotes on, its
+     * straight apostrophes go in as ’ ("don't" becomes "don’t"). Off, it is exactly the text offered. */
+    private fun smartWord(text: String) = if (smartQuotesHere()) SmartQuotes.word(text) else text
+
+    /** Whether Labs › Keyboard › Smart quotes applies at the cursor: its toggle on, in a plain text
+     * field, and not in a password, email, URL or TYPE_NULL field (a terminal), whose text must keep
+     * the straight quotes it has always taken. */
+    private fun smartQuotesHere(): Boolean {
+        if (!feedback.smartQuotes || secure) return false
+        val type = editor?.inputType ?: 0
+        return (type and InputType.TYPE_MASK_CLASS) == InputType.TYPE_CLASS_TEXT && FieldKind.of(type) == FieldKind.Text
     }
 
     /** The space bar, tapped at [point] in [grid]'s coordinates (null off the letters page). */
@@ -442,10 +463,11 @@ internal class KeyboardEngine(
             val old = w.token; val lang = w.decoder.model.language
             // Your text replacements first, whatever autocorrect is set to; they never offer an undo.
             val swap = w.textReplacement(b)
-            if (swap != null && replace(swap.original, swap.replacement + " ")) { resetTyping(); afterSpace(now); return }
+            if (swap != null && replace(swap.original, smartWord(swap.replacement) + " ")) { resetTyping(); afterSpace(now); return }
             if (feedback.autocorrect && old.isNotEmpty() && endsWith(prefix + old)) {
-                val fix = w.finish(' ', point, grid)
-                if (fix != null && !feedback.blocked(lang, fix.original, fix.replacement) && replace(fix.original, fix.replacement + " ")) {
+                val fix = w.finish(' ', point, grid, ::smartWord)
+                if (fix != null && !feedback.blocked(lang, fix.original, fix.replacement) &&
+                    replace(fix.original, fix.replacement + " ")) {
                     cancelChip()
                     undo = Undo(lang, fix.original, fix.replacement)
                     if (expectedCaret >= 0) expectedCaret += fix.replacement.length + 1 - fix.original.length
@@ -459,6 +481,16 @@ internal class KeyboardEngine(
         val b = before()
         spaceAnchor = b; spaceAt = now
         showPredictions(b); inputDone()
+    }
+
+    /** A quote key's own character (' or ") as it goes in: Labs › Keyboard › Smart quotes makes it
+     * ’ or ‘ and “ or ” by the text before the cursor; off, and in a password field or an email or
+     * URL field, it is exactly the key's character. The keys' long-press alternates never come here:
+     * they type what they show. */
+    fun quote(value: Char) {
+        if (!target.connected) return
+        val placed = if (smartQuotesHere()) SmartQuotes.typed(value, before().lastOrNull()) else value
+        type(placed.toString())
     }
 
     fun type(value: String) {
@@ -479,9 +511,9 @@ internal class KeyboardEngine(
         val w = word
         if (mark && w != null && !symbols && canEndWord() && !afterSwipe) {
             val swap = w.textReplacement(text)
-            if (swap != null && replace(swap.original, swap.replacement + value)) { resetTyping(); showPredictions(before()); inputDone(); return }
+            if (swap != null && replace(swap.original, smartWord(swap.replacement) + value)) { resetTyping(); showPredictions(before()); inputDone(); return }
             if (feedback.autocorrect && w.token.isNotEmpty() && endsWith(prefix + w.token)) {
-                val fix = w.finish(value[0])
+                val fix = w.finish(value[0], commit = ::smartWord)
                 if (fix != null && !feedback.blocked(w.decoder.model.language, fix.original, fix.replacement) &&
                     replace(fix.original, fix.replacement + value)) { resetTyping(); showPredictions(before()); inputDone(); return }
             }
@@ -524,7 +556,7 @@ internal class KeyboardEngine(
     fun enter() {
         edited()
         // A text replacement that ends the text goes in before the line break or the editor's action.
-        word?.takeIf { canEndWord() }?.textReplacement(before())?.let { replace(it.original, it.replacement) }
+        word?.takeIf { canEndWord() }?.textReplacement(before())?.let { replace(it.original, smartWord(it.replacement)) }
         resetTyping(); clearSpaces(); surface?.suggestions(emptyList())
         val info = editor
         if (info?.actionLabel != null && (info.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION) == 0 &&
@@ -580,7 +612,10 @@ internal class KeyboardEngine(
             if (model == null) SpokenText.continuing(text, before, language)
             else SpokenText.continuing(text, before, language) { model.index(it) >= 0 && (model.capitals?.percent(it) ?: -1) < 50 }
         }
-        val result = dictationInsertion(shaped, before, target.after(1)?.firstOrNull(), standalone)
+        // Spacing is decided on the straight quotes, as it always was, so a dictation's spacing is
+        // unchanged: the same smart quotes as the keys and the strip then go in with their spacing.
+        val spaced = dictationInsertion(shaped, before, target.after(1)?.firstOrNull(), standalone)
+        val result = if (smartQuotesHere()) SmartQuotes.text(spaced, before?.lastOrNull()) else spaced
         if (result.isNotEmpty() && target.commit(result)) {
             continuation.record(if (signature) result else null)
             if (!secure) offerUndo(Dictated(result, target.after(16).orEmpty()))
@@ -665,7 +700,8 @@ internal class KeyboardEngine(
         if (!swiping) return
         val b = before()
         val first = retries.reordered(readings, b).firstOrNull() ?: return
-        surface?.suggestions(listOf(Suggestion(swipeCased(first, swipeCapital(b, SwipeText.needsSpace(b))), Suggestion.Kind.Word)))
+        surface?.suggestions(listOf(Suggestion(smartWord(swipeCased(first, swipeCapital(b, SwipeText.needsSpace(b)))),
+            Suggestion.Kind.Word)))
     }
 
     /** The swipe ended: its best reading goes in (none when [readings] is empty, as for a cancelled swipe), after a
@@ -680,8 +716,8 @@ internal class KeyboardEngine(
         val ordered = retries.typing(readings, b)
         val space = SwipeText.needsSpace(b)
         val capital = swipeCapital(b, space)
-        val text = swipeCased(ordered.first(), capital)
-        val alternatives = swipeAlternatives(w, ordered, capital)
+        val text = smartWord(swipeCased(ordered.first(), capital))
+        val alternatives = swipeAlternatives(w, ordered, capital).map(::smartWord)
         clearSpaces(); resetTyping()
         if (!target.commit(if (space) " $text" else text)) return
         swiped = Swiped(text, alternatives); takenBack = null
