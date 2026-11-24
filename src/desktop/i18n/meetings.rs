@@ -52,4 +52,7 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Select the lines to delete.", ["Zaznacz wiersze do usunięcia.", "选择要删除的行。", "削除する行を選択してください。", "Wähle die zu löschenden Zeilen aus.", "Selecciona las líneas que quieres eliminar.", "Виберіть рядки, які треба видалити."]),
     ("Its summary and chapters will be removed. Summarize again for a fresh one.", ["Jego podsumowanie i rozdziały zostaną usunięte. Podsumuj ponownie, aby je odtworzyć.", "它的摘要和章节将被移除。再次总结可生成新的。", "要約とチャプターは削除されます。もう一度要約すると新しく作成されます。", "Zusammenfassung und Kapitel werden entfernt. Fasse erneut zusammen, um neue zu erhalten.", "Se eliminarán su resumen y sus capítulos. Vuelve a resumir para crear unos nuevos.", "Підсумок і розділи буде вилучено. Підсумуйте знову, щоб створити нові."]),
     ("Lines could not be deleted.", ["Nie udało się usunąć wierszy.", "无法删除行。", "行を削除できませんでした。", "Zeilen konnten nicht gelöscht werden.", "No se pudieron eliminar las líneas.", "Не вдалося видалити рядки."]),
+    ("{} call ended", ["Rozmowa w {} zakończona", "{} 通话已结束", "{} の通話が終了しました", "{}-Anruf beendet", "Llamada de {} finalizada", "Дзвінок у {} завершено"]),
+    ("Recording stops in {} s", ["Nagrywanie zatrzyma się za {} s", "{} 秒后停止录制", "{} 秒後に録音を停止します", "Aufnahme endet in {} s", "La grabación se detiene en {} s", "Запис зупиниться через {} с"]),
+    ("Stop now", ["Zatrzymaj teraz", "立即停止", "今すぐ停止", "Jetzt stoppen", "Detener ahora", "Зупинити зараз"]),
 ];

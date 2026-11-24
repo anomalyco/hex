@@ -1176,13 +1176,15 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
   -> Settings window may stay closed
 
 Detected app leaves the microphone for about 3 s     // meetings.call-ended
-  -> "Zoom left the call" capsule: Keep recording / Stop & transcribe
+  -> "Zoom call ended" capsule (rune_ui/meeting_capsules/call_ended.rs):
+     the call app's icon (or rounded-rect provider tile), "Hex is still
+     recording.", Keep recording / Stop & transcribe
      ├── It stands in for the recording pill while it shows
      └── Keep recording (or another capsule replacing it) -> the recording
          pill returns with its start time and title
          (keep_recording_brings_back_the_recording_capsule_as_it_was; not
          observed on a real Mac)
-  -> No timeout; nothing stops automatically
+  -> No timeout without an automatic stop; nothing stops automatically
 
 Panel capsules move like the recording capsule (#1093, graduated from Labs; only a native Wayland capsule still returns to its corner) // meetings.panel-drag
   The panel capsules: offer, reminder, left the call, the finished meeting,
@@ -1231,13 +1233,16 @@ meetings.stop_when_call_ends) // meetings.auto-stop
          that can't be read. On Linux the graph is briefly empty right after
          its monitor (re)starts, which reads as not playing, harmless because
          the microphone read is empty too and an absence only counts after 3 s
-  -> Both off for about 3 s -> capsule says "Hex stops recording in 30 s
-     unless you keep recording."
+  -> Both off for about 3 s -> "<App> call ended" capsule counts down
+     "Recording stops in 30 s", with a concentric rounded-rect ring around
+     the app icon that drains smoothly on the frame clock and fades over its
+     last 0.18 s (under Reduce Motion it steps once a second with no head;
+     ControllerEvent::CallEnded carries the stop's Instant)
      ├── App back on the microphone or output within 30 s -> its stop is
      │   dropped; once no other automatic stop counts the notice is withdrawn
      │   and the recording capsule returns (CallEndedWithdrawn)
      ├── Keep recording -> nothing stops for this absence; leaving again re-arms
-     ├── Stop & transcribe -> stops now
+     ├── Stop now -> Stop & Transcribe now
      └── 30 s pass -> Stop & Transcribe, as the menu bar's; logged
          "meeting recording stopped automatically after its call ended";
          its call's snooze ends as after a hand stop, so the app retaking the

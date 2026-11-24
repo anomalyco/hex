@@ -391,13 +391,15 @@ pub struct AutoStop {
 }
 
 impl AutoStop {
-    /// The call ended: stop after the grace.
-    pub fn arm(&mut self) {
-        self.arm_at(Instant::now());
+    /// The call ended: stop after the grace. Returns when.
+    pub fn arm(&mut self) -> Instant {
+        self.arm_at(Instant::now())
     }
 
-    fn arm_at(&mut self, now: Instant) {
-        self.deadline = Some(now + AUTO_STOP_GRACE);
+    fn arm_at(&mut self, now: Instant) -> Instant {
+        let deadline = now + AUTO_STOP_GRACE;
+        self.deadline = Some(deadline);
+        deadline
     }
 
     /// Whether a stop is counting: armed, and its grace has not run out.

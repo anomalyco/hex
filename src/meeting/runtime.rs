@@ -221,8 +221,8 @@ fn follow(event: &ControllerEvent, window: &rune::AppHandle<Ui>) {
             let message = error.clone();
             window.update(move |ui, _| crate::rune_ui::meeting_edit_failed(ui, message));
         }
-        ControllerEvent::CallEnded { app, auto_stop } => {
-            if *auto_stop {
+        ControllerEvent::CallEnded { app, stops_at, .. } => {
+            if stops_at.is_some() {
                 tracing::info!(
                     %app,
                     "the call ended; the recording stops in {} s unless kept",

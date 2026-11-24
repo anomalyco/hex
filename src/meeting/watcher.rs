@@ -105,12 +105,15 @@ pub(crate) enum ControllerEvent {
     Stopping,
     /// Both sources have stopped. The worker is preparing the final transcript.
     Transcribing,
-    /// `auto_stop` when the recording stops on its own after
+    /// `stops_at` when the recording stops on its own then, after
     /// [`crate::meeting::detection::AUTO_STOP_GRACE`] (Stop when the
-    /// call ends).
+    /// call ends or Labs › Stop every call recording when the call ends).
     CallEnded {
         app: String,
-        auto_stop: bool,
+        /// The native call app's bundle ID (macOS) or executable name for
+        /// its icon; `None` for web calls in a browser.
+        application: Option<String>,
+        stops_at: Option<Instant>,
     },
     /// A pending automatic stop was dropped because the call came back
     /// (Labs › Stop when the call ends): its notice goes, and the recording
@@ -970,12 +973,11 @@ fn poll_recording(
                 auto_stop,
                 "meeting application released the microphone"
             );
-            if auto_stop {
-                active.auto_stop.arm();
-            }
+            let stops_at = auto_stop.then(|| active.auto_stop.arm());
             let _ = events.send(ControllerEvent::CallEnded {
                 app: active.app_label.clone(),
-                auto_stop,
+                application: call_ended_icon_application(active.application.as_deref()),
+                stops_at,
             });
         }
         if active.auto_stop.due() {
@@ -1022,10 +1024,11 @@ fn poll_recording(
                             candidate,
                         );
                     }
-                    active.call_stop.arm();
+                    let stops_at = active.call_stop.arm();
                     let _ = events.send(ControllerEvent::CallEnded {
                         app: active.app_label.clone(),
-                        auto_stop: true,
+                        application: call_ended_icon_application(active.application.as_deref()),
+                        stops_at: Some(stops_at),
                     });
                 }
                 // The page names the recorded call again (or one the user
@@ -1054,6 +1057,14 @@ fn poll_recording(
     let stop_on_end = crate::app_settings::meeting_stop_when_call_ends();
     disarm_call_stop_unless_watching(recording, stop_on_end, detector, events);
     Ok(())
+}
+
+/// The native call app's ID for the call-ended capsule's icon; browsers
+/// return `None` so web calls show their service mark instead of the browser's.
+fn call_ended_icon_application(application: Option<&str>) -> Option<String> {
+    application
+        .filter(|id| !crate::microphone_activity::is_browser_id(Some(id)))
+        .map(str::to_owned)
 }
 
 /// Drops an armed stop whose call came back or whose setting went off (both share one notice).
