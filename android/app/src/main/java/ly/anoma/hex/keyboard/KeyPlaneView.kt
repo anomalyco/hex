@@ -15,7 +15,6 @@ import android.text.style.MetricAffectingSpan
 import android.text.style.RelativeSizeSpan
 import android.view.ContextThemeWrapper
 import android.view.Gravity
-import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -572,7 +571,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
             p.setRecentEmojiProvider(recents)
             p.setOnEmojiPickedListener { item ->
                 // Gboard's tap as an emoji is chosen; the picker's own view plays the click.
-                if (vibrates(context, ime.feedback.haptics)) p.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                tap(context, ime.feedback.haptics, Tap.Press)
                 ime.engine.type(item.emoji)
             }
             picker = p; addView(p, 0, LayoutParams(LayoutParams.MATCH_PARENT, height))

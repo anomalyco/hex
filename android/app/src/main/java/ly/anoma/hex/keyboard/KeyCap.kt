@@ -5,10 +5,8 @@ import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.media.AudioManager
-import android.provider.Settings
 import android.text.TextUtils
 import android.view.Gravity
-import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -49,13 +47,12 @@ internal class KeyCap(context: Context, fill: Int, description: String, private 
         face.background = paints
         addView(face, LayoutParams(-1, -1))
     }
-    private fun vibrates() = vibrates(context, haptics())
     // A tap as each key goes down, as on Gboard. The click is the system's own, so it follows Touch
     // sounds as iPhone Hex's follows Keyboard clicks (AudioManager.playSoundEffect checks the setting).
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
             downAt = event.eventTime
-            if (vibrates()) performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+            tap(context, haptics(), Tap.Press)
             context.getSystemService(AudioManager::class.java)?.playSoundEffect(sound)
         }
         if (event.actionMasked == MotionEvent.ACTION_UP) liftAt = event.eventTime
@@ -64,8 +61,7 @@ internal class KeyCap(context: Context, fill: Int, description: String, private 
     /** A key that acts as it lifts lifted: Gboard's second, lighter tick, only after a press of
      * [KeyboardMetrics.RELEASE_TICK_MS] or more (Gboard: none at 190 ms, one at 200 ms). */
     fun typedOnLift() {
-        if (liftAt - downAt >= KeyboardMetrics.RELEASE_TICK_MS && vibrates())
-            performHapticFeedback(HapticFeedbackConstants.KEYBOARD_RELEASE)
+        if (liftAt - downAt >= KeyboardMetrics.RELEASE_TICK_MS) tap(context, haptics(), Tap.Release)
     }
     /** Row 1's digit, small in the corner, quiet enough that the key still reads as its letter. */
     fun hint(text: String?) {
@@ -99,10 +95,6 @@ internal class KeyCap(context: Context, fill: Int, description: String, private 
         if (label != null && isLongClickable) info.addAction(AccessibilityNodeInfo.AccessibilityAction(AccessibilityNodeInfo.ACTION_LONG_CLICK, label))
     }
 }
-
-/** Hex's Haptics setting and the system's Keyboard vibration both on. */
-internal fun vibrates(context: Context, haptics: Boolean) =
-    haptics && Settings.System.getInt(context.contentResolver, "keyboard_vibration_enabled", 1) != 0
 
 /** Builds keys with the keyboard's colours and haptics setting. */
 internal class KeyCaps(private val context: Context, private val haptics: () -> Boolean) {

@@ -2,8 +2,6 @@ package ly.anoma.hex.keyboard
 
 import android.content.Context
 import android.graphics.Rect
-import android.os.Build
-import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
@@ -119,16 +117,15 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
     }
     /** iPhone Hex's light tap as dictation starts; as the microphone closes (done, cancelled or failed), a
      * lighter tick that iPhone Hex doesn't have, so someone using TalkBack, which is quiet while Hex records,
-     * feels both ends. Android's own pair for a gesture's start and end (a click and a tick). */
+     * feels both ends: a click and a tick, as Android's own pair for a gesture's start and end. */
     private fun cue(from: SpeechPhase, to: SpeechPhase) {
         fun recording(p: SpeechPhase) = p == SpeechPhase.Opening || p == SpeechPhase.Listening
-        val modern = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
-        val effect = when {
-            !recording(from) && recording(to) -> if (modern) HapticFeedbackConstants.GESTURE_START else HapticFeedbackConstants.CONFIRM
-            recording(from) && !recording(to) -> if (modern) HapticFeedbackConstants.GESTURE_END else HapticFeedbackConstants.CONTEXT_CLICK
+        val cue = when {
+            !recording(from) && recording(to) -> Tap.Start
+            recording(from) && !recording(to) -> Tap.End
             else -> return
         }
-        if (vibrates(context, ime.feedback.haptics)) performHapticFeedback(effect)
+        tap(context, ime.feedback.haptics, cue)
     }
     fun setLevel(value: Float) = strip.setLevel(value)
     fun cancelGestures() { strip.cancelGestures(); keys.cancelGestures() }
