@@ -36,6 +36,7 @@ import ly.anoma.hex.speech.DictationTimes
 import ly.anoma.hex.speech.Engine
 import ly.anoma.hex.speech.ModelAtTick
 import ly.anoma.hex.speech.ModelStore
+import ly.anoma.hex.speech.RanOn
 import ly.anoma.hex.speech.SpeechPreferences
 import ly.anoma.hex.speech.engineFor
 import ly.anoma.hex.speech.SpeechModel
@@ -175,7 +176,7 @@ internal object Diagnostics {
             val (cores, clocks) = sampler.stop()
             if (measured == null) { into.value = Speed.Failed; return }
             runs += Run(mode.label, number, measured.downloaded, measured.wallMs, measured.cpuMs, measured.timings, measured.text,
-                before, sched(), cores, clocks)
+                before, sched(), cores, clocks, if (mode.english) SpeechModel.threads else 0)
         }
         into.value = Speed.Done(runs, pcm.size / 16_000.0)
     }
@@ -240,7 +241,7 @@ internal fun read(path: String) = runCatching { File(path).readText().trim() }.g
 /** One speed test run: wall and processor time in ms, and whisper.cpp's timings (Whisper.timings). */
 internal class Run(val mode: String, val number: Int, val downloaded: Boolean, val wallMs: Long, val cpuMs: Long,
                    val timings: LongArray, val text: String, val before: Sched, val after: Sched, val cores: String?,
-                   val clocks: String? = null)
+                   val clocks: String? = null, val threads: Int = 0)
 
 /** Where the test's thread was scheduled: its cpuset, the process's cgroups, the cores it may use and its nice value. */
 internal data class Sched(val cpuset: String?, val cgroup: String?, val allowed: String?, val nice: Int?)
@@ -472,7 +473,7 @@ internal fun runLines(run: Run, shared: Set<String> = emptySet()): String = buil
         val decoder = (t[0] + t[2] + t[3] + t[4]) / 1000
         append("; encoder $encoder ms, decoder $decoder ms, other ${maxOf(0, run.wallMs - encoder - decoder)} ms")
         append("; ${t[6]} threads, encoder window ${if (t[5] == 0L) "full" else "${t[5]}"}")
-    }
+    } else if (run.threads > 0) append("; ${run.threads} threads")
     val before = schedParts(run.before).filterKeys { it !in shared }
     val after = schedParts(run.after).filterKeys { it !in shared }
     if (before.isNotEmpty()) {
@@ -489,6 +490,17 @@ private fun schedParts(s: Sched) = linkedMapOf("cpuset" to (s.cpuset ?: "not rea
 
 private fun schedLine(parts: Map<String, String>) = parts.entries.joinToString(", ") { "${it.key} ${it.value}" }
 
+/** The model that wrote a dictation, in plain words; for a fallback, why. The faster model gives no encoder/decoder
+ * split, and after it failed the decode's time includes its try. */
+internal fun ranOn(ran: RanOn) = when (ran) {
+    RanOn.Standard -> "standard dictation"
+    RanOn.Faster -> "faster English dictation"
+    RanOn.NoFile -> "standard dictation, as faster English dictation's download is missing or failed its check"
+    RanOn.LowMemory -> "standard dictation, as the phone was low on memory for faster English dictation"
+    RanOn.LoadFailed -> "standard dictation, as faster English dictation's model didn't load"
+    RanOn.FasterFailed -> "standard dictation, after faster English dictation failed (its try is in the decode's time)"
+}
+
 /** The last real dictation's durations (MicCapture's [DictationTimes]), or that there was none since Hex started. */
 internal fun lastDictationLines(t: DictationTimes?): String = buildString {
     append("Last dictation (durations only, held in memory until Hex's process ends; a dictation discarded with ✕ isn't counted; nothing said or typed):")
@@ -497,8 +509,10 @@ internal fun lastDictationLines(t: DictationTimes?): String = buildString {
     val mark = if (t.tick) "✓" else "the 1-minute stop"
     append(if (t.place == DictationPlace.Keyboard) "  in the keyboard" else "  on Home")
     append(String.format(Locale.ROOT, ", %.1f s recorded, %.1f s kept", t.recordedMs / 1000.0, t.keptMs / 1000.0))
+    append("; ").append(ranOn(t.ran))
     val timings = t.timings?.takeIf { it.size >= 7 }
     if (timings != null) append("; ${timings[6]} threads, encoder window ${if (timings[5] == 0L) "full" else "${timings[5]}"}")
+    else if (t.threads > 0) append("; ${t.threads} threads")
     append("; model ").append(when (t.model) {
         ModelAtTick.Loaded -> "already loaded"
         ModelAtTick.LoadedWhileSpeaking -> "loaded while you spoke"

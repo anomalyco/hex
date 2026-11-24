@@ -9,18 +9,27 @@ internal enum class Engine { Standard, English }
 internal fun engineFor(options: SpeechOptions): Engine =
     if (options.fastEnglish && options.spoken == DictationLanguage.English && !options.translate) Engine.English else Engine.Standard
 
+/** Why the faster model couldn't run: no verified file (missing, or failing its SHA-256), Android short of memory for
+ * it (before loading it, or its load ran out), or a load that failed otherwise. */
+internal enum class Unready { NoFile, LowMemory, LoadFailed }
+
 /** What the faster model did with a dictation. */
 internal sealed interface EnglishResult {
     data class Text(val text: String) : EnglishResult
-    /** It couldn't run: no verified file (missing, or failing its SHA-256) or a failed load; [memory] when Android was
-     * short of memory for it. */
-    data class Unavailable(val memory: Boolean) : EnglishResult
+    data class Unavailable(val why: Unready) : EnglishResult
     /** It ran and failed, or the person discarded the dictation while it ran. */
     data object Failed : EnglishResult
 }
 
-/** A dictation's text (null when it failed), and whether a shortage of memory sent it to today's model. */
-internal data class Decoded(val text: String?, val lowMemory: Boolean = false)
+/** The model that wrote a dictation, for Labs › Diagnostics' last dictation: today's, the faster one, or today's after the
+ * faster one couldn't run ([Unready] says why) or failed. */
+internal enum class RanOn { Standard, Faster, NoFile, LowMemory, LoadFailed, FasterFailed }
+
+/** A dictation's text (null when it failed) and the model that wrote it. */
+internal data class Decoded(val text: String?, val ran: RanOn = RanOn.Standard) {
+    /** A shortage of memory sent it to today's model. */
+    val lowMemory get() = ran == RanOn.LowMemory
+}
 
 /** Runs the faster model on [pcm] when [engine] says so. When it can't, or it fails, the same audio goes to today's
  * model, so nothing said is lost; only a dictation the person discarded ([abandoned]) is not tried again. */
@@ -28,9 +37,13 @@ internal fun transcribe(engine: Engine, pcm: ShortArray, count: Int, abandoned: 
                         english: (ShortArray, Int) -> EnglishResult, standard: (ShortArray, Int) -> String?): Decoded {
     if (engine == Engine.Standard) return Decoded(standard(pcm, count))
     return when (val result = english(pcm, count)) {
-        is EnglishResult.Text -> Decoded(result.text)
-        is EnglishResult.Unavailable -> Decoded(standard(pcm, count), result.memory)
-        EnglishResult.Failed -> if (abandoned()) Decoded(null) else Decoded(standard(pcm, count))
+        is EnglishResult.Text -> Decoded(result.text, RanOn.Faster)
+        is EnglishResult.Unavailable -> Decoded(standard(pcm, count), when (result.why) {
+            Unready.NoFile -> RanOn.NoFile
+            Unready.LowMemory -> RanOn.LowMemory
+            Unready.LoadFailed -> RanOn.LoadFailed
+        })
+        EnglishResult.Failed -> if (abandoned()) Decoded(null, RanOn.Faster) else Decoded(standard(pcm, count), RanOn.FasterFailed)
     }
 }
 

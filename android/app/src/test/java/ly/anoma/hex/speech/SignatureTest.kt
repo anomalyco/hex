@@ -118,8 +118,10 @@ class FastEnglishRoutingTest {
         assertEquals(Engine.Standard, engineFor(changed))
     }
     @Test fun aMissingFileGoesToTodaysModelSilently() {
-        val models = Models(EnglishResult.Unavailable(memory = false))
-        assertEquals(Decoded("standard text", lowMemory = false), models.run(Engine.English, ShortArray(16_000)))
+        val models = Models(EnglishResult.Unavailable(Unready.NoFile))
+        val decoded = models.run(Engine.English, ShortArray(16_000))
+        assertEquals(Decoded("standard text", RanOn.NoFile), decoded)
+        assertFalse(decoded.lowMemory)
         assertEquals(null, ModelStore.english.verifiedIn(createTempDirectory().toFile()))
     }
     @Test fun aFileFailingItsHashIsDeletedSoTheDownloadIsOfferedAgain() {
@@ -135,26 +137,33 @@ class FastEnglishRoutingTest {
     @Test fun shortOfMemoryTheSameAudioGoesToTodaysModel() {
         val pcm = ShortArray(48_000) { (it % 200).toShort() }
         val before = pcm.copyOf()
-        val models = Models(EnglishResult.Unavailable(memory = true))
-        assertEquals(Decoded("standard text", lowMemory = true), models.run(Engine.English, pcm))
+        val models = Models(EnglishResult.Unavailable(Unready.LowMemory))
+        val decoded = models.run(Engine.English, pcm)
+        assertEquals(Decoded("standard text", RanOn.LowMemory), decoded)
+        assertTrue(decoded.lowMemory)
         assertSame(pcm, models.standardGot.single().first)
         assertEquals(48_000, models.standardGot.single().second)
         assertArrayEquals(before, pcm)
     }
     @Test fun aFailedEnglishDecodeTriesTodaysModel() {
         val models = Models(EnglishResult.Failed)
-        assertEquals(Decoded("standard text"), models.run(Engine.English, ShortArray(16_000)))
+        assertEquals(Decoded("standard text", RanOn.FasterFailed), models.run(Engine.English, ShortArray(16_000)))
+        assertEquals(1, models.standardGot.size)
+    }
+    @Test fun aFailedLoadGoesToTodaysModelAndSaysSo() {
+        val models = Models(EnglishResult.Unavailable(Unready.LoadFailed))
+        assertEquals(Decoded("standard text", RanOn.LoadFailed), models.run(Engine.English, ShortArray(16_000)))
         assertEquals(1, models.standardGot.size)
     }
     @Test fun aDiscardedDictationIsNotTriedAgain() {
         // ✕ stops the faster model's decode; today's model must not start on the same audio.
         val models = Models(EnglishResult.Failed)
-        assertEquals(Decoded(null), models.run(Engine.English, ShortArray(16_000), abandoned = true))
+        assertEquals(Decoded(null, RanOn.Faster), models.run(Engine.English, ShortArray(16_000), abandoned = true))
         assertTrue(models.standardGot.isEmpty())
     }
     @Test fun englishTextIsUsedAsItIs() {
         val models = Models(EnglishResult.Text("Meet me on Tuesday, sorry, Wednesday."))
-        assertEquals(Decoded("Meet me on Tuesday, sorry, Wednesday."), models.run(Engine.English, ShortArray(16_000)))
+        assertEquals(Decoded("Meet me on Tuesday, sorry, Wednesday.", RanOn.Faster), models.run(Engine.English, ShortArray(16_000)))
         assertTrue(models.standardGot.isEmpty())
     }
     @Test fun customVocabularyKeepsTheRouteAndTodaysPrompt() {
@@ -166,7 +175,7 @@ class FastEnglishRoutingTest {
     @Test fun aMinuteLongDictationIsDecodedWholeAndKeepsItsNote() {
         val pcm = ShortArray(16_000 * 60)
         val models = Models(EnglishResult.Text("a minute of words"))
-        assertEquals(Decoded("a minute of words"), models.run(Engine.English, pcm))
+        assertEquals(Decoded("a minute of words", RanOn.Faster), models.run(Engine.English, pcm))
         assertEquals(16_000 * 60, models.englishGot.single().second)
         assertEquals("Stopped at 1 minute", dictationNote("Stopped at 1 minute", LOW_MEMORY_NOTE))
         assertEquals(LOW_MEMORY_NOTE, dictationNote(null, LOW_MEMORY_NOTE))

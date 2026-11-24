@@ -91,8 +91,10 @@ internal object SpeechModel {
 
     /** A dictation decode's times for Labs › Diagnostics: its start and end (System.nanoTime), the process's processor
      * time over it (-1: unreadable), whisper.cpp's timings when today's model ran, copied before the speed test can
-     * replace them, and whether it loaded a model itself. Only [decode] writes it; the speed test's [measure] never does. */
-    class Spent(val job: Long, val startedAt: Long, val endedAt: Long, val cpuMs: Long, val timings: LongArray?, val loaded: Boolean)
+     * replace them, whether it loaded a model itself, the model that wrote the text and the threads it ran on. Only
+     * [decode] writes it; the speed test's [measure] never does. */
+    class Spent(val job: Long, val startedAt: Long, val endedAt: Long, val cpuMs: Long, val timings: LongArray?, val loaded: Boolean,
+                val ran: RanOn = RanOn.Standard, val threads: Int = 0)
     @Volatile private var spent: Spent? = null
     fun spent(job: Long) = spent?.takeIf { it.job == job }
     private fun cpuMs() = runCatching { android.os.Process.getElapsedCpuTime() }.getOrDefault(-1L)
@@ -115,7 +117,8 @@ internal object SpeechModel {
         val ended = System.nanoTime()
         val started = if (decodeAt != 0L) decodeAt else ended
         val processor = cpuMs().let { if (it < 0 || decodeCpu < 0) -1L else it - decodeCpu }
-        spent = Spent(job, started, ended, processor, if (whisperRan) runCatching { Whisper.timings() }.getOrNull() else null, opened != before)
+        spent = Spent(job, started, ended, processor, if (whisperRan) runCatching { Whisper.timings() }.getOrNull() else null,
+            opened != before, decoded.ran, threads)
         keep()
         return decoded
     }
@@ -222,13 +225,14 @@ internal object SpeechModel {
      * hashed once per process ([ModelStore.verified]): one that is missing or fails goes unused, silently. */
     private fun openEnglish(app: Context): EnglishResult.Unavailable? {
         if (english != 0L) return null
-        val file = ModelStore.english.verified(app) ?: return EnglishResult.Unavailable(false)
-        if (handle != 0L && shortOfMemory(app)) return EnglishResult.Unavailable(true)
+        val file = ModelStore.english.verified(app) ?: return EnglishResult.Unavailable(Unready.NoFile)
+        if (handle != 0L && shortOfMemory(app)) return EnglishResult.Unavailable(Unready.LowMemory)
         unload()
         englishUsed = true
         english = Parakeet.load(file.absolutePath, threads)
         opened++
-        return if (english != 0L) null else EnglishResult.Unavailable(Parakeet.outOfMemory())
+        return if (english != 0L) null
+            else EnglishResult.Unavailable(if (Parakeet.outOfMemory()) Unready.LowMemory else Unready.LoadFailed)
     }
 
     private fun freeEnglish() { if (english != 0L) Parakeet.free(english); english = 0L }

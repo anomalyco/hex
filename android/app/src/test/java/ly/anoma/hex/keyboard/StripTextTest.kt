@@ -29,6 +29,7 @@ import ly.anoma.hex.diagnostics.lastDictationLines
 import ly.anoma.hex.speech.DictationPlace
 import ly.anoma.hex.speech.DictationTimes
 import ly.anoma.hex.speech.ModelAtTick
+import ly.anoma.hex.speech.RanOn
 import ly.anoma.hex.speech.modelAtTick
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -201,7 +202,7 @@ class StripTextTest {
         val timings = longArrayOf(30_000, 6_100_000, 3_300_000, 0, 80_000, 0, 4)
         assertEquals("""
             Last dictation (durations only, held in memory until Hex's process ends; a dictation discarded with ✕ isn't counted; nothing said or typed):
-              in the keyboard, 10.4 s recorded, 9.8 s kept; 4 threads, encoder window full; model still loading at ✓, ready 1240 ms after
+              in the keyboard, 10.4 s recorded, 9.8 s kept; standard dictation; 4 threads, encoder window full; model still loading at ✓, ready 1240 ms after
               after ✓: recording stopped 31 ms, decode started 52 ms, decode finished 9870 ms, text inserted 9884 ms
               decode 9818 ms; encoder 6100 ms, decoder 3330 ms, prompt 80 ms, other 308 ms; processor 30436 ms, 3.1× the decode's wall time
 
@@ -210,12 +211,25 @@ class StripTextTest {
         // Stopped at 1 minute without ✓, the model loaded by the decode, no text, and nothing readable from the decode.
         assertEquals("""
             Last dictation (durations only, held in memory until Hex's process ends; a dictation discarded with ✕ isn't counted; nothing said or typed):
-              on Home, 60.0 s recorded, 58.2 s kept; model loaded after the 1-minute stop
+              on Home, 60.0 s recorded, 58.2 s kept; standard dictation; model loaded after the 1-minute stop
               after the 1-minute stop: recording stopped 0 ms, decode started 1250 ms, decode finished 1300 ms, no text inserted
               decode 50 ms; processor not readable
 
         """.trimIndent(), lastDictationLines(DictationTimes(DictationPlace.Home, 60_000, 58_200, ModelAtTick.LoadedAfter, 0,
             false, 0, 1_250, 1_300, null, -1, null)))
+        // Faster English dictation: no encoder/decoder split, its own thread count.
+        assertEquals("""
+            Last dictation (durations only, held in memory until Hex's process ends; a dictation discarded with ✕ isn't counted; nothing said or typed):
+              in the keyboard, 11.0 s recorded, 10.6 s kept; faster English dictation; 4 threads; model loaded while you spoke
+              after ✓: recording stopped 30 ms, decode started 41 ms, decode finished 231 ms, text inserted 240 ms
+              decode 190 ms; processor 697 ms, 3.7× the decode's wall time
+
+        """.trimIndent(), lastDictationLines(DictationTimes(DictationPlace.Keyboard, 11_000, 10_600, ModelAtTick.LoadedWhileSpeaking, 900,
+            true, 30, 41, 231, 240, 697, null, RanOn.Faster, 4)))
+        // Short of memory, today's model wrote it, and says why.
+        assertTrue(lastDictationLines(DictationTimes(DictationPlace.Home, 5_000, 4_800, ModelAtTick.Loaded, 0, true, 20, 25, 2_025,
+            2_030, 7_000, timings, RanOn.LowMemory, 4)).contains(
+            "4.8 s kept; standard dictation, as the phone was low on memory for faster English dictation; 4 threads, encoder window full;"))
     }
     @Test fun diagnosticsSayWhereTheModelWasAtTheTick() {
         assertEquals(ModelAtTick.Loaded, modelAtTick(tick = 100, prepared = 50, prepareLoaded = false, decodeLoaded = false))
@@ -230,9 +244,11 @@ class StripTextTest {
         val top = Sched("/top-app", "0::/uid_*/pid_*", "0-7", 0)
         val standard = Run("as now", 1, true, 2_676, 10_091, longArrayOf(20_000, 2_423_000, 194_000, 0, 0, 0, 4),
             "And so my fellow Americans, ask not.", top, top, "cpu 0-3")
-        val faster = Run(FASTER_MODE, 1, true, 190, 697, LongArray(0), "And so, my fellow Americans, ask not.", top, top, "cpu 0-3")
+        val faster = Run(FASTER_MODE, 1, true, 190, 697, LongArray(0), "And so, my fellow Americans, ask not.", top, top, "cpu 0-3",
+            "cpu 0-3 1.8–2.4 GHz", threads = 4)
         val report = report(null, Diagnostics.Speed.Done(listOf(standard, faster), 11.0), Diagnostics.Speed.Idle)
-        assertTrue(report.contains("  faster English dictation, run 1: 190 ms, processor 697 ms\n"))
+        assertTrue(report.contains("  faster English dictation, run 1: 190 ms, processor 697 ms; 4 threads\n"))
+        assertTrue(report.contains("    clocks while it ran: cpu 0-3 1.8–2.4 GHz"))
         assertTrue(report.contains("  text: And so my fellow Americans, ask not. (every run)\n"))
         assertTrue(report.contains("  faster English dictation text: And so, my fellow Americans, ask not. (every run)\n"))
         assertEquals("Faster English dictation: on, downloaded; the dictation language now uses faster dictation",
