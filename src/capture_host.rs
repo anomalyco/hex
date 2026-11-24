@@ -130,9 +130,10 @@ pub use routing::{
 #[cfg(target_os = "macos")]
 pub use screen_access::*;
 #[cfg(target_os = "macos")]
+pub use sink::CaptureSink;
 #[cfg(not(target_os = "macos"))]
 pub use sink::ListenerTimeline;
-pub use sink::{CaptureAudio, CaptureSink, CaptureSinkClosed};
+pub use sink::{CaptureAudio, CaptureSinkClosed};
 use timeline::Timeline;
 use words::ChosenTranscriber;
 
