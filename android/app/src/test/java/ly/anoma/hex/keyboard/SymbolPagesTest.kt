@@ -76,6 +76,21 @@ class SymbolPagesTest {
         }
     }
 
+    @Test fun aLocalCurrencyKeepsEveryMoneyKeyOnTheTwoPages() {
+        // The =< page's money row always has four keys, and £ ¢ € ¥ $ stay typeable on a page or a hold.
+        for (code in listOf("GBP", "EUR", "JPY", "CNY", "INR", "PHP", "KRW", "RUB", "UAH", "USD", "CHF")) {
+            val currency = LocalCurrency.symbol(code)
+            val row = page(currency = currency, more = true).lines[1]
+            assertEquals("$code's =< row 2 has $row", 10, row.length)
+            val money = row.take(4)
+            assertEquals("$code's money row draws $money", 4, money.toSet().size)
+            assertTrue("$code's money row is $money", money.all { it in "£¢€¥$" })
+            val typed = symbols(page(currency = currency, more = false)) + symbols(page(currency = currency, more = true))
+            val missing = "£¢€¥$".filter { it !in typed }
+            assertTrue("$code cannot type $missing", missing.isEmpty())
+        }
+    }
+
     @Test fun noPageDrawsTheSameKeyTwice() {
         for (language in Spoken.entries) for (currency in currencies) for (kind in FieldKind.entries) {
             val pages = listOf(lettersPage(language).copy(kind = kind),

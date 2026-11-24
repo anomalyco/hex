@@ -34,11 +34,22 @@ class LocalCurrencyTest {
         assertEquals(10, symbols.length)
         // The $ it shows there holds the rest too, without another £.
         assertEquals(listOf("¢", "€", "₹", "¥", "₱"), LetterFeedback.symbolHolds('$', '£'))
-        // A currency it never drew puts $ where ¥ was, so $ stays on one of the two pages with ten keys.
-        assertEquals("£¢\$^°={}\\", page('₹', more = true).lines[1])
-        assertEquals("£¢\$^°={}\\", page('₩', more = true).lines[1])
+        // A currency it never drew gives only ¥'s slot to $, so £, ¢ and € stay and the row keeps ten keys.
+        assertEquals("£¢€\$^°={}\\", page('₹', more = true).lines[1])
+        assertEquals("£¢€\$^°={}\\", page('₩', more = true).lines[1])
         // That $ keeps ¥ reachable, offers every other symbol, and never a second copy of the local one.
         assertEquals(listOf("¢", "€", "£", "₹", "¥", "₱"), LetterFeedback.symbolHolds('$', '₩'))
+    }
+
+    @Test fun everyCurrencyKeepsTenKeysOnTheFirstTwoRowsOfBothPages() {
+        for (code in listOf("GBP", "EUR", "JPY", "CNY", "INR", "PHP", "KRW", "RUB", "UAH", "USD", "CHF")) {
+            val currency = LocalCurrency.symbol(code)
+            for (more in listOf(false, true)) {
+                val lines = page(currency, more).lines
+                assertEquals("$code, more = $more, row 1", 10, lines[0].length)
+                assertEquals("$code, more = $more, row 2", 10, lines[1].length)
+            }
+        }
     }
 
     @Test fun germanyAndFrancePutEurosOnThe123Page() {

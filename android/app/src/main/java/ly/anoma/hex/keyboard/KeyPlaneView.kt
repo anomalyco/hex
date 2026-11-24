@@ -87,6 +87,8 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private val roll = Rollover()
     // A slide from ?123 or shift types the key it lifts on: the keys it can type, and the one under it.
     private val slides = HashMap<KeyCap, (KeyPoint) -> Unit>()
+    /** TalkBack's long click on the =< page's < key, whose held marks the key offers; only that page gets it. */
+    private val commaHolds = View.OnLongClickListener { host.openAccents(LetterFeedback.symbolHolds('<'), it); true }
     private val bottomSlides = HashMap<KeyCap, (KeyPoint) -> Unit>()
     private var slidOnto: KeyCap? = null
     private val onScreen = IntArray(2)
@@ -145,15 +147,12 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
             true
         }
         comma = caps.cap(",", context.getString(R.string.keyboard_comma), modifier) { ime.engine.type(commaText(current)) }
-        // On the =< page the key is <, which the page's own rows have no room for, so it keeps the holds
-        // the < key had there before.
+        // On the =< page the key is <, which that page's rows have no room for, so it keeps the holds the <
+        // key had there. Elsewhere it is the field's mark or a comma, a plain key as before: the long click
+        // is attached only while that page shows (showPage).
         typesOnLift(comma, preview = { null },
-            holds = { if (current?.symbols == true) listOf(LetterFeedback.symbolHolds(commaText(current)[0])) else emptyList() },
+            holds = { if (current?.more == true) listOf(LetterFeedback.symbolHolds('<')) else emptyList() },
             type = { option -> if (option != null) ime.engine.type(option) else comma.performClick() })
-        comma.setOnLongClickListener {
-            val held = if (current?.symbols == true) LetterFeedback.symbolHolds(commaText(current)[0]) else emptyList()
-            if (held.isEmpty()) false else { host.openAccents(held, it); true }
-        }
         bottomSlides[comma] = { ime.engine.type(commaText(current)) }
         // Emoji on the letters; on the symbol pages Gboard's 1234 key, which opens its number pad.
         emojiKey = caps.icon(R.drawable.ic_emoji, context.getString(R.string.keyboard_emoji), caps.key,
@@ -369,6 +368,8 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         comma.label?.text = commaLabel
         comma.label?.textSize = if (commaLabel == "@") 21f else 26f
         comma.longClickLabel = if (page.more) context.getString(R.string.keyboard_more_characters) else null
+        comma.setOnLongClickListener(if (page.more) commaHolds else null)
+        comma.isLongClickable = page.more
         comma.contentDescription = when (commaLabel) {
             "@" -> context.getString(R.string.keyboard_at)
             "/" -> context.getString(R.string.keyboard_slash)

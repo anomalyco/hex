@@ -29,13 +29,14 @@ internal object KeyboardLetters {
         listOf(DIGITS, "@#${currency ?: '$'}_&-+()/", "*\"':;!?")
 
     /** Gboard's =< page: the marks the ?123 page has no room for, on the same seven-key last row. A
-     * local currency that page took $'s place with gives up its own slot here for $, and one Hex has no
-     * slot for gives up ¥'s, so nothing is duplicated and $ always stays on one of the two pages. */
+     * local currency that page took $'s place with gives up its own slot here for $; one Hex has no slot
+     * for takes only ¥'s, so £, ¢ and € stay drawn and nothing is duplicated. $ is always on one of the
+     * two pages. */
     fun symbols(currency: Char? = null): List<String> {
         val money = when {
             currency == null -> "£¢€¥"
             currency in "£¢€¥" -> "£¢€¥".replace(currency, '$')
-            else -> "£¢$"
+            else -> "£¢€$"
         }
         return listOf("~`|•√π÷×§Δ", "${money}^°={}\\", "%©®™✓[]")
     }

@@ -3177,7 +3177,7 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 │   rows have no keys of their own for them). Checks: `SymbolPagesTest` in android/app/src/test
 │   (both pages' keys, every printable ASCII character for each layout and local currency, no key
 │   drawn twice on a page) and `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` passed
-│   173 tests on 2026-11-24 on OpenJDK 21 and Android SDK 36 (offline, `-x prepareSpeechModel`);
+│   175 tests on 2026-11-24 on OpenJDK 21 and Android SDK 36 (offline, `-x prepareSpeechModel`);
 │   the repo has no Android CI, and nothing was tried on a device or emulator.
 ├── Português, Nederlands, Polski or Русский with no pinned layout -> English's keys and
 │   accents (DictationLanguage.layout is null), with English's word list only standing in for
@@ -3259,15 +3259,16 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 │   localized symbol chooses the character, so the same phone shows the same one in any
 │   language. Holding the key offers $ first, then $'s held symbols without a second copy
 │   of the local one, in their order. The =< page's money row (£ ¢ € ¥) shows $ in the slot of a
-│   local £, € or ¥, and gives ¥'s slot to $ for ₹, ₱, ₩, ₽ and ₴, so no page draws a symbol
-│   twice and $ is always on one of them; $'s holds keep every symbol except a local ¥, which is
-│   the ?123 key.
+│   local £, € or ¥, and gives only ¥'s slot to $ for ₹, ₱, ₩, ₽ and ₴, so £, ¢ and € stay drawn,
+│   no page draws a symbol twice, and $ is always on one of them; $'s holds keep every symbol
+│   except a local ¥, which is the ?123 key.
 │   Only the symbol pages read the currency: a number, PIN, phone or date pad, including the
 │   symbols page's own 1234 pad, draws none and reads none. Off, both pages and every hold
 │   are unchanged.
-│   Checks: `LocalCurrencyTest` (rows, holds and region cases, 6/6) and `SymbolPagesTest` (4/4)
-│   in android/app/src/test, and `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin`
-│   passed 173 tests on 2026-11-24 on OpenJDK 21 and Android SDK 36 (offline, with
+│   Checks: `LocalCurrencyTest` (rows, holds, ten keys a row and region cases, 7/7) and
+│   `SymbolPagesTest` (5/5) in android/app/src/test, and
+│   `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin`
+│   passed 175 tests on 2026-11-24 on OpenJDK 21 and Android SDK 36 (offline, with
 │   `-x prepareSpeechModel`); not tried on a device or emulator, and the repo has no Android CI.
 ├── Labs > Keyboard > Emoji suggestions (off) -> on the English layout, while a word
 │   that names an emoji is being typed (smile -> 😊, joy/haha -> 😂, heart -> ❤️), the
