@@ -199,7 +199,7 @@
         <item quantity="other">%1$d 项放不下，这台手机最多保存 100 个词汇和 1,000 条替换：%2$s</item>
     </plurals>
     <plurals name="words_not_usable_deletion">
-        <item quantity="other">%1$d 条替换是删除词语而不是改写，这台手机暂不支持：%2$s</item>
+        <item quantity="other">%1$d 项替换不写入任何内容，或只写入空格或换行，这台手机暂时做不到：%2$s</item>
     </plurals>
     <plurals name="words_not_usable_duplicate">
         <item quantity="other">%1$d 个读音与文件中已有的替换重复，将使用先出现的那条：%2$s</item>
