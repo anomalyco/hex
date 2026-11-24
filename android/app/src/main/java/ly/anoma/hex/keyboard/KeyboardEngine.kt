@@ -80,7 +80,8 @@ internal class KeyboardEngine(
     private val emoji: EmojiWords? = null,
     private val clock: () -> Long = { SystemClock.uptimeMillis() },
     private val main: Handler = Handler(Looper.getMainLooper()),
-    /** Labs › Learn from my fixes: what became of a tracked dictation. Null keeps no tracker at all. */
+    /** Labs › Learn from my fixes: what became of a tracked dictation. Null reports nothing; the tracker
+     * only follows a dictation when [insertDictation] is told to learn. */
     private val learned: ((DictationEdit) -> Unit)? = null,
 ) {
     private companion object {
