@@ -467,6 +467,34 @@ final class DictationSSOTTests: XCTestCase {
             KeyboardParakeetStatus.line(state: .idle, isDownloaded: false, hold: .notEnglish, keyboardState: nil, now: now),
             "Only for English dictation."
         )
+
+        // Model: Multilingual. Its download speaks for itself; once on the iPhone, what the
+        // keyboard does with it, or why it doesn't.
+        func multilingual(
+            downloaded: Bool = true,
+            takes: Bool = true,
+            fits: Bool = true,
+            _ state: KeyboardParakeetSettings.KeyboardState?
+        ) -> String? {
+            KeyboardParakeetStatus.multilingualLine(
+                isDownloaded: downloaded,
+                takesLanguage: takes,
+                fitsKeyboard: fits,
+                keyboardState: state.map { ($0, now) },
+                now: now
+            )
+        }
+        XCTAssertNil(multilingual(downloaded: false, .ready))
+        XCTAssertEqual(multilingual(.ready), "Ready in the keyboard")
+        XCTAssertEqual(multilingual(.preparing), "Getting ready in the keyboard")
+        XCTAssertEqual(multilingual(nil), "Downloaded. The keyboard gets it ready the next time it opens.")
+        XCTAssertEqual(multilingual(fits: false, nil), "The keyboard can't use it right now, so it uses Apple's speech recognition.")
+        XCTAssertEqual(
+            multilingual(takes: false, .ready),
+            "Not for this dictation language, so the keyboard uses Apple's speech recognition."
+        )
+        let names = SpeechModelChoice.multilingualLanguages
+        XCTAssertTrue(names.contains("Dutch") && names.contains("Ukrainian") && names.contains("English"), names)
     }
 
     func testWantedDictationLanguagePrecedenceAndSelfDictationHandoffReason() throws {

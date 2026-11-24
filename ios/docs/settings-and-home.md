@@ -34,8 +34,10 @@ list starts at the top. The pages, one file each in `HEXMobile/Settings/`
   Into field when Type as I speak's is on, In bar when only Show what I say's is, Off when
   neither; picking one writes both, so the two together, which 1.0.4 allowed, keep working
   until another is picked); then Clean up what I say and Custom vocabulary (its list below
-  the switch); and last Speech model in keyboard (its status below it), Keep mic warm and
-  Microphone.
+  the switch); and last Speech model in keyboard, then **Model**: **English** (the
+  default) or **Multilingual** (`SpeechModelChoice`, from Experiments until 2026-11-24, on
+  iPhones with 6 GB or more), with what the picked one means and its status below,
+  Keep mic warm and Microphone.
 - **Keyboard:** Keyboard, **Full** (the default) or **Dictation bar** (stored
   as `FullKeyboardSettings.isEnabled`, App Group key `experiments.fullKeyboard`
   from when the full keyboard was an experiment: unset or true is Full, false
@@ -53,8 +55,7 @@ list starts at the top. The pages, one file each in `HEXMobile/Settings/`
   learned below the switch), and under **Advanced**, Record typing logs (off
   by default) with its Typing logs viewer while it's on; last, under **Feedback**, what
   Send feedback sends and when (only in a build with a report key).
-- **Experiments**, in four groups: **Dictation**: Multilingual model (Parakeet),
-  Two-language dictation, Voice isolation and Clean up with Apple Intelligence;
+- **Experiments**, in four groups: **Dictation**: Two-language dictation, Voice isolation and Clean up with Apple Intelligence;
   **Languages**: Hinglish (Hindi in Latin letters), Greeklish (Greek in Latin letters),
   Korean keyboard (두벌식), Swipe typing in more languages and German spatial autocorrect
   (greyed, its value kept, unless Autocorrect and Spatial autocorrect are on); **Keyboard

@@ -1686,7 +1686,7 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertNil(defaults.object(forKey: "parakeet.loadInterrupted"))
     }
 
-    // MARK: - Experiments › Multilingual model (Parakeet)
+    // MARK: - Settings › Dictation › Model: Multilingual
 
     /// 6 GB and 4 GB iPhones report about this much.
     private static let sixGB: UInt64 = 5_900_000_000
@@ -2078,6 +2078,28 @@ final class DictationControllerTests: XCTestCase {
         ParakeetUltraModel.remove(from: model.folder)
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertFalse(FileManager.default.fileExists(atPath: model.folder.path), "nothing wrote after stop")
+    }
+
+    /// Settings › Dictation › Model back to English: a complete multilingual model stays, so
+    /// picking Multilingual again needs no download; one left part-way goes.
+    func testPickingEnglishKeepsACompleteMultilingualModelAndDropsAPartOne() throws {
+        let model = try UltraStubModel()
+        defer { model.remove() }
+        let first = model.files[0]
+        let partial = model.folder.appendingPathComponent(first.path).appendingPathExtension("partial")
+        try FileManager.default.createDirectory(at: partial.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try model.bodies[first.path]!.prefix(1000).write(to: partial)
+        XCTAssertTrue(ParakeetUltraModel.removeUnlessComplete(from: model.folder, files: model.files))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: model.folder.path), "a part-way download goes")
+
+        for file in model.files {
+            let destination = model.folder.appendingPathComponent(file.path)
+            try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try model.bodies[file.path]!.write(to: destination)
+        }
+        XCTAssertTrue(ParakeetUltraModel.isDownloaded(in: model.folder, files: model.files))
+        XCTAssertFalse(ParakeetUltraModel.removeUnlessComplete(from: model.folder, files: model.files))
+        XCTAssertTrue(ParakeetUltraModel.isDownloaded(in: model.folder, files: model.files), "a complete one stays")
     }
 
     func testParakeetUltrasFilesArePinnedAndComplete() throws {

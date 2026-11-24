@@ -6,7 +6,7 @@ import Foundation
 /// Settings › Dictation › Speech model in keyboard (on unless turned off): the keyboard's own dictation
 /// transcribed with Parakeet on the Neural Engine, in the keyboard's process, so Hex needn't be
 /// open or warm.
-/// English uses Parakeet V2; a language Experiments › Multilingual model dictates uses Parakeet
+/// English uses Parakeet V2; a language Settings › Dictation › Model: Multilingual dictates uses Parakeet
 /// Ultra. Both load from the App Group (`SpeechModelStore`), after the keyboard's first frame
 /// and launch work (`warmUp`), and stay loaded while the keyboard's process lives, until a
 /// memory warning. The first load compiles the model for the Neural Engine (17 s for V2, 12 s

@@ -2,7 +2,7 @@ import Foundation
 
 /// Settings › Dictation › Speech model in keyboard, in the App Group so the keyboard reads it. On unless
 /// the person turned it off. While it's on, the keyboard's own dictation transcribes with Hex's
-/// speech model (Parakeet V2 for English, Parakeet Ultra where Experiments › Multilingual model
+/// speech model (Parakeet V2 for English, Parakeet Ultra where Settings › Dictation › Model: Multilingual
 /// dictates) on the Neural Engine, without opening Hex, once the files are in the App Group and
 /// the keyboard has compiled the model. Whenever that isn't so, or isn't safe, it uses Apple's
 /// speech recognition exactly as with the switch off. Hex downloads the model by itself only
@@ -61,6 +61,11 @@ nonisolated struct KeyboardParakeetSettings {
         }
         let at = defaults?.double(forKey: Self.keyboardStateAtKey) ?? 0
         return (state, Date(timeIntervalSince1970: at))
+    }
+
+    /// Whether `keyboardState` is about the multilingual model rather than English's.
+    var keyboardStateIsMultilingual: Bool {
+        defaults?.bool(forKey: Self.keyboardStateMultilingualKey) == true
     }
 
     func setKeyboardState(_ state: KeyboardState?, multilingual: Bool = false, now: Date = Date()) {

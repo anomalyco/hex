@@ -49,7 +49,7 @@ final class DictationController {
 
     var transcriber: any LocalTranscribing
     let transcriberFactory: () async -> any LocalTranscribing
-    /// Experiments › Multilingual model (Parakeet): its download, beside the engine Hex
+    /// Settings › Dictation › Model: Multilingual: its download, beside the engine Hex
     /// dictates with until it's ready.
     @ObservationIgnored let multilingualDownload: ParakeetUltraDownload
     private let cleaner: (any TranscriptCleaning)?

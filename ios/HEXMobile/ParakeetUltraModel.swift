@@ -146,6 +146,15 @@ nonisolated enum ParakeetUltraModel {
         SpeechModelStore.markComplete(directory)
     }
 
+    /// Settings › Dictation › Model set back to English: a complete download stays, so picking
+    /// Multilingual again needs no download; a partial one goes. True when it removed it.
+    @discardableResult
+    static func removeUnlessComplete(from directory: URL = directory, files: [File] = files) -> Bool {
+        guard !isDownloaded(in: directory, files: files) else { return false }
+        remove(from: directory)
+        return true
+    }
+
     /// Removes the download, partial files included, and any copy left where it was before.
     static func remove(from directory: URL = directory) {
         try? FileManager.default.removeItem(at: directory)
