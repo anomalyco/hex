@@ -3015,9 +3015,9 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   Hinglish, Greeklish, Two-language dictation, Adaptive touch, German spatial autocorrect,
 │   Swipe typing in more languages, Korean keyboard (두벌식), Dvorak punctuation keys, Comma
 │   and period keys, Quick accents, Emoji shortcodes, ABC under the emoji key, Keyboard
-│   themes (Black, White, Navy, Forest, Ember), Two-thumb selection, Delete swiped words
-│   letter by letter, Hide word suggestions, Join the keyboard when unfolded, Learn each
-│   language separately
+│   themes (Black, White, Navy, Forest, Ember, Burgundy), Two-thumb selection, Delete
+│   swiped words letter by letter, Hide word suggestions, Join the keyboard when unfolded,
+│   Learn each language separately
 ├── Full keyboard's languages (Settings › Keyboard › Languages, with Full chosen): one or
 │   more layouts, the space bar names the current one and a slide switches letters, accents
 │   and autocorrect, and the input mode reports the language typing

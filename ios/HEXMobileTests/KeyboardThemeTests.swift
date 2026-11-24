@@ -58,6 +58,9 @@ final class KeyboardThemeTests: XCTestCase {
         ])
         XCTAssertTrue(settings.keyboardThemesEnabled)
         XCTAssertEqual(settings.effectiveKeyboardTheme, .forest)
+
+        settings.applyLaunchArguments(["HEX", FullKeyboardSettings.keyboardThemeLaunchArgument, "burgundy"])
+        XCTAssertEqual(settings.effectiveKeyboardTheme, .burgundy)
     }
 
     /// Automatic is exactly what the keyboard drew before themes: every themed property keeps
@@ -213,6 +216,11 @@ final class KeyboardThemeTests: XCTestCase {
         XCTAssertEqual(view.palette.theme, .forest)
         XCTAssertFalse(view.themePanel.isHidden)
         assertSameColor(try XCTUnwrap(view.themePanel.backgroundColor), color(0x06130C), "Forest's panel")
+
+        settings.keyboardTheme = .burgundy
+        view.syncSettings()
+        XCTAssertEqual(view.palette.theme, .burgundy)
+        assertSameColor(try XCTUnwrap(view.themePanel.backgroundColor), color(0x1A090C), "Burgundy's panel")
 
         settings.keyboardTheme = .white
         view.syncSettings()
