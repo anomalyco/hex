@@ -243,6 +243,8 @@ PT_CONTEXT_WORDS = set("""e é esta está estas estás nos nós a à as às la l
     analise análise divida dívida calculo cálculo media média formula fórmula anuncio anúncio noticia notícia
     fabrica fábrica valida válida numero número inicio início estimulo estímulo peca peça copia cópia magoa mágoa
     negocio negócio""".split())
+# Portuguese never writes ç before e or i: "voçê" is a typo, and the strip offered it for a swiped "voce".
+PT_MISSPELT = re.compile(r".*ç[eéêií].*")
 PT_RETIRED = re.compile(r".*[éó]i(?:as?|os?|cas?|cos?)|.*ôos?|.*êem|pára|pêlos?|pólos?|pêras?")
 
 
@@ -537,14 +539,14 @@ def pt_pairs(folder, region, vocab):
 
 
 def pt_words(folder, region):
-    """A country's words with their counts, less the spellings Brazil's spelling retired and plain
-    spellings at least 20 times rarer than a marked twin ("nao" beside "não", "voce" beside "você"),
+    """A country's words with their counts, less ç before e or i, the spellings Brazil's spelling retired
+    and plain spellings at least 20 times rarer than a marked twin ("nao" beside "não", "voce" beside "você"),
     the rule Polish's model keeps (ios/scripts/build-typing-model.py, TWIN_RATIO), except
     PT_CONTEXT_WORDS; and the corpus's size."""
     counts, total = {}, 0
     for k, (n, _, _) in pt_uni(folder, region).items():
         total += n
-        if n and len(k) <= 32 and (len(k) > 1 or k in PT_ONE_LETTER):
+        if n and len(k) <= 32 and (len(k) > 1 or k in PT_ONE_LETTER) and not PT_MISSPELT.fullmatch(k):
             counts[k] = n
     best = {}
     for w, c in counts.items():
