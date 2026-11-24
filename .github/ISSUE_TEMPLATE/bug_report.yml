@@ -17,16 +17,12 @@ body:
       placeholder: "2.1.13, installed from the signed DMG"
     validations:
       required: true
-  - type: dropdown
+  - type: input
     id: platform
     attributes:
       label: Platform
-      options:
-        - macOS
-        - Linux X11
-        - Linux Wayland
-        - TypeScript SDK
-        - Other
+      description: Where you run Hex.
+      placeholder: "macOS, Windows, Linux X11, Linux Wayland, Android, TypeScript SDK, or other"
     validations:
       required: true
   - type: input
