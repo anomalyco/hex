@@ -148,7 +148,7 @@ internal object Diagnostics {
         val memory = ActivityManager.MemoryInfo().also { c.getSystemService(ActivityManager::class.java).getMemoryInfo(it) }
         val cores = (0 until Runtime.getRuntime().availableProcessors()).map {
             Core(it, read("/sys/devices/system/cpu/cpu$it/cpu_capacity")?.toIntOrNull(),
-                read("/sys/devices/system/cpu/cpu$it/cpufreq/cpuinfo_max_freq")?.toLongOrNull())
+                read("/sys/devices/system/cpu/cpu$it/cpufreq/cpuinfo_max_freq")?.toLongOrNull()?.takeIf { it > 0 })
         }
         val channel = when (BuildConfig.BUILD_TYPE) { "preview" -> "preview"; "release" -> "play"; else -> BuildConfig.BUILD_TYPE }
         val library = runCatching { libraryLabel(Whisper.library()) }.getOrDefault("didn't load")
@@ -168,7 +168,7 @@ internal object Diagnostics {
         fun system(name: String) = runCatching { Settings.System.getString(c.contentResolver, name) ?: "not set" }.getOrDefault("not readable")
         @SuppressLint("DiscouragedApi")
         val declared = Resources.getSystem().getIdentifier("config_keyboardVibrationSettingsSupported", "bool", "android")
-            .let { if (it == 0) "not declared" else Resources.getSystem().getBoolean(it).toString() }
+            .let { if (it == 0) "not declared" else if (Resources.getSystem().getBoolean(it)) "yes" else "no" }
         fun support(effect: Int) = when (vibrator?.areAllEffectsSupported(effect)) {
             Vibrator.VIBRATION_EFFECT_SUPPORT_YES -> "yes"
             Vibrator.VIBRATION_EFFECT_SUPPORT_NO -> "no"
@@ -180,11 +180,11 @@ internal object Diagnostics {
         }
         return listOf(
             "Haptics: Hex's switch ${if (haptics) "on" else "off"}, key ticks play: ${if (vibrates(c, haptics)) "yes" else "no"}",
-            "Haptics: keyboard_vibration_enabled ${system("keyboard_vibration_enabled")}, keyboard vibration setting $declared, " +
+            "Haptics: keyboard_vibration_enabled ${system("keyboard_vibration_enabled")}, phone declares that setting: $declared, " +
                 "haptic_feedback_enabled ${system(Settings.System.HAPTIC_FEEDBACK_ENABLED)}, " +
                 "haptic_feedback_intensity ${system("haptic_feedback_intensity")}, sound mode $ringer",
-            "Vibrator: " + if (vibrator == null) "none" else "has vibrator ${vibrator.hasVibrator()}, amplitude control " +
-                "${vibrator.hasAmplitudeControl()}, tick ${support(VibrationEffect.EFFECT_TICK)}, click ${support(VibrationEffect.EFFECT_CLICK)}",
+            "Vibrator: " + if (vibrator == null) "none" else "has vibrator ${yes(vibrator.hasVibrator())}, amplitude control " +
+                "${yes(vibrator.hasAmplitudeControl())}, tick ${support(VibrationEffect.EFFECT_TICK)}, click ${support(VibrationEffect.EFFECT_CLICK)}",
         )
     }
 
@@ -193,6 +193,7 @@ internal object Diagnostics {
         read("/proc/thread-self/status")?.lineSequence()?.firstOrNull { it.startsWith("Cpus_allowed_list:") }?.substringAfter(':')?.trim(),
         runCatching { Process.getThreadPriority(Process.myTid()) }.getOrNull())
 
+    private fun yes(value: Boolean) = if (value) "yes" else "no"
     private fun gb(bytes: Long) = String.format(Locale.ROOT, "%.1f GB", bytes / 1e9)
 }
 
@@ -226,7 +227,7 @@ private class CoreSampler(private val name: String) {
             val (comm, state, cpu) = taskStat(read("${task.path}/stat") ?: continue) ?: continue
             if (comm != name || state != 'R') continue
             val samples = seen.getOrPut(cpu) { mutableListOf() }
-            read("/sys/devices/system/cpu/cpu$cpu/cpufreq/scaling_cur_freq")?.toLongOrNull()?.let(samples::add)
+            read("/sys/devices/system/cpu/cpu$cpu/cpufreq/scaling_cur_freq")?.toLongOrNull()?.takeIf { it > 0 }?.let(samples::add)
         }
     }
 }
@@ -317,7 +318,8 @@ internal fun wavSamples(bytes: ByteArray): ShortArray? {
     return null
 }
 
-internal fun ghz(khz: Long) = String.format(Locale.ROOT, "%.2f GHz", khz / 1e6)
+/** Gigahertz from the kernel's kHz; a value under 10 MHz (an emulator's) as it is. */
+internal fun ghz(khz: Long) = if (khz < 10_000) "$khz kHz" else String.format(Locale.ROOT, "%.2f GHz", khz / 1e6)
 
 /** One run on one line, then where it was scheduled and the cores it ran on. */
 internal fun runLines(run: Run): String = buildString {

@@ -21,7 +21,7 @@
     <string name="diagnostics_tick_detail">按键时播放的触感，遵循 Hex 的开关</string>
     <string name="diagnostics_pulse">更强的振动</string>
     <string name="diagnostics_pulse_detail">一次较长的全强度振动，不受开关影响</string>
-    <string name="diagnostics_strip_running">Hex 速度测试正在运行，听写会等它完成。</string>
-    <string name="diagnostics_strip_done">速度测试已完成，点按即可在 Hex 中查看。</string>
+    <string name="diagnostics_strip_running">正在运行 Hex 速度测试…</string>
+    <string name="diagnostics_strip_done">速度测试已完成，点按查看</string>
     <string name="diagnostics_dismiss">关闭</string>
 </resources>

@@ -23,7 +23,7 @@
     <string name="diagnostics_tick_detail">What a key press plays, with Hex’s switches</string>
     <string name="diagnostics_pulse">Stronger pulse</string>
     <string name="diagnostics_pulse_detail">A long, full-strength pulse, whatever the switches say</string>
-    <string name="diagnostics_strip_running">Hex speed test running. Dictation waits until it’s done.</string>
-    <string name="diagnostics_strip_done">Speed test done. Tap to see it in Hex.</string>
+    <string name="diagnostics_strip_running">Running Hex’s speed test…</string>
+    <string name="diagnostics_strip_done">Speed test done. Tap to see it</string>
     <string name="diagnostics_dismiss">Dismiss</string>
 </resources>
