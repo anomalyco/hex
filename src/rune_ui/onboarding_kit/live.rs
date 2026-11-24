@@ -565,8 +565,15 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
             )
         });
     // A chosen file's failure names itself first; then a pick the window
-    // refused, while the tour still reports that pick; then the service's.
-    let picked_failed = ui.tour.as_ref().is_some_and(|tour| tour.flow.pick_failed());
+    // refused, while the tour still reports that pick and nothing else is
+    // being prepared (an import the person chose replaces it); then the
+    // service's.
+    let preparing_any = ui
+        .view
+        .as_ref()
+        .is_some_and(|view| view.transcription.preparing.is_some());
+    let picked_failed =
+        !preparing_any && ui.tour.as_ref().is_some_and(|tour| tour.flow.pick_failed());
     let failure = super::super::model_import::import_failure(ui)
         .or_else(|| match picked_failed {
             true => super::super::model_import::pick_failure(ui),
@@ -904,6 +911,8 @@ pub(super) fn retry_download(ui: &mut Ui) {
     live.failed = false;
     live.stalled = false;
     live.progress = None;
+    // A retry starts a fresh attempt: an old import's error must not name it.
+    ui.picker.import.error = None;
     let choice = live.choice.clone();
     match ui.found.picked {
         Some(index) => found_choice::pick(ui, index),

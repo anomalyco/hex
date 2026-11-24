@@ -340,6 +340,13 @@ impl Flow {
         self.pick_failed
     }
 
+    /// A model file the person chose is being prepared: the refused pick is
+    /// over, and no download of ours starts behind the import.
+    pub fn pick_replaced(&mut self) {
+        self.pick_failed = false;
+        self.download_requested = true;
+    }
+
     pub fn step(&self) -> Step {
         self.step
     }
@@ -1967,6 +1974,21 @@ mod tests {
         );
         flow.on(Input::Status(fresh_status(), downloading(0.1)));
         assert_eq!(flow.view().model, ItemStatus::Downloading(0.1));
+    }
+
+    #[test]
+    fn a_chosen_file_ends_the_refused_pick_without_a_new_download() {
+        let mut flow = Flow::new(Step::Welcome, fresh_status(), true, true);
+        flow.on(Input::Status(fresh_status(), ModelProgress::default()));
+        flow.model_failed();
+        assert_eq!(flow.view().model, ItemStatus::Failed);
+        flow.pick_replaced();
+        assert!(!flow.pick_failed());
+        assert_eq!(
+            flow.on(Input::Status(fresh_status(), ModelProgress::default())),
+            Effect::None,
+            "the import is already being prepared"
+        );
     }
 
     #[test]

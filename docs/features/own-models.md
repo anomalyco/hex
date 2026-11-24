@@ -213,7 +213,10 @@ Onboarding opens -> scan; its own download waits until it answers  // setup.foun
     │   download page, which shows without a list, names the reason with Try
     │   again, Use a model file…, and Continue without a model; Try again
     │   forgets that reason and asks again for the choice the language
-    │   capsule last set (live.choice; tour.flow.model_failed, Flow::pick_failed)
+    │   capsule last set (live.choice). A model file the person chooses, or
+    │   any model the service is already preparing, ends it: the reason and
+    │   its actions go, so Try again never cancels the import
+    │   (tour.flow.model_failed, Flow::pick_failed, Flow::pick_replaced)
     ├── A pick that fails asks again on the list
     ├── Back on the pages after it returns to the list to change the pick,
     │   even with the model ready
@@ -252,6 +255,8 @@ downloaded, the full check refusing a mismatched file),
 `an_unavailable_pick_fails_the_page_instead_of_downloading_forever`,
 `retrying_after_a_refused_pick_shows_the_next_download_failure`,
 `a_failed_pick_keeps_its_actions_without_a_reason`,
+`a_model_being_prepared_hides_the_refused_pick`,
+`a_chosen_file_ends_the_refused_pick_without_a_new_download`,
 `try_again_after_a_network_failure_asks_once`,
 `the_onboarding_model_list_starts_the_row_picked_or_the_recommended_one`,
 `linux::app::tests::a_model_this_build_cannot_run_says_why_and_starts_nothing`,

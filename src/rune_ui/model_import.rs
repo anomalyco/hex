@@ -254,6 +254,12 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
                     let language = crate::transcription::models::definition(model)
                         .language_for(&ui.settings.transcription.language)
                         .to_owned();
+                    // The file replaces whatever the first run refused: that
+                    // pick is over, and its reason with it.
+                    ui.found.error = None;
+                    if let Some(tour) = &mut ui.tour {
+                        tour.flow.pick_replaced();
+                    }
                     ui.send(super::Request::ChooseModel { model, language });
                 }
             }

@@ -3642,6 +3642,14 @@ fn unavailable_model() -> TranscriptionModelId {
     )
 }
 
+/// A model file the service is preparing: a fresh import.
+fn imported_model() -> TranscriptionModelId {
+    use crate::transcription::models::CustomModelId;
+    TranscriptionModelId::Custom(
+        CustomModelId::parse("custom-fedcba9876543210").expect("a custom id"),
+    )
+}
+
 /// A pick onboarding refuses: the saved selection can't run, so the tour
 /// marks it failed and the page names it.
 fn refused_pick(rt: &mut Runtime<Ui>) {
@@ -3828,6 +3836,45 @@ fn a_failed_pick_keeps_its_actions_without_a_reason() {
         !texts(&rt).contains(&"0 of 731 MB".to_owned()),
         "the page never reads as a download: {:?}",
         texts(&rt)
+    );
+}
+
+/// A model file being prepared replaces the refused pick: no stale reason and
+/// no Try again over the load, which would cancel the import.
+#[test]
+fn a_model_being_prepared_hides_the_refused_pick() {
+    let mut ui = portal_fixture();
+    onboarding::fixture(&mut ui, crate::desktop::onboarding::Step::Setup, false);
+    onboarding_kit::live::fixture(&mut ui, Page::Download);
+    let mut rt = runtime_for(ui, false, PANE_SIZE);
+    refused_pick(&mut rt);
+    assert!(
+        rt.find("retry-download").is_some(),
+        "the refused pick offers Try again"
+    );
+
+    // The import the person chose is loading; the window's settings catch up
+    // only once it is ready.
+    rt.update(|ui, _| {
+        if let Some(view) = &mut ui.view {
+            view.transcription.preparing = Some(imported_model());
+        }
+    });
+    settle(&mut rt);
+    assert!(
+        rt.find("retry-download").is_none(),
+        "no Try again over the load"
+    );
+    assert!(
+        !texts(&rt)
+            .iter()
+            .any(|text| text.ends_with("is unavailable")),
+        "the refused pick's reason stays gone: {:?}",
+        texts(&rt)
+    );
+    assert!(
+        rt.find("download-failed").is_none(),
+        "the page is not a failure while the file prepares"
     );
 }
 
