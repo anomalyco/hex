@@ -247,6 +247,16 @@ final class KeyboardKeyPlaneView: UIView {
         }
     }
 
+    /// `rect` with its edges on this screen's pixel grid.
+    private func pixelAligned(_ rect: CGRect) -> CGRect {
+        let scale = max(1, traitCollection.displayScale)
+        let x0 = (rect.minX * scale).rounded() / scale
+        let x1 = (rect.maxX * scale).rounded() / scale
+        let y0 = (rect.minY * scale).rounded() / scale
+        let y1 = (rect.maxY * scale).rounded() / scale
+        return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
+    }
+
     /// A docked iPad key with a flick (`KeyboardFlicks`), as Apple's draws it (iPad mini, iPadOS
     /// 27.2): the flick character about 12.5 pt high, grey, centred 14.5 pt below a 55.5 pt
     /// keycap's top, and the label 11 pt below the middle. Pulled, the character slides to the
@@ -267,16 +277,6 @@ final class KeyboardKeyPlaneView: UIView {
         let flickFrame = CGRect(x: frame.minX, y: centre - frame.height / 2, width: frame.width, height: frame.height)
         let color = palette.textBase.withAlphaComponent(0.45 + 0.55 * min(1, 2 * p))
         drawText(flick, in: flickFrame, font: UIFont.systemFont(ofSize: size, weight: .regular), color: color)
-    }
-
-    /// `rect` with its edges on this screen's pixel grid.
-    private func pixelAligned(_ rect: CGRect) -> CGRect {
-        let scale = max(1, traitCollection.displayScale)
-        let x0 = (rect.minX * scale).rounded() / scale
-        let x1 = (rect.maxX * scale).rounded() / scale
-        let y0 = (rect.minY * scale).rounded() / scale
-        let y1 = (rect.maxY * scale).rounded() / scale
-        return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
     }
 
     private func drawText(_ text: String, in frame: CGRect, font: UIFont, color: UIColor, yOffset: CGFloat = 0) {
