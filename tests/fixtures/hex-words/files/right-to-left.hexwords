@@ -1,0 +1,15 @@
+{
+  "format": "hex.words",
+  "version": 1,
+  "vocabulary": [
+    {"term": "שלום", "soundsLike": ["shalom"]},
+    {"term": "مرحبا بك"},
+    {"term": "abc\u202edef"},
+    {"term": "\u200fשלום עולם"}
+  ],
+  "replacements": [
+    {"heard": "toda", "write": "תודה"},
+    {"heard": "shukran", "write": "شكرا"},
+    {"heard": "evil", "write": "\u2066text\u2069"}
+  ]
+}

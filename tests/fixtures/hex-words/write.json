@@ -1,0 +1,128 @@
+{
+  "description": "Writing. Give the writer input (the app's own lists, in the shape shown), parse what it wrote, remove madeBy, and compare to expect.file; compare the entries it left out to expect.notExported as a set. Also check that the written file is UTF-8 without a byte order mark, passes hex-words.schema.json, has madeBy.app, and reads back with nothing skipped.",
+  "cases": [
+    {
+      "name": "Desktop: the vocabulary with its spellings and the Global mode's replacements, a deletion included; other modes' replacements stay home; soundsLike is left out when a term has none",
+      "writer": "desktop",
+      "input": {
+        "vocabulary": [{"term": "OpenCode", "soundsLike": ["open code"]}, {"term": "Rune", "soundsLike": []}],
+        "replacements": [{"matchedPhrase": "jet hub", "output": "GitHub"}, {"matchedPhrase": "um", "output": ""}],
+        "modes": [{"name": "Chat", "replacements": [{"matchedPhrase": "dash dash", "output": "--"}]}]
+      },
+      "expect": {
+        "file": {
+          "format": "hex.words",
+          "version": 1,
+          "vocabulary": [{"term": "OpenCode", "soundsLike": ["open code"]}, {"term": "Rune"}],
+          "replacements": [{"heard": "jet hub", "write": "GitHub"}, {"heard": "um", "write": ""}]
+        },
+        "notExported": []
+      }
+    },
+    {
+      "name": "Desktop: text is written cleaned: composed (NFC), spaces collapsed in terms, spellings and heard phrases, and CR LF in an output becomes LF",
+      "writer": "desktop",
+      "input": {
+        "vocabulary": [{"term": "  Zoë  Smith ", "soundsLike": ["zoey  smith"]}],
+        "replacements": [{"matchedPhrase": " sign   off ", "output": "Best,\r\nRyan"}],
+        "modes": []
+      },
+      "expect": {
+        "file": {
+          "format": "hex.words",
+          "version": 1,
+          "vocabulary": [{"term": "Zoë Smith", "soundsLike": ["zoey smith"]}],
+          "replacements": [{"heard": "sign off", "write": "Best,\nRyan"}]
+        },
+        "notExported": []
+      }
+    },
+    {
+      "name": "Desktop: entries a reader would skip are left out and counted, never written",
+      "writer": "desktop",
+      "input": {
+        "vocabulary": [
+          {"term": "Open​Code", "soundsLike": []},
+          {"term": "Hex", "soundsLike": ["xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "hex", "hecks"]},
+          {"term": "--", "soundsLike": []}
+        ],
+        "replacements": [
+          {"matchedPhrase": "one two three four five six seven eight nine", "output": "9"},
+          {"matchedPhrase": ":)", "output": "🙂"},
+          {"matchedPhrase": "fine", "output": "Fine"}
+        ],
+        "modes": []
+      },
+      "expect": {
+        "file": {
+          "format": "hex.words",
+          "version": 1,
+          "vocabulary": [{"term": "Hex", "soundsLike": ["hecks"]}],
+          "replacements": [{"heard": "fine", "write": "Fine"}]
+        },
+        "notExported": [
+          {"path": "vocabulary[0]", "reason": "hiddenCharacters"},
+          {"path": "vocabulary[1].soundsLike[0]", "reason": "tooLong"},
+          {"path": "vocabulary[1].soundsLike[1]", "reason": "sameAsTerm"},
+          {"path": "vocabulary[2]", "reason": "noLetters"},
+          {"path": "replacements[0]", "reason": "tooManyWords"},
+          {"path": "replacements[1]", "reason": "noLetters"}
+        ]
+      }
+    },
+    {
+      "name": "Desktop: empty lists still write both parts, empty",
+      "writer": "desktop",
+      "input": {"vocabulary": [], "replacements": [], "modes": []},
+      "expect": {
+        "file": {"format": "hex.words", "version": 1, "vocabulary": [], "replacements": []},
+        "notExported": []
+      }
+    },
+    {
+      "name": "Phone: terms and your own replacements; learned fixes stay out while the switch is off",
+      "writer": "phone",
+      "input": {
+        "vocabulary": ["OpenCode", "Rune"],
+        "replacements": [{"heard": "jet hub", "write": "GitHub"}],
+        "learnedFixes": [{"heard": "cloud code", "meant": "Claude Code", "active": true}],
+        "includeLearned": false
+      },
+      "expect": {
+        "file": {
+          "format": "hex.words",
+          "version": 1,
+          "vocabulary": [{"term": "OpenCode"}, {"term": "Rune"}],
+          "replacements": [{"heard": "jet hub", "write": "GitHub"}]
+        },
+        "notExported": []
+      }
+    },
+    {
+      "name": "Phone: with the switch on, learned fixes in use follow your own replacements marked learned; a learned fix for words you already replace is left out, and one switched off or not yet applied is never exported",
+      "writer": "phone",
+      "input": {
+        "vocabulary": ["OpenCode"],
+        "replacements": [{"heard": "jet hub", "write": "GitHub"}],
+        "learnedFixes": [
+          {"heard": "cloud code", "meant": "Claude Code", "active": true},
+          {"heard": "Jet Hub", "meant": "JetHub", "active": true},
+          {"heard": "pie torch", "meant": "PyTorch", "active": false}
+        ],
+        "includeLearned": true
+      },
+      "expect": {
+        "file": {
+          "format": "hex.words",
+          "version": 1,
+          "vocabulary": [{"term": "OpenCode"}],
+          "replacements": [
+            {"heard": "jet hub", "write": "GitHub"},
+            {"heard": "cloud code", "write": "Claude Code", "learned": true}
+          ]
+        },
+        "notExported": [{"path": "learnedFixes[1]", "reason": "duplicate"}]
+      }
+    }
+  ]
+}
