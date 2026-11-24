@@ -190,7 +190,8 @@ internal class KeyboardEngine(
     /** The number row changed (Labs › Keyboard › Number row): the keys redraw with it at once. */
     fun numberRowChanged() { showPlane() }
 
-    /** The local currency changed (Labs › Keyboard › Local currency): the 123 page redraws with the phone's own. */
+    /** The local currency changed (Labs › Keyboard › Local currency): the ?123 page and d's held symbol
+     * redraw with the phone's own. */
     fun localCurrencyChanged() { showPlane() }
 
     /** Suggest swear words changed: the current word's suggestions follow at once. */
@@ -243,10 +244,11 @@ internal class KeyboardEngine(
         if (force || was != shift.uppercase) showPlane()
     }
     private fun showPlane() {
-        // A number, phone or date pad never draws a currency, so it never reads the phone's.
+        // A number, phone or date pad never draws a currency, so it never reads the phone's. The letters
+        // page reads it for d's held symbol, as the ?123 page does for its $.
         surface?.showPage(KeyboardPage(layoutLanguage(), symbols, more, shift.uppercase, shift.locked, EnterKey.from(editor),
             FieldKind.of(editor?.inputType ?: 0), pad, feedback.numberRow,
-            if (feedback.localCurrency && symbols && pad == null) LocalCurrency.local() else null))
+            if (feedback.localCurrency && pad == null) LocalCurrency.local() else null))
         // The strip's Emoji tool follows the page (Labs › Keyboard › Keyboard tools): the keys' emoji key is
         // on the letters only, never on a symbol page or a pad.
         val emoji = emojiAvailable

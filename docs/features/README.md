@@ -3255,19 +3255,25 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   Checks: `editorsThatKeepTheirOwnTextTakeKeyEvents` in `FieldTypingTest`
 │   (android/app/src/test) covers the field's classification; the key presses are read from
 │   `KeyboardEngine` and were not tried on a device.
-├── Labs > Keyboard > Symbols on letter keys (off) -> hold a letter from QWERTY's home or
-│   bottom row for its symbol first, SwiftKey-style (m for /, a for @), with the letter's
-│   accents after it; symbols follow the letter, so AZERTY q/w and QWERTZ y get none where
-│   their layouts draw them below row 1. Row 1 keeps its digit while it shows one: with Number
-│   row off it hints and holds the digit first. With it on, the top row's letters show and hold
-│   Gboard's symbols in the hidden digit's place (q for %, p for }, r for = as j holds it),
-│   while a letter that already has a home- or bottom-row symbol keeps that one wherever the
-│   layout draws it (AZERTY a/z for @/_, QWERTZ z for _). The top row's symbols stay on row 1,
-│   so a layout that draws q, w or y lower is unchanged there. Off, the keys are unchanged.
-│   `heldLettersOfferSymbolsWhenTheLabIsOn` in InsertionTest.kt covers the holds, and
-│   `withBothLabsTheTopRowShowsGboardsSymbols` and `theTopRowSymbolsStayOnTheTopRow` in
-│   KeyboardPageTest.kt the top row and the rows it leaves alone; all three passed in
-│   https://github.com/anomalyco/hex/actions/runs/45367619509 (testDebugUnitTest + compileDebugKotlin,
+├── Labs > Keyboard > Symbols on letter keys (off) -> hold a letter from any of QWERTY's three
+│   rows for its symbol first, with the letter's accents after it; the marks are
+│   Gboard's own (the ?123 page draws the same ones): a s d f g h j k l for
+│   @ # $ _ & - + ( ) and z x c v b n m for * " ' : ; ! ?, so ! and ? are reachable and
+│   no mark sits on two letter keys. Symbols follow the letter, so AZERTY q/w and QWERTZ y get
+│   none where their layouts draw them below row 1. With Local currency on, d holds the
+│   phone's symbol in $'s place. Row 1 keeps its digit while it shows one: with Number
+│   row off it hints and holds the digit first. With it on, the top row's letters show and
+│   hold Gboard's symbols in the hidden digit's place (q for %, p for }, r for =), while a
+│   letter that already has a row 2 or 3 symbol keeps that one wherever the layout draws it
+│   (AZERTY a and z keep @ and `*`, QWERTZ z keeps `*`). The top row's symbols
+│   stay on row 1, so a layout that draws q, w or y lower is unchanged there. Off, the keys
+│   are unchanged. `heldLettersOfferSymbolsWhenTheLabIsOn` in InsertionTest.kt covers the
+│   holds; `theHomeAndBottomRowsShowGboardsSymbols`, `noSymbolIsDrawnOnTwoLetterKeys` and
+│   `theLocalCurrencyTakesDsSymbol` in KeyboardPageTest.kt cover the two rows, the currency
+│   and that no mark repeats, beside `withBothLabsTheTopRowShowsGboardsSymbols` and
+│   `theTopRowSymbolsStayOnTheTopRow` for the top row; `./gradlew :app:testDebugUnitTest
+│   :app:compileDebugKotlin -x prepareSpeechModel` passed 198 tests in
+│   https://github.com/anomalyco/hex/actions/runs/45450568457 (Temurin JDK 21 and Android SDK 36,
 │   GitHub-hosted); not tried on a device or emulator. The repo has no Android CI.
 ├── Labs > Output > Signature (off) -> one editable line (up to 200 characters; empty adds
 │   nothing, default "Sent from Hex") on its own line at the end of each keyboard dictation,
@@ -3286,7 +3292,7 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   and the Hex menu matches that height; ?123, the symbols pages and the pads keep their keys
 │   and are a row shorter than the letters while it is on. Off, the page is unchanged.
 │   KeyboardPageTest covers it, including the top row's symbols, and passed in
-│   https://github.com/anomalyco/hex/actions/runs/45367619509 (testDebugUnitTest + compileDebugKotlin,
+│   https://github.com/anomalyco/hex/actions/runs/45450568457 (testDebugUnitTest + compileDebugKotlin,
 │   GitHub-hosted); not tried on a device. The repo has no Android CI.
 ├── Labs > Keyboard > Local currency (off) -> the phone's region picks the ?123 page's
 │   currency symbol in $'s place from a fixed set of single-character symbols: GBP £, EUR €,
@@ -3300,14 +3306,16 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   local £, € or ¥, and gives only ¥'s slot to $ for ₹, ₱, ₩, ₽ and ₴, so £, ¢ and € stay drawn,
 │   no page draws a symbol twice, and $ is always on one of them; $'s holds drop the local symbol
 │   itself, whichever it is, so their list never repeats it.
-│   Only the symbol pages read the currency: a number, PIN, phone or date pad, including the
-│   symbols page's own 1234 pad, draws none and reads none. Off, both pages and every hold
-│   are unchanged.
-│   Checks: `LocalCurrencyTest` (rows, holds, ten keys a row and region cases, 7/7) and
-│   `SymbolPagesTest` (5/5) in android/app/src/test, and
-│   `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin`
-│   passed 175 tests on 2026-11-24 on OpenJDK 21 and Android SDK 36 (offline, with
-│   `-x prepareSpeechModel`); not tried on a device or emulator, and the repo has no Android CI.
+│   The letters page reads it too, for d's held symbol and corner hint in place of $;
+│   otherwise only the symbol pages read it, and a number, PIN, phone or date pad, including
+│   the symbols page's own 1234 pad, draws none and reads none. Off, both pages, d's hold
+│   and every other hold are unchanged.
+│   Checks: `LocalCurrencyTest` (rows, holds, ten keys a row and region cases, 7/7),
+│   `SymbolPagesTest` (5/5) and `theLocalCurrencyTakesDsSymbol` in KeyboardPageTest.kt in
+│   android/app/src/test, and `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin`
+│   passed 198 tests in https://github.com/anomalyco/hex/actions/runs/45450568457 (Temurin JDK 21
+│   and Android SDK 36, GitHub-hosted); not tried on a device or emulator, and the repo has no
+│   Android CI.
 ├── Labs > Keyboard > Emoji suggestions (off) -> on the English layout, while a word
 │   that names an emoji is being typed (smile -> 😊, joy/haha -> 😂, heart -> ❤️), the
 │   strip's last slot offers it beside the word suggestions, padded to that slot even when

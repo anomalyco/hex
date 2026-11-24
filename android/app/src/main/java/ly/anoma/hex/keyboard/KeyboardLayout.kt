@@ -45,8 +45,8 @@ internal data class KeyboardPage(
     /** Labs › Keyboard › Number row: the letter pages draw 1 to 0 above their letters too. */
     val numberRow: Boolean = false,
     /** Labs › Keyboard › Local currency: the phone's symbol, read once for the page, that the ?123 page shows
-     * in place of $, or null for $. The =< page then shows $ in that symbol's slot, or in ¥'s for one it has
-     * none, so both pages keep their keys and neither draws a symbol twice. */
+     * in place of $ and that d holds on the letters, or null for $. The =< page then shows $ in that symbol's
+     * slot, or in ¥'s for one it has none, so both pages keep their keys and neither draws a symbol twice. */
     val currency: Char? = null,
 ) {
     val lines: List<String> get() = when {
