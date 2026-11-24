@@ -175,6 +175,20 @@ class ElisionSuggestionTest {
         }
     }
 
+    // Keyboard › Autocorrect off: after the pause the strip still offers what space would have put in and the
+    // decoder's near words, never as a fix; the strip shown at once keeps to completions, as before.
+    @Test fun withAutocorrectOffTheStripStillOffersNearWords() {
+        val keys = layout("en")
+        val w = word("en")
+        w.type(keys, "diagnostucs")
+        val off = w.strip(autocorrect = false, nearWords = true)
+        assertTrue(off.toString(), off.none { it.kind == Suggestion.Kind.Fix })
+        assertEquals(listOf("diagnostucs", "diagnostics"), off.map { it.text })
+        assertEquals(listOf("diagnostucs"), w.strip(autocorrect = false).map { it.text })
+        w.type(keys, "dont")
+        assertTrue("don't" in w.strip(autocorrect = false, nearWords = true).map { it.text })
+    }
+
     @Test fun aPickedElisionIsLeftAsItIs() {
         val keys = layout("it")
         val w = word("it")

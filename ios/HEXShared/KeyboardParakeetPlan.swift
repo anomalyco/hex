@@ -29,6 +29,10 @@ nonisolated enum KeyboardParakeetPlan: Equatable, Sendable {
     case tooSmall
     /// English dictation, keyboard fits, waiting for Parakeet V2 to finish downloading.
     case awaitingV2Download(language: String)
+    /// As `awaitingV2Download`, with the multilingual model still here from before English was
+    /// picked: it keeps dictating English until V2 is ready (Settings › Dictation › Model keeps
+    /// the model picked before until the new one has loaded once).
+    case awaitingV2DownloadUsingUltra(language: String)
     /// English dictation, keyboard fits, Parakeet V2 is complete in the App Group.
     case readyV2(language: String)
 
@@ -46,6 +50,12 @@ nonisolated enum KeyboardParakeetPlan: Equatable, Sendable {
         if twoLanguageEnabled { return .twoLanguage }
         let fitsLimit = keyboardLimit.map { $0 >= KeyboardParakeetBudget.requiredLimit } ?? true
         if let multilingualLanguage {
+            // Until the multilingual model is here, English's, if it still is, keeps dictating
+            // English (it goes only once the multilingual one has loaded once).
+            if !ultraDownloaded, v2Downloaded, SpeechLanguagePicker.isEnglish(multilingualLanguage),
+               let keyboardLimit, keyboardLimit >= KeyboardParakeetBudget.requiredLimit {
+                return .readyV2(language: multilingualLanguage)
+            }
             return .multilingual(
                 language: multilingualLanguage,
                 downloaded: ultraDownloaded,
@@ -61,7 +71,10 @@ nonisolated enum KeyboardParakeetPlan: Equatable, Sendable {
         guard keyboardLimit >= KeyboardParakeetBudget.requiredLimit else {
             return .tooSmall
         }
-        return v2Downloaded ? .readyV2(language: wantedLanguage) : .awaitingV2Download(language: wantedLanguage)
+        if v2Downloaded { return .readyV2(language: wantedLanguage) }
+        return ultraDownloaded
+            ? .awaitingV2DownloadUsingUltra(language: wantedLanguage)
+            : .awaitingV2Download(language: wantedLanguage)
     }
 
     static func current(
@@ -99,6 +112,8 @@ nonisolated enum KeyboardParakeetPlan: Equatable, Sendable {
             (.parakeetUltra, language)
         case .readyV2(let language):
             (.parakeetV2, language)
+        case .awaitingV2DownloadUsingUltra(let language):
+            (.parakeetUltra, language)
         case .unmeasured(let language, v2Downloaded: true):
             // Before a limit is measured (e.g. simulator where available == 0), allow V2 if complete;
             // on device warmUp records the real limit before checking choice().
@@ -110,7 +125,9 @@ nonisolated enum KeyboardParakeetPlan: Equatable, Sendable {
 
     /// Whether the keyboard should show its "New speech model" download notice.
     var awaitsV2Download: Bool {
-        if case .awaitingV2Download = self { return true }
-        return false
+        switch self {
+        case .awaitingV2Download, .awaitingV2DownloadUsingUltra: true
+        default: false
+        }
     }
 }

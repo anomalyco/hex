@@ -232,7 +232,7 @@ struct ContentView: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }
 
-                // Experiments › Multilingual model: its download or load, beside dictation.
+                // Settings › Dictation › Model: Multilingual: its download or load, beside dictation.
                 MultilingualModelStatus(
                     download: dictation.multilingualDownload,
                     retry: { dictation.retryMultilingualParakeet() },

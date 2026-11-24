@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import SwiftUI
 
-/// Experiments › Multilingual model (Parakeet): gets Parakeet Ultra onto the iPhone beside the
+/// Settings › Dictation › Model: Multilingual: gets Parakeet Ultra onto the iPhone beside the
 /// engine Hex dictates with meanwhile, so turning the experiment on never takes dictation away.
 /// Each file resumes from its `.partial`, at the next launch too. A dropped connection or a
 /// download that stops moving for `stallLimit` tries again by itself (after 2, 4, 8, 16, 30 s),
@@ -374,9 +374,9 @@ private nonisolated final class ByteReading: @unchecked Sendable {
     }
 }
 
-/// The multilingual model's download or load, on home and under its switch in Experiments:
+/// The multilingual model's download or load, on home and under Settings › Dictation › Model:
 /// what it's doing, that Hex dictates with its usual model meanwhile, and after a failure
-/// Try again and Turn off.
+/// Try again and Use English.
 struct MultilingualModelStatus: View {
     let download: ParakeetUltraDownload
     let retry: () -> Void
@@ -411,8 +411,8 @@ struct MultilingualModelStatus: View {
                     HStack(spacing: 8) {
                         Button("Try again", action: retry)
                             .accessibilityIdentifier("multilingual-model-try-again")
-                        Button("Turn off", action: turnOff)
-                            .accessibilityIdentifier("multilingual-model-turn-off")
+                        Button("Use English", action: turnOff)
+                            .accessibilityIdentifier("multilingual-model-use-english")
                     }
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(HexTheme.textBase)
