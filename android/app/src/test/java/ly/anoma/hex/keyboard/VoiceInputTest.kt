@@ -25,6 +25,12 @@ class VoiceInputTest {
         assertFalse(armsVoice(null, null))
     }
 
+    @Test fun aNewClientInTheSameVoiceSubtypeDoesNotArmAgain() {
+        // onUnbindInput keeps the handled mode, so a field in another app starts without the microphone opening.
+        val handledAfterEntry = VoiceInput.MODE
+        assertFalse(armsVoice(VoiceInput.MODE, handledAfterEntry))
+    }
+
     @Test fun theSwitchWaitsUntilNothingIsPending() {
         assertTrue(voiceCanLeave(leaving = true, phase = SpeechPhase.Idle))
         for (phase in listOf(SpeechPhase.Opening, SpeechPhase.Listening, SpeechPhase.Transcribing)) {

@@ -95,7 +95,7 @@ internal class VoiceInputView(context: Context, private val ime: HexKeyboard) : 
         status(SpeechPhase.Idle, context.getString(R.string.keyboard_hint_voice))
     }
 
-    /** [hint] is a dictation's note or the idle line ("Tap ✓ to talk", a password field's message). */
+    /** [hint] is a dictation's note or the idle line ("Tap Hex to talk", a password field's message). */
     fun status(phase: SpeechPhase, hint: String) {
         speechCue(this.phase, phase, ime.feedback.haptics)
         this.phase = phase

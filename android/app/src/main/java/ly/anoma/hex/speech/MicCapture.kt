@@ -65,9 +65,10 @@ internal class MicCapture(
     private val recognizer: Recognizer,
     private val update: (SpeechPhase, String?) -> Unit,
     private val meter: (Float) -> Unit,
-    private val insert: (String, SpeechOptions) -> Unit,
+    private val insert: (String, SpeechOptions, Boolean) -> Unit,
 ) {
-    private class Ticket(val options: SpeechOptions) {
+    /** [voice]: dictated from the keyboard's voice bar, so its text leaves for the usual keyboard after it. */
+    private class Ticket(val options: SpeechOptions, val voice: Boolean) {
         val job = jobs.incrementAndGet()
         @Volatile var finish = false
         @Volatile var cancelled = false
@@ -89,9 +90,9 @@ internal class MicCapture(
     /** Whether a new dictation can start: nothing holds the microphone. */
     val canStart get() = active == null
 
-    fun start(options: SpeechOptions) {
+    fun start(options: SpeechOptions, voice: Boolean = false) {
         if (active != null) return
-        val ticket = Ticket(options)
+        val ticket = Ticket(options, voice)
         active = ticket
         publish(SpeechPhase.Opening)
         // The model loads while the person speaks, not after they let go.
@@ -160,7 +161,7 @@ internal class MicCapture(
         while (queue.firstOrNull()?.done == true) {
             val next = queue.removeFirst()
             shown = next.note ?: shown
-            next.text?.let { insert(it, next.options) }
+            next.text?.let { insert(it, next.options, next.voice) }
         }
         publish(current(), shown)
     }

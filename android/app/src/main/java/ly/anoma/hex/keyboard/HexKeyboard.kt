@@ -171,7 +171,8 @@ class HexKeyboard : InputMethodService() {
         showStatus(capture.phase, null)
     }
 
-    /** Starts the one automatic listen an entry into the voice subtype arms; a later start waits for ✓. */
+    /** Starts the one automatic listen an entry into the voice subtype arms; a later start waits for the
+     * Hex key. */
     private fun startVoice() {
         if (!voiceArmed || capture.phase != SpeechPhase.Idle) return
         voice?.post {
@@ -220,11 +221,11 @@ class HexKeyboard : InputMethodService() {
         armVoice()
         if (isInputViewShown) syncInputView()
     }
-    /** The client let Hex go (another keyboard took over): a later voice session arms a fresh listen. */
+    /** The client let Hex go (another keyboard or another app's field): stop a pending listen, but keep the
+     * subtype's entry, so focusing a field elsewhere does not open the microphone by itself. */
     override fun onUnbindInput() {
         super.onUnbindInput()
         voiceArmed = false
-        handledMode = null
     }
     override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int,
                                    candidatesStart: Int, candidatesEnd: Int) {
@@ -258,6 +259,9 @@ class HexKeyboard : InputMethodService() {
         if (voice != null && voiceCanLeave(leavingAfterCommit, phase) && capture.phase == SpeechPhase.Idle) {
             leavingAfterCommit = false
             returnToKeyboard()
+        } else if (voiceArmed && phase == SpeechPhase.Idle) {
+            // A dictation from the full keyboard settling now leaves an armed voice bar free to start.
+            startVoice()
         }
     }
     internal fun beginSpeech(): Boolean {
@@ -267,7 +271,7 @@ class HexKeyboard : InputMethodService() {
             return false
         }
         engine.clearForDictation()
-        capture.start(preferences.options(nextEnglish))
+        capture.start(preferences.options(nextEnglish), voice != null)
         nextEnglish = null
         return true
     }
@@ -280,7 +284,8 @@ class HexKeyboard : InputMethodService() {
         if (capture.phase == SpeechPhase.Listening || capture.phase == SpeechPhase.Opening) capture.finish()
     }
     internal fun cancelSpeech() = capture.cancelLatest()
-    /** The voice bar's ✓: starts listening, finishes the recording, or waits out a transcription. */
+    /** The voice bar's key (the Hex mark idle, ✓ while recording): starts listening, finishes the recording,
+     * or waits out a transcription. */
     internal fun toggleVoice() {
         when (capture.phase) {
             SpeechPhase.Idle -> beginSpeech()
@@ -300,14 +305,14 @@ class HexKeyboard : InputMethodService() {
         voiceArmed = false; leavingAfterCommit = false
         if (!switchToPreviousInputMethod()) manager.showInputMethodPicker()
     }
-    private fun commitSpeech(text: String, options: SpeechOptions) {
+    private fun commitSpeech(text: String, options: SpeechOptions, voice: Boolean) {
         if (currentInputConnection == null || engine.secure || !isInputViewShown) return
         // Read now, so a toggle or text changed while it transcribed applies to this dictation. Hex's own
         // fields, such as Settings' practice box, never get the signature.
         val own = currentInputEditorInfo?.packageName == packageName
         val signed = if (own) null else Signature.append(text, preferences.signatureText, preferences.signature)
         engine.insertDictation(signed ?: text, if (options.translate) "en" else options.spoken.code, signed != null)
-        if (voice != null) {
+        if (voice) {
             // Synchronous: the editor holds the inserted text when this returns, so the switch can't race it,
             // and the leave waits for showStatus to see the queue idle.
             currentInputConnection?.getTextBeforeCursor(1, 0)

@@ -1,6 +1,7 @@
 package ly.anoma.hex.keyboard
 
 import android.content.Context
+import android.content.res.Resources
 import android.view.inputmethod.InputMethodManager
 import android.view.inputmethod.InputMethodSubtype
 import java.util.Locale
@@ -25,9 +26,11 @@ internal object VoiceInput {
     fun imeId(context: Context) = context.packageName + "/" + HexKeyboard::class.java.name
 
     /** The voice subtype. Its language is the phone's, because Android enables implicitly only the subtypes
-     * whose language matches the system's; its label has no format specifier, so the picker shows it as written. */
-    fun subtype(context: Context): InputMethodSubtype {
-        val (locale, tag) = subtypeLocale(context.resources.configuration.locales[0])
+     * whose language matches the system's (while Hex's languages follow the system); its label has no format
+     * specifier, so the picker shows it as written. */
+    fun subtype(): InputMethodSubtype {
+        // The phone's language, not a context's: the app's resources can follow another locale.
+        val (locale, tag) = subtypeLocale(Resources.getSystem().configuration.locales[0])
         return InputMethodSubtype.InputMethodSubtypeBuilder()
             .setSubtypeId(SUBTYPE_ID)
             .setSubtypeNameResId(R.string.voice_input_label)
@@ -44,7 +47,7 @@ internal object VoiceInput {
     @Suppress("DEPRECATION") // The app API for a runtime subtype; deprecated in 29 but still served in 36.
     fun apply(context: Context, on: Boolean) {
         val manager = context.getSystemService(InputMethodManager::class.java) ?: return
-        val wanted = subtype(context)
+        val wanted = subtype()
         if (!subtypeSyncNeeded(on, VoiceSubtype(wanted.locale, wanted.languageTag), registered(manager, context))) return
         val subtypes: Array<InputMethodSubtype> = if (on) arrayOf(wanted) else emptyArray()
         manager.setAdditionalInputMethodSubtypes(imeId(context), subtypes)

@@ -79,7 +79,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         capture = MicCapture(LocalSpeech(applicationContext),
             update = { next, reason -> phase = next; notice = speechNote(reason) },
-            meter = {}, insert = { text, _ -> transcript = text })
+            meter = {}, insert = { text, _, _ -> transcript = text })
         page = prefs.getInt("page", 0).coerceIn(0, 3)
         // The keyboard's Settings tool opens Hex on its Keyboard page for the launch that carried the extra.
         // The task keeps its base intent, so a Recents relaunch still carries it: a restored or history
