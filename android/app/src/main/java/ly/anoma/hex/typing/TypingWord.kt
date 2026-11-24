@@ -70,7 +70,7 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
      * predictions lowercase; your own words and shortcuts keep theirs. */
     var addsCapitals = true
     /** English's word list standing in for a dictation language with no layout or typing model of its own
-     * (Português, Nederlands, Polski, Русский): the keys' geometry and your personal dictionary still work,
+     * (Nederlands, Polski, Русский): the keys' geometry and your personal dictionary still work,
      * but the model's completions, next words, autocorrection, tap correction and emoji keywords are English's
      * and stay off. */
     var standIn = false
@@ -468,14 +468,14 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         // the commonest words for next-word slots the model can't fill.
         private val sentenceStarters = mapOf("en" to listOf("I", "the", "I'm"), "es" to listOf("yo", "el", "la"),
             "de" to listOf("ich", "das", "die"), "nb" to listOf("jeg", "det", "vi"), "fr" to listOf("je", "le", "la"),
-            "it" to listOf("io", "il", "la"))
+            "it" to listOf("io", "il", "la"), "pt" to listOf("eu", "o", "a"))
         private val clauseStarters = mapOf("en" to listOf("I", "but", "and"), "es" to listOf("que", "pero", "y"),
             "de" to listOf("und", "aber", "ich"), "nb" to listOf("og", "men", "jeg"), "fr" to listOf("et", "mais", "je"),
-            "it" to listOf("e", "ma", "che"))
+            "it" to listOf("e", "ma", "che"), "pt" to listOf("e", "mas", "que"))
         private val commonWords = mapOf("en" to listOf("the", "to", "and", "a", "I", "of"),
             "es" to listOf("de", "que", "y", "la", "el", "en"), "de" to listOf("und", "die", "der", "ich", "ist", "das"),
             "nb" to listOf("og", "i", "det", "er", "på", "som"), "fr" to listOf("de", "la", "et", "le", "je", "à"),
-            "it" to listOf("di", "e", "che", "la", "il", "a"))
+            "it" to listOf("di", "e", "che", "la", "il", "a"), "pt" to listOf("de", "a", "o", "que", "e", "em"))
         private val midSentenceMarks = ",;:)\"'\u201D\u2019\u2014"
         /** The word right before the cursor, or null inside a handle, path, address or number. */
         fun currentToken(before: CharSequence): String? {

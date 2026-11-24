@@ -13,8 +13,8 @@ import ly.anoma.hex.typing.Suggestion
 import ly.anoma.hex.typing.TypingModel
 import ly.anoma.hex.typing.TypingWord
 
-/** English's word list standing in for a dictation language with no model of its own (Português, Nederlands,
- * Polski, Русский): your personal dictionary and its replacements stay, English's words do not. */
+/** English's word list standing in for a dictation language with no model of its own (Nederlands, Polski,
+ * Русский): your personal dictionary and its replacements stay, English's words do not. */
 class StandInTypingTest {
     private fun word(standIn: Boolean = false): TypingWord {
         val model = TypingModel.file(File("src/main/assets/typing/en.hextm"), "en")

@@ -71,6 +71,7 @@ It writes the paths, each set's summary and each word's readings to `android/bui
 | Bokmål | 11,845 | 96.4% | 99.3% | — | 1.10 / 3.79 ms |
 | French | 12,666 | 95.2% | 99.3% | 95.2% / 99.3% | 1.30 / 4.62 ms |
 | Italian | 11,002 | 96.0% | 99.3% | — | 1.43 / 4.69 ms |
+| Portuguese (Brazil) | 11,580 | 96.3% | 99.5% | — | not yet measured |
 
 "Typed or in the strip" is the word among the first four readings: the one typed and the three the strip offers. The emulator is the Studio's API 36 Pixel 8 (4 cores, ARM64), timing `SwipeReader` alone as the keyboard calls it when the finger lifts. iPhone Hex has no Bokmål or Italian model. English with neat and sloppy fingers: 99.0% / 99.9% and 82.0% / 92.2%, the same as iPhone; Spanish 96.1% / 99.9% and 83.3% / 93.4% (iPhone 83.2%).
 
@@ -239,6 +240,11 @@ adapted from Shutterstock's [LDNOOBW revision 5faf2ba](https://github.com/LDNOOB
 - Apply each language's list to its own layout, plus unambiguous shared loanwords.
   Spanish *negro* (black), German *dick* (thick), and Bokmål *fag* (subject) remain
   available. An unscored listed spelling is protected when typed just like a model word.
+- Portuguese (LDNOOBW `pt`, Brazil first): its ordinary words stay available (*comer*, *cerveja*,
+  *burro*, *saco*, *pau*, *transar*, *gozar*, *camisinha*, *inferno*), as do neutral terms
+  (*lésbica*, *bissexual*) and *veado* (deer); the slur's own spelling *viado* is blocked, and so
+  is *bicha*, a queue in Portugal but a slur in Brazil. Expressions of three words or more are
+  left to their words (*porra*, *puta*, *cu*), with common inflections added (*fodeu*, *fodido*).
 
 ## Reproduce on the Studio
 
