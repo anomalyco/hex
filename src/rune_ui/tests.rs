@@ -3196,6 +3196,38 @@ fn the_vocabulary_sheet_offers_files_only_with_its_lab_on() {
     assert!(rt.find("close-vocabulary").is_some());
 }
 
+/// A words file's review lists what Add would add, not only counts: new
+/// terms with their spellings, a listed term's new spelling, new
+/// replacements, the clash, and the maker as the file's claim.
+#[test]
+fn the_words_file_review_lists_what_add_would_add() {
+    let rt = runtime("words-review", false, GOLDEN_SIZE);
+    let shown = texts(&rt);
+    for words in [
+        "Next.js",
+        "Zoë",
+        "שלום",
+        "OpenCode",
+        "open coat",
+        "cloud code",
+        "Claude Code",
+        "toda",
+        "תודה",
+        "jet hub",
+        "Git Hub",
+        "GitHub",
+        "Hex for iPhone",
+        ", as the file says",
+    ] {
+        assert!(
+            shown.iter().any(|text| text == words),
+            "{words:?} isn't its own run in {shown:?}"
+        );
+    }
+    // Already there: listed in the counts, not as something to add.
+    assert!(!shown.iter().any(|text| text == "Rune"));
+}
+
 /// General's Vocabulary row opens the sheet, and Escape closes it.
 #[test]
 fn the_vocabulary_row_opens_its_sheet() {

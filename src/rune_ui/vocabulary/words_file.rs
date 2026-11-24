@@ -1,6 +1,7 @@
 //! Labs › Vocabulary and replacement files: Hex words files (`.hexwords`,
 //! `docs/specs/hex-words.md`) from the Vocabulary sheet's footer. Open…
-//! reads a file into memory and shows its review sheet; nothing changes until
+//! reads a file into memory on a worker thread, so even an 8 MiB file never
+//! stalls the window, and shows its review sheet; nothing changes until
 //! Add, which merges the file into the vocabulary and the Global mode's
 //! replacements through the window's one settings save. Undo puts both lists
 //! back until either changes or another file is added, across restarts.
@@ -8,6 +9,7 @@
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, TryRecvError, sync_channel};
 
 use rune::El;
 use rune_kit::{Menu as KitMenu, MenuItem, Placement};
@@ -41,6 +43,8 @@ pub(super) struct Review {
 pub(in crate::rune_ui) struct WordsFiles {
     open_chooser: Option<Pending>,
     export_chooser: Option<Pending>,
+    /// A chosen file being read and checked off the window's thread.
+    reading: Option<Receiver<Result<WordsFile, OpenError>>>,
     review: Option<Review>,
     undo: Option<Undo>,
     /// Where the Undo copy is kept. Scenes and tests have none and keep it in
@@ -175,16 +179,33 @@ fn choose_export(ui: &mut Ui) {
 /// window changed.
 pub(super) fn poll(ui: &mut Ui) -> bool {
     if !on(ui) {
-        ui.vocabulary.words.open_chooser = None;
-        ui.vocabulary.words.export_chooser = None;
+        let words = &mut ui.vocabulary.words;
+        words.open_chooser = None;
+        words.export_chooser = None;
+        words.reading = None;
         return false;
     }
     let mut changed = forget_stale_undo(ui);
-    // A dialog that answers after its sheet closed changes nothing.
+    // A dialog or a read that finishes after its sheet closed changes
+    // nothing.
     if !ui.is_modal(Modal::Vocabulary) {
         ui.vocabulary.words.open_chooser = None;
         ui.vocabulary.words.export_chooser = None;
+        ui.vocabulary.words.reading = None;
         return changed;
+    }
+    let read = match ui.vocabulary.words.reading.as_ref().map(Receiver::try_recv) {
+        None | Some(Err(TryRecvError::Empty)) => None,
+        Some(Ok(result)) => Some(Some(result)),
+        Some(Err(TryRecvError::Disconnected)) => Some(None),
+    };
+    if let Some(result) = read {
+        ui.vocabulary.words.reading = None;
+        match result {
+            Some(result) => read_done(ui, result),
+            None => super::say(ui, tr("Couldn't read that file").into(), true),
+        }
+        changed = true;
     }
     if let Some(choice) = ui
         .vocabulary
@@ -242,7 +263,34 @@ pub(super) fn opened(ui: &mut Ui, choice: Choice) {
             return;
         }
     };
-    match hex_words::open(&path) {
+    if ui.vocabulary.words.reading.is_some() {
+        return;
+    }
+    let (send, receive) = sync_channel(1);
+    let wake = super::wake(ui);
+    let reader = std::thread::Builder::new()
+        .name("hex-words-read".into())
+        .spawn(move || {
+            // A window that stopped waiting needs no answer.
+            let _ = send.send(hex_words::open(&path));
+            wake();
+        });
+    match reader {
+        Ok(_) => {
+            ui.vocabulary.words.reading = Some(receive);
+            super::say(ui, tr("Reading that file…").into(), false);
+        }
+        Err(error) => super::say(
+            ui,
+            tr_fill("Couldn't open that file: {}", &error.to_string()),
+            true,
+        ),
+    }
+}
+
+/// What reading the chosen file gave: its review, or why it was refused.
+pub(super) fn read_done(ui: &mut Ui, result: Result<WordsFile, OpenError>) {
+    match result {
         Ok(file) => show_review(ui, file),
         Err(error) => {
             if let OpenError::Refused(refusal) = &error {
@@ -252,6 +300,18 @@ pub(super) fn opened(ui: &mut Ui, choice: Choice) {
             super::say(ui, tr_fill("Couldn't open that file: {}", &why), true);
         }
     }
+}
+
+/// Waits for the read `opened` started, as the window's poll would take it.
+#[cfg(test)]
+pub(super) fn finish_reading(ui: &mut Ui) {
+    let receiver = ui
+        .vocabulary
+        .words
+        .reading
+        .take()
+        .expect("a read in flight");
+    read_done(ui, receiver.recv().expect("the reader answers"));
 }
 
 /// Why a file wasn't opened, in a few words. An OS error keeps its own text.
@@ -678,4 +738,25 @@ pub(in crate::rune_ui) fn fixture(ui: &mut Ui, review: bool) {
     ui.modes = crate::rune_ui::modes::ModesPane::new(&ui.settings);
     ui.vocabulary.words.undo = Some(Undo::new(before, current(ui)));
     super::say_with_undo(ui, added_line(&merged));
+}
+
+/// Scenes: the review of a long file, whose parts and clashes scroll.
+pub(in crate::rune_ui) fn long_fixture(ui: &mut Ui) {
+    fixture(ui, false);
+    let terms: Vec<serde_json::Value> = (1..=24)
+        .map(|n| serde_json::json!({"term": format!("Project {n}"), "soundsLike": [format!("pro jet {n}")]}))
+        .collect();
+    let rules: Vec<serde_json::Value> = (1..=16)
+        .map(|n| serde_json::json!({"heard": format!("shortcut {n}"), "write": format!("Expanded text {n}")}))
+        .collect();
+    let file = serde_json::json!({
+        "format": "hex.words",
+        "version": 2,
+        "madeBy": {"app": "Hex for Android", "version": "0.2.2"},
+        "vocabulary": terms,
+        "replacements": rules,
+    });
+    if let Ok(file) = hex_words::read(file.to_string().as_bytes()) {
+        show_review(ui, file);
+    }
 }

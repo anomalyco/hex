@@ -576,6 +576,10 @@ pub(super) const SCENES: &[Scene] = &[
         *ui = mac_fixture();
         vocabulary::words_fixture(ui, true);
     }),
+    ("words-review-long", |ui| {
+        *ui = mac_fixture();
+        vocabulary::words_long_fixture(ui);
+    }),
     ("mac-settings-recording", |ui| {
         *ui = mac_fixture();
         let held = crate::app_settings::HotkeyModifiers {

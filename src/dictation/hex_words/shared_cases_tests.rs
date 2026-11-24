@@ -304,6 +304,25 @@ fn every_desktop_merge_case_and_its_undo() {
             failures.push(mismatch(&case["name"], &case["expect"], &actual));
             continue;
         }
+        // What the review lists agrees with what it counts.
+        assert_eq!(
+            merged.new_terms.len(),
+            summary.added_terms,
+            "{}",
+            case["name"]
+        );
+        assert_eq!(
+            merged.new_spellings.len(),
+            summary.updated_terms,
+            "{}",
+            case["name"]
+        );
+        assert_eq!(
+            merged.new_replacements.len(),
+            summary.added_replacements,
+            "{}",
+            case["name"]
+        );
         // Undo, through the copy as the data folder keeps it, and back into
         // settings, gives back `before` exactly.
         let kept = Undo::new(before, merged.lists.clone()).to_bytes();

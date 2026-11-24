@@ -22,8 +22,8 @@ use crate::dictation::vocabulary::{self, VocabularyEntry};
 mod words_file;
 
 pub(super) use words_file::{
-    MENU as WORDS_MENU, WordsFiles, fixture as words_fixture, modal as review_modal,
-    on_close as review_closed,
+    MENU as WORDS_MENU, WordsFiles, fixture as words_fixture, long_fixture as words_long_fixture,
+    modal as review_modal, on_close as review_closed,
 };
 /// One term row: a regular text field and its padding.
 const ROW_HEIGHT: f32 = 36.0;
@@ -1213,8 +1213,12 @@ mod tests {
         let before = lists(&ui);
         let before = (before.0.join(","), format!("{:?}", before.1));
 
-        // Opening shows the review and changes nothing.
+        // Opening reads the file off the window's thread, then shows the
+        // review and changes nothing.
         words_file::opened(&mut ui, Ok(Some(path.clone())));
+        assert!(ui.is_modal(Modal::Vocabulary));
+        assert_eq!(status(&ui), ("Reading that file…", false));
+        words_file::finish_reading(&mut ui);
         assert!(ui.is_modal(Modal::WordsReview));
         assert_eq!(ui.saved, 0);
         assert_eq!(lists(&ui).0, ["NextJS"]);
@@ -1263,6 +1267,7 @@ mod tests {
         std::fs::write(&path, iphone()).unwrap();
         let mut ui = words_ui();
         words_file::opened(&mut ui, Ok(Some(path.clone())));
+        words_file::finish_reading(&mut ui);
         words_file::cancel(&mut ui);
         assert!(ui.is_modal(Modal::Vocabulary));
         assert_eq!(ui.saved, 0);
@@ -1270,6 +1275,7 @@ mod tests {
         assert!(!words_file::can_undo(&ui));
 
         words_file::opened(&mut ui, Ok(Some(path)));
+        words_file::finish_reading(&mut ui);
         words_file::add(&mut ui);
         assert!(words_file::can_undo(&ui));
         ui.vocabulary.rows[0].term = TextEdit::new("Next JS");
@@ -1295,6 +1301,7 @@ mod tests {
             let path = scratch.path("refused.hexwords");
             std::fs::write(&path, bytes).unwrap();
             words_file::opened(&mut ui, Ok(Some(path)));
+            words_file::finish_reading(&mut ui);
             assert!(ui.is_modal(Modal::Vocabulary));
             assert_eq!(
                 status(&ui),

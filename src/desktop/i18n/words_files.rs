@@ -7,6 +7,11 @@
 /// Ukrainian.
 #[rustfmt::skip]
 pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
+    ("Made by {}, as the file says", ["Utworzono w {}, według pliku", "由 {} 制作（据文件所述）", "{} で作成（ファイルの記載による）", "Erstellt mit {}, laut der Datei", "Creado con {}, según el archivo", "Створено в {}, як зазначено у файлі"]),
+    ("sounds like", ["brzmi jak", "听起来像", "聞こえ方", "klingt wie", "suena como", "звучить як"]),
+    ("also sounds like", ["brzmi też jak", "也听起来像", "別の聞こえ方", "klingt auch wie", "también suena como", "також звучить як"]),
+    ("Reading that file…", ["Odczytywanie tego pliku…", "正在读取该文件…", "ファイルを読み込んでいます…", "Datei wird gelesen…", "Leyendo ese archivo…", "Читання цього файлу…"]),
+    ("Couldn't read that file", ["Nie udało się odczytać tego pliku", "无法读取该文件", "このファイルを読み込めませんでした", "Diese Datei konnte nicht gelesen werden", "No se pudo leer ese archivo", "Не вдалося прочитати цей файл"]),
     ("Words file…", ["Plik słów…", "词语文件…", "単語ファイル…", "Wortdatei…", "Archivo de palabras…", "Файл слів…"]),
     ("Open words file…", ["Otwórz plik słów…", "打开词语文件…", "単語ファイルを開く…", "Wortdatei öffnen…", "Abrir archivo de palabras…", "Відкрити файл слів…"]),
     ("Export words file…", ["Eksportuj plik słów…", "导出词语文件…", "単語ファイルを書き出す…", "Wortdatei exportieren…", "Exportar archivo de palabras…", "Експортувати файл слів…"]),
@@ -70,9 +75,7 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Keep mine", ["Zachowaj moje", "保留我的", "自分のものを残す", "Meine behalten", "Mantener el mío", "Залишити моє"]),
     ("Use this one", ["Użyj tego", "使用这个", "こちらを使う", "Diese verwenden", "Usar este", "Узяти це"]),
     ("Clashes", ["Konflikty", "冲突", "競合", "Konflikte", "Conflictos", "Конфлікти"]),
-    ("Made by", ["Utworzono w", "制作者", "作成元", "Erstellt mit", "Creado con", "Створено в"]),
     ("Made by a newer Hex: what this Hex doesn't know is left out", ["Utworzono w nowszym Hex: to, czego ten Hex nie zna, pominięto", "由较新的 Hex 制作：此 Hex 不认识的内容已略去", "新しい Hex で作成: この Hex が知らない部分は除外されます", "Mit einem neueren Hex erstellt: Was dieses Hex nicht kennt, wird ausgelassen", "Creado con un Hex más reciente: lo que este Hex no conoce se omite", "Створено в новішому Hex: те, чого цей Hex не знає, пропущено"]),
-    ("In this file", ["W tym pliku", "此文件中", "このファイルの内容", "In dieser Datei", "En este archivo", "У цьому файлі"]),
     ("Replacements", ["Zamiany", "替换", "置換", "Ersetzungen", "Reemplazos", "Заміни"]),
     ("Vocabulary holds up to 500 terms: {} left out", ["Słownictwo mieści do 500 terminów: pominięto {}", "词汇最多 500 个术语：略去 {} 个", "語彙は最大 500 件の用語です: {} 件を除外", "Das Vokabular fasst bis zu 500 Begriffe: {} ausgelassen", "El vocabulario admite hasta 500 términos: se omitieron {}", "Словник вміщує до 500 термінів: пропущено {}"]),
     ("A term holds up to 16 spellings: {} left out", ["Termin mieści do 16 pisowni: pominięto {}", "一个术语最多 16 种拼写：略去 {} 个", "1 つの用語の表記は最大 16 件です: {} 件を除外", "Ein Begriff fasst bis zu 16 Schreibweisen: {} ausgelassen", "Un término admite hasta 16 grafías: se omitieron {}", "Термін вміщує до 16 написань: пропущено {}"]),
@@ -84,6 +87,11 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
 /// French, for the strings above.
 #[rustfmt::skip]
 pub(super) const FRENCH: &[(&str, &str)] = &[
+    ("Made by {}, as the file says", "Créé avec {}, d’après le fichier"),
+    ("sounds like", "se prononce comme"),
+    ("also sounds like", "se prononce aussi comme"),
+    ("Reading that file…", "Lecture de ce fichier…"),
+    ("Couldn't read that file", "Impossible de lire ce fichier"),
     ("Words file…", "Fichier de mots…"),
     ("Open words file…", "Ouvrir un fichier de mots…"),
     ("Export words file…", "Exporter un fichier de mots…"),
@@ -147,9 +155,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("Keep mine", "Garder le mien"),
     ("Use this one", "Utiliser celui-ci"),
     ("Clashes", "Conflits"),
-    ("Made by", "Créé avec"),
     ("Made by a newer Hex: what this Hex doesn't know is left out", "Créé avec un Hex plus récent : ce que ce Hex ne connaît pas est laissé de côté"),
-    ("In this file", "Dans ce fichier"),
     ("Replacements", "Remplacements"),
     ("Vocabulary holds up to 500 terms: {} left out", "Le vocabulaire contient jusqu’à 500 termes : {} laissés de côté"),
     ("A term holds up to 16 spellings: {} left out", "Un terme contient jusqu’à 16 graphies : {} laissées de côté"),
@@ -161,6 +167,11 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
 /// Brazilian Portuguese, for the strings above.
 #[rustfmt::skip]
 pub(super) const PORTUGUESE: &[(&str, &str)] = &[
+    ("Made by {}, as the file says", "Criado com {}, segundo o arquivo"),
+    ("sounds like", "soa como"),
+    ("also sounds like", "também soa como"),
+    ("Reading that file…", "Lendo esse arquivo…"),
+    ("Couldn't read that file", "Não foi possível ler esse arquivo"),
     ("Words file…", "Arquivo de palavras…"),
     ("Open words file…", "Abrir arquivo de palavras…"),
     ("Export words file…", "Exportar arquivo de palavras…"),
@@ -224,9 +235,7 @@ pub(super) const PORTUGUESE: &[(&str, &str)] = &[
     ("Keep mine", "Manter o meu"),
     ("Use this one", "Usar este"),
     ("Clashes", "Conflitos"),
-    ("Made by", "Criado com"),
     ("Made by a newer Hex: what this Hex doesn't know is left out", "Criado com um Hex mais recente: o que este Hex não conhece fica de fora"),
-    ("In this file", "Neste arquivo"),
     ("Replacements", "Substituições"),
     ("Vocabulary holds up to 500 terms: {} left out", "O vocabulário comporta até 500 termos: {} deixados de fora"),
     ("A term holds up to 16 spellings: {} left out", "Um termo comporta até 16 grafias: {} deixadas de fora"),
@@ -238,6 +247,11 @@ pub(super) const PORTUGUESE: &[(&str, &str)] = &[
 /// Russian, for the strings above.
 #[rustfmt::skip]
 pub(super) const RUSSIAN: &[(&str, &str)] = &[
+    ("Made by {}, as the file says", "Создано в {}, как указано в файле"),
+    ("sounds like", "звучит как"),
+    ("also sounds like", "также звучит как"),
+    ("Reading that file…", "Чтение этого файла…"),
+    ("Couldn't read that file", "Не удалось прочитать этот файл"),
     ("Words file…", "Файл слов…"),
     ("Open words file…", "Открыть файл слов…"),
     ("Export words file…", "Экспортировать файл слов…"),
@@ -301,9 +315,7 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
     ("Keep mine", "Оставить моё"),
     ("Use this one", "Взять это"),
     ("Clashes", "Конфликты"),
-    ("Made by", "Создано в"),
     ("Made by a newer Hex: what this Hex doesn't know is left out", "Создано в более новом Hex: то, чего этот Hex не знает, пропущено"),
-    ("In this file", "В этом файле"),
     ("Replacements", "Замены"),
     ("Vocabulary holds up to 500 terms: {} left out", "Словарь вмещает до 500 терминов: пропущено {}"),
     ("A term holds up to 16 spellings: {} left out", "Термин вмещает до 16 написаний: пропущено {}"),
@@ -315,6 +327,11 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
 /// Hungarian, for the strings above.
 #[rustfmt::skip]
 pub(super) const HUNGARIAN: &[(&str, &str)] = &[
+    ("Made by {}, as the file says", "Készítő: {} – a fájl szerint"),
+    ("sounds like", "hangzása"),
+    ("also sounds like", "hangzása még"),
+    ("Reading that file…", "A fájl olvasása…"),
+    ("Couldn't read that file", "Nem sikerült beolvasni azt a fájlt"),
     ("Words file…", "Szófájl…"),
     ("Open words file…", "Szófájl megnyitása…"),
     ("Export words file…", "Szófájl exportálása…"),
@@ -378,9 +395,7 @@ pub(super) const HUNGARIAN: &[(&str, &str)] = &[
     ("Keep mine", "Az enyém marad"),
     ("Use this one", "Ez legyen"),
     ("Clashes", "Ütközések"),
-    ("Made by", "Készítő:"),
     ("Made by a newer Hex: what this Hex doesn't know is left out", "Újabb Hex készítette: amit ez a Hex nem ismer, kimarad"),
-    ("In this file", "Ebben a fájlban"),
     ("Replacements", "Cserék"),
     ("Vocabulary holds up to 500 terms: {} left out", "A szókincs legfeljebb 500 kifejezést tárol: {} kimaradt"),
     ("A term holds up to 16 spellings: {} left out", "Egy kifejezéshez legfeljebb 16 írásmód tartozhat: {} kimaradt"),

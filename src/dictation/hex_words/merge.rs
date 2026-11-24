@@ -122,6 +122,13 @@ pub(crate) struct Merged {
     /// What didn't fit this device's limits (`overDeviceLimit`), in file
     /// order.
     pub(crate) over_limit: Vec<Place>,
+    /// The file's terms this merge adds, by index, for the review to list.
+    pub(crate) new_terms: Vec<usize>,
+    /// Terms already listed that gain spellings: the file's index and the
+    /// spellings they gain.
+    pub(crate) new_spellings: Vec<(usize, Vec<String>)>,
+    /// The file's replacements this merge adds, by index.
+    pub(crate) new_replacements: Vec<usize>,
 }
 
 /// Merges the file's `terms` and `replacements` into `before`. A clash
@@ -170,7 +177,7 @@ fn merge_terms(merged: &mut Merged, terms: &[Term], limits: Limits) {
         match keys.get(&key) {
             Some(&at) => {
                 let entry = &mut list[at];
-                let mut gained = false;
+                let mut gained = Vec::new();
                 for (spelling_index, spelling) in term.sounds_like.iter().enumerate() {
                     let spelling_key = key_of(spelling);
                     if spelling_key == key_of(&entry.term)
@@ -188,12 +195,13 @@ fn merge_terms(merged: &mut Merged, terms: &[Term], limits: Limits) {
                         continue;
                     }
                     entry.sounds_like.push(spelling.clone());
-                    gained = true;
+                    gained.push(spelling.clone());
                 }
-                if gained {
-                    merged.summary.updated_terms += 1;
-                } else {
+                if gained.is_empty() {
                     merged.summary.already_have_terms += 1;
+                } else {
+                    merged.summary.updated_terms += 1;
+                    merged.new_spellings.push((index, gained));
                 }
             }
             None if list.len() >= limits.terms => merged.over_limit.push(Place::Term(index)),
@@ -211,6 +219,7 @@ fn merge_terms(merged: &mut Merged, terms: &[Term], limits: Limits) {
                     sounds_like,
                 });
                 merged.summary.added_terms += 1;
+                merged.new_terms.push(index);
             }
         }
     }
@@ -256,6 +265,7 @@ fn merge_replacements(
                     output: replacement.write.clone(),
                 });
                 merged.summary.added_replacements += 1;
+                merged.new_replacements.push(index);
             }
         }
     }
