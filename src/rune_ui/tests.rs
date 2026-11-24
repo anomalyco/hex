@@ -4176,6 +4176,98 @@ fn the_trust_prompt_lists_what_a_config_reaches_until_it_is_allowed() {
     assert!(rt.find("allow-transformations").is_none());
 }
 
+/// The agent card keeps its text clear of its buttons when a longer
+/// interface language makes the title and example wrap (#2711). 536 pt is
+/// the narrowest window the report shows, below the window's usual minimum.
+#[test]
+fn hungarian_output_keeps_the_agent_cards_text_clear_of_its_buttons() {
+    // The language is per test thread; put English back for whichever test
+    // this thread runs next, even if an assertion below fails.
+    struct RestoreEnglish;
+    impl Drop for RestoreEnglish {
+        fn drop(&mut self) {
+            crate::desktop::i18n::apply(Some("en"));
+        }
+    }
+    let _english = RestoreEnglish;
+    let case = |scene: &str, width: f32| {
+        let mut rt = runtime(scene, true, (width, 500.0));
+        crate::desktop::i18n::apply(Some("hu"));
+        rt.invalidate();
+        settle(&mut rt);
+        rt
+    };
+
+    let overlaps = |a: [f32; 4], b: [f32; 4]| {
+        a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3]
+    };
+
+    // At the usual window width the actions share the text's row, so their
+    // left edge is the line the copy must not cross.
+    let wide = case("output", 980.0);
+    let title = element(&wide, "example-title").rect;
+    let request = element(&wide, "example-request").rect;
+    let open = element(&wide, "open-settings-file").rect;
+    let edit = element(&wide, "edit-with-agent").rect;
+    let card = element(&wide, "agent-card").rect;
+    assert!(
+        title[0] + title[2] <= open[0],
+        "the title runs under Open file: {title:?} vs {open:?}"
+    );
+    assert!(
+        request[0] + request[2] <= open[0],
+        "the example runs under Open file: {request:?} vs {open:?}"
+    );
+    assert!(
+        edit[0] + edit[2] <= card[0] + card[2],
+        "Edit with agent leaves the card: {edit:?} vs {card:?}"
+    );
+
+    let output = case("output", 536.0);
+    let title = element(&output, "example-title").rect;
+    let request = element(&output, "example-request").rect;
+    let open = element(&output, "open-settings-file").rect;
+    let edit = element(&output, "edit-with-agent").rect;
+    let card = element(&output, "agent-card").rect;
+    for (name, text) in [("title", title), ("example", request)] {
+        assert!(
+            !overlaps(text, open),
+            "the {name} runs under Open file: {text:?} vs {open:?}"
+        );
+        assert!(
+            !overlaps(text, edit),
+            "the {name} runs under Edit with agent: {text:?} vs {edit:?}"
+        );
+    }
+    assert!(
+        edit[0] + edit[2] <= card[0] + card[2],
+        "Edit with agent leaves the card: {edit:?} vs {card:?}"
+    );
+
+    // After Edit with agent, the same title is a plain line instead of the
+    // animated one, so it must wrap on its own.
+    let copied = case("output-open", 536.0);
+    let title = copied
+        .elements()
+        .into_iter()
+        .find(|e| !e.exiting && e.path.contains("agent-card") && e.path.ends_with("/copy/title"))
+        .map(|e| e.rect)
+        .expect("the copied title");
+    let open = element(&copied, "open-settings-file").rect;
+    let edit = element(&copied, "edit-with-agent").rect;
+    let card = element(&copied, "agent-card").rect;
+    for (button, name) in [(open, "Open file"), (edit, "Edit with agent")] {
+        assert!(
+            !overlaps(title, button),
+            "the copied title runs under {name}: {title:?} vs {button:?}"
+        );
+    }
+    assert!(
+        edit[0] + edit[2] <= card[0] + card[2],
+        "Edit with agent leaves the card: {edit:?} vs {card:?}"
+    );
+}
+
 /// Labs › Transform typed text: Output's Typed text section and its
 /// recorder appear only with the lab on, and the recorder listens like the
 /// raw dictation shortcut's.
