@@ -344,11 +344,13 @@ internal class KeyboardEngine(
             surface?.suggestions(Suggestion.withEmoji(w.strip(autocorrect = false).map(::shown), emojiFor(w)))
             // A stand-in's strip already is the finished one: nothing there changes after the pause.
             // A field that asked for no suggestions of its own gets no fix: space leaves its words alone.
-            if (!feedback.autocorrect || !correctingField || w.standIn || !canEndWord()) return
+            // With Keyboard › Autocorrect off the near words still come, as plain words space never puts in.
+            if (!correctingField || w.standIn || !canEndWord()) return
             val token = w.token
+            val fixes = feedback.autocorrect
             pendingChip = Runnable {
                 pendingChip = null
-                if (word === w && w.token == token) surface?.suggestions(Suggestion.withEmoji(w.strip(autocorrect = true).map {
+                if (word === w && w.token == token) surface?.suggestions(Suggestion.withEmoji(w.strip(fixes, nearWords = true).map {
                     if (it.kind == Suggestion.Kind.Fix && feedback.blocked(w.decoder.model.language, token, it.text))
                         Suggestion(it.text, Suggestion.Kind.Word) else it
                 }.map(::shown), emojiFor(w)))
