@@ -101,7 +101,14 @@ pub(crate) fn default_output_candidates() -> Vec<cpal::Device> {
 /// Opens the system default output as a rodio sink. Windows tries the
 /// endpoint's listed device and then every other listed output, never cpal's
 /// default handle, whose monitor leaves thread-pool threads STA; every other
-/// OS keeps rodio's default handle and fallback.
+/// OS asks the default device for its own buffer size before rodio's default
+/// handle and fallback.
+///
+/// Rodio's default handle always asks for a fixed 50 ms buffer rounded to a
+/// power of two (2048 frames at 44.1 kHz). A device with a smaller supported
+/// range, such as a Bluetooth headset that takes 14..=1024 frames, rejects
+/// that configuration and the handle cannot fall back. The device's own
+/// default buffer size is always within its range.
 pub(crate) fn open_default_output_sink()
 -> std::result::Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
     #[cfg(target_os = "windows")]
@@ -119,7 +126,13 @@ pub(crate) fn open_default_output_sink()
     }
     #[cfg(not(target_os = "windows"))]
     {
-        rodio::DeviceSinkBuilder::open_default_sink()
+        rodio::DeviceSinkBuilder::from_default_device()
+            .and_then(|builder| {
+                builder
+                    .with_buffer_size(cpal::BufferSize::Default)
+                    .open_sink_or_fallback()
+            })
+            .or_else(|_| rodio::DeviceSinkBuilder::open_default_sink())
     }
 }
 
