@@ -303,7 +303,9 @@ Windows System default input or output                       // audio::default_e
   -> open the listed cpal device with that id                // never cpal's default handle:
      cpal's default-handle monitor initializes COM as STA on Windows thread-pool
      threads, so ActivateAudioInterfaceAsync later fails with RPC_E_CHANGED_MODE
-  ├── input: no listed device matches -> the open fails      // bounded recovery retries
+  ├── input: no default endpoint resolves -> a listed stand-in microphone
+  │   (built-in first); the next route change resolves the default again,
+  │   and only nothing usable being listed is an error
   ├── output: a listed device will not open -> try the next listed output
   │   -> none opens -> the tone is dropped                   // never the default handle
   └── default endpoint changes -> an IMMNotificationClient bumps the input or

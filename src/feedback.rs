@@ -1141,11 +1141,11 @@ impl<S: Source> Source for Retractable<S> {
 /// Whether a stream error leaves the output unusable. An underrun or overrun
 /// is a glitch on a stream that keeps running. A default-output change is only
 /// safe on macOS, where cpal reports `DeviceChanged` after the default-output
-/// unit has already rerouted the stream; on Windows cpal's WASAPI backend never
-/// rebinds, so a default-device change ends the stream with
-/// `StreamInvalidated`, which is fatal. Other kinds are treated as an output
-/// that may no longer work; dropping it costs only a cold reopen at the next
-/// tone.
+/// unit has already rerouted the stream. On Windows Hex opens one of the
+/// listed devices, never the default-output handle, so a default change never
+/// invalidates this stream; a removed device arrives as `DeviceNotAvailable`
+/// and drops the sink for a cold reopen at the next tone. Other kinds are
+/// treated as an output that may no longer work, at the same cost.
 fn stream_error_is_fatal(kind: rodio::cpal::ErrorKind) -> bool {
     !matches!(
         kind,

@@ -2498,6 +2498,8 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │   ├── Windows System default -> The default endpoint's listed cpal device, never
 │   │   cpal's default handle: its monitor leaves thread-pool threads STA, which
 │   │   then fails ActivateAudioInterfaceAsync (RPC_E_CHANGED_MODE)
+│   │   └── No default endpoint resolves -> a listed stand-in microphone (built-in
+│   │       first); the next route change resolves the default; nothing usable -> error
 │   ├── Windows default input changes -> Switch once capture is idle // endpoint
 │   │   notification client bumps the input route; Windows never opens a default
 │   │   handle, so cpal's default-change report never applies
