@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 project(hexspeech LANGUAGES C CXX)
 
 include(FetchContent)
+include(ExternalProject)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Link Whisper and ggml into the JNI library" FORCE)
 set(WHISPER_BUILD_TESTS OFF CACHE BOOL "")
 set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "")
@@ -27,10 +28,45 @@ FetchContent_Declare(whisper_cpp
     TLS_VERIFY ON
     PATCH_COMMAND ${PATCH_EXECUTABLE} -p1 -N -t -F0 -i ${CMAKE_CURRENT_LIST_DIR}/ggml-no-debugger.patch)
 FetchContent_MakeAvailable(whisper_cpp)
+# The second copy below builds Whisper and ggml again through this file, stopping here.
+if(HEX_SPEECH_DEPS_ONLY)
+    return()
+endif()
 
-add_library(hexspeech SHARED hexspeech.cpp)
-target_compile_features(hexspeech PRIVATE cxx_std_17)
-target_link_libraries(hexspeech PRIVATE whisper android log)
-target_link_options(hexspeech PRIVATE -Wl,--gc-sections -Wl,--exclude-libs,ALL)
-add_custom_command(TARGET hexspeech POST_BUILD VERBATIM
-    COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM} -DLIB=$<TARGET_FILE:hexspeech> -P ${CMAKE_CURRENT_LIST_DIR}/check-imports.cmake)
+function(hexspeech_library name)
+    add_library(${name} SHARED hexspeech.cpp)
+    target_compile_features(${name} PRIVATE cxx_std_17)
+    target_link_libraries(${name} PRIVATE ${ARGN} android log)
+    target_link_options(${name} PRIVATE -Wl,--gc-sections -Wl,--exclude-libs,ALL)
+    add_custom_command(TARGET ${name} POST_BUILD VERBATIM
+        COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM} -DLIB=$<TARGET_FILE:${name}> -P ${CMAKE_CURRENT_LIST_DIR}/check-imports.cmake)
+endfunction()
+
+# Runs on any arm64 processor.
+hexspeech_library(hexspeech whisper)
+
+# libhexspeech_v82: the same library with ggml's CPU code built for ARMv8.2 with the dot-product instructions
+# (ggml's android_armv8.2_1 variant), which Whisper.kt loads only when the processor reports them. Whisper and ggml
+# are built a second time by this file, from the same patched source, with only GGML_CPU_ARM_ARCH changed.
+set(HEX_SPEECH_V82_ARCH armv8.2-a+dotprod CACHE STRING "GGML_CPU_ARM_ARCH of libhexspeech_v82")
+set(v82 ${CMAKE_CURRENT_BINARY_DIR}/v82)
+set(v82_archives ${v82}/libwhisper.a ${v82}/libggml.a ${v82}/libggml-cpu.a ${v82}/libggml-base.a)
+set(v82_args -DHEX_SPEECH_DEPS_ONLY=ON -DGGML_CPU_ARM_ARCH=${HEX_SPEECH_V82_ARCH}
+    -DFETCHCONTENT_SOURCE_DIR_WHISPER_CPP=${whisper_cpp_SOURCE_DIR} -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=${v82})
+foreach(var CMAKE_TOOLCHAIN_FILE CMAKE_BUILD_TYPE CMAKE_MAKE_PROGRAM ANDROID_ABI ANDROID_PLATFORM ANDROID_NDK ANDROID_STL
+        ANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES ANDROID_USE_LEGACY_TOOLCHAIN_FILE)
+    if(DEFINED ${var})
+        list(APPEND v82_args -D${var}=${${var}})
+    endif()
+endforeach()
+ExternalProject_Add(hexspeech_v82_deps
+    SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}
+    BINARY_DIR ${v82}/build
+    CMAKE_ARGS ${v82_args}
+    BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --target whisper
+    BUILD_ALWAYS ON
+    INSTALL_COMMAND ""
+    BUILD_BYPRODUCTS ${v82_archives})
+hexspeech_library(hexspeech_v82 -Wl,--start-group ${v82_archives} -Wl,--end-group)
+target_include_directories(hexspeech_v82 PRIVATE ${whisper_cpp_SOURCE_DIR}/include ${whisper_cpp_SOURCE_DIR}/ggml/include)
+add_dependencies(hexspeech_v82 hexspeech_v82_deps)

@@ -2,7 +2,11 @@ package ly.anoma.hex.speech
 
 import android.content.Context
 import android.content.res.AssetManager
+import android.util.Log
 import java.io.File
+import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -97,10 +101,59 @@ internal object SpeechModel {
 }
 
 internal object Whisper {
-    init { System.loadLibrary("hexspeech") }
+    init { SpeechLibrary.load() }
     external fun load(assets: AssetManager, file: String?): Long
     external fun free(handle: Long)
     external fun decode(handle: Long, small: Boolean, pcm: ShortArray, count: Int, threads: Int,
                         language: String, translate: Boolean, prompt: String?, job: Long): ByteArray?
     external fun abort(job: Long)
+}
+
+/** Picks the speech library for this processor. libhexspeech_v82 is libhexspeech with ggml's CPU code built for
+ * ARMv8.2 with the dot-product instructions (`-march=armv8.2-a+dotprod`), about a fifth faster with the downloaded
+ * model; a processor without one of them would stop on it (SIGILL). It loads only when the kernel's AT_HWCAP, read
+ * from /proc/self/auxv, reports every instruction set that flag lets the compiler use, and arm64 Linux reports one
+ * only when every core has it. A process that isn't arm64 (an emulator translating ARM), an unreadable auxv or a
+ * failed load gets libhexspeech, which runs on any arm64 processor. The choice is made once, on first use. */
+private object SpeechLibrary {
+    private const val TAG = "HexSpeech"
+    private const val AT_NULL = 0L
+    private const val AT_HWCAP = 16L
+    // asm/hwcap.h: CRC32, ATOMICS and ASIMDRDM are the ARMv8.1 user instructions ARMv8.2 includes; ASIMDDP is dot product.
+    private val V82 = mapOf("crc32" to (1L shl 7), "atomics" to (1L shl 8), "asimdrdm" to (1L shl 12), "asimddp" to (1L shl 20))
+
+    fun load() {
+        val hwcap = if (System.getProperty("os.arch") == "aarch64") hwcap() else null
+        val missing = if (hwcap == null) null else V82.filterValues { hwcap and it == 0L }.keys
+        if (missing != null && missing.isEmpty()) {
+            try {
+                System.loadLibrary("hexspeech_v82")
+                Log.i(TAG, "libhexspeech_v82: the processor reports ${V82.keys.joinToString()}")
+                return
+            } catch (e: UnsatisfiedLinkError) {
+                Log.w(TAG, "libhexspeech_v82 failed to load, using libhexspeech: ${e.message}")
+            } catch (e: SecurityException) {
+                Log.w(TAG, "libhexspeech_v82 failed to load, using libhexspeech: ${e.message}")
+            }
+        } else {
+            Log.i(TAG, "libhexspeech: " + if (missing == null) "no arm64 AT_HWCAP" else "the processor lacks ${missing.joinToString()}")
+        }
+        System.loadLibrary("hexspeech")
+    }
+
+    private fun hwcap(): Long? = try {
+        val auxv = ByteBuffer.wrap(File("/proc/self/auxv").readBytes()).order(ByteOrder.nativeOrder())
+        var found: Long? = null
+        while (found == null && auxv.remaining() >= 16) {
+            val type = auxv.long
+            val value = auxv.long
+            if (type == AT_NULL) break
+            if (type == AT_HWCAP) found = value
+        }
+        found
+    } catch (e: IOException) {
+        null
+    } catch (e: SecurityException) {
+        null
+    }
 }
