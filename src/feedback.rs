@@ -1141,11 +1141,11 @@ impl<S: Source> Source for Retractable<S> {
 /// Whether a stream error leaves the output unusable. An underrun or overrun
 /// is a glitch on a stream that keeps running. A default-output change is only
 /// safe on macOS, where cpal reports `DeviceChanged` after the default-output
-/// unit has already rerouted the stream; on Windows cpal's WASAPI backend never
-/// rebinds, so a default-device change ends the stream with
-/// `StreamInvalidated`, which is fatal. Other kinds are treated as an output
-/// that may no longer work; dropping it costs only a cold reopen at the next
-/// tone.
+/// unit has already rerouted the stream. On Windows Hex opens one of the
+/// listed devices, never the default-output handle, so a default change never
+/// invalidates this stream; a removed device arrives as `DeviceNotAvailable`
+/// and drops the sink for a cold reopen at the next tone. Other kinds are
+/// treated as an output that may no longer work, at the same cost.
 fn stream_error_is_fatal(kind: rodio::cpal::ErrorKind) -> bool {
     !matches!(
         kind,
@@ -1153,27 +1153,77 @@ fn stream_error_is_fatal(kind: rodio::cpal::ErrorKind) -> bool {
     )
 }
 
+/// The stream error callback. It may run on a CoreAudio thread, so it only
+/// flips `failed` on a fatal error: no logging, allocation, or locks. The
+/// playback worker reads the flag, drops the sink, and logs once from its own
+/// thread.
+fn fatal_error_callback(
+    failed: Arc<AtomicBool>,
+) -> impl FnMut(rodio::cpal::Error) + Send + 'static {
+    move |error: rodio::cpal::Error| {
+        if stream_error_is_fatal(error.kind()) {
+            failed.store(true, Ordering::Release);
+        }
+    }
+}
+
+/// Tones open the resolved default output or another listed output, never
+/// cpal's default handle: the handle's default-device monitor leaves Windows
+/// thread-pool threads STA, which later fails every default-handle activation
+/// in the process (`audio::default_endpoint`), including during the Bluetooth
+/// churn that opens this path.
+#[cfg(target_os = "windows")]
 fn open_output() -> Result<Opened<MixerDeviceSink>> {
-    // The stream error callback may run on a CoreAudio thread, so it only
-    // flips this flag on a fatal error: no logging, allocation, or locks. The
-    // playback worker reads it, drops the sink, and logs once from its own
-    // thread.
-    let failed = Arc::new(AtomicBool::new(false));
-    let callback = {
-        let failed = failed.clone();
-        move |error: rodio::cpal::Error| {
-            if stream_error_is_fatal(error.kind()) {
-                failed.store(true, Ordering::Release);
+    let mut last_error = eyre!("no audio output device is available");
+    for device in crate::audio::default_output_candidates() {
+        // A fresh flag per attempt keeps a late error from a failed open from
+        // closing a later sink.
+        let failed = Arc::new(AtomicBool::new(false));
+        match open_listed_output(device, failed) {
+            Ok(mut opened) => {
+                opened.sink.log_on_drop(false);
+                return Ok(opened);
+            }
+            Err(error) => {
+                tracing::debug!(%error, "a listed audio output would not open; trying the next");
+                last_error = error;
             }
         }
-    };
+    }
+    Err(last_error)
+}
+
+/// Opens one of cpal's output devices with the tone buffer and the sink's
+/// failure flag.
+#[cfg(target_os = "windows")]
+fn open_listed_output(
+    device: rodio::cpal::Device,
+    failed: Arc<AtomicBool>,
+) -> Result<Opened<MixerDeviceSink>> {
+    DeviceSinkBuilder::from_device(device)
+        .and_then(|builder| {
+            builder
+                .with_buffer_size(BufferSize::Fixed(OUTPUT_BUFFER_FRAMES))
+                .with_error_callback(fatal_error_callback(failed.clone()))
+                .open_stream()
+        })
+        .map(|sink| Opened { sink, failed })
+        .wrap_err("could not open the audio output")
+}
+
+#[cfg(not(target_os = "windows"))]
+fn open_output() -> Result<Opened<MixerDeviceSink>> {
+    let failed = Arc::new(AtomicBool::new(false));
     let mut opened = DeviceSinkBuilder::from_default_device()
         .and_then(|builder| {
             builder
                 .with_buffer_size(BufferSize::Fixed(OUTPUT_BUFFER_FRAMES))
-                .with_error_callback(callback)
+                .with_error_callback(fatal_error_callback(failed.clone()))
                 .open_stream()
-                .map(|sink| Opened { sink, failed })
+                .map(|sink| Opened {
+                    sink,
+                    failed: failed.clone(),
+                })
         })
         // rodio's all-device fallback (`open_default_sink`) takes no error
         // callback, so a sink opened there keeps rodio's default callback and
