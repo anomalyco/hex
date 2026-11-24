@@ -221,12 +221,7 @@ extension DictationController {
                 self.languageOffer = nil
                 self.isModelReady = true
                 self.keyboardBridge.setModelInstalled(true)
-                switch self.phase {
-                case .modelRequired, .failed:
-                    self.transition(model: .ready)
-                default:
-                    self.markModelReadyPreservingCapture()
-                }
+                self.transition(model: .ready)
                 self.multilingualParakeetLoaded()
                 self.publishKeyboardSnapshot()
             } catch {

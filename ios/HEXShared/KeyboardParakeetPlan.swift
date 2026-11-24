@@ -3,7 +3,7 @@ import Foundation
 /// The single derivation of whether and how the keyboard uses Parakeet, shared by:
 /// - `KeyboardParakeet.choice()` (which model the keyboard loads and transcribes with)
 /// - `KeyboardParakeetDownload.hold` (whether Hex auto-downloads Parakeet V2 for the keyboard)
-/// - `KeyboardParakeetNotice.modelAwaitsDownload` (whether the keyboard shows the download notice)
+/// - `FullKeyboardView.offerModelNotice` (whether the keyboard shows the download notice)
 nonisolated enum KeyboardParakeetPlan: Equatable, Sendable {
     enum Model: Equatable, Sendable {
         case parakeetV2

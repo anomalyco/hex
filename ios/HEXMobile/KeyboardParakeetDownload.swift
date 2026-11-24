@@ -91,27 +91,6 @@ final class KeyboardParakeetDownload {
         }
     }
 
-    /// Convenience over the individual inputs; delegates to `KeyboardParakeetPlan`.
-    nonisolated static func hold(
-        otherEngine: Bool,
-        english: Bool,
-        keyboardLimit: Int?,
-        unmetered: Bool?,
-        freeBytes: Int64?
-    ) -> Hold? {
-        let plan = KeyboardParakeetPlan.resolve(
-            isEnabled: true,
-            fitsDevice: true,
-            twoLanguageEnabled: otherEngine,
-            multilingualLanguage: nil,
-            wantedLanguage: english ? "en-US" : "fr-FR",
-            keyboardLimit: keyboardLimit,
-            v2Downloaded: false,
-            ultraDownloaded: false
-        )
-        return hold(plan: plan, unmetered: unmetered, freeBytes: freeBytes)
-    }
-
     /// Whether a connection lets the download start by itself: up, not expensive (a personal
     /// hotspot, or cellular as iOS usually prices it), not Low Data Mode, and not over cellular
     /// at all, because iOS reports 5G as not expensive under "Allow More Data on 5G".

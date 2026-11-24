@@ -1857,9 +1857,17 @@ final class DictationControllerTests: XCTestCase {
             unmetered: Bool? = true,
             free: Int64? = 8_000_000_000
         ) -> KeyboardParakeetDownload.Hold? {
-            KeyboardParakeetDownload.hold(
-                otherEngine: otherEngine, english: english, keyboardLimit: limit, unmetered: unmetered, freeBytes: free
+            let plan = KeyboardParakeetPlan.resolve(
+                isEnabled: true,
+                fitsDevice: true,
+                twoLanguageEnabled: otherEngine,
+                multilingualLanguage: nil,
+                wantedLanguage: english ? "en-US" : "fr-FR",
+                keyboardLimit: limit,
+                v2Downloaded: false,
+                ultraDownloaded: false
             )
+            return KeyboardParakeetDownload.hold(plan: plan, unmetered: unmetered, freeBytes: free)
         }
         XCTAssertNil(hold(), "an iPhone 17 Pro on Wi-Fi with room")
         XCTAssertEqual(hold(english: false), .notEnglish)

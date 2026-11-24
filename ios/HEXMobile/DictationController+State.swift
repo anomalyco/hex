@@ -104,36 +104,12 @@ extension DictationController {
         }
     }
 
-    /// Whether a capture or transcription belongs to a keyboard dictation job.
-    nonisolated enum KeyboardJob: Equatable, Sendable {
-        case none
-        case active(id: String)
-
-        init(id: String?) {
-            if let id {
-                self = .active(id: id)
-            } else {
-                self = .none
-            }
-        }
-
-        var id: String? {
-            if case .active(let id) = self { return id }
-            return nil
-        }
-
-        var isActive: Bool {
-            if case .active = self { return true }
-            return false
-        }
-    }
-
     @MainActor
     struct ActiveCaptureSession {
         let generation: UInt64
         let capture: any ActiveAudioCapture
         let startedAt: TimeInterval
-        let keyboardJob: KeyboardJob
+        let keyboardJobID: String?
         let preferences: DictationPipeline.Preferences
         let usesCleanup: Bool
         /// Whether the keyboard gets the raw transcript to learn from.
@@ -141,20 +117,18 @@ extension DictationController {
         let copyToPasteboard: Bool
         /// The transcriber's language (BCP 47) when the capture started.
         let language: String
-
-        var keyboardJobID: String? { keyboardJob.id }
     }
 
     /// The dictation capture lifecycle. Holding `ActiveCaptureSession` inside `.recording`
-    /// makes `.recording` without a live capture unrepresentable, and holding `KeyboardJob`
+    /// makes `.recording` without a live capture unrepresentable, and holding `keyboardJobID`
     /// inside `.opening`/`.recording`/`.transcribing` ensures active keyboard job state clears
     /// automatically on every exit.
     @MainActor
     enum Capture {
         case idle
-        case opening(generation: UInt64, job: KeyboardJob)
+        case opening(generation: UInt64, keyboardJobID: String?)
         case recording(ActiveCaptureSession)
-        case transcribing(generation: UInt64, job: KeyboardJob)
+        case transcribing(generation: UInt64, keyboardJobID: String?)
         /// A capture, permission, keepalive, or transcription failure.
         /// `retryableWithModelReady` is true only for capture/transcription failures with a
         /// loaded model, letting the keyboard's next Hex key retry without reopening Hex.
@@ -165,18 +139,16 @@ extension DictationController {
             return nil
         }
 
-        var keyboardJob: KeyboardJob {
+        var keyboardJobID: String? {
             switch self {
-            case .opening(_, let job), .transcribing(_, let job):
-                job
+            case .opening(_, let jobID), .transcribing(_, let jobID):
+                jobID
             case .recording(let session):
-                session.keyboardJob
+                session.keyboardJobID
             case .idle, .failed:
-                .none
+                nil
             }
         }
-
-        var keyboardJobID: String? { keyboardJob.id }
 
         var isRecording: Bool {
             if case .recording = self { return true }
