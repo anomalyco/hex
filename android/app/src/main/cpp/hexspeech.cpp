@@ -189,7 +189,13 @@ Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jlong handle, jboo
     params.abort_callback = [](void *mine) { return abandoned.load() == *static_cast<const jlong *>(mine); };
     params.abort_callback_user_data = &job;
     params.no_context = true;
-    params.no_timestamps = true;
+    // Audio longer than Whisper's 30 s window is decoded with timestamps, as Whisper decodes long audio: each window
+    // then ends at the last sentence it finished, and the next starts there. Without them whisper.cpp moves on a
+    // whole 30 s at a time, cutting mid-sentence: the words across the cut were lost, and a window full of speech to
+    // its edge left out whole sentences (5 of 14 in a 36 s Spanish dictation). On 32 clips of 36-58 s in the ten
+    // dictation languages that lost 27 of 457 sentences; with timestamps, one: a sentence said twice in a row,
+    // which every setting drops. The time is the same. Up to 30 s nothing changes.
+    params.no_timestamps = count <= 30 * 16000;
     params.print_progress = params.print_realtime = params.print_timestamps = params.print_special = false;
     params.suppress_nst = true;
     // A fresh decoding state for every dictation (3 ms), the weights staying loaded: a state kept from an
