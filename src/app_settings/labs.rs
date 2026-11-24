@@ -257,6 +257,10 @@ pub struct LabsSettings {
     /// reminder's on macOS) 30 s after its call app leaves the microphone, as
     /// Always record's Stop when the call ends does.
     pub stop_any_call_recording: bool,
+    /// A meeting recording can leave the microphone out of its track while
+    /// the call's own audio keeps recording and transcribing (macOS; Labs ›
+    /// Mute the microphone while recording).
+    pub meeting_microphone_mute: bool,
     /// With `labs.annotate_replay` on, keeps a rolling 15 s display buffer via `SCClipBufferingOutput` (macOS 27+).
     pub annotate_replay: bool,
     /// An OpenCode service running in the default WSL distribution is used
@@ -577,6 +581,7 @@ impl Default for LabsSettings {
             meeting_import: false,
             transcript_edits: false,
             stop_any_call_recording: false,
+            meeting_microphone_mute: false,
             groups: std::collections::BTreeMap::new(),
             stop_when_call_ends: None,
             meeting_descriptive_filenames: None,

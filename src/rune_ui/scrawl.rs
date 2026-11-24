@@ -5,6 +5,8 @@
 //! for the transcriber, demos, and the replay Lab. Scrawl's own app keeps the
 //! shortcut while it runs until "Use Hex for annotations" asks it to quit.
 
+pub(super) mod routing_rules;
+
 use rune::{El, col, row, text};
 use scrawl_capture::retention::{Policy, Preset};
 
@@ -386,6 +388,7 @@ fn after_rows(ui: &Ui, p: Paint, view: &ScrawlView, layer: &mut Vec<El>) -> Vec<
     let kept = retention_description(policy);
     let folder = folder_label(&ui.settings.capture.captures_dir());
     let mut rows = vec![
+        routing_rules::settings_row(ui, p),
         icon_row(
             p,
             "capture-retention",

@@ -789,6 +789,16 @@ pub(super) const SCENES: &[Scene] = &[
     #[cfg(hex_capture)]
     ("mac-scrawl", |ui| scrawl_fixture(ui, true, |_| {})),
     #[cfg(hex_capture)]
+    ("mac-routing-rules", |ui| {
+        scrawl_fixture(ui, true, |_| {});
+        scrawl::routing_rules::fixture(ui, true, false);
+    }),
+    #[cfg(hex_capture)]
+    ("mac-routing-add", |ui| {
+        scrawl_fixture(ui, true, |_| {});
+        scrawl::routing_rules::fixture(ui, true, true);
+    }),
+    #[cfg(hex_capture)]
     ("mac-scrawl-open", |ui| {
         scrawl_fixture(ui, true, |view| view.how_it_works = true);
         ui.advanced.push(Pane::Annotate);

@@ -7,7 +7,8 @@
 use rune::TextEdit;
 use scrawl_capture::capture::Stage;
 
-use crate::capture_host::{AskedBy, CaptureNeed};
+use crate::capture_host::routing::rule_match::shorten_home;
+use crate::capture_host::{AskedBy, AutoSendBy, CaptureNeed, RuleMatch};
 use crate::desktop::i18n::{tr, tr_fill};
 
 use super::tuning::{self, CapsuleFlow};
@@ -110,6 +111,9 @@ pub(crate) struct Dest {
     /// The name of the session's folder, when known: the search matches
     /// it, and a row shows it only when its title alone can't tell it apart.
     pub(crate) folder: Option<String>,
+    /// Full project folder path when known, for the `Always…` configurator's
+    /// "The project's newest session" option.
+    pub(crate) directory: Option<String>,
 }
 
 impl Dest {
@@ -121,6 +125,7 @@ impl Dest {
             name,
             why: why.into(),
             folder: None,
+            directory: None,
         }
     }
 
@@ -133,6 +138,10 @@ impl Dest {
 
     pub(crate) fn folder(self, folder: Option<String>) -> Self {
         Self { folder, ..self }
+    }
+
+    pub(crate) fn directory(self, directory: Option<String>) -> Self {
+        Self { directory, ..self }
     }
 }
 
@@ -150,6 +159,7 @@ pub(crate) enum Route {
         suggested: Vec<Dest>,
         recent: Vec<Dest>,
         site: Option<String>,
+        by: AutoSendBy,
     },
     /// Guesses, best first; nothing was sent. `site` is what a rule
     /// would match ("example.com").
@@ -239,6 +249,8 @@ pub(crate) enum Input {
     Delivered(Delivered),
     Routed(Route),
     Refined(Route),
+    /// Structured match scope for the post-send `Always…` configurator.
+    RuleMatch(Option<RuleMatch>),
     /// Something failed, and why, when the host knows.
     Failed(Failure, Option<String>),
     /// An iPhone was cabled (true) or unplugged.
@@ -341,6 +353,14 @@ pub(crate) enum Action {
         to: String,
         always: Option<String>,
     },
+    /// Save a rule configured in the post-send `Always…` popover.
+    SaveRule {
+        kind: scrawl_capture::RuleKind,
+        key: String,
+        target: String,
+    },
+    /// Open Hex's Settings window directly to `Modal::RoutingRules`.
+    OpenRules,
     /// Copy the capture to the clipboard again after a failed copy.
     Copy(std::path::PathBuf),
     /// Paste the capture into the app in front.
@@ -408,6 +428,8 @@ pub(crate) struct List {
     /// down: then the footer (or the suggestions' header) says so and the
     /// target row reads "always".
     pub(crate) always: Option<(String, bool)>,
+    /// Opened from a queued send via `⌄`, so the footer also offers Cancel send.
+    pub(crate) queued: bool,
 }
 
 impl List {
@@ -431,12 +453,116 @@ impl List {
     }
 }
 
+/// The kind of split destination chip shown on the finished capsule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SplitKind {
+    /// Suggested destination: `[→ ACME  ⌄]`. Clicking left sends immediately.
+    Suggest,
+    /// Queued send: `[⏱ ACME  ⌄]`. Hover tooltip explains why; `⌄` redirects or cancels.
+    Queued,
+}
+
+/// The unified destination split chip (one fill, no vertical divider).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SplitChip {
+    pub(crate) kind: SplitKind,
+    pub(crate) name: String,
+    /// Hover tooltip text (e.g. why a send is queued).
+    pub(crate) help: Option<String>,
+}
+
+impl SplitChip {
+    pub(crate) fn suggest(name: String) -> Self {
+        Self {
+            kind: SplitKind::Suggest,
+            name,
+            help: None,
+        }
+    }
+
+    pub(crate) fn queued(name: String, why: String) -> Self {
+        Self {
+            kind: SplitKind::Queued,
+            name,
+            help: (!why.is_empty()).then_some(why),
+        }
+    }
+}
+
+/// State of the inline post-send `Always…` rule configurator.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct AlwaysConfig {
+    pub(crate) rule_match: RuleMatch,
+    /// For website matches with a subpath: true = subpath, false = whole site.
+    pub(crate) use_subpath: bool,
+    pub(crate) session_id: String,
+    pub(crate) session_name: String,
+    /// `(target_folder, display_name)` when the target session's project folder is known.
+    pub(crate) project_dir: Option<(String, String)>,
+    /// True = specific session (`ses_…`), false = project folder's newest session.
+    pub(crate) to_session: bool,
+}
+
+impl AlwaysConfig {
+    pub(crate) fn new(
+        rule_match: RuleMatch,
+        session_id: String,
+        session_name: String,
+        directory: Option<&str>,
+    ) -> Self {
+        let use_subpath = match &rule_match {
+            RuleMatch::Site {
+                default_subpath, ..
+            } => *default_subpath,
+            _ => false,
+        };
+        let project_dir = directory
+            .map(str::trim)
+            .filter(|dir| !dir.is_empty())
+            .map(|dir| {
+                let path = std::path::Path::new(dir);
+                let target = shorten_home(path);
+                let display = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or_else(|| target.clone());
+                (target, display)
+            });
+        Self {
+            rule_match,
+            use_subpath,
+            session_id,
+            session_name,
+            project_dir,
+            to_session: true,
+        }
+    }
+
+    /// The `(RuleKind, key, target)` that clicking `Save rule` persists.
+    pub(crate) fn save_spec(&self) -> (scrawl_capture::RuleKind, String, String) {
+        let (kind, key) = self.rule_match.rule_key(self.use_subpath);
+        let target = if self.to_session {
+            self.session_id.clone()
+        } else {
+            self.project_dir
+                .as_ref()
+                .map(|(path, _)| path.clone())
+                .unwrap_or_else(|| self.session_id.clone())
+        };
+        (kind, key, target)
+    }
+}
+
 /// The finished capsule: its lead, a quiet word on why, the Undo chip,
-/// the route chips, the Send to… chip, and (open) the field with its list.
+/// the split destination chip, the `Always…` button/popover, the Send to… chip,
+/// and (open) the field with its list.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Done {
     pub(crate) lead: Lead,
     pub(crate) text: String,
+    /// Draw the lead headline in primary ink (`Sending to …`, `Sent to …`).
+    pub(crate) strong_text: bool,
     pub(crate) why: Option<String>,
     /// It can still be taken back: the Undo chip shows.
     pub(crate) undo: bool,
@@ -448,6 +574,12 @@ pub(crate) struct Done {
     /// The pointer holds the countdown: how long it had left. The ring
     /// stands still until the pointer leaves.
     pub(crate) held: Option<f64>,
+    /// Unified split destination chip (`[→ ACME ⌄]` or `[⏱ ACME ⌄]`).
+    pub(crate) split: Option<SplitChip>,
+    /// Post-send `Always…` chip: `Some(false)` quiet, `Some(true)` lit while open.
+    pub(crate) always_button: Option<bool>,
+    /// Open inline `Always…` rule configurator under the capsule.
+    pub(crate) always_popover: Option<AlwaysConfig>,
     /// The Send to… chip's label.
     pub(crate) ask: Option<String>,
     /// The capture shortcut opens the search from here: its keycaps sit
@@ -483,11 +615,15 @@ impl Done {
         Self {
             lead,
             text: text.into(),
+            strong_text: false,
             why: None,
             undo: false,
             countdown: None,
             window: undo_s(),
             held: None,
+            split: None,
+            always_button: None,
+            always_popover: None,
             ask: None,
             ask_keys: false,
             ask_button: false,
@@ -570,8 +706,11 @@ enum Phase {
     /// Sent elsewhere from the list, or a rule saved.
     Sent(Sent),
     Queued {
+        to: String,
+        session: Option<String>,
         why: String,
         at: f64,
+        back: Option<Route>,
     },
     /// Taken back with nowhere else to offer.
     TakenBack {
@@ -619,6 +758,8 @@ struct Routed {
     delivered: bool,
     /// A rule's send is being posted: past stopping, so Undo is gone.
     sending: bool,
+    /// Opened from a queued send via `⌄` to redirect or cancel.
+    queued: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -657,7 +798,11 @@ struct Sent {
     /// The session id it went to, so taking it back moves that session,
     /// not one sharing its title, to the end of the list.
     session: String,
+    /// Full project directory of the destination session, when known.
+    directory: Option<String>,
     rule_saved: bool,
+    /// Rule was saved from the post-send `Always…` popover (vs Shift-click).
+    saved_from_popover: bool,
     at: f64,
     /// The route it was picked from, offered again when the send is taken
     /// back.
@@ -665,22 +810,39 @@ struct Sent {
     /// The capsule's own pick, which the router can take back for
     /// [`undo_s`]. A queued send that went on a retry can't be.
     undoable: bool,
+    /// Match scope available for the post-send `Always…` configurator when
+    /// no rule was already saved.
+    rule_match: Option<RuleMatch>,
+    /// Open inline `Always…` configurator state.
+    always: Option<AlwaysConfig>,
 }
 
 impl Sent {
-    fn picked(dest: &Dest, rule_saved: bool, at: f64, back: Option<Route>) -> Self {
+    fn picked(
+        dest: &Dest,
+        rule_saved: bool,
+        at: f64,
+        back: Option<Route>,
+        rule_match: Option<RuleMatch>,
+    ) -> Self {
         Self {
             to: dest.name.clone(),
             session: dest.session.clone(),
+            directory: dest.directory.clone(),
             rule_saved,
+            saved_from_popover: false,
             at,
             back,
             undoable: true,
+            rule_match,
+            always: None,
         }
     }
 
     fn from(&self) -> Dest {
-        Dest::new(self.to.clone(), "").session(self.session.clone())
+        Dest::new(self.to.clone(), "")
+            .session(self.session.clone())
+            .directory(self.directory.clone())
     }
 }
 
@@ -765,6 +927,9 @@ pub(crate) struct Flow {
     /// permission helper: it opens once that capture's capsule folds, and
     /// returns to what asked.
     helper_next: Option<(CaptureNeed, AskedBy)>,
+    /// Structured match scope for the current capture's post-send `Always…`
+    /// configurator (website subpath/host, terminal folder, or non-general app).
+    rule_match: Option<RuleMatch>,
 }
 
 impl Default for Flow {
@@ -790,6 +955,7 @@ impl Flow {
             suggest_on_route: true,
             drawing: false,
             helper_next: None,
+            rule_match: None,
         }
     }
 
@@ -1069,6 +1235,14 @@ impl Flow {
                 route: Route::Unreachable { .. },
                 ..
             }) => None,
+            // While the `Always…` configurator is open, listen for clicks away
+            // without taking keys from the app in front.
+            Phase::Sent(Sent {
+                always: Some(_), ..
+            }) => Some(CapsuleKeys::Suggest {
+                cycle: false,
+                search: false,
+            }),
             // Never Escape here: it goes to the app in front, and a send is
             // taken back only by clicking Undo.
             _ => None,
@@ -1153,6 +1327,7 @@ impl Flow {
                 let end = at + send_hold_s();
                 (end > now).then_some(end)
             }
+            Phase::Sent(sent) if sent.always.is_some() => None,
             Phase::Sent(sent) if sent.undoable => undo_at(sent.at),
             _ => None,
         };
@@ -1182,11 +1357,13 @@ impl Flow {
         if let Pres::Done(done) = &mut pres
             && self.uncopied
             && done.lead == Lead::Check
-            && (done.text == annotation() || (done.text.is_empty() && done.why.is_none()))
+            && (done.text == annotation()
+                || done.text == tr("Copied")
+                || (done.text.is_empty() && done.why.is_none()))
         {
             done.lead = Lead::Warning;
             done.text = tr("Couldn't copy").into();
-            if done.ask.is_none() && self.written.is_some() {
+            if done.split.is_none() && done.ask.is_none() && self.written.is_some() {
                 done.ask = Some(tr("Try again").into());
                 done.ask_button = true;
             }
@@ -1194,7 +1371,7 @@ impl Flow {
         // Scrawl's "No speech": a capture with no words still copies.
         if let Pres::Done(done) = &mut pres
             && self.silent
-            && (done.text.is_empty() || done.text == annotation())
+            && (done.text.is_empty() || done.text == annotation() || done.text == tr("Copied"))
             && done.why.is_none()
         {
             done.why = Some(tr("no speech").into());
@@ -1252,20 +1429,41 @@ impl Flow {
                 inspect: true,
                 ..Done::plain(Lead::Check, already_sent_to(to))
             }),
-            Phase::Queued { why, .. } => Pres::Done(Done {
-                why: Some(why.clone()),
-                inspect: true,
+            Phase::Queued { to, why, .. } => Pres::Done(Done {
+                split: Some(SplitChip::queued(short(to), why.clone())),
                 ..Done::plain(Lead::Check, tr("Queued"))
             }),
-            // A pick went at once: the check, and Undo with its ring while
-            // it can still be taken back.
-            Phase::Sent(sent) => Pres::Done(Done {
-                why: sent.rule_saved.then(|| tr("always").into()),
-                undo: sent.undoable && undo_left(sent.at),
-                countdown: (sent.undoable && undo_left(sent.at)).then(|| sent.at + undo_s()),
-                inspect: true,
-                ..Done::plain(Lead::Check, sent_to(&sent.to))
-            }),
+            // A pick went at once: strong headline, optional `Always…` button
+            // when no rule was saved yet, and Undo with its ring.
+            Phase::Sent(sent) => {
+                let open = sent.always.is_some();
+                let undo = sent.undoable && (open || undo_left(sent.at));
+                let countdown =
+                    (sent.undoable && !open && undo_left(sent.at)).then(|| sent.at + undo_s());
+                let why = if sent.rule_saved {
+                    Some(
+                        if sent.saved_from_popover {
+                            tr("Rule saved")
+                        } else {
+                            tr("always")
+                        }
+                        .into(),
+                    )
+                } else {
+                    None
+                };
+                let always_button = (!sent.rule_saved && sent.rule_match.is_some()).then_some(open);
+                Pres::Done(Done {
+                    strong_text: true,
+                    why,
+                    undo,
+                    countdown,
+                    always_button,
+                    always_popover: sent.always.clone(),
+                    inspect: !undo && always_button.is_none(),
+                    ..Done::plain(Lead::Check, sent_to(&sent.to))
+                })
+            }
             Phase::Routed(routed) => Pres::Done(routed_done(routed, now)),
         }
     }
@@ -1296,6 +1494,7 @@ mod tests {
             suggested: vec![to],
             recent: vec![Dest::new("HOME", "yesterday")],
             site: Some("example.com".into()),
+            by: AutoSendBy::Rule,
         }
     }
 
@@ -1321,7 +1520,13 @@ mod tests {
         );
         let shown = done(&flow, 0.5);
         assert_eq!(shown.text, "Queued");
-        assert_eq!(shown.why.as_deref(), Some("OpenCode can't see files"));
+        assert_eq!(
+            shown.split,
+            Some(SplitChip::queued(
+                "SEER".into(),
+                "OpenCode can't see files".into()
+            ))
+        );
     }
 
     #[test]
@@ -1336,7 +1541,7 @@ mod tests {
         );
         assert_eq!(done(&flow, 0.0).text, "Looking for sessions…");
         for (input, title, paste) in [
-            (Input::Routed(guess()), "Annotation copied", true),
+            (Input::Routed(guess()), "Copied", false),
             (Input::Sending, "Sending…", false),
             (Input::Settled, "Sent", false),
         ] {
@@ -1432,7 +1637,7 @@ mod tests {
             );
             if routing {
                 assert!(!done(&flow, 1.0).paste, "a rule may still be found");
-                flow.input(Input::Routed(guess()), 1.1);
+                flow.input(Input::Routed(Route::Nothing { recent: Vec::new() }), 1.1);
                 flow.input(Input::Shift(true), 1.2);
             }
             assert!(done(&flow, 1.3).paste);
@@ -1672,9 +1877,10 @@ mod tests {
         assert_eq!(done(&flow, 10.0).lead, Lead::Check);
         assert_eq!(done(&flow, 10.0).ask, None, "Undo, as a pick has");
         assert_eq!(done(&flow, 15.0).ask, None, "nothing after the window");
-        // No words count it down: the Undo chip's ring drains to the
-        // window's end, the same moment whenever it is asked.
-        assert_eq!(done(&flow, 10.0).why, None);
+        // Subtle muted provenance names why it auto-sends ("Rule" or "Jev");
+        // the Undo chip's ring drains to the window's end.
+        assert_eq!(done(&flow, 10.0).why.as_deref(), Some("Rule"));
+        assert!(done(&flow, 10.0).strong_text);
         for t in [10.0, 11.0, 12.0] {
             assert_eq!(done(&flow, t).countdown, Some(10.0 + send_hold_s()));
         }
@@ -1733,6 +1939,7 @@ mod tests {
         // A pick, sent at once, keeps its own window to take it back.
         let mut flow = Flow::new();
         flow.input(Input::Routed(guess()), 0.0);
+        flow.input(Input::OpenList, 0.5);
         flow.input(Input::SendRow(0), 1.0);
         flow.input(Input::Sending, 1.1);
         assert_eq!(done(&flow, 1.1).window, undo_s());
@@ -1768,6 +1975,7 @@ mod tests {
         // end keeps a second.
         let mut flow = Flow::new();
         flow.input(Input::Routed(guess()), 0.0);
+        flow.input(Input::OpenList, 0.5);
         flow.input(Input::SendRow(0), 1.0);
         assert!(flow.hover(true, 1.0 + undo_s() - 0.5).is_empty(), "it went");
         assert!(done(&flow, 20.0).undo);
@@ -1835,6 +2043,7 @@ mod tests {
     fn a_sent_capsule_hides_by_itself() {
         let mut flow = Flow::new();
         flow.input(Input::Routed(guess()), 0.0);
+        flow.input(Input::OpenList, 0.5);
         flow.input(Input::SendRow(0), 1.0);
         assert!(matches!(
             flow.pres(1.0),
@@ -1876,6 +2085,7 @@ mod tests {
                 Dest::new("HOME", "recent").session("ses_home"),
             ],
             site: Some("example.com".into()),
+            by: AutoSendBy::Rule,
         }
     }
 
@@ -1940,6 +2150,7 @@ mod tests {
             suggested: Vec::new(),
             recent: Vec::new(),
             site: None,
+            by: AutoSendBy::Rule,
         };
         flow.input(Input::Routed(lone), 0.0);
         flow.input(Input::Undo, 1.0);
@@ -2041,6 +2252,7 @@ mod tests {
             suggested: vec![to],
             recent: Vec::new(),
             site: None,
+            by: AutoSendBy::Rule,
         };
         assert_eq!(
             routes::sent_to("ses_e853b1bd3ffe68OoWKFGtjPy43"),
@@ -2140,6 +2352,7 @@ mod tests {
                 Dest::new("HEX", "last sent").session("ses_hex"),
             ],
             site: None,
+            by: AutoSendBy::Rule,
         };
         let mut flow = Flow::new();
         flow.input(Input::Routed(route), 0.0);
@@ -2204,6 +2417,7 @@ mod tests {
 
         let mut flow = Flow::new();
         flow.input(Input::Routed(guess()), 0.0);
+        flow.input(Input::OpenList, 0.5);
         flow.input(Input::SendRow(0), 1.0);
         assert_eq!(done(&flow, 1.5).countdown, Some(1.0 + undo_s()));
         assert_eq!(flow.pres(1.5), flow.pres(1.0 + undo_s() - 0.5));
@@ -2380,6 +2594,7 @@ mod tests {
         use super::super::surface::Id;
         let mut flow = Flow::new();
         flow.input(Input::Routed(guess()), 0.0);
+        flow.click(Id::More, 0.5);
         assert_eq!(
             flow.click(Id::Row(1), 1.0),
             [Action::Send {
@@ -2408,16 +2623,7 @@ mod tests {
         assert_eq!(flow.keys(), Some(CapsuleKeys::List));
         flow.hover(false, 0.65);
         assert!(flow.input(Input::ClickAway, 0.7).is_empty());
-        assert_eq!(
-            flow.keys(),
-            Some(CapsuleKeys::Suggest {
-                cycle: false,
-                search: false
-            }),
-            "back to the suggestions it opened over"
-        );
-        assert!(flow.input(Input::ClickAway, 0.75).is_empty());
-        assert_eq!(flow.keys(), None);
+        assert_eq!(flow.keys(), None, "back to the compact capsule");
         assert!(matches!(flow.pres(0.8), Pres::Done(_)));
         flow.input(Input::ClickAway, 0.9);
         assert!(matches!(flow.pres(0.9), Pres::Done(_)), "the chips stay");
@@ -2437,6 +2643,7 @@ mod tests {
         };
         let mut flow = Flow::new();
         flow.input(Input::Routed(twins()), 0.0);
+        flow.click(Id::More, 0.5);
         assert_eq!(
             flow.click(Id::Row(1), 1.0),
             [Action::Send {
@@ -2466,14 +2673,17 @@ mod tests {
             .map(|name| Dest::new(name, ""))
             .to_vec();
         flow.input(
-            Input::Routed(Route::Guess {
+            Input::Routed(Route::Rule {
+                to: Dest::new("OTHER", "rule"),
                 suggested,
                 recent: Vec::new(),
                 site: None,
+                by: AutoSendBy::Rule,
             }),
             0.0,
         );
-        let (_, list) = done(&flow, 0.0).open.unwrap();
+        flow.input(Input::Undo, 0.5);
+        let (_, list) = done(&flow, 0.5).open.unwrap();
         assert_eq!(list.rows().count(), SUGGEST_ROWS);
         assert_eq!(list.always, None, "no site, no rule to save");
     }
@@ -2549,12 +2759,13 @@ mod tests {
         let mut flow = Flow::new();
         flow.input(Input::Routed(guess()), 0.0);
         let asked = done(&flow, 0.0);
-        assert_eq!(asked.ask.as_deref(), Some("Search"));
-        assert!(asked.ask_keys, "with the shortcut that opens it");
-        assert!(!asked.inspect, "Inspect is only on the folded capsule");
-        let (_, suggestions) = asked.open.expect("a guess opens on its suggestions");
-        assert!(suggestions.suggesting());
-        flow.input(Input::OpenList, 1.0);
+        assert_eq!(asked.text, "Copied");
+        assert_eq!(asked.split, Some(SplitChip::suggest("SEER".into())));
+        assert!(
+            asked.open.is_none(),
+            "compact split chip until ⌄ opens the list"
+        );
+        flow.click(super::super::surface::Id::More, 1.0);
         let open = done(&flow, 1.0);
         let (query, list) = open.open.expect("open");
         assert_eq!(query.text, "");
@@ -2581,23 +2792,19 @@ mod tests {
 
     #[test]
     fn a_guess_suggests_three_and_a_click_sends_nothing_before_it() {
-        use crate::capture_host::CapsuleKeys;
         let mut flow = Flow::new();
         flow.input(Input::Routed(guess()), 0.0);
-        let (_, list) = done(&flow, 0.0).open.unwrap();
+        assert_eq!(
+            done(&flow, 0.0).split,
+            Some(SplitChip::suggest("SEER".into()))
+        );
+        assert!(flow.take_cues().is_empty(), "nothing sent, nothing heard");
+        flow.click(super::super::surface::Id::More, 0.5);
+        let (_, list) = done(&flow, 0.5).open.unwrap();
         let names: Vec<_> = list.rows().map(|dest| dest.name.as_str()).collect();
         assert_eq!(names, ["SEER", "HEX", "HOME"], "suggested, then recent");
         assert_eq!(list.selected, 0, "the best is marked");
-        assert_eq!(list.footer, Footer::Suggesting);
         assert_eq!(list.always, Some(("example.com".into(), false)));
-        assert_eq!(
-            flow.keys(),
-            Some(CapsuleKeys::Suggest {
-                cycle: false,
-                search: false
-            })
-        );
-        assert!(flow.take_cues().is_empty(), "nothing sent, nothing heard");
         flow.tick(4.0);
         assert!(matches!(flow.pres(4.0), Pres::Done(_)), "no countdown runs");
         assert_eq!(
@@ -2616,8 +2823,9 @@ mod tests {
     fn the_capture_shortcut_searches_every_session_and_escape_comes_back() {
         use crate::capture_host::CapsuleKeys;
         let mut flow = Flow::new();
-        flow.input(Input::Routed(guess()), 0.0);
-        let (_, list) = done(&flow, 0.0).open.unwrap();
+        flow.input(Input::Routed(rule_of_three()), 0.0);
+        flow.input(Input::Undo, 0.2);
+        let (_, list) = done(&flow, 0.2).open.unwrap();
         assert_eq!(list.title, "Send to");
         let height = list.rows().count();
         assert!(
@@ -2657,7 +2865,8 @@ mod tests {
     fn typing_over_the_suggestions_with_the_pointer_on_them_searches() {
         use crate::capture_host::CapsuleKeys;
         let mut flow = Flow::new();
-        flow.input(Input::Routed(guess()), 0.0);
+        flow.input(Input::Routed(rule_of_three()), 0.0);
+        flow.input(Input::Undo, 0.2);
         flow.hover(true, 0.5);
         assert!(flow.pointer_moved(), "the pointer on them changes the keys");
         assert_eq!(
@@ -2700,7 +2909,8 @@ mod tests {
             search: false,
         });
         let mut flow = Flow::new();
-        flow.input(Input::Routed(guess()), 0.0);
+        flow.input(Input::Routed(rule_of_three()), 0.0);
+        flow.input(Input::Undo, 0.2);
         assert_eq!(flow.keys(), quiet, "the pointer elsewhere");
         assert!(
             !flow.pointer_moved(),
@@ -2714,7 +2924,8 @@ mod tests {
         assert_eq!(flow.keys(), quiet, "the pointer left");
         flow.hover(true, 1.5);
         flow.pointer_moved();
-        flow.input(Input::Routed(guess()), 2.0);
+        flow.input(Input::Routed(rule_of_three()), 2.0);
+        flow.input(Input::Undo, 2.2);
         assert_eq!(flow.keys(), quiet, "a new answer under a resting pointer");
         flow.pointer_moved();
         assert_ne!(flow.keys(), quiet);
@@ -2796,7 +3007,8 @@ mod tests {
         ]);
         let mut flow = Flow::new();
         flow.input(Input::Routed(route), 0.0);
-        let (_, list) = done(&flow, 0.0).open.unwrap();
+        flow.input(Input::OpenList, 0.1);
+        let (_, list) = done(&flow, 0.1).open.unwrap();
         let notes: Vec<_> = list.rows().map(|dest| dest.why.as_str()).collect();
         assert_eq!(notes, ["home · 1 h ago", "1 h ago", "dotfiles · 1 h ago"]);
     }
@@ -2805,7 +3017,8 @@ mod tests {
     fn shift_shows_the_rule_and_a_shift_pick_saves_it() {
         use super::super::surface::Id;
         let mut flow = Flow::new();
-        flow.input(Input::Routed(guess()), 0.0);
+        flow.input(Input::Routed(rule_of_three()), 0.0);
+        flow.input(Input::Undo, 0.2);
         flow.input(Input::Shift(true), 0.5);
         let (_, list) = done(&flow, 0.5).open.unwrap();
         assert_eq!(list.always, Some(("example.com".into(), true)));
@@ -2823,7 +3036,7 @@ mod tests {
         assert_ne!(notes[0], "always");
         assert_eq!(
             list.target_dest().map(|dest| dest.name.as_str()),
-            Some("HEX")
+            Some("HOME")
         );
         flow.input(Input::Shift(false), 1.0);
         let (_, list) = done(&flow, 1.0).open.unwrap();
@@ -2836,22 +3049,23 @@ mod tests {
         assert_eq!(
             flow.input(Input::SendRow(1), 2.0),
             [Action::Send {
-                to: "HEX".into(),
+                to: "ses_home".into(),
                 always: Some("example.com".into())
             }]
         );
         let sent = done(&flow, 2.0);
-        assert_eq!(sent.text, "Sent to HEX");
+        assert_eq!(sent.text, "Sent to HOME");
         assert_eq!(sent.why.as_deref(), Some("always"));
         assert!(sent.undo);
         assert_eq!(
             flow.click(Id::Undo, 2.5),
-            [Action::Undo { to: "HEX".into() }],
+            [Action::Undo { to: "HOME".into() }],
             "Undo takes back the send, and the router the rule with it"
         );
         // A Shift click saves it too.
         let mut flow = Flow::new();
         flow.input(Input::Routed(guess()), 0.0);
+        flow.click(Id::More, 0.2);
         flow.input(Input::Shift(true), 0.5);
         assert_eq!(
             flow.click(Id::Row(0), 1.0),
@@ -2872,23 +3086,24 @@ mod tests {
                 .collect()
         };
         let mut flow = Flow::new();
-        flow.input(Input::Routed(guess()), 0.0);
+        flow.input(Input::Routed(rule_of_three()), 0.0);
+        flow.input(Input::Undo, 0.05);
         flow.input(Input::Shift(true), 0.1);
         flow.point(0, true);
-        assert_eq!(names(&flow), ["SEER"]);
+        assert_eq!(names(&flow), ["HEX"]);
         // Onto the next row: the pointer reaches it before it leaves the
         // last one.
-        flow.point(2, true);
+        flow.point(1, true);
         assert!(!flow.point(0, false), "leaving a row it already left");
         assert_eq!(names(&flow), ["HOME"]);
-        assert!(flow.point(2, false));
+        assert!(flow.point(1, false));
         assert!(names(&flow).is_empty(), "off the rows");
         // A Shift click on the pointed row sends there and saves it.
-        flow.point(2, true);
+        flow.point(1, true);
         assert_eq!(
-            flow.click(super::super::surface::Id::Row(2), 0.5),
+            flow.click(super::super::surface::Id::Row(1), 0.5),
             [Action::Send {
-                to: "HOME".into(),
+                to: "ses_home".into(),
                 always: Some("example.com".into())
             }]
         );
@@ -2896,8 +3111,8 @@ mod tests {
         // and ⇧⏎ go on from it.
         let mut flow = Flow::new();
         flow.input(Input::Routed(guess()), 0.0);
-        flow.point(1, true);
         flow.input(Input::OpenList, 0.1);
+        flow.point(1, true);
         flow.input(Input::Shift(true), 0.2);
         assert_eq!(
             names(&flow),
@@ -2920,7 +3135,8 @@ mod tests {
     #[test]
     fn a_click_away_folds_the_suggestions_and_they_leave_like_any_capsule() {
         let mut flow = Flow::new();
-        flow.input(Input::Routed(guess()), 0.0);
+        flow.input(Input::Routed(rule_of_three()), 0.0);
+        flow.input(Input::Undo, 0.2);
         // Escape is never Hex's here: it changes nothing.
         assert!(flow.input(Input::Escape, 0.5).is_empty());
         assert!(done(&flow, 0.5).open.is_some());
@@ -3154,7 +3370,11 @@ mod tests {
         );
         let shown = done(&flow, 0.0);
         assert_eq!(shown.why.as_deref(), Some("no suggestions"));
-        let (_, list) = shown.open.expect("recent sessions are the suggestions");
+        assert_eq!(shown.ask.as_deref(), Some("Send to…"));
+        flow.input(Input::OpenList, 0.5);
+        let (_, list) = done(&flow, 0.5)
+            .open
+            .expect("recent sessions open from Send to…");
         assert_eq!(list.rows().next().unwrap().name, "HOME");
     }
 
@@ -3338,6 +3558,211 @@ mod tests {
         );
         assert_eq!(done(&flow, 12.0).text, "Couldn't send to SEER");
         assert_eq!(done(&flow, 12.0).why.as_deref(), Some("offline"));
+    }
+
+    #[test]
+    fn quick_send_and_post_send_always_configurator_cover_sites_terminals_and_apps() {
+        use super::super::surface::Id;
+        use scrawl_capture::RuleKind;
+
+        // 1) Shared host (github.com/acme/web) defaults to subpath and lets user
+        // choose between specific session and project folder's newest session.
+        let mut flow = Flow::new();
+        flow.input(
+            Input::RuleMatch(Some(RuleMatch::Site {
+                subpath: Some("github.com/acme/web".into()),
+                host: "github.com".into(),
+                default_subpath: true,
+            })),
+            0.0,
+        );
+        let route = Route::Guess {
+            suggested: vec![
+                Dest::new("ACME", "same repo")
+                    .session("ses_acme")
+                    .directory(Some("/Users/you/code/acme-web".into())),
+            ],
+            recent: vec![Dest::new("HOME", "yesterday").session("ses_home")],
+            site: Some("github.com/acme/web".into()),
+        };
+        flow.input(Input::Routed(route), 0.1);
+        let bar = done(&flow, 0.1);
+        assert_eq!(bar.text, "Copied");
+        assert_eq!(bar.split, Some(SplitChip::suggest("ACME".into())));
+
+        // One-click quick send transitions to Sent with Always… and Undo.
+        assert_eq!(
+            flow.click(Id::QuickSend, 1.0),
+            [Action::Send {
+                to: "ses_acme".into(),
+                always: None,
+            }]
+        );
+        let sent = done(&flow, 1.0);
+        assert_eq!(sent.text, "Sent to ACME");
+        assert!(sent.strong_text);
+        assert_eq!(sent.always_button, Some(false));
+        assert!(sent.undo);
+
+        // Opening Always… pauses dismiss + Undo countdown and defaults to subpath + session.
+        assert!(flow.click(Id::Always, 1.5).is_empty());
+        assert_eq!(
+            flow.next_due(1.5),
+            None,
+            "dismiss paused while Always… is open"
+        );
+        let open = done(&flow, 1.5);
+        assert_eq!(open.always_button, Some(true));
+        let cfg = open.always_popover.expect("Always popover open");
+        assert!(cfg.use_subpath, "shared host defaults to subpath");
+        assert!(cfg.to_session, "defaults to specific session");
+        assert!(cfg.project_dir.is_some());
+
+        // Switch to project folder's newest session and save.
+        assert!(flow.click(Id::AlwaysToProject, 1.6).is_empty());
+        assert_eq!(
+            flow.click(Id::AlwaysSave, 1.7),
+            [Action::SaveRule {
+                kind: RuleKind::Site,
+                key: "github.com/acme/web".into(),
+                target: "/Users/you/code/acme-web".into(),
+            }]
+        );
+        let saved = done(&flow, 1.7);
+        assert!(saved.always_popover.is_none());
+        assert_eq!(saved.always_button, None);
+        assert_eq!(saved.why.as_deref(), Some("Rule saved"));
+
+        // 2) Terminal working folder rule (never "any terminal app window").
+        let mut flow = Flow::new();
+        flow.input(
+            Input::RuleMatch(Some(RuleMatch::Terminal {
+                display: "~/code/acme-web".into(),
+                folder: "/Users/you/code/acme-web".into(),
+            })),
+            0.0,
+        );
+        flow.input(
+            Input::Routed(Route::Guess {
+                suggested: vec![Dest::new("ACME", "same folder").session("ses_acme")],
+                recent: Vec::new(),
+                site: None,
+            }),
+            0.1,
+        );
+        flow.click(Id::QuickSend, 0.2);
+        flow.click(Id::Always, 0.3);
+        assert_eq!(
+            flow.click(Id::AlwaysSave, 0.4),
+            [Action::SaveRule {
+                kind: RuleKind::Terminal,
+                key: "/Users/you/code/acme-web".into(),
+                target: "ses_acme".into(),
+            }]
+        );
+
+        // 3) All rules… footer link dismisses the capsule and opens Modal::RoutingRules.
+        let mut flow = Flow::new();
+        flow.input(
+            Input::RuleMatch(Some(RuleMatch::App {
+                bundle_id: "anomaly.hex".into(),
+                name: "Hex".into(),
+            })),
+            0.0,
+        );
+        flow.input(
+            Input::Routed(Route::Guess {
+                suggested: vec![Dest::new("HEX", "recent").session("ses_hex")],
+                recent: Vec::new(),
+                site: None,
+            }),
+            0.1,
+        );
+        flow.click(Id::QuickSend, 0.2);
+        flow.click(Id::Always, 0.3);
+        assert_eq!(flow.click(Id::OpenRules, 0.4), [Action::OpenRules]);
+        assert_eq!(flow.pres(0.4), Pres::Hidden);
+    }
+
+    #[test]
+    fn queued_split_chip_opens_send_to_list_to_redirect_or_cancel() {
+        use super::super::surface::Id;
+
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(guess()), 0.0);
+        flow.click(Id::QuickSend, 0.2);
+        flow.input(
+            Input::Delivered(Delivered::Queued {
+                to: "SEER".into(),
+                why: "OpenCode is starting".into(),
+            }),
+            0.4,
+        );
+        let q = done(&flow, 0.4);
+        assert_eq!(q.text, "Queued");
+        assert_eq!(
+            q.split,
+            Some(SplitChip::queued(
+                "SEER".into(),
+                "OpenCode is starting".into()
+            ))
+        );
+
+        // Clicking ⌄ opens the searchable Send-to list marked queued.
+        assert!(flow.click(Id::More, 0.5).is_empty());
+        let (_, list) = done(&flow, 0.5).open.expect("list opened from queued");
+        assert!(list.queued);
+        // Clicking another session redirects.
+        assert_eq!(
+            flow.click(Id::Row(1), 0.6),
+            [Action::Send {
+                to: "HEX".into(),
+                always: None,
+            }]
+        );
+
+        // Or Cancel send cancels the queued send.
+        let mut flow = Flow::new();
+        flow.input(
+            Input::Delivered(Delivered::Queued {
+                to: "SEER".into(),
+                why: "OpenCode is starting".into(),
+            }),
+            0.0,
+        );
+        flow.click(Id::More, 0.2);
+        assert_eq!(
+            flow.click(Id::Undo, 0.3),
+            [Action::Undo { to: String::new() }]
+        );
+        assert_eq!(done(&flow, 0.3).text, "Taken back");
+    }
+
+    #[test]
+    fn auto_send_provenance_shows_rule_or_jev_and_clears_when_delivered() {
+        let mut flow = Flow::new();
+        let to = Dest::new("ACME", "Jev").session("ses_acme");
+        flow.input(
+            Input::Routed(Route::Rule {
+                to: to.clone(),
+                suggested: vec![to],
+                recent: Vec::new(),
+                site: None,
+                by: AutoSendBy::Jev,
+            }),
+            0.0,
+        );
+        let pre = done(&flow, 0.0);
+        assert_eq!(pre.text, "Sending to ACME");
+        assert!(pre.strong_text);
+        assert_eq!(pre.why.as_deref(), Some("Jev"));
+        assert!(pre.undo);
+
+        flow.input(Input::Settled, 0.5);
+        let post = done(&flow, 0.5);
+        assert_eq!(post.text, "Sent to ACME");
+        assert!(post.strong_text);
+        assert_eq!(post.why, None);
     }
 
     #[test]

@@ -45,6 +45,7 @@ fn rule() -> Route {
             Dest::new("RUNE", "2 days ago"),
         ],
         site: Some("example.com".into()),
+        by: crate::capture_host::AutoSendBy::Rule,
     }
 }
 
@@ -179,7 +180,12 @@ fn stills() -> Vec<(&'static str, Pres)> {
         }),
         (
             "hover",
-            after(&[written(true), In(Input::Routed(guess())), Point(1)]),
+            after(&[
+                written(true),
+                In(Input::Routed(rule())),
+                In(Input::Undo),
+                Point(1),
+            ]),
         ),
         (
             "copy-failed",
@@ -194,6 +200,16 @@ fn stills() -> Vec<(&'static str, Pres)> {
             ))]),
         ),
         ("rule-sent", after(&routed(rule()))),
+        ("rule-jev", {
+            let to = Dest::new("ACME", "sent · Jev");
+            after(&routed(Route::Rule {
+                to: to.clone(),
+                suggested: vec![to],
+                recent: vec![Dest::new("HOME", "yesterday")],
+                site: None,
+                by: crate::capture_host::AutoSendBy::Jev,
+            }))
+        }),
         (
             "rule-resolving",
             after(&routed(Route::ResolvingRule {
@@ -209,13 +225,14 @@ fn stills() -> Vec<(&'static str, Pres)> {
         ("guess", after(&routed(guess()))),
         // Shift down with the pointer on HEX: that row is where it goes.
         ("shift", {
-            let mut beats = routed(guess());
+            let mut beats = routed(rule());
+            beats.push(In(Input::Undo));
             beats.push(Point(1));
             beats.push(In(Input::Shift(true)));
             after(&beats)
         }),
         ("sent-rule", {
-            let mut beats = routed(guess());
+            let mut beats = open(guess());
             beats.push(In(Input::Shift(true)));
             beats.push(In(Input::SendRow(0)));
             beats.push(In(Input::Shift(false)));
@@ -269,6 +286,55 @@ fn stills() -> Vec<(&'static str, Pres)> {
             let mut beats = open(guess());
             beats.push(In(Input::Move(1)));
             beats.push(In(Input::Send { always: false }));
+            after(&beats)
+        }),
+        ("sent-always", {
+            let beats = vec![
+                In(Input::RuleMatch(Some(
+                    crate::capture_host::RuleMatch::Site {
+                        subpath: Some("github.com/acme/web".into()),
+                        host: "github.com".into(),
+                        default_subpath: true,
+                    },
+                ))),
+                processing(),
+                written(true),
+                In(Input::Routed(Route::Guess {
+                    suggested: vec![
+                        Dest::new("ACME", "same repo")
+                            .session("ses_acme")
+                            .directory(Some("/Users/you/code/acme-web".into())),
+                    ],
+                    recent: vec![Dest::new("HOME", "yesterday")],
+                    site: Some("github.com/acme/web".into()),
+                })),
+                Click(Id::QuickSend),
+            ];
+            after(&beats)
+        }),
+        ("always-open", {
+            let beats = vec![
+                In(Input::RuleMatch(Some(
+                    crate::capture_host::RuleMatch::Site {
+                        subpath: Some("github.com/acme/web".into()),
+                        host: "github.com".into(),
+                        default_subpath: true,
+                    },
+                ))),
+                processing(),
+                written(true),
+                In(Input::Routed(Route::Guess {
+                    suggested: vec![
+                        Dest::new("ACME", "same repo")
+                            .session("ses_acme")
+                            .directory(Some("/Users/you/code/acme-web".into())),
+                    ],
+                    recent: vec![Dest::new("HOME", "yesterday")],
+                    site: Some("github.com/acme/web".into()),
+                })),
+                Click(Id::QuickSend),
+                Click(Id::Always),
+            ];
             after(&beats)
         }),
         ("rule-saved", {
@@ -406,12 +472,13 @@ fn every_state_draws_its_pieces() {
         ("processing", &["processing"]),
         ("saved", &["done", "paste", "close"]),
         ("failed", &["done", "close"]),
-        // A rule's send counts down on the Undo chip, with no words.
-        ("rule-sent", &["done", "undo", "close"]),
+        // A rule or Jev auto-send shows its muted provenance beside Sending to ….
+        ("rule-sent", &["done", "why", "undo", "close"]),
+        ("rule-jev", &["done", "why", "undo", "close"]),
         ("rule-final", &["done", "inspect", "close"]),
-        ("guess", &["done", "paste", "search", "list", "row-SEER"]),
-        ("guess-five", &["done", "search", "list", "row-SEER"]),
-        ("no-answer", &["done", "why", "search", "list"]),
+        ("guess", &["done", "split", "send", "more", "close"]),
+        ("guess-five", &["done", "split", "send", "more", "close"]),
+        ("no-answer", &["done", "why", "ask", "close"]),
         ("hover", &["shift-hint"]),
         ("shift", &["shift-hint"]),
         (
@@ -419,12 +486,17 @@ fn every_state_draws_its_pieces() {
             &["done", "field", "list", "row-SEER", "footer"],
         ),
         ("sent", &["done", "undo", "close"]),
+        ("sent-always", &["done", "always", "undo", "close"]),
+        (
+            "always-open",
+            &["done", "always", "always-popover", "close"],
+        ),
         // Taken back, the suggestions again, the wrong one last.
         (
             "taken-back",
             &["done", "list", "row-HOME", "row-RUNE", "row-SEER"],
         ),
-        ("queued", &["done", "why", "close"]),
+        ("queued", &["done", "split", "send", "more", "close"]),
     ];
     // Paste and Inspect are for a written capture, and the open list's
     // field takes their place. The top line holds one action at most: Undo
@@ -436,10 +508,17 @@ fn every_state_draws_its_pieces() {
         ("list-guess", &["paste", "inspect"]),
         (
             "guess",
-            &["field", "inspect", "footer", "shift-hint", "ask-keys"],
+            &[
+                "field",
+                "inspect",
+                "paste",
+                "footer",
+                "shift-hint",
+                "ask-keys",
+            ],
         ),
-        ("queued", &["paste"]),
-        ("rule-sent", &["why", "paste", "ask", "inspect"]),
+        ("queued", &["paste", "why"]),
+        ("rule-sent", &["paste", "ask", "inspect"]),
         ("rule-final", &["ask", "paste"]),
         ("sent", &["paste", "inspect"]),
     ];
@@ -488,6 +567,7 @@ fn the_widest_states_fit_the_panel() {
         suggested: vec![Dest::new(long(0), "")],
         recent: vec![Dest::new(long(1), "")],
         site: None,
+        by: crate::capture_host::AutoSendBy::Rule,
     };
     let ask = Route::Guess {
         suggested: (0..5).map(|n| Dest::new(long(n), "")).collect(),
@@ -520,7 +600,7 @@ fn the_widest_states_fit_the_panel() {
             assert!(
                 items
                     .iter()
-                    .any(|item| matches!(item.id, Id::Paste | Id::Undo | Id::Ask)),
+                    .any(|item| matches!(item.id, Id::Paste | Id::Undo | Id::Ask | Id::Split)),
                 "no action for {pres:?}"
             );
         }
@@ -553,7 +633,21 @@ fn the_annotation_toolbar_names_the_local_action_and_the_search_binding() {
     ]);
     let rt = runtime(pres, true);
     let elements = rt.elements();
-    for label in ["Paste", "Search ⌥⇧S", "Close"] {
+    for label in ["Send to SEER", "Send to…", "Close"] {
+        assert!(
+            elements
+                .iter()
+                .any(|e| e.role == "button" && e.label.as_deref() == Some(label)),
+            "missing {label}"
+        );
+    }
+    let pres = after(&[In(Input::Written {
+        bundle: "example.scrawl".into(),
+        routing: false,
+    })]);
+    let rt = runtime(pres, true);
+    let elements = rt.elements();
+    for label in ["Paste", "Close"] {
         assert!(
             elements
                 .iter()
@@ -576,7 +670,7 @@ fn the_ready_line_and_its_list_share_their_edges() {
         runtime(pres, true)
     };
     let near = |a: f32, b: f32| (a - b).abs() < 0.26;
-    let rt = still("guess");
+    let rt = still("taken-back");
     let elements = rt.elements();
     let keyed = |key: &str| {
         elements
@@ -604,19 +698,19 @@ fn the_ready_line_and_its_list_share_their_edges() {
 
     // The margin is for words: the preview nests in the corner instead
     // (`the_preview_nests_in_the_capsules_left_corners`).
-    for text in ["Send to", "SEER", "RUNE"] {
+    for text in ["Send to", "HOME", "SEER"] {
         assert!(
             near(worded(text)[0] - shell[0], 16.0),
             "{text} off the list's margin"
         );
     }
     let right = shell[0] + shell[2];
-    for text in ["same page", "2 days ago"] {
+    for text in ["yesterday", "2 days ago"] {
         let [x, _, w, _] = worded(text);
         assert!(near(right - (x + w), 16.0), "{text} off the right edge");
     }
 
-    let boxes = ["paste", "search", "close"].map(boxed);
+    let boxes = ["search", "close"].map(boxed);
     for [_, y, _, h] in boxes {
         assert!(
             near(h, 28.0) && near(y - shell[1], 6.0),
@@ -628,7 +722,7 @@ fn the_ready_line_and_its_list_share_their_edges() {
         let gap = pair[1][0] - (pair[0][0] + pair[0][2]);
         assert!(near(gap, 6.0), "boxes {gap} apart");
     }
-    let [x, _, w, _] = boxes[2];
+    let [x, _, w, _] = boxes[1];
     assert!(
         near(right - (x + w), 6.0),
         "✕ is {} from the wall",
@@ -636,14 +730,21 @@ fn the_ready_line_and_its_list_share_their_edges() {
     );
 
     // The fill is smaller than what takes the click.
-    let [x, y, w, h] = keyed("paste");
+    let rt_saved = still("saved");
+    let elements_saved = rt_saved.elements();
+    let [x, y, w, h] = elements_saved
+        .iter()
+        .find(|e| e.key.as_deref().and_then(|k| k.split('#').next()) == Some("paste"))
+        .unwrap()
+        .rect;
     assert!(near(h, CHIP_H) && w >= 44.0);
     assert!(
-        rt.hit_regions()
+        rt_saved
+            .hit_regions()
             .iter()
             .any(|r| near(r[0], x) && near(r[1], y) && near(r[2], x + w) && near(r[3], y + h)),
         "Paste's chip isn't a hit region: {:?}",
-        rt.hit_regions()
+        rt_saved.hit_regions()
     );
 
     // Folded, the words, Paste and ✕ keep 16 pt between them.
@@ -828,6 +929,10 @@ fn render(gpu: &rune::render::Gpu, pres: Pres, dark: bool) -> (u32, u32, Vec<u8>
             open: Some((_, list)),
             ..
         }) => super::surface::LIST_Y + super::list_height(list) + 28.0,
+        Pres::Done(super::flow::Done {
+            always_popover: Some(config),
+            ..
+        }) => super::surface::LIST_Y + super::always_view::always_height(config) + 28.0,
         _ => {
             // A card's guesses hang under the line.
             use super::surface::{Anchor, anchor_for, layout_at};
@@ -894,6 +999,7 @@ const GOLDENS: &[&str] = &[
     "saved",
     "copy-failed",
     "rule-sent",
+    "rule-jev",
     "rule-resolving",
     "rule-final",
     "guess",
@@ -903,6 +1009,8 @@ const GOLDENS: &[&str] = &[
     "no-answer",
     "list-guess",
     "sent",
+    "sent-always",
+    "always-open",
     "queued",
     "permission",
     "permission-restart",

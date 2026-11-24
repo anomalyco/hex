@@ -603,12 +603,16 @@ class InsertionTest {
         // Off, every key offers exactly what it did: accents alone, and none on a letter without them.
         assertEquals(LetterFeedback.options('a', "en"), LetterFeedback.holds('a', "en", null))
         assertEquals(emptyList<String>(), LetterFeedback.holds('m', "en", null))
-        // On, a second or third row key offers its symbol first, then the same accents after it.
+        // On, a key without a digit offers its symbol first, then the same accents after it.
         val a = LetterFeedback.holds('a', "en", null, symbolsOnLetters = true)
         assertEquals("@", a.first())
         assertEquals(LetterFeedback.options('a', "en"), a.drop(1))
         assertEquals(listOf("/"), LetterFeedback.holds('m', "en", null, symbolsOnLetters = true))
         assertEquals(LetterFeedback.options('e', "en"), LetterFeedback.holds('e', "en", null, symbolsOnLetters = true))
+        // On the top row, with the number row hiding its digit, a letter offers Gboard's symbol first.
+        assertEquals(listOf("%"), LetterFeedback.holds('q', "en", null, symbolsOnLetters = true, topRow = true))
+        assertEquals(listOf("|") + LetterFeedback.options('e', "en"),
+            LetterFeedback.holds('e', "en", null, symbolsOnLetters = true, topRow = true))
         // A capital offers the same symbol, and row 1 keeps its digit first.
         assertEquals("@", LetterFeedback.holds('A', "en", null, symbolsOnLetters = true).first())
         assertEquals("1", LetterFeedback.holds('q', "en", '1', symbolsOnLetters = true).first())

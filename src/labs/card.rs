@@ -96,6 +96,7 @@ impl Feature {
             Self::DictateWhileAnnotating => "Dictate while annotating",
             Self::StopAnyCallRecording => "Stop every call recording when the call ends",
             Self::ClipboardPhrase => "Clipboard phrase",
+            Self::MeetingMicrophoneMute => "Mute the microphone while recording",
         }
     }
 
@@ -354,6 +355,9 @@ impl Feature {
             }
             Self::ClipboardPhrase => {
                 "Say \"my clipboard\" while dictating and Hex pastes what you copied there, in quotes"
+            }
+            Self::MeetingMicrophoneMute => {
+                "Adds a mute button to meeting recordings. Hex keeps recording the call's audio but leaves out your microphone until you unmute."
             }
         }
     }

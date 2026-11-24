@@ -91,6 +91,13 @@ internal class KeyboardEngine(
     private var word: TypingWord? = null
     private var editor: EditorInfo? = null
     private var ordinaryField = false
+    // A field that keeps its own text (TYPE_NULL, a terminal's): nothing can be read back or edited as text, so
+    // delete, the cursor and Enter go in as key events.
+    private var keyEventEditor = false
+    // A field that asks not to be learned from (IME_FLAG_NO_PERSONALIZED_LEARNING): suggestions stay, but
+    // nothing typed there is remembered (an undone correction, an emoji pick).
+    var learnsTyping = true
+        private set
     private var prefix = ""
     private var expectedCaret = -1
     private data class Undo(val language: String, val original: String, val replacement: String)
@@ -136,19 +143,11 @@ internal class KeyboardEngine(
     fun startInput(attribute: EditorInfo) {
         edited()
         editor = attribute
-        val kind = attribute.inputType and InputType.TYPE_MASK_CLASS
-        val variation = attribute.inputType and InputType.TYPE_MASK_VARIATION
-        secure = when (kind) {
-            InputType.TYPE_CLASS_TEXT -> variation in setOf(InputType.TYPE_TEXT_VARIATION_PASSWORD,
-                InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD, InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD)
-            InputType.TYPE_CLASS_NUMBER -> variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD
-            else -> false
-        }
-        ordinaryField = kind == InputType.TYPE_CLASS_TEXT && !secure &&
-            attribute.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING == 0 &&
-            variation !in setOf(InputType.TYPE_TEXT_VARIATION_URI, InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
-                InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_FILTER) &&
-            attribute.inputType and (InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_FLAG_AUTO_COMPLETE) == 0
+        val field = FieldTyping.of(attribute.inputType, attribute.imeOptions)
+        secure = field.secure
+        ordinaryField = field.ordinary
+        keyEventEditor = field.keyEvents
+        learnsTyping = field.learns
         resetTyping(); word = null; clearSpaces(); forgetSwipe()
         pad = Pad.of(attribute.inputType)
         symbols = pad != null
@@ -528,6 +527,13 @@ internal class KeyboardEngine(
     }
     fun delete() {
         if (!target.connected) return
+        // A TYPE_NULL field's text can't be read back, and its editor takes no surrounding-text delete: a
+        // delete is the key press itself, one per call, and a held key repeats the call as Gboard's does.
+        if (keyEventEditor) {
+            edited(); clearSpaces(); resetTyping(); surface?.suggestions(emptyList())
+            target.sendKey(KeyEvent.KEYCODE_DEL)
+            return
+        }
         if (deleteSwiped()) return
         edited()
         // Right after a pick held its space, delete takes that space back and deletes nothing.
@@ -567,20 +573,23 @@ internal class KeyboardEngine(
         if (info?.actionLabel != null && (info.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION) == 0 &&
             target.performEditorAction(info.actionId)) return
         if (!target.defaultEditorAction()) {
-            if (editor?.inputType == InputType.TYPE_NULL) target.sendKey(KeyEvent.KEYCODE_ENTER)
+            if (keyEventEditor) target.sendKey(KeyEvent.KEYCODE_ENTER)
             else type("\n")
         }
     }
 
-    /** A space-bar slide starts moving the cursor: the word in progress stays as typed. */
+    /** A space-bar slide starts moving the cursor: the word in progress stays as typed. A field whose text
+     * isn't there to read, a password or a TYPE_NULL editor, steps with arrow keys instead. */
     fun cursorSlide(): CursorSlide {
         resetTyping(); clearSpaces(); surface?.suggestions(emptyList())
-        return CursorSlide(target, minOf(selStart, selEnd), maxOf(selStart, selEnd), readable = !secure)
+        return CursorSlide(target, minOf(selStart, selEnd), maxOf(selStart, selEnd),
+            readable = !secure && !keyEventEditor)
     }
 
-    /** A slide left from delete: null where it can't run (a password field, a selection, no known cursor). */
+    /** A slide left from delete: null where it can't run (a password or TYPE_NULL field, a selection, no known
+     * cursor). */
     fun deleteSlide(): DeleteSlide? {
-        if (secure || selStart < 0 || selStart != selEnd || !target.connected) return null
+        if (secure || keyEventEditor || selStart < 0 || selStart != selEnd || !target.connected) return null
         resetTyping(); clearSpaces(); surface?.suggestions(emptyList())
         return DeleteSlide(target, selStart, target.before(2000).orEmpty())
     }
@@ -646,7 +655,8 @@ internal class KeyboardEngine(
     /** Puts back what an autocorrection replaced, with its space, if it is still right before the cursor. */
     private fun revert(last: Undo): Boolean {
         if (!endsWith(last.replacement + " ") || !replace(last.replacement + " ", last.original)) return false
-        feedback.undo(last.language, last.original, last.replacement)
+        // A no-learning field still takes the undo; only the rejection is not remembered for next time.
+        if (learnsTyping) feedback.undo(last.language, last.original, last.replacement)
         val typed = last.original.substringAfterLast(' ')
         prefix = before().dropLast(typed.length).takeLast(40); word?.restored(typed, prefix)
         if (expectedCaret >= 0) expectedCaret += last.original.length - last.replacement.length - 1

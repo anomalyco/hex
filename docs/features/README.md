@@ -3178,15 +3178,38 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 │   tried on a device.
 ├── Keyboard > Suggest swear words (off) -> opt in to profanity; listed slurs never offered
 ├── Type a listed word in full -> keep its spelling on space or tap its literal chip
-├── Labs > Keyboard > Symbols on letter keys (off) -> hold a letter from QWERTY's home and
-│   bottom rows (a–l, z–m) for its symbol first, SwiftKey-style (m for /, a for @), with the
-│   letter's accents after it; symbols follow the letter, so AZERTY q/w and QWERTZ y get none,
-│   and row 1 (including AZERTY a/z) keeps its digits; off, the keys are unchanged. With
-│   Number row on, row 1's AZERTY a/z and QWERTZ z show their symbols (@, _) as hint and hold
-│   instead of digits.
-│   `heldLettersOfferSymbolsWhenTheLabIsOn` in InsertionTest.kt passed in
-│   https://github.com/anomalyco/hex/actions/runs/45273240353 (testDebugUnitTest + compileDebugKotlin,
-│   GitHub-hosted); not tried on a device or emulator.
+├── Fields marked private or no-learning (a browser's incognito tab) -> normal suggestions,
+│   next words, autocorrection, swipe typing and double-space period, because Android's
+│   `IME_FLAG_NO_PERSONALIZED_LEARNING` only says that nothing typed there is learned. Undoing
+│   an autocorrection there still restores what was typed, but the rejection is not remembered
+│   for later sessions, and a picked emoji does not join the picker's recents. Checks:
+│   `FieldTypingTest` in android/app/src/test (5/5) and
+│   `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` passed on 2026-11-24 (167
+│   tests in all, on Temurin JDK 21 and Android SDK 36); the repo has no Android CI, and
+│   nothing was tried on a device or emulator.
+├── A TYPE_NULL field (a terminal) -> its text stays on the editor's side, so Hex reads and edits
+│   none of it. Delete, and a held Delete, send one KEYCODE_DEL key press per press instead of the
+│   surrounding-text delete, which reports success but deletes nothing there; Delete's slide is off,
+│   the space bar's cursor slide steps with arrow keys, and Enter sends KEYCODE_ENTER when the
+│   editor has no action. Suggestions, autocorrection, swipes and smart quotes were already off in
+│   such a field.
+│   Checks: `editorsThatKeepTheirOwnTextTakeKeyEvents` in `FieldTypingTest`
+│   (android/app/src/test) covers the field's classification; the key presses are read from
+│   `KeyboardEngine` and were not tried on a device.
+├── Labs > Keyboard > Symbols on letter keys (off) -> hold a letter from QWERTY's home or
+│   bottom row for its symbol first, SwiftKey-style (m for /, a for @), with the letter's
+│   accents after it; symbols follow the letter, so AZERTY q/w and QWERTZ y get none where
+│   their layouts draw them below row 1. Row 1 keeps its digit while it shows one: with Number
+│   row off it hints and holds the digit first. With it on, the top row's letters show and hold
+│   Gboard's symbols in the hidden digit's place (q for %, p for }, r for = as j holds it),
+│   while a letter that already has a home- or bottom-row symbol keeps that one wherever the
+│   layout draws it (AZERTY a/z for @/_, QWERTZ z for _). The top row's symbols stay on row 1,
+│   so a layout that draws q, w or y lower is unchanged there. Off, the keys are unchanged.
+│   `heldLettersOfferSymbolsWhenTheLabIsOn` in InsertionTest.kt covers the holds, and
+│   `withBothLabsTheTopRowShowsGboardsSymbols` and `theTopRowSymbolsStayOnTheTopRow` in
+│   KeyboardPageTest.kt the top row and the rows it leaves alone; all three passed in
+│   https://github.com/anomalyco/hex/actions/runs/45367619509 (testDebugUnitTest + compileDebugKotlin,
+│   GitHub-hosted); not tried on a device or emulator. The repo has no Android CI.
 ├── Labs > Output > Signature (off) -> one editable line (up to 200 characters; empty adds
 │   nothing, default "Sent from Hex") on its own line at the end of each keyboard dictation,
 │   added once; the next dictation starts on a new line below it, and a signed dictation
@@ -3198,14 +3221,14 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 ├── Labs > Keyboard > Number row (off) -> 1 2 3 4 5 6 7 8 9 0 above the letter rows on
 │   every layout (en, es, nb, de, fr, it), typed like normal keys. The first letter row's
 │   corner digits and digit-first hold are hidden while it shows; accents on hold stay, and
-│   the Symbols on letter keys hints and holds still work, with row 1 letters that have a
-│   symbol (AZERTY a/z, QWERTZ z) showing it instead of the digit. The keyboard is one row
-│   taller and the Hex menu matches that height; ?123, the symbols pages and the pads keep
-│   their keys and are a row shorter than the letters while it is on. Off, the page is
-│   unchanged.
-│   KeyboardPageTest plus a passing `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin`
-│   on a GitHub-hosted runner (https://github.com/anomalyco/hex/actions/runs/45275591325, the
-│   latest observed verification); not tried on a device. The repo has no Android CI.
+│   the Symbols on letter keys hints and holds still work: row 1's first ten letters show a
+│   symbol instead of the digit, Gboard's such as q for % and p for }, or its own home- or
+│   bottom-row symbol where it has one, like AZERTY a for @. The keyboard is one row taller
+│   and the Hex menu matches that height; ?123, the symbols pages and the pads keep their keys
+│   and are a row shorter than the letters while it is on. Off, the page is unchanged.
+│   KeyboardPageTest covers it, including the top row's symbols, and passed in
+│   https://github.com/anomalyco/hex/actions/runs/45367619509 (testDebugUnitTest + compileDebugKotlin,
+│   GitHub-hosted); not tried on a device. The repo has no Android CI.
 ├── Labs > Keyboard > Local currency (off) -> the phone's region picks the ?123 page's
 │   currency symbol in $'s place from a fixed set of single-character symbols: GBP £, EUR €,
 │   JPY and CNY ¥, INR ₹, PHP ₱, KRW ₩, RUB ₽ and UAH ₴. USD, a locale with no country, a
@@ -3259,7 +3282,7 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
     Checks: `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` (includes
     `KeyboardToolsTest`) and `python3 scripts/code-shape.py --check`; the repo has no
     Android CI. Not tried on a device or emulator.
-└── Labs > Keyboard > Smart quotes (off) -> in a plain-text field (not a password, email or URL
+├── Labs > Keyboard > Smart quotes (off) -> in a plain-text field (not a password, email or URL
     field, or a TYPE_NULL field such as a terminal), the ' and " keys type ’ ‘ “ ”: an opening
     quote — ‘ or “ — at the start, after whitespace, or after an opening bracket or quote, and
     the closing quote or apostrophe — ’ or ” — after anything else. A word a suggestion,
@@ -3274,6 +3297,35 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
     `SmartQuotesTest`'s 12) on 2026-11-24, on Temurin JDK 21 and Android SDK 36 (platform 36,
     build-tools 35/36, NDK 27.2.12479018); the repo has no Android CI, and nothing was tried on a
     device or emulator. `python3 scripts/code-shape.py --check` passes.
+└── Labs > Keyboard > Voice-only mode (off) -> a "Voice only" subtype of Hex, registered at runtime
+    with `InputMethodManager.setAdditionalInputMethodSubtypes` (never in input_method.xml), that
+    replaces the keyboard with one compact dictation bar: the strip's dot waveform and a status
+    line, ✓ to finish (or to start again after a blocked or failed start) and ✕ to cancel. Showing
+    it starts dictation at once, with the keyboard's guards: a password field, no text field, a
+    microphone another dictation holds, or a missing microphone permission shows the reason in the
+    bar, whose ✕ goes back. ✓ transcribes through the same MicCapture queue and model as the
+    keyboard and inserts the text at the cursor with the same signature and continuation rules
+    (commitSpeech). After the insertion, after ✕, or after a failed dictation (its note shows for
+    1.2 s) Hex calls `switchToPreviousInputMethod()`, opening Android's keyboard picker when that
+    returns false, at most once per dictation; an input restart right after a leave shows the bar
+    idle rather than recording again. The subtype is auxiliary, so Hex's own globe-key rotation
+    stays as it was. Enabling it: turning the toggle on has Android 14 and later enable the
+    voice subtype itself with `setExplicitlyEnabledInputMethodSubtypes` (the full keyboard and voice
+    subtypes); Android 12 and 13 have no such API, so there the toggle opens Android's Hex subtype
+    screen to tick "Voice only". Turning it off clears the subtype and returns the explicit set to
+    the implicit default. Reach it from another keyboard: Android gives a voice-input key one voice
+    input method, preferring the system's, so HeliBoard's and other AOSP-based keyboards' mic keys
+    reach Hex only when no system voice input (such as Google voice typing) is enabled; otherwise
+    use the keyboard switcher or Android's picker. The IME registers the subtype again when it
+    starts, which matters after a settings restore. Off, no subtype or explicit set is touched and
+    Hex is exactly the keyboard it was; a voice subtype that is somehow current shows the full
+    keyboard. Checks:
+    `./gradlew :app:compileDebugKotlin :app:testDebugUnitTest` (with `-x prepareSpeechModel` and a
+    build-tools 36.0.0 override, since AGP's default 35.0.0 is not installed) passed 166 tests,
+    `VoiceOnlyTest`'s 4 among them, on 2026-11-24 on Temurin JDK 21 and Android SDK 36 (platform 36,
+    build-tools 36.0.0, NDK 27.2.12479018); `VoiceOnlyTest` covers the bar-or-keyboard and restart
+    decisions, `python3 scripts/code-shape.py --check` and `git diff --check` pass, and the repo has
+    no Android CI; nothing was tried on a device or emulator.
 Unmerged Windows / deferred features -> Not part of this map
 ```
 

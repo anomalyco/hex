@@ -21,11 +21,13 @@ mod french;
 mod history;
 mod hud_height;
 mod labs;
+mod meeting_mute;
 mod meetings;
 mod menu;
 pub(crate) mod numbers;
 mod onboarding;
 mod portuguese;
+mod routing;
 mod russian;
 mod screenshots;
 mod signature;
@@ -385,15 +387,16 @@ fn tables() -> &'static [HashMap<&'static str, &'static str>; 6] {
     })
 }
 
-/// Every translated string: the main, Meetings, Labs, Dictation style,
-/// failure, first-run, menu bar, History, Screenshots, and Annotate Agents
-/// rows.
+/// Every translated string: the main, Meetings, Labs, microphone mute,
+/// Dictation style, failure, first-run, menu bar, History, Screenshots, and
+/// Annotate Agents rows.
 pub(super) fn all_translations() -> impl Iterator<Item = &'static (&'static str, [&'static str; 6])>
 {
     TRANSLATIONS
         .iter()
         .chain(meetings::TRANSLATIONS)
         .chain(labs::TRANSLATIONS)
+        .chain(meeting_mute::TRANSLATIONS)
         .chain(style::TRANSLATIONS)
         .chain(signature::TRANSLATIONS)
         .chain(clipboard_phrase::TRANSLATIONS)
@@ -404,6 +407,7 @@ pub(super) fn all_translations() -> impl Iterator<Item = &'static (&'static str,
         .chain(menu::TRANSLATIONS)
         .chain(history::TRANSLATIONS)
         .chain(screenshots::TRANSLATIONS)
+        .chain(routing::TRANSLATIONS)
 }
 
 #[cfg(test)]

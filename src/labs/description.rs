@@ -261,6 +261,9 @@ impl Feature {
             Self::ClipboardPhrase => {
                 "Each time you say the phrase in a normal dictation (\"my clipboard\" by default, at least two words), Hex puts the clipboard's text there in double quotes after processing and before it pastes, and Paste Last and History keep the same text. An empty clipboard leaves the words as spoken; raw and API output are left alone"
             }
+            Self::MeetingMicrophoneMute => {
+                "Mute Hex's microphone while a meeting records: the call's audio keeps recording and transcribing, and the microphone's packets stay in place as silence until you unmute (macOS)"
+            }
         }
     }
 }

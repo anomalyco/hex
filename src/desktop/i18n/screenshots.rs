@@ -18,19 +18,8 @@ pub(super) fn merged(
     table: &[(&'static str, &'static str)],
     language: Language,
 ) -> HashMap<&'static str, &'static str> {
-    let (
-        extra,
-        agents,
-        signature,
-        clipboard,
-        style,
-        hud_height,
-        voice_isolation,
-        annotate,
-        calls,
-        edits,
-    ) = match language {
-        Language::French => (
+    let sections: &[&[(&'static str, &'static str)]] = match language {
+        Language::French => &[
             FRENCH,
             super::agents::FRENCH,
             super::signature::FRENCH,
@@ -41,8 +30,10 @@ pub(super) fn merged(
             super::annotate_dictation::FRENCH,
             super::calls::FRENCH,
             super::transcript_edits::FRENCH,
-        ),
-        Language::Portuguese => (
+            super::routing::FRENCH,
+            super::meeting_mute::FRENCH,
+        ],
+        Language::Portuguese => &[
             PORTUGUESE,
             super::agents::PORTUGUESE,
             super::signature::PORTUGUESE,
@@ -53,8 +44,10 @@ pub(super) fn merged(
             super::annotate_dictation::PORTUGUESE,
             super::calls::PORTUGUESE,
             super::transcript_edits::PORTUGUESE,
-        ),
-        Language::Russian => (
+            super::routing::PORTUGUESE,
+            super::meeting_mute::PORTUGUESE,
+        ],
+        Language::Russian => &[
             RUSSIAN,
             super::agents::RUSSIAN,
             super::signature::RUSSIAN,
@@ -65,21 +58,14 @@ pub(super) fn merged(
             super::annotate_dictation::RUSSIAN,
             super::calls::RUSSIAN,
             super::transcript_edits::RUSSIAN,
-        ),
+            super::routing::RUSSIAN,
+            super::meeting_mute::RUSSIAN,
+        ],
     };
 
     table
         .iter()
-        .chain(extra)
-        .chain(agents)
-        .chain(signature)
-        .chain(clipboard)
-        .chain(style)
-        .chain(hud_height)
-        .chain(voice_isolation)
-        .chain(annotate)
-        .chain(calls)
-        .chain(edits)
+        .chain(sections.iter().flat_map(|section| section.iter()))
         .copied()
         .collect()
 }

@@ -940,6 +940,17 @@
       ],
       "summary": "Say \"my clipboard\" while dictating and Hex pastes what you copied there, in quotes",
       "title": "Clipboard phrase"
+    },
+    {
+      "added": "2026-11-24",
+      "group": "meetings",
+      "groupTitle": "Meetings",
+      "id": "meeting-microphone-mute",
+      "oses": [
+        "macos"
+      ],
+      "summary": "Adds a mute button to meeting recordings. Hex keeps recording the call's audio but leaves out your microphone until you unmute.",
+      "title": "Mute the microphone while recording"
     }
   ]
 }

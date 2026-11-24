@@ -297,6 +297,14 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // one_native_call_app_is_watched_and_a_browser_or_two_are_not,
 │                                        // windows_and_linux_executables_link_to_their_canonical_call_app
 │                                        // (meeting/watcher/call_end.rs); not observed on a real Mac, Windows, or Linux call
+├── Mute the microphone while recording no labs.meeting_microphone_mute (macOS) a recording's header and the menu bar under
+│                                        Stop & Transcribe offer Mute microphone, and the recording capsule shows Microphone
+│                                        muted beside its meter: Hex's microphone leaves the recording, so no "You" line is
+│                                        produced, while the call's audio keeps recording and transcribing; the microphone's
+│                                        packets stay the same length as exact zeros, so the WAV timeline and every position
+│                                        stay put. Unmute microphone puts it back, and turning the lab off restores it
+│                                        at once without stopping, clearing the switch so turning it back on does not
+│                                        re-mute (see meetings.md)
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
 ├── Transform typed text no labs.typed_text + typed_text_hotkey (Linux) Settings › Output shows a Typed text section whose shortcut is unbound by
@@ -4245,6 +4253,34 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   `only_an_automatic_browser_call_with_a_code_keeps_reading_its_page`
   ([meeting/watcher.rs](../../src/meeting/watcher.rs)). Not observed on a real
   Mac, Windows, or Linux call, or a real Slack huddle.
+- Mute the microphone while recording (macOS, with Meetings on): the
+  recording's header offers **Mute microphone** beside Stop & transcribe, the
+  menu bar offers it under Stop & Transcribe, and the recording capsule says
+  **Microphone muted** beside its meter. On, Hex's microphone leaves the
+  recording without stopping it: its packets keep the length they arrived at
+  but carry exact zeros (`PacketSink::send_samples` in
+  [capture.rs](../../src/meeting/capture.rs)), so the WAV timeline and every
+  position stay put, no "You" line is produced, and the call's own audio keeps
+  recording and transcribing. Nothing about the call app changes. Its toggle is
+  `labs.meeting_microphone_mute` (off by default); the row, the capsule's
+  notice, and the pane's button read the same gate, so with the lab off
+  nothing shows and no sample changes. Turning the lab off mid-recording
+  restores audio at once, because the sink reads the gate with each packet,
+  and the controller's next pass clears its own switch
+  (`reconcile_microphone_mute`), so turning the lab back on in the same
+  recording does not mute it again. The switch is also cleared when a
+  recording starts or ends (`start_recording`, and where the finished
+  worker's recording is taken in
+  [watcher.rs](../../src/meeting/watcher.rs)). A mute request is ignored unless a
+  meeting records with the lab on. Checks:
+  `the_meeting_microphone_mute_lab_is_a_macos_meetings_lab_off_by_default`
+  ([labs.rs](../../src/labs.rs)),
+  `a_muted_microphone_goes_silent_in_place_and_the_call_does_not`,
+  `a_microphone_mute_needs_a_recording_and_its_lab`, and
+  `a_lab_turned_off_clears_the_microphone_mute`
+  ([capture.rs](../../src/meeting/capture.rs)); not observed on a real Mac call,
+  and the menu bar, capsule, and pane controls are macOS-only code this Linux
+  build never compiled.
 - Import audio (macOS): Meetings offers **Import audio…** beside Start
   recording. A local WAV, M4A, MP3, AIFF, or CAF file is decoded to 16 kHz
   mono float WAV by the AVFoundation bridge, then transcribed with the
