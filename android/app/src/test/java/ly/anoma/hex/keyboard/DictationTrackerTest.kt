@@ -143,6 +143,34 @@ class DictationTrackerTest {
         assertTrue(results.single().pairs.isEmpty())
     }
 
+    @Test fun aShortAfterAnchorRepeatedInsideTheDictationStillFindsItsEnd() {
+        field.text = "Hi  "
+        field.cursor = 3
+        dictate(" one two three four five six seven eight nine cloud eleven twelve thirteen fourteen fifteen " +
+            "sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour twentyfive")
+        field.replace(field.text.indexOf("cloud"), field.text.indexOf("cloud") + 5, "Claude")
+        field.setCursor(field.text.indexOf("seven"))
+        tracker.observe()
+        now += 61_000
+        tracker.observe()
+        assertEquals(listOf(DictationOutcome.Edited), outcomes())
+        assertEquals(listOf("Claude"), results.single().pairs.map { it.meant })
+    }
+
+    @Test fun aRepeatedNewlineAfterAnchorFindsTheEndOfALongList() {
+        field.text = "List:\n\n"
+        field.cursor = 6
+        val lines = (1..20).joinToString("\n") { if (it == 20) "line20 cloud" else "line" + it }
+        dictate(lines)
+        field.replace(field.text.indexOf("cloud"), field.text.indexOf("cloud") + 5, "Claude")
+        field.setCursor(field.text.indexOf("line15"))
+        tracker.observe()
+        now += 61_000
+        tracker.observe()
+        assertEquals(listOf(DictationOutcome.Edited), outcomes())
+        assertEquals(listOf("Claude"), results.single().pairs.map { it.meant })
+    }
+
     @Test fun deletingAndDictatingAgainIsARedictation() {
         dictate("Meet at cloud nine.")
         tracker.observe()

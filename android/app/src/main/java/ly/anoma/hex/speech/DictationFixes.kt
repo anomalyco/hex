@@ -243,6 +243,9 @@ internal class DictationFixStore(context: Context) {
 
     fun learned() = DictationFixes.learned(records)
 
+    /** Whether this phone keeps any fix at all, learned or still below the threshold. */
+    fun hasRecords() = records.isNotEmpty()
+
     fun disabled(): Set<String> = prefs.getString(DISABLED, null).orEmpty().split('\n')
         .filter(String::isNotEmpty).toSet()
 

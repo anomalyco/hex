@@ -118,6 +118,8 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val fixStore = remember(context) { DictationFixStore(context) }
     val learnedFixes = remember(revision, learnFixes) { if (learnFixes) fixStore.learned() else emptyList() }
     val disabledFixes = remember(revision, learnFixes) { if (learnFixes) fixStore.disabled() else emptySet() }
+    // The lab off stops learning and applying, not the records already on the phone: Delete stays reachable.
+    val storedFixes = remember(revision) { fixStore.hasRecords() }
     var forgetting by remember { mutableStateOf(false) }
     val english = ModelStore.english.state.collectAsState().value
     var signatureDraft by remember { mutableStateOf(speech.signatureText) }
@@ -380,6 +382,8 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                                 fix.id !in disabledFixes) { on -> fixStore.disable(fix.id, !on) }
                                         }
                                     }
+                                }
+                                if (learnFixes || storedFixes) {
                                     Rule()
                                     if (forgetting) {
                                         Row(Modifier.fillMaxWidth().heightIn(min = 52.dp)

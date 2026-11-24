@@ -3471,7 +3471,8 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
     Parakeet's vocabulary get the vocabulary first, then the learned words, deduplicated, at least
     two characters, capped at the existing 100, and either source works without the other. A
     translated dictation gets neither fixes nor learned hints. Settings > Labs > Dictation
-    lists each learned pair with a switch and a confirmed Delete; the fixes live in the same
+    lists each learned pair with a switch and a confirmed Delete; the Delete stays reachable while
+    the lab is off, since the records on the phone remain. The fixes live in the same
     `speech` SharedPreferences as one escaped line per fix, capped at 1,000 records (the least used
     and oldest drop first), and turning the lab off neither learns nor applies anything. Checks:
     `DictationLearningTest` (29: kept, rewrite, plausible and implausible substitutions, the
@@ -3480,11 +3481,11 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
     merging, merging's word limit, the 1,000-record cap, whole-word and phrase application, fixes
     before vocabulary, combining marks, hints kept apart from forced spellings, the sentence-start
     case, hints off and translated, learned capitals, hints and their cap, and the persistence
-    round-trip) and `DictationTrackerTest` (11: kept at the minute, edits found with and without
+    round-trip) and `DictationTrackerTest` (13: kept at the minute, edits found with and without
     text after, a new dictation settling the last, typing after a dictation at the field start, a
-    cursor inside a long dictation, redictation, deletion, a span the field never showed, and Undo) in
-    android/app/src/test, plus
-    `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin -x prepareSpeechModel` passing 277
+    cursor inside a long dictation, repeated short and newline after-anchors, redictation, deletion,
+    a span the field never showed, and Undo) in android/app/src/test, plus
+    `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin -x prepareSpeechModel` passing 279
     tests on 2026-11-24 on OpenJDK 21 and Android SDK 36 (offline); the repo has no Android CI, and
     nothing was tried on a device or emulator.
 Unmerged Windows / deferred features -> Not part of this map

@@ -122,19 +122,27 @@ internal class DictationTracker(
             current.anchorBefore.isNotEmpty() -> occurrences(text, current.anchorBefore).map { it + current.anchorBefore.length }
             startEdge -> listOf(0)
             else -> emptyList()
-        }.take(16)
+        }
         val ends = when {
             current.anchorAfter.isNotEmpty() -> occurrences(text, current.anchorAfter)
             endEdge -> listOf(text.length)
             else -> emptyList()
-        }.take(16)
+        }
         var bestStart = -1
         var bestEnd = -1
         var bestMiss = Int.MAX_VALUE
-        for (start in starts) for (end in ends) {
-            if (start > end) continue
-            val miss = kotlin.math.abs(end - start - current.inserted.length)
-            if (miss < bestMiss) { bestMiss = miss; bestStart = start; bestEnd = end }
+        // A short anchor (" ", "\n", ".") repeats inside the dictation, so every end is considered, but only
+        // the few nearest the span's last known end: never a fixed first-16 window that stops inside it.
+        for (start in starts) {
+            val target = start + current.latest.length
+            val found = ends.binarySearch(target)
+            val at = if (found >= 0) found else -found - 1
+            for (index in maxOf(0, at - 2)..minOf(ends.lastIndex, at + 2)) {
+                val end = ends[index]
+                if (end < start) continue
+                val miss = kotlin.math.abs(end - target)
+                if (miss < bestMiss) { bestMiss = miss; bestStart = start; bestEnd = end }
+            }
         }
         if (bestStart < 0 || bestEnd - bestStart > current.inserted.length * 4 + 200) return !current.located
         val span = text.substring(bestStart, bestEnd)
