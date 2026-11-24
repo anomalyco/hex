@@ -3183,10 +3183,19 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 │   `IME_FLAG_NO_PERSONALIZED_LEARNING` only says that nothing typed there is learned. Undoing
 │   an autocorrection there still restores what was typed, but the rejection is not remembered
 │   for later sessions, and a picked emoji does not join the picker's recents. Checks:
-│   `FieldTypingTest` in android/app/src/test (4/4) and
-│   `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` passed on 2026-11-24 (162
+│   `FieldTypingTest` in android/app/src/test (5/5) and
+│   `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` passed on 2026-11-24 (167
 │   tests in all, on Temurin JDK 21 and Android SDK 36); the repo has no Android CI, and
 │   nothing was tried on a device or emulator.
+├── A TYPE_NULL field (a terminal) -> its text stays on the editor's side, so Hex reads and edits
+│   none of it. Delete, and a held Delete, send one KEYCODE_DEL key press per press instead of the
+│   surrounding-text delete, which reports success but deletes nothing there; Delete's slide is off,
+│   the space bar's cursor slide steps with arrow keys, and Enter sends KEYCODE_ENTER when the
+│   editor has no action. Suggestions, autocorrection, swipes and smart quotes were already off in
+│   such a field.
+│   Checks: `editorsThatKeepTheirOwnTextTakeKeyEvents` in `FieldTypingTest`
+│   (android/app/src/test) covers the field's classification; the key presses are read from
+│   `KeyboardEngine` and were not tried on a device.
 ├── Labs > Keyboard > Symbols on letter keys (off) -> hold a letter from QWERTY's home or
 │   bottom row for its symbol first, SwiftKey-style (m for /, a for @), with the letter's
 │   accents after it; symbols follow the letter, so AZERTY q/w and QWERTZ y get none where
