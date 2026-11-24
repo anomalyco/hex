@@ -1533,7 +1533,7 @@ fn history_stats_button_opens_and_closes_the_dialog() {
     );
 
     tap(&mut rt, "history-stats-open");
-    assert!(rt.state.history.stats_open);
+    assert!(rt.state.is_modal(Modal::HistoryStats));
     assert!(rt.find("history-stats-dialog").is_some());
     assert!(texts(&rt).iter().any(|text| text == "Dictation stats"));
     // Headline tiles, the daily chart, the app bars, Output's share, and
@@ -1570,7 +1570,7 @@ fn history_stats_button_opens_and_closes_the_dialog() {
     );
     assert!(rt.find("history-stats-typing").is_some());
     tap(&mut rt, "history-stats-close");
-    assert!(!rt.state.history.stats_open);
+    assert!(!rt.state.is_modal(Modal::HistoryStats));
     assert!(rt.find("history-stats-dialog").is_none());
 
     tap(&mut rt, "history-stats-open");
@@ -1583,7 +1583,7 @@ fn history_stats_button_opens_and_closes_the_dialog() {
             ..Mods::default()
         },
     );
-    assert!(rt.state.history.stats_open);
+    assert!(rt.state.is_modal(Modal::HistoryStats));
     assert_eq!(
         rt.state.pane, pane,
         "Command-1 waits while the stats dialog is open"
@@ -1591,22 +1591,34 @@ fn history_stats_button_opens_and_closes_the_dialog() {
     rt.update(on_close);
     settle(&mut rt);
     assert!(
-        !rt.state.history.stats_open,
+        !rt.state.is_modal(Modal::HistoryStats),
         "closing the window closes the dialog"
     );
+
+    tap(&mut rt, "history-stats-open");
+    vocabulary::open(&mut rt.state);
+    assert!(
+        rt.state.is_modal(Modal::Vocabulary) && !rt.state.is_modal(Modal::HistoryStats),
+        "opening another modal replaces the stats dialog"
+    );
+    vocabulary::close(&mut rt.state);
+    settle(&mut rt);
 
     tap(&mut rt, "history-stats-open");
     rt.update(|ui, tx| show(ui, Destination::History, tx));
     settle(&mut rt);
     assert!(
-        !rt.state.history.stats_open,
+        !rt.state.is_modal(Modal::HistoryStats),
         "showing History again closes the dialog"
     );
 
     tap(&mut rt, "history-stats-open");
     key(&mut rt, Key::Escape, Mods::default());
     settle(&mut rt);
-    assert!(!rt.state.history.stats_open, "Escape closes the dialog");
+    assert!(
+        !rt.state.is_modal(Modal::HistoryStats),
+        "Escape closes the dialog"
+    );
     assert!(
         focused(&rt).ends_with("history-stats-open"),
         "focus returns to Stats: {}",
@@ -1619,7 +1631,7 @@ fn history_stats_button_opens_and_closes_the_dialog() {
     rt.invalidate();
     settle(&mut rt);
     assert!(
-        !rt.state.history.stats_open,
+        !rt.state.is_modal(Modal::HistoryStats),
         "emptying the stats closes the dialog"
     );
     assert!(rt.find("history-stats-open").is_none());
@@ -1633,7 +1645,7 @@ fn history_stats_button_opens_and_closes_the_dialog() {
     rt.invalidate();
     settle(&mut rt);
     assert!(
-        !rt.state.history.stats_open,
+        !rt.state.is_modal(Modal::HistoryStats),
         "turning the lab off closes the dialog"
     );
     assert!(rt.find("history-stats-open").is_none());
@@ -1651,7 +1663,7 @@ fn history_stats_dialog_hides_sections_with_nothing_to_show() {
     });
     rt.state.settings.labs.history_stats = true;
     crate::labs::apply(&rt.state.settings.labs);
-    rt.state.history.stats_open = true;
+    rt.state.open_modal(Modal::HistoryStats);
     rt.invalidate();
     settle(&mut rt);
     assert!(rt.find("history-stats-dialog").is_some());
@@ -1779,7 +1791,7 @@ fn history_stats_button_and_dialog_still_work_with_the_strip_on() {
     assert!(rt.find("history-stats-open").is_some(), "Stats still shows");
 
     tap(&mut rt, "history-stats-open");
-    assert!(rt.state.history.stats_open);
+    assert!(rt.state.is_modal(Modal::HistoryStats));
     assert!(rt.find("history-stats-dialog").is_some());
     for key in [
         "tile-dictations",
@@ -1792,7 +1804,7 @@ fn history_stats_button_and_dialog_still_work_with_the_strip_on() {
         assert!(rt.find(key).is_some(), "{key} shows");
     }
     tap(&mut rt, "history-stats-close");
-    assert!(!rt.state.history.stats_open);
+    assert!(!rt.state.is_modal(Modal::HistoryStats));
     assert!(
         rt.find("history-stats-strip").is_some(),
         "the strip stays above the list"

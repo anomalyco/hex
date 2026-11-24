@@ -9,13 +9,13 @@
 
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
-use rune::{Cx, El, TextEdit, Tx, col, row, text};
+use rune::{El, TextEdit, Tx, col, row, text};
 use rune_kit::{Menu as KitMenu, MenuItem, Placement, Select, SelectAppearance, TextInput};
 
 use super::controls::{ButtonKind, Paint, button};
 use super::list_detail::{self as ld, Item};
 use super::lists::{Tone, error_panel, section_label, small_button};
-use super::{Menu, Ui};
+use super::{Menu, Modal, Pane, Ui};
 use crate::desktop::i18n::{event_age, tr, tr_fill, tr_named};
 use crate::history::playback::Playback;
 use crate::history::stats::{AppCount, DayCount, HistoryStats, ProfileOutputTime};
@@ -31,7 +31,7 @@ pub(super) mod unified;
 
 pub(super) use self::audio::AudioCopy;
 use self::audio::copy_audio;
-pub(super) use self::stats::close_stats;
+pub(super) use self::stats::modal as stats_modal;
 
 #[derive(Default)]
 pub(super) struct HistoryPane {
@@ -62,8 +62,6 @@ pub(super) struct HistoryPane {
     pub(super) typing_speed_drag: Option<u32>,
     /// The saved typing speed the stats compared against when last read.
     typing_wpm: u32,
-    /// The stats dialog is open.
-    pub(super) stats_open: bool,
     /// Every selected entry, when several are, and the Delete confirmation
     /// while the card shows one.
     pub(super) selection: selection::Selection,
@@ -200,9 +198,6 @@ impl HistoryPane {
             Some(store) if stats_on => Some(store.usage()),
             _ => None,
         };
-        if !self.has_stats() {
-            self.stats_open = false;
-        }
     }
 
     /// Whether the dialog has anything to show: retained dictations, or the
@@ -256,12 +251,6 @@ impl HistoryPane {
             if let Some(playback) = &mut self.playback {
                 playback.stop();
             }
-            changed = true;
-        }
-        // The dialog belongs to the pane and its switch: leaving History,
-        // turning Dictation stats off, or emptying the stats closes it.
-        if self.stats_open && (!visible || !stats_on || !self.has_stats()) {
-            self.stats_open = false;
             changed = true;
         }
         let Some(store) = self.store.as_ref().filter(|_| visible) else {
@@ -741,11 +730,31 @@ fn delete(ui: &mut Ui, id: u64) {
     }
 }
 
+/// Polls History and closes the Dictation stats dialog when leaving History,
+/// turning the lab off, or emptying the stats.
+pub(super) fn poll(ui: &mut Ui) -> bool {
+    let visible = ui.pane == Pane::History
+        && !ui.labs_open
+        && ui.window.as_ref().is_none_or(rune::AppHandle::is_visible);
+    let stats_on = ui.settings.labs.history_stats;
+    let mut changed = ui.history.poll(
+        visible,
+        ui.settings.labs.keep_recordings,
+        stats_on,
+        ui.settings.typing_wpm,
+    );
+    if ui.is_modal(Modal::HistoryStats) && (!visible || !stats_on || !ui.history.has_stats()) {
+        ui.close_modal_if(Modal::HistoryStats);
+        changed = true;
+    }
+    changed
+}
+
 /// The header's retention menu and the list + detail body.
-pub(super) fn pane(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (Vec<El>, El) {
+pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
     #[cfg(all(target_os = "macos", hex_capture))]
     if ui.history.unified.enabled {
-        return unified::view(ui, p, cx, layer);
+        return unified::view(ui, p, layer);
     }
     let pane = &ui.history;
     let actions = header_actions(ui, p, layer);
@@ -820,9 +829,6 @@ pub(super) fn pane(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (
             ld::body(p, "history-body", column, detail(ui, p, layer))
         }
     };
-    if let Some(modal) = stats::modal(ui, p, cx) {
-        layer.extend(modal);
-    }
     (
         actions,
         col()
@@ -947,8 +953,7 @@ fn header_actions(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {
                     tr("Stats"),
                     ButtonKind::Secondary,
                     |ui: &mut Ui, _| {
-                        ui.open = None;
-                        ui.history.stats_open = true;
+                        ui.open_modal(Modal::HistoryStats);
                     },
                 )),
         ];

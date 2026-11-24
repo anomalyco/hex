@@ -96,7 +96,7 @@ pub(super) const SCENES: &[Scene] = &[
         ui.history = history::HistoryPane::fixture();
         ui.history.stats = Some(history::HistoryPane::fixture_stats());
         ui.history.usage = Some(history::HistoryPane::fixture_usage());
-        ui.history.stats_open = true;
+        ui.open_modal(Modal::HistoryStats);
         ui.settings.labs.history_stats = true;
         crate::labs::apply(&ui.settings.labs);
         ui.pane = Pane::History;

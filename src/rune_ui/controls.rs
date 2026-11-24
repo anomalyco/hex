@@ -1022,15 +1022,41 @@ pub(super) fn value_button(
         )
 }
 
+/// Wraps `panel` in a modal sheet's overlay elevation, scrim, and centered
+/// modal layer: keys stay inside, Escape or a press outside runs `close`, and
+/// focus returns to the control that opened it.
+pub(super) fn modal_sheet(p: Paint, prefix: &str, mut panel: El, close: fn(&mut Ui)) -> [El; 2] {
+    for shadow in &p.k.elevation.overlay {
+        panel = panel.box_shadow(*shadow);
+    }
+    let layer = |key: String| {
+        el().key(key)
+            .role("none")
+            .absolute(0.0, 0.0)
+            .w_full()
+            .h_full()
+    };
+    [
+        layer(format!("{prefix}-scrim"))
+            .fill(p.k.c.scrim)
+            .on_press(close)
+            .transition(modal_scrim_transition(p)),
+        layer(format!("{prefix}-layer"))
+            .center()
+            .transition(modal_transition(p))
+            .child(panel.modal(true, close)),
+    ]
+}
+
 /// How a modal's surface enters and leaves: scaled from 0.96 about its
 /// centre, with a fade. Its text scales with its boxes, so the panel moves
 /// as one surface.
-pub(super) fn modal_transition(p: Paint) -> Transition {
+fn modal_transition(p: Paint) -> Transition {
     Transition::scale(0.96).springs(overlay_springs(p))
 }
 
 /// The scrim behind a modal: the surface's springs, fading only.
-pub(super) fn modal_scrim_transition(p: Paint) -> Transition {
+fn modal_scrim_transition(p: Paint) -> Transition {
     Transition::opacity().springs(overlay_springs(p))
 }
 
