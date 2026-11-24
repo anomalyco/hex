@@ -5,8 +5,16 @@
 use rune::{Cursor, El, Icon, SpringPair, TextStyle, Transition, Tx, col, el, icon, row, text};
 use rune_theme_opencode::icons;
 
+use super::super::controls::DESCRIPTION;
 use super::super::notes_writer::NotesWriter;
 use super::*;
+
+mod finished;
+
+use finished::discard_confirm;
+pub(super) use finished::ready;
+#[cfg(target_os = "windows")]
+use finished::ready_height;
 
 /// What a recording says beside its meter, in place of its title.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -37,6 +45,37 @@ impl Notice {
         }
     }
 }
+
+/// A capsule ✕'s hit box: the open recording's discard and the ready
+/// panel's close.
+const CLOSE_BOX: f32 = 28.0;
+/// The panel's icon spine: the centre of its rows' 16 pt glyphs, where every
+/// ✕ is centred too.
+pub(super) const SPINE: f32 = PANEL_PAD + ROW_PX + 8.0;
+/// How far the discard ✕ hangs past the header's inset, so its centre lands
+/// on the spine.
+const CLOSE_NUDGE: f32 = REST_PX + CLOSE_BOX / 2.0 - SPINE;
+/// What the discard ✕ takes from the open header's field, on its free side.
+pub(super) const DISCARD_ROOM: f32 = CLOSE_BOX - CLOSE_NUDGE;
+/// The panel while it asks "Discard recording?": its header, the question
+/// and its consequence, and Keep and Discard (§2.4 of the design spec).
+pub(super) const CONFIRM_HEIGHT: f32 = REST_HEIGHT + CONFIRM_BODY;
+/// The question under the header: 4 + title 20 + 2 + detail 16 + 12 +
+/// buttons 28 + 8.
+const CONFIRM_BODY: f32 = 4.0 + 20.0 + 2.0 + 16.0 + 12.0 + CONFIRM_BUTTON + CONFIRM_INSET;
+const CONFIRM_BUTTON: f32 = 28.0;
+/// Keep and Discard sit this far in from the panel's sides and its edge.
+const CONFIRM_INSET: f32 = 8.0;
+/// Keep and Discard share the row equally, 8 pt apart.
+const CONFIRM_CHOICE_WIDTH: f32 = (PANEL_WIDTH - 2.0 * CONFIRM_INSET - 8.0) / 2.0;
+/// The question's words start here, as a card's text does.
+const CONFIRM_TEXT_RAIL: f32 = 16.0;
+/// The ready panel's title band: its link's padding round the title and length.
+const TITLE_PY: f32 = 8.0;
+/// Clear space under the title link's hover fill.
+const TITLE_CLEAR: f32 = 8.0;
+/// Between the summary and the copies.
+const SUMMARY_GAP: f32 = 12.0;
 
 pub(super) fn recording_notice(shown: &Recording) -> Option<Notice> {
     // The microphone's own switch says more than the silence warning that
@@ -293,18 +332,6 @@ fn in_corner(capsule: &Capsule, body: El) -> El {
     .child(body)
 }
 
-/// The finished meeting: its title and length, the summary when there is
-/// one, and the same copies as the recording.
-pub(super) fn ready(p: Paint, capsule: &Capsule, manifest: &MeetingManifest) -> El {
-    result(
-        p,
-        capsule,
-        meeting::display_title(manifest),
-        manifest.duration_ms,
-        Some(manifest),
-    )
-}
-
 pub(super) fn finalizing(p: Paint, capsule: &Capsule, duration_ms: u64) -> El {
     result(
         p,
@@ -352,11 +379,20 @@ fn result(
                     (REST_HEIGHT - crate::rune_hud::dot_scope::PLATE_HEIGHT) / 2.,
                 )
             }))
+            // The recording's clock, so the time is the same node. Capture
+            // has ended: the dot fades where it was and the time stays put.
             .child(
-                text(meeting::format_duration(duration))
-                    .key("elapsed")
-                    .font(timer_style())
-                    .color(p.muted()),
+                row()
+                    .key("clock")
+                    .gap(METER_GAP)
+                    .center_y()
+                    .child(rec_dot(p).opacity(0.))
+                    .child(
+                        text(meeting::format_duration(duration))
+                            .key("elapsed")
+                            .font(timer_style())
+                            .color(p.muted()),
+                    ),
             )
     });
     let close = row()
@@ -583,7 +619,28 @@ fn minutes_shown(capsule: &Capsule) -> u64 {
 /// The header's room for the field in a surface `width` wide: from the
 /// rows' inset to the time. Another digit on the time takes three columns.
 fn field_room(capsule: &Capsule, width: f32) -> f32 {
-    width - 2. * REST_PX - METER_GAP - timer_width(minutes_shown(capsule))
+    let room = width - 2. * REST_PX - METER_GAP - timer_width(minutes_shown(capsule));
+    room - discard_room(capsule).min((room - waveform::WIDTH).max(0.))
+}
+
+/// The room the discard ✕ holds in the header this frame: none at rest, all
+/// of it once the surface is a row taller, so the field's free end and a
+/// left corner's time ride the wall with the ✕ beyond them. Finishing keeps
+/// it, so nothing in the header moves at Stop. It never takes the resting
+/// field's own width (see [`field_room`]).
+fn discard_room(capsule: &Capsule) -> f32 {
+    let open = match capsule.drawn() {
+        Some(State::Recording {
+            hovered, stopping, ..
+        }) => *hovered || *stopping,
+        Some(State::Finalizing { .. } | State::Ready { .. }) => true,
+        _ => return 0.,
+    };
+    match capsule.stage.outline() {
+        Some(o) => DISCARD_ROOM * ((stage::grid(o.h) - REST_HEIGHT) / ROW_HEIGHT).clamp(0., 1.),
+        None if open => DISCARD_ROOM,
+        None => 0.,
+    }
 }
 
 /// The soft edge the widening field wipes the header's notice with, pt, and
@@ -605,7 +662,8 @@ pub(super) fn field_wanted(capsule: &Capsule) -> f32 {
         _ => false,
     };
     if open {
-        field_room(capsule, PANEL_WIDTH).max(waveform::WIDTH)
+        let room = PANEL_WIDTH - 2. * REST_PX - METER_GAP - timer_width(minutes_shown(capsule));
+        (room - DISCARD_ROOM).max(waveform::WIDTH)
     } else {
         waveform::WIDTH
     }
@@ -643,11 +701,27 @@ pub(super) fn meter(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
         .transition(Transition::none())
         .child(waveform::slot(field_width(capsule)))
         .child(
-            text(elapsed)
-                .key("elapsed")
-                .font(timer_style())
-                .color(p.muted()),
+            row()
+                .key("clock")
+                .gap(METER_GAP)
+                .center_y()
+                .child(rec_dot(p))
+                .child(
+                    text(elapsed)
+                        .key("elapsed")
+                        .font(timer_style())
+                        .color(p.muted()),
+                ),
         )
+}
+
+/// The red dot before a recording's time.
+fn rec_dot(p: Paint) -> El {
+    el().key("rec-dot")
+        .size(REC_DOT, REC_DOT)
+        .radius(REC_DOT / 2.)
+        .fill(p.danger())
+        .a11y_hidden()
 }
 
 /// The open recording's height: its header, Stop, any notice and the copies.
@@ -773,14 +847,23 @@ pub(super) fn arriving_header(
 /// The recording: at rest only its levels and time; under the
 /// pointer it springs open into Stop and the copies, its header nearest the
 /// screen edge.
-pub(super) fn recording(
-    p: Paint,
-    capsule: &Capsule,
-    shown: &Recording,
-    hovered: bool,
-    stopping: bool,
-) -> El {
+/// How the recording's pill is held open, and whether it asks to discard.
+#[derive(Clone, Copy)]
+pub(super) struct Open {
+    pub(super) hovered: bool,
+    pub(super) stopping: bool,
+    pub(super) confirming: bool,
+}
+
+pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording, held: Open) -> El {
+    let Open {
+        hovered,
+        stopping,
+        confirming,
+    } = held;
     let open = hovered || stopping;
+    // The question replaces Stop and the copies while it is asked.
+    let asking = open && confirming;
     // Rows that are leaving stay drawn until they have gone.
     let actions = open || (0..stage::ACTIONS).any(|row| capsule.action_presence(row).shows());
     let notice = recording_notice(shown);
@@ -804,10 +887,13 @@ pub(super) fn recording(
     // their place and their cut while the field's free end wipes over them,
     // or in a left corner the time beyond it: they are never squeezed, and
     // nothing is drawn on one.
+    // The notice is measured against the resting header, so the ✕ arriving
+    // never recuts it; it has gone once the field is as wide as it opens.
     let field = field_width(capsule);
-    let wide = field_room(capsule, PANEL_WIDTH);
-    let covered = if wide > waveform::WIDTH {
-        ((field - waveform::WIDTH) / (wide - waveform::WIDTH)).clamp(0., 1.)
+    let wide = PANEL_WIDTH - 2. * REST_PX - METER_GAP - timer_width(minutes_shown(capsule));
+    let widest = wide - DISCARD_ROOM;
+    let covered = if widest > waveform::WIDTH {
+        ((field - waveform::WIDTH) / (widest - waveform::WIDTH)).clamp(0., 1.)
     } else {
         f32::from(u8::from(open))
     };
@@ -836,7 +922,7 @@ pub(super) fn recording(
             .child(words)
     });
     let stop = capsule.action_presence(0);
-    let action = actions.then(|| {
+    let action = (actions && !asking).then(|| {
         // Pressed, the same row says so in place: its glyph and first
         // letters stay where they were and it stops taking the pointer.
         let row = panel_row(
@@ -866,7 +952,11 @@ pub(super) fn recording(
         };
         stop_slot().child(row)
     });
-    let panel_height = open_height(shown);
+    let panel_height = if asking {
+        CONFIRM_HEIGHT
+    } else {
+        open_height(shown)
+    };
     let (target_w, target_h, target_r) = if open {
         (PANEL_WIDTH, panel_height, PANEL_RADIUS)
     } else {
@@ -881,17 +971,65 @@ pub(super) fn recording(
         });
     let header = meter_band();
     let spacer = el().key("space").grow(1.0);
+    // The ✕ keeps its place on the icon spine, over the header rather than
+    // in its row, so nothing beside it moves as it arrives; while the
+    // question is asked (or the discard is under way) it fades and takes no
+    // input.
+    let discard = (open && (!stopping || confirming)).then(|| {
+        let x = if right {
+            SPINE - CLOSE_BOX / 2.
+        } else {
+            PANEL_WIDTH - SPINE - CLOSE_BOX / 2.
+        };
+        let slot = row()
+            .key("discard-slot")
+            .size(CLOSE_BOX, CLOSE_BOX)
+            .absolute(x, (REST_HEIGHT - CLOSE_BOX) / 2.)
+            .center()
+            .child(
+                IconButton::new(&icons::CLOSE_SMALL)
+                    .variant(IconButtonVariant::GhostMuted)
+                    .control_size(ControlSize::Small)
+                    .label(tr("Discard recording"))
+                    .build(p.k)
+                    .key("discard")
+                    .cursor(Cursor::Pointer)
+                    .no_window_drag()
+                    .on_press_tx(|c: &mut Capsule, tx| {
+                        c.ask_discard();
+                        c.stir(tx);
+                    }),
+            );
+        if asking {
+            slot.opacity(0.0).inert()
+        } else {
+            slot.opacity(stop.opacity)
+        }
+    });
     let header = if right {
-        header.children(accessory).child(spacer).child(meter)
+        header
+            .children(discard)
+            .children(accessory)
+            .child(spacer)
+            .child(meter)
     } else {
-        header.child(meter).child(spacer).children(accessory)
+        header
+            .child(meter)
+            .child(spacer)
+            .children(accessory)
+            .children(discard)
     };
     let header = bands(top, header, action).absolute(
         0.,
         if top {
             0.
         } else {
-            panel_height - if actions { OPEN_HEADER } else { REST_HEIGHT }
+            panel_height
+                - if actions && !asking {
+                    OPEN_HEADER
+                } else {
+                    REST_HEIGHT
+                }
         },
     );
     // The full-size layout exists before the first hover. Its origin cancels
@@ -905,7 +1043,11 @@ pub(super) fn recording(
             if top { 0.0 } else { height - panel_height },
         )
         .child(header);
-    if actions {
+    if asking {
+        contents = contents.child(
+            discard_confirm(p, top, stopping).absolute(0.0, if top { REST_HEIGHT } else { 0.0 }),
+        );
+    } else if actions {
         if let Some(notice) = notice {
             contents = contents.child(
                 row()
@@ -971,15 +1113,18 @@ pub(super) fn recording(
     #[cfg(not(target_os = "windows"))]
     let body = recording_pointer(body);
     let body = if capsule.presentation.hold_hover {
-        body.on_pointer_move(|c: &mut Capsule, point| {
+        body.on_pointer_move_local(|c: &mut Capsule, point, tx| {
+            let (x, y) = (point.window_x, point.window_y);
             if c.presentation
                 .pointer
-                .is_some_and(|(x, y)| (point.x - x).abs().max((point.y - y).abs()) > 4.)
+                .is_some_and(|(px, py)| (x - px).abs().max((y - py).abs()) > 4.)
             {
                 c.presentation.hold_hover = false;
                 c.set_hovered(true);
+                // The panel opens on this frame, not the next event's.
+                c.stir(tx);
             } else if c.presentation.pointer.is_none() {
-                c.presentation.pointer = Some((point.x, point.y));
+                c.presentation.pointer = Some((x, y));
             }
         })
     } else {
@@ -1140,14 +1285,9 @@ pub(super) fn ready_window_size(_: &MeetingManifest) -> (f32, f32) {
 /// is being written, and the two copies.
 #[cfg(target_os = "windows")]
 pub(super) fn ready_window_size(manifest: &MeetingManifest) -> (f32, f32) {
-    let summary = if ready_summary(manifest).is_some() {
-        SUMMARY_LINE * SUMMARY_LINES as f32 + ROW_PX + ROW_GAP
-    } else {
-        0.0
-    };
     (
         PANEL_WIDTH + 2.0 * CAPSULE_INSET,
-        RESULT_HEADER_MAX + summary + ROW_GAP + COPIES_HEIGHT + PANEL_PAD + 2.0 * CAPSULE_INSET,
+        ready_height(manifest).max(open_height_without_notice()) + 2.0 * CAPSULE_INSET,
     )
 }
 
@@ -1236,6 +1376,7 @@ impl Capsule {
                 recording: shown,
                 hovered,
                 stopping,
+                ..
             } => Some(recording_window_size(*hovered || *stopping, Some(shown))),
             State::Finalizing { .. } => Some(finalizing_window_size()),
             State::Ready { manifest, .. } => Some(ready_window_size(manifest)),
@@ -1268,8 +1409,11 @@ mod tests {
 
     #[test]
     fn the_resting_window_is_the_pill_and_the_open_one_the_panel() {
-        assert_eq!(rest(), (159., 44.));
+        // The 165 pt pill (its field, the red dot, and the time) and its inset.
+        assert_eq!(rest(), (173., 44.));
         assert_eq!(open(), (260., 185.));
+        // The discard question fits inside the open window.
+        assert!(CONFIRM_HEIGHT + 2. * CAPSULE_INSET <= open().1);
         // A notice widens the resting pill to the panel, and adds its line
         // to the open one.
         let noticed = noticed();

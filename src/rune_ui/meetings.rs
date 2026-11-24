@@ -21,7 +21,7 @@ use super::controls::{
     ButtonKind, DESCRIPTION, Paint, button, card, page, pulsing_dot, segmented_tx,
 };
 use super::list_detail::{self as ld, Item};
-use super::lists::{Tone, dismissible_error_panel, error_panel, section_label, tone_tag};
+use super::lists::{Tone, dismissible_error_panel, error_panel, tone_tag};
 use super::notes_writer::NotesWriter;
 use super::platform::MeetingRequest;
 use super::{Menu, Ui};
@@ -29,8 +29,11 @@ use crate::desktop::file_dialog::{Dialog, Filter, Pending, Target};
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 
 pub(in crate::rune_ui) mod audio_source;
+mod detail;
 mod fixture;
 mod selection;
+
+use detail::*;
 
 pub(super) static MORE_ICON: rune::Icon = rune::Icon {
     name: "hex-more",
@@ -405,6 +408,9 @@ pub(super) fn cancel_edit(ui: &mut Ui) -> bool {
 /// switch and Start/Stop, then the recordings or the settings.
 pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
     if !available(ui) {
+        if crate::labs::Feature::Meetings.managed().is_none() {
+            return (Vec::new(), off_state(p));
+        }
         let content = page("content").child(card(
             p,
             "enable",
@@ -749,14 +755,14 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
             |ui: &mut Ui| ui.meetings.edit_error = None,
         ));
     }
-    let body = if pane.meetings.is_empty() {
-        ld::empty_state(
-            p,
-            "meetings-empty",
-            ld::HISTORY_ICON,
-            tr("No meetings yet"),
-            Some(tr("Record a call to see its notes and transcript here.")),
-        )
+    // Prototype: Hex can't hear the other side until System Audio
+    // Recording is allowed.
+    if ui.platform.caps.permissions && !ui.platform.system_audio {
+        notices.push(system_audio_notice(p));
+    }
+    let empty = pane.meetings.is_empty();
+    let body = if empty {
+        empty_state(ui, p)
     } else {
         let mut list = col().key("meetings-list").label(tr("Meetings"));
         let mut day: Option<&str> = None;
@@ -769,6 +775,7 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
                     &format!("day{index}"),
                     day_label(&meeting.day),
                     day.is_none(),
+                    ld::LEADING_INDENT,
                 ));
                 day = Some(&meeting.day);
             }
@@ -817,8 +824,14 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
         let column = ld::list_column(p, search(ui, p), "meetings-scroll", list);
         ld::body(p, "meetings-body", column, detail)
     };
+    // An empty pane's own Start recording is the one main action.
+    let idle = pane.active().is_none() && !pane.start_pending && !pane.stop_pending;
     (
-        vec![action],
+        if empty && idle {
+            Vec::new()
+        } else {
+            vec![action]
+        },
         col()
             .key("meetings-pane")
             .grow(1.0)
@@ -826,6 +839,221 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
             .children((!notices.is_empty()).then(|| ld::notices(notices)))
             .child(body),
     )
+}
+
+/// The pane while Meetings is off: what it does and its one
+/// action, Turn on Meetings.
+fn off_state(p: Paint) -> El {
+    col()
+        .key("meetings-off")
+        .grow(1.0)
+        .shrink()
+        .center()
+        .gap(6.0)
+        .pb(40.0)
+        .child(
+            rune::el()
+                .key("badge")
+                .size(40.0, 40.0)
+                .mb(6.0)
+                .radius(p.k.radius.lg)
+                .fill(p.k.c.layer_01)
+                .center()
+                .child(
+                    rune::icon(super::sidebar::Pane::Meetings.icon(), 20.0)
+                        .key("icon")
+                        .color(p.k.c.icon_faint),
+                )
+                .a11y_hidden(),
+        )
+        .child(
+            text(tr("Record your calls"))
+                .key("title")
+                .font(p.k.ty.ui_medium)
+                .color(p.text()),
+        )
+        .child(
+            text(tr("Local transcripts and notes for your calls."))
+                .key("hint")
+                .font(DESCRIPTION)
+                .color(p.muted())
+                .align(rune::Align::Center)
+                .wrap()
+                .w(300.0),
+        )
+        .child(row().key("cta").mt(12.0).child(button(
+            p,
+            "meetings-turn-on",
+            tr("Turn on Meetings"),
+            ButtonKind::Primary,
+            |ui: &mut Ui, _| {
+                ui.update(|settings| settings.meetings.enabled = true);
+            },
+        )))
+}
+
+/// The first-run pane, with Start recording as its one action
+/// and where meetings are kept.
+fn empty_state(ui: &Ui, p: Paint) -> El {
+    use crate::app_settings::MeetingRetention;
+    let kept = ui
+        .settings
+        .meetings
+        .retention
+        .unwrap_or(MeetingRetention::DEFAULT);
+    let where_kept = match kept {
+        MeetingRetention::Forever => tr("Meetings stay on this Mac.").to_owned(),
+        kept => tr_fill(
+            "Meetings stay on this Mac and move to the Trash after {}.",
+            tr(kept.label()),
+        ),
+    };
+    col()
+        .key("meetings-empty")
+        .grow(1.0)
+        .shrink()
+        .center()
+        .gap(6.0)
+        .pb(40.0)
+        .child(
+            rune::el()
+                .key("badge")
+                .size(40.0, 40.0)
+                .mb(6.0)
+                .radius(p.k.radius.lg)
+                .fill(p.k.c.layer_01)
+                .center()
+                .child(
+                    rune::icon(super::sidebar::Pane::Meetings.icon(), 20.0)
+                        .key("icon")
+                        .color(p.k.c.icon_faint),
+                )
+                .a11y_hidden(),
+        )
+        .child(
+            text(tr("No meetings yet"))
+                .key("title")
+                .font(p.k.ty.ui_medium)
+                .color(p.text()),
+        )
+        .child(
+            text(tr("Record a call to get its transcript and notes here."))
+                .key("hint")
+                .font(DESCRIPTION)
+                .color(p.muted())
+                .align(rune::Align::Center)
+                .wrap()
+                .w(300.0),
+        )
+        .child(row().key("cta").mt(12.0).child(button(
+            p,
+            "start-meeting",
+            tr("Start recording"),
+            ButtonKind::Primary,
+            |ui: &mut Ui, _| start(ui),
+        )))
+        .child(
+            row()
+                .key("where-kept")
+                .mt(16.0)
+                .gap(6.0)
+                .center_y()
+                .child(rune::icon(&rune_theme_opencode::icons::LOCK, 12.0).color(p.k.c.icon_faint))
+                .child(text(where_kept).font(p.k.ty.small).color(p.faint())),
+        )
+}
+
+/// The pane's notice while System Audio Recording is off, with
+/// the way to turn it on.
+fn system_audio_notice(p: Paint) -> El {
+    let c = &p.k.c.warning;
+    row()
+        .key("system-audio-off")
+        .pl(12.0)
+        .pr(8.0)
+        .py(8.0)
+        .gap(12.0)
+        .center_y()
+        .radius(p.k.radius.md)
+        .fill(c.bg)
+        .border(0.5, c.border)
+        .child(
+            col()
+                .key("message")
+                .grow(1.0)
+                .shrink()
+                .gap(2.0)
+                .child(
+                    text(tr("Hex can't hear the other participants"))
+                        .key("title")
+                        .font(p.k.ty.ui_medium)
+                        .color(c.fg),
+                )
+                .child(
+                    text(tr(
+                        "Only your microphone is recorded until Hex is allowed in Screen & System Audio Recording.",
+                    ))
+                    .key("detail")
+                    .font(DESCRIPTION)
+                    .color(p.muted())
+                    .wrap(),
+                ),
+        )
+        .child(button(
+            p,
+            "open-system-audio",
+            tr("Open System Settings"),
+            ButtonKind::Secondary,
+            |ui: &mut Ui, _| ui.ask(super::platform::PlatformRequest::SystemAudio),
+        ))
+}
+
+/// The detail's two copies, labelled, transcript first.
+fn copy_buttons(p: Paint, pane: &MeetingsPane, meeting: &Meeting) -> [El; 2] {
+    let copied = |what: &str| {
+        pane.copied
+            .as_ref()
+            .is_some_and(|(id, copied)| id == &meeting.id && copied == what)
+    };
+    let labelled = |key: &'static str, what: &'static str, glyph, label: &'static str| {
+        let done = copied(what);
+        let id = meeting.id.clone();
+        Button::new(if done { tr("Copied") } else { label })
+            .variant(ButtonVariant::Neutral)
+            .control_size(ControlSize::Small)
+            .icon(if done { p.k.glyph.check_small } else { glyph })
+            .on_press_tx(move |ui: &mut Ui, tx: &mut Tx| {
+                let Some(meeting) = ui.meetings.meeting(&id) else {
+                    return;
+                };
+                let text = if what == "prompt" {
+                    format!(
+                        "Use my Hex meeting {:?} as context.\n\nRead its notes and transcript:\n  hex meetings show {} --md\n",
+                        shown_title(meeting),
+                        meeting.id,
+                    )
+                } else {
+                    transcript_markdown(meeting.turns(), meeting.imported)
+                };
+                copy(ui, tx, id.clone(), what, text);
+            })
+            .build(p.k)
+            .key(key)
+    };
+    [
+        labelled(
+            "meeting-copy-transcript",
+            "transcript",
+            ld::COPY_ICON,
+            tr("Copy transcript"),
+        ),
+        labelled(
+            "meeting-copy-prompt",
+            "prompt",
+            &rune_theme_opencode::icons::OUTLINE_CONSOLE,
+            tr("Copy agent prompt"),
+        ),
+    ]
 }
 
 /// Whether the pane offers selection for this meeting: the lab is on, and
@@ -865,513 +1093,6 @@ fn day_label(day: &str) -> &str {
         "Yesterday" => tr("Yesterday"),
         other => other,
     }
-}
-
-fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
-    let pane = &ui.meetings;
-    let active = meeting.status.is_active();
-    let copied = |what: &str| {
-        pane.copied
-            .as_ref()
-            .is_some_and(|(id, copied)| id == &meeting.id && copied == what)
-    };
-    let armed = pane.delete_armed.as_deref() == Some(meeting.id.as_str());
-    let renaming = pane.renaming.as_deref() == Some(meeting.id.as_str());
-    let can_select = selectable(ui, meeting);
-    let selecting = can_select && pane.selection.active();
-    let mut actions = Vec::new();
-    let mut confirm = None;
-    if armed && !active && !meeting.notes_running {
-        // The confirmation sits under the title until it is answered.
-        let id = meeting.id.clone();
-        confirm = Some(
-            row()
-                .key("delete-confirm")
-                .gap(8.0)
-                .pt(14.0)
-                .child(
-                    button(
-                        p,
-                        "meeting-confirm-delete",
-                        if meeting.reveal.is_markdown() {
-                            tr("Trash recording & Markdown")
-                        } else {
-                            tr("Trash recording")
-                        },
-                        ButtonKind::Danger,
-                        move |ui: &mut Ui, _| trash(ui, id.clone()),
-                    )
-                    .default_button(),
-                )
-                .child(button(
-                    p,
-                    "meeting-cancel-delete",
-                    tr("Cancel"),
-                    ButtonKind::Secondary,
-                    |ui: &mut Ui, _| ui.meetings.delete_armed = None,
-                )),
-        );
-    } else if !renaming && !selecting {
-        // The title field brings its own Save and Cancel.
-        if can_select {
-            actions.push(selection::action(p));
-        }
-        if !meeting.turns().is_empty() {
-            actions.push(copy_action(p, pane, meeting, "transcript"));
-        }
-        if !active {
-            let id = meeting.id.clone();
-            actions.push(ld::ghost_icon(
-                p,
-                "meeting-rename",
-                ld::EDIT_ICON,
-                tr("Rename"),
-                move |ui: &mut Ui, _| start_rename(ui, id.clone()),
-            ));
-        }
-        actions.extend(overflow(ui, p, meeting, layer));
-    }
-
-    let title = if renaming {
-        let title_h = p.k.ty.body_medium.line_px();
-        row()
-            .key("rename")
-            .w_full()
-            .h(title_h)
-            .gap(6.0)
-            .center_y()
-            .child(
-                TextInput::new(&pane.rename)
-                    .label(tr("Name"))
-                    .width(Some(220.0))
-                    .height(title_h)
-                    .on_edit(|ui: &mut Ui| &mut ui.meetings.rename)
-                    .on_submit(|ui: &mut Ui, _| finish_rename(ui))
-                    .build(p.k)
-                    .key("rename-field"),
-            )
-            .child(
-                Button::new(tr("Save"))
-                    .variant(ButtonVariant::Neutral)
-                    .control_size(ControlSize::Small)
-                    .on_press(|ui: &mut Ui| finish_rename(ui))
-                    .build(p.k)
-                    .key("meeting-save-title"),
-            )
-            .child(
-                Button::new(tr("Cancel"))
-                    .variant(ButtonVariant::Neutral)
-                    .control_size(ControlSize::Small)
-                    .on_press(|ui: &mut Ui| ui.meetings.renaming = None)
-                    .build(p.k)
-                    .key("meeting-cancel-title"),
-            )
-    } else {
-        ld::card_title(p, shown_title(meeting))
-    };
-    let mut meta_line = vec![
-        day_label(&meeting.day).to_string(),
-        meeting.clock.clone(),
-        length(meeting.duration_ms),
-    ];
-    meta_line.extend(meeting.app.clone());
-    let retention = meeting
-        .kept_for
-        .filter(|_| !meeting.status.is_active())
-        .map(|kept_for| ld::meta_note(p, "retention", &tr_fill("Deleted after {}", tr(kept_for))));
-    let mut meta: Vec<El> = status_tag(p, meeting.status, pane.stop_pending)
-        .into_iter()
-        .collect();
-    meta.push(ld::meta_text(p, &meta_line.join(" · ")));
-
-    let errors = [
-        pane.action_error
-            .as_deref()
-            .map(|error| ("action-error", tr("Meeting could not be updated."), error)),
-        meeting
-            .error
-            .as_deref()
-            .map(|error| ("recording-error", tr("Recording failed."), error)),
-        meeting
-            .export_error
-            .as_deref()
-            .map(|error| ("export-error", tr("Markdown not saved."), error)),
-        meeting
-            .notes_error
-            .as_deref()
-            .filter(|_| !meeting.notes_running)
-            .map(|error| ("notes-error", tr("Notes could not be written."), error)),
-        meeting
-            .live_error
-            .as_deref()
-            .filter(|_| active)
-            .map(|error| ("live-error", tr("Live transcript unavailable."), error)),
-    ];
-    let mut body = col().key("detail-body").gap(24.0).pb(8.0);
-    for (key, title, error) in errors.into_iter().flatten() {
-        body = body.child(error_panel(p, key, title, error, Tone::Danger));
-    }
-    if !active && meeting.microphone_warning == Some(crate::meeting::TrackWarning::DigitalSilence) {
-        body = body.child(error_panel(
-            p,
-            "microphone-silence",
-            tr("Microphone is silent"),
-            tr("Your microphone was silent for part of this call. Another app may have been using it with voice processing, so your side may be missing."),
-            Tone::Warning,
-        ));
-    }
-    if meeting.notes_running || meeting.summary.is_some() {
-        let mut notes =
-            col()
-                .key("notes")
-                .gap(6.0)
-                .child(section_label(p, "summary-label", tr("Summary")));
-        if meeting.notes_running {
-            // Writing or regenerating: the spinner and the writer's line
-            // above whatever summary is already shown (#2556).
-            notes = notes.child(
-                row()
-                    .key("notes-running")
-                    .gap(8.0)
-                    .center_y()
-                    .child(Loader::new().build(p.k))
-                    .child(
-                        text(notes_running_label(ui))
-                            .font(DESCRIPTION)
-                            .color(p.faint()),
-                    ),
-            );
-        }
-        if let Some(summary) = &meeting.summary {
-            let summary = summary.trim();
-            notes = notes.child(
-                text(if summary.is_empty() {
-                    tr("Nothing to summarize")
-                } else {
-                    summary
-                })
-                .key("summary")
-                .font(p.k.ty.body)
-                .color(if summary.is_empty() {
-                    p.faint()
-                } else {
-                    p.text()
-                })
-                .wrap(),
-            );
-        }
-        body = body.child(notes);
-    }
-    if !meeting.chapters.is_empty() {
-        body = body.child(chapters(p, meeting, &copied));
-    }
-    let transcript_label = match meeting.status {
-        Status::Starting | Status::Recording if !pane.stop_pending => tr("Live transcript"),
-        Status::Starting | Status::Recording | Status::Transcribing => tr("Draft transcript"),
-        Status::Complete => tr("Transcript"),
-        Status::Interrupted | Status::Failed => tr("Recovered draft"),
-    };
-    body = body.child(
-        col()
-            .key("transcript-block")
-            .gap(10.0)
-            .child(section_label(p, "transcript-label", transcript_label))
-            .children(selecting.then(|| selection::bar(ui, p, meeting)))
-            .child(transcript(ui, p, meeting, pane.stop_pending, selecting)),
-    );
-    col()
-        .key("meeting-detail")
-        .grow(1.0)
-        .shrink()
-        .child(ld::card_header(title, meta, actions))
-        .children(retention)
-        .children(confirm)
-        .child(ld::card_scroll_sticky(
-            p,
-            "meeting-transcript",
-            body,
-            follows_live_transcript(ui, meeting),
-        ))
-}
-
-/// A recording meeting's transcript keeps its newest line in view while
-/// scrolled to the bottom. Any meeting not recording scrolls only by hand.
-fn follows_live_transcript(ui: &Ui, meeting: &Meeting) -> bool {
-    matches!(meeting.status, Status::Starting | Status::Recording) && !ui.meetings.stop_pending
-}
-
-/// The meeting's chapters, each with its start, name, line, and Copy
-/// section.
-fn chapters(p: Paint, meeting: &Meeting, copied: &dyn Fn(&str) -> bool) -> El {
-    let mut list = col()
-        .key("chapters")
-        .gap(10.0)
-        .pb(16.0)
-        .child(section_label(p, "chapters-label", tr("Chapters")));
-    for (index, chapter) in meeting.chapters.iter().enumerate() {
-        let what = format!("chapter{index}");
-        let id = meeting.id.clone();
-        let mut words = col().key("words").gap(2.0).grow(1.0).shrink().child(
-            text(chapter.title.clone())
-                .key("title")
-                .font(p.k.ty.body_medium)
-                .color(p.text())
-                .wrap(),
-        );
-        if !chapter.summary.trim().is_empty() {
-            words = words.child(
-                text(chapter.summary.trim())
-                    .key("summary")
-                    .font(DESCRIPTION)
-                    .color(p.muted())
-                    .wrap(),
-            );
-        }
-        list = list.child(
-            row()
-                .key(format!("chapter{index}"))
-                .gap(12.0)
-                .child(
-                    text(crate::meeting::format_duration(chapter.start_ms))
-                        .key("clock")
-                        .font(p.k.ty.mono)
-                        .color(p.faint())
-                        .pt(1.0),
-                )
-                .child(words)
-                .child(
-                    ld::ghost_icon(
-                        p,
-                        "copy-section",
-                        if copied(&what) {
-                            p.k.glyph.check_small
-                        } else {
-                            ld::COPY_ICON
-                        },
-                        tr("Copy section"),
-                        move |ui: &mut Ui, tx: &mut Tx| {
-                            if let Some(markdown) = ui
-                                .meetings
-                                .meeting(&id)
-                                .and_then(|meeting| meeting.chapters.get(index))
-                                .map(|chapter| chapter.markdown.clone())
-                            {
-                                copy(ui, tx, id.clone(), what.clone(), markdown);
-                            }
-                        },
-                    )
-                    .mt(-4.0),
-                ),
-        );
-    }
-    list
-}
-
-/// Less common actions behind the ellipsis, Delete last.
-fn overflow(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> Option<El> {
-    let active = meeting.status.is_active();
-    let mut menu = KitMenu::new("meeting-actions")
-        .placement(Placement::BottomEnd)
-        .gutter(4.0)
-        .min_width(200.0)
-        .open(ui.open == Some(Menu::MeetingActions))
-        .on_close(|ui: &mut Ui| ui.open = None);
-    let mut items = 0;
-    if let Some(summary) = meeting.summary.clone() {
-        let id = meeting.id.clone();
-        let copied = ui
-            .meetings
-            .copied
-            .as_ref()
-            .is_some_and(|(copied, what)| copied == &meeting.id && what == "notes");
-        // Stays open so "Copied" confirms the copy.
-        menu = menu.item(
-            MenuItem::new(if copied {
-                tr("Copied")
-            } else {
-                tr("Copy summary")
-            })
-            .on_select_tx(move |ui: &mut Ui, tx: &mut Tx| {
-                copy(ui, tx, id.clone(), "notes", summary.trim().to_string());
-                ui.open = Some(Menu::MeetingActions);
-            }),
-        );
-        items += 1;
-    }
-    if !active {
-        // Reveal Markdown appears only while the export exists; the
-        // recording folder stays one item away either way.
-        if meeting.reveal.is_markdown() {
-            let reveal = meeting.reveal.clone();
-            menu = menu.item(
-                MenuItem::new(tr("Reveal Markdown")).on_select(move |ui: &mut Ui| {
-                    ui.open = None;
-                    ask(ui, MeetingRequest::Reveal(reveal.clone()));
-                }),
-            );
-            items += 1;
-        }
-        let folder = meeting.folder.clone();
-        menu = menu.item(
-            MenuItem::new(tr("Reveal files")).on_select(move |ui: &mut Ui| {
-                ui.open = None;
-                ask(
-                    ui,
-                    MeetingRequest::Reveal(crate::meeting::RevealTarget::Folder(folder.clone())),
-                );
-            }),
-        );
-        items += 1;
-    }
-    if meeting.status == Status::Complete && notes_available(ui) {
-        if meeting.notes_running {
-            menu = menu.item(MenuItem::new(tr("Summarizing…")).disabled(true));
-        } else {
-            let id = meeting.id.clone();
-            menu = menu.item(
-                MenuItem::new(if meeting.summary.is_some() {
-                    tr("Regenerate summary")
-                } else {
-                    tr("Summarize")
-                })
-                .on_select(move |ui: &mut Ui| {
-                    ui.open = None;
-                    ask(ui, MeetingRequest::Summarize(id.clone()));
-                }),
-            );
-        }
-        items += 1;
-    }
-    if !active && !meeting.notes_running {
-        if items > 0 {
-            menu = menu.separator();
-        }
-        let id = meeting.id.clone();
-        menu = menu
-            .item(MenuItem::new(tr("Delete…")).on_select(move |ui: &mut Ui| trash(ui, id.clone())));
-        items += 1;
-    }
-    if items == 0 {
-        return None;
-    }
-    let trigger = IconButton::new(&MORE_ICON)
-        .variant(IconButtonVariant::Ghost)
-        .control_size(ControlSize::Small)
-        .help(tr("More"))
-        .on_press(|ui: &mut Ui| {
-            ui.open = (ui.open != Some(Menu::MeetingActions)).then_some(Menu::MeetingActions);
-        })
-        .build(p.k)
-        .key("meeting-more");
-    Some(menu.trigger(trigger).build(p.k, layer))
-}
-
-fn transcript(ui: &Ui, p: Paint, meeting: &Meeting, stop_pending: bool, selecting: bool) -> El {
-    let empty = |copy: &str| {
-        text(copy)
-            .key("transcript-empty")
-            .font(DESCRIPTION)
-            .color(p.faint())
-            .wrap()
-    };
-    let turns = match &meeting.transcript {
-        Transcript::Unavailable(error) => {
-            return error_panel(
-                p,
-                "transcript-error",
-                tr("Transcript unavailable."),
-                error,
-                Tone::Danger,
-            );
-        }
-        Transcript::Loaded(turns) => turns,
-    };
-    if turns.is_empty() {
-        return empty(match meeting.status {
-            Status::Starting => tr("Preparing local audio capture…"),
-            Status::Recording if meeting.live_error.is_some() => {
-                tr("Live transcription is unavailable. Audio is still recording safely.")
-            }
-            Status::Recording if stop_pending => tr("Building the final transcript…"),
-            Status::Recording => tr("Listening for speech…"),
-            Status::Transcribing => tr("Building the final transcript…"),
-            Status::Complete => tr("No speech was transcribed."),
-            Status::Interrupted | Status::Failed => tr("No recoverable transcript is available."),
-        });
-    }
-    let mut lines = col().key("turns").gap(14.0);
-    for (index, turn) in turns.iter().enumerate() {
-        if selecting {
-            lines = lines.child(selection::turn_row(
-                p,
-                index,
-                turn,
-                meeting.imported,
-                ui.meetings.selection.contains(turn),
-            ));
-        } else {
-            lines = lines.children(turn_line(p, index, turn, meeting.imported));
-        }
-    }
-    if meeting.status == Status::Recording && !stop_pending {
-        lines = lines.child(
-            text(tr("Listening…"))
-                .key("listening")
-                .font(p.k.ty.small)
-                .color(p.faint()),
-        );
-    }
-    lines
-}
-
-/// One turn of a transcript: the pause before it, if any, then the speaker,
-/// the time, and the words. An imported meeting has one track: Speaker.
-pub(super) fn turn_line(p: Paint, index: usize, turn: &Turn, imported: bool) -> Vec<El> {
-    let mut els = Vec::new();
-    if let Some(pause) = turn.pause_before_ms {
-        els.push(
-            text(tr_fill("{} pause", &length(pause)))
-                .key(format!("pause{index}"))
-                .font(p.k.ty.small)
-                .color(p.faint()),
-        );
-    }
-    els.push(
-        col()
-            .key(format!("turn{index}"))
-            .gap(2.0)
-            .child(
-                row()
-                    .key("speaker")
-                    .gap(8.0)
-                    .child(
-                        text(if imported {
-                            tr("Speaker")
-                        } else if turn.mine {
-                            tr("You")
-                        } else {
-                            tr("Them")
-                        })
-                        .key("name")
-                        .font(p.k.ty.small_medium)
-                        .color(p.muted()),
-                    )
-                    .child(
-                        text(crate::meeting::format_duration(turn.start_ms))
-                            .key("clock")
-                            .font(p.k.ty.small)
-                            .color(p.faint()),
-                    ),
-            )
-            .child(
-                text(turn.text.clone())
-                    .key("text")
-                    .font(p.k.ty.body)
-                    .color(p.text())
-                    .wrap(),
-            ),
-    );
-    els
 }
 
 #[cfg(all(test, not(target_os = "macos")))]

@@ -123,7 +123,7 @@ final class SwipeTyping {
         pending[id] = stroke
         guard let first = stroke.points.first, hypot(point.x - first.x, point.y - first.y) > threshold,
               let touch = engine.touches[id], !touch.committed, engine.activeAccentMenu == nil,
-              engine.allowsSwipes else { return false }
+              touch.flick == nil, engine.allowsSwipes else { return false }
         pending[id] = nil
         syncWords()
         engine.beginSwipe(touchID: id)

@@ -677,8 +677,7 @@ final class FullKeyboardView: UIView {
     func textDidChange() {
         applyAppearance()
         let field = engine.field
-        let route = KeyboardFieldRouting.route(for: engine.target.keyboardType)
-        let routeField: KeyboardFieldKind = if case .keys(let kind, _) = route { kind } else { .text }
+        let routeField = KeyboardFieldRouting.route(for: engine.target.keyboardType).field
         // While you search emoji the keys still type the query, whatever the host changed.
         if routedTarget.isSearching {
             refreshReturnKey()
@@ -923,7 +922,7 @@ final class FullKeyboardView: UIView {
         )
         // A dictation that didn't go in by itself comes before a copy, but not in a code field.
         if model.hasFullAccess, model.offeredDictation != nil {
-            if case .code = clipboardOffer {} else { clipboardOffer = .dictation }
+            if clipboardOffer?.leadsToAppleKeyboard != true { clipboardOffer = .dictation }
         }
         stripOffer = clipboardOffer
         var suggestions = withStripEmoji(engine.suggestions, quiet: lastDictation != nil || status != nil || clipboardOffer != nil)

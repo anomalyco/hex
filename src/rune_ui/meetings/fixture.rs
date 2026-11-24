@@ -83,7 +83,7 @@ impl MeetingsPane {
                 transcript: Transcript::Loaded(Vec::new()),
                 chapters: Vec::new(),
                 imported: false,
-                kept_for: Some("24 hours"),
+                kept_for: Some("7 days"),
             };
         let mut live = meeting(
             "preview-live",

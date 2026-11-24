@@ -484,10 +484,16 @@ impl Capsule {
                 recording: shown,
                 hovered,
                 stopping,
+                confirming,
             }) => {
                 let open = *hovered || *stopping;
                 let outline = if open {
-                    panel(panel::open_height(shown))
+                    // The question hugs its words and buttons.
+                    panel(if *confirming {
+                        panel::CONFIRM_HEIGHT
+                    } else {
+                        panel::open_height(shown)
+                    })
                 } else {
                     pill(panel::rest_width(shown))
                 };

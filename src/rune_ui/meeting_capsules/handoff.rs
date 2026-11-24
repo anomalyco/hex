@@ -15,6 +15,41 @@ impl Capsule {
         }
     }
 
+    /// The ✕'s first step: ask before anything is lost.
+    pub(super) fn ask_discard(&mut self) {
+        if let State::Recording {
+            stopping: false,
+            confirming,
+            ..
+        } = &mut self.state
+        {
+            *confirming = true;
+        }
+    }
+
+    /// Keep: the question goes and the copies return.
+    pub(super) fn keep_recording(&mut self) {
+        if let State::Recording { confirming, .. } = &mut self.state {
+            *confirming = false;
+        }
+    }
+
+    /// Discard: the controller stops capture, skips the transcript, and
+    /// trashes the recording; its `Discarded` closes the pill.
+    pub(super) fn request_discard(&mut self) {
+        if matches!(
+            self.state,
+            State::Recording {
+                stopping: false,
+                confirming: true,
+                ..
+            }
+        ) && self.send(ControllerCommand::Discard)
+        {
+            self.mark_stopping();
+        }
+    }
+
     pub(super) fn mark_stopping(&mut self) {
         if let State::Recording { stopping, .. } = &mut self.state {
             *stopping = true;
@@ -58,6 +93,7 @@ impl Capsule {
             recording,
             hovered: false,
             stopping: false,
+            confirming: false,
         };
         self.corner = anchor.corner;
         self.display = anchor.display;
@@ -77,7 +113,15 @@ impl Capsule {
         } else {
             ReadyHover::Idle
         };
-        self.state = State::Ready { manifest, hover };
+        let mut stay = stay::Stay::new(READY_TIMEOUT);
+        if hover == ReadyHover::Hovered {
+            stay.pause();
+        }
+        self.state = State::Ready {
+            manifest,
+            hover,
+            stay,
+        };
         // The ready panel is taller than the finalizing one, so this grows
         // it here; a shrink would wait for the surface.
         #[cfg(target_os = "windows")]
