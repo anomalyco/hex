@@ -64,3 +64,15 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
     ("Use one line", "Используйте одну строку"),
     ("Use 200 characters or fewer", "Используйте не более 200 символов"),
 ];
+
+/// Hungarian, for the strings above.
+#[rustfmt::skip]
+pub(super) const HUNGARIAN: &[(&str, &str)] = &[
+    ("Signature", "Aláírás"),
+    (
+        "Add a line to the end of each dictation, such as \"Sent from Hex\"",
+        "Adjon hozzá egy sort minden diktálás végéhez, például: „Sent from Hex”",
+    ),
+    ("Use one line", "Használjon egy sort"),
+    ("Use 200 characters or fewer", "Használjon legfeljebb 200 karaktert"),
+];

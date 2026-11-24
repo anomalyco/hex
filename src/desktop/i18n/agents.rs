@@ -1,6 +1,6 @@
 //! The Annotate pane's Agents section and its lab, kept in their own table
-//! so the main, French, Portuguese, and Russian tables stay under the source
-//! cap.
+//! so the main, French, Portuguese, Russian, and Hungarian tables stay under
+//! the source cap.
 
 /// Columns: Polish, Chinese (Simplified), Japanese, German, Spanish, Ukrainian.
 #[rustfmt::skip]
@@ -92,4 +92,27 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
     ("Couldn't link the command-line tool: {}", "Не удалось связать инструмент командной строки: {}"),
     ("Install agent skill from Annotate", "Установка навыка агента из Annotate"),
     ("Adds an Agents section to the Annotate pane that writes the hex-annotate skill into Claude Code, Codex, OpenCode, or Pi, and on macOS links hex onto PATH", "Добавляет раздел «Агенты» на панель Annotate, который записывает навык hex-annotate в Claude Code, Codex, OpenCode или Pi, а на macOS добавляет hex в PATH"),
+];
+
+/// Hungarian, for the strings above.
+#[rustfmt::skip]
+pub(super) const HUNGARIAN: &[(&str, &str)] = &[
+    ("Agents", "Ügynökök"),
+    ("Let coding agents read your captures with the hex-annotate skill", "Hagyja, hogy a kódoló ügynökök elolvassák a felvételeit a hex-annotate készséggel"),
+    ("Not found", "Nem található"),
+    ("Installed", "Telepítve"),
+    ("Update available", "Frissítés érhető el"),
+    ("Managed elsewhere", "Máshol kezelve"),
+    ("Install with the skills CLI", "Telepítés a skills CLI-vel"),
+    ("For skills you manage yourself", "Az Ön által kezelt készségekhez"),
+    ("Command-line tool", "Parancssori eszköz"),
+    ("Installed at {}", "Telepítve: {}"),
+    ("Owned by another program", "Egy másik program tulajdona"),
+    ("{} isn't on your PATH", "{} nincs benne a PATH-ban"),
+    ("Move Hex to Applications first", "Először helyezze át a Hexet az Alkalmazások mappába"),
+    ("The skill's zoom, inspect, and frames commands need Labs › Agent tools for captures on", "A készség zoom, inspect és frames parancsaihoz kapcsolja be a Labs › Ügynökeszközök a rögzítésekhez lehetőséget"),
+    ("Couldn't install the skill: {}", "Nem sikerült telepíteni a készséget: {}"),
+    ("Couldn't link the command-line tool: {}", "Nem sikerült összekapcsolni a parancssori eszközt: {}"),
+    ("Install agent skill from Annotate", "Ügynökkészség telepítése az Annotate-ből"),
+    ("Adds an Agents section to the Annotate pane that writes the hex-annotate skill into Claude Code, Codex, OpenCode, or Pi, and on macOS links hex onto PATH", "Hozzáad egy Ügynökök szakaszt az Annotate panelhez, amely beírja a hex-annotate készséget a Claude Code-ba, a Codexbe, az OpenCode-ba vagy a Pibe, és macOS-en a hexet a PATH-hoz adja"),
 ];
