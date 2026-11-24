@@ -610,6 +610,7 @@ mod tests {
         include_str!("../rune_ui/lists.rs"),
         include_str!("../rune_ui/macos_host.rs"),
         include_str!("../rune_ui/meeting_capsules.rs"),
+        include_str!("../rune_ui/meeting_capsules/call_ended.rs"),
         include_str!("../rune_ui/meetings.rs"),
         include_str!("../rune_ui/meetings/selection.rs"),
         include_str!("../rune_ui/models.rs"),

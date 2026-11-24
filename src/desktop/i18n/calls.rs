@@ -21,6 +21,9 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("{} seconds after the call app leaves the microphone", "{} secondes après que l’app d’appel a libéré le micro"),
     ("{name}: {answer}", "{name} : {answer}"),
     ("{} apps and websites answer differently", "{} apps et sites web répondent autrement"),
+    ("{} call ended", "Appel {} terminé"),
+    ("Recording stops in {} s", "L'enregistrement s'arrête dans {} s"),
+    ("Stop now", "Arrêter maintenant"),
 ];
 
 #[rustfmt::skip]
@@ -41,6 +44,9 @@ pub(super) const PORTUGUESE: &[(&str, &str)] = &[
     ("{} seconds after the call app leaves the microphone", "{} segundos depois que o app da chamada libera o microfone"),
     ("{name}: {answer}", "{name}: {answer}"),
     ("{} apps and websites answer differently", "{} apps e sites respondem de outra forma"),
+    ("{} call ended", "Chamada do {} encerrada"),
+    ("Recording stops in {} s", "A gravação para em {} s"),
+    ("Stop now", "Parar agora"),
 ];
 
 #[rustfmt::skip]
@@ -61,4 +67,7 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
     ("{} seconds after the call app leaves the microphone", "Через {} с после того, как приложение звонка освободит микрофон"),
     ("{name}: {answer}", "{name}: {answer}"),
     ("{} apps and websites answer differently", "Другие ответы: {}"),
+    ("{} call ended", "Звонок в {} завершён"),
+    ("Recording stops in {} s", "Запись остановится через {} с"),
+    ("Stop now", "Остановить сейчас"),
 ];

@@ -1,5 +1,5 @@
 //! The meeting capsules on Rune: the calendar meeting reminder, the
-//! recording offer, "left the call", the ready transcript, and the recording
+//! recording offer, "call ended" (`call_ended`), the ready transcript, and the recording
 //! capsule. Each is an
 //! interactive Rune overlay, which on macOS is a non-activating `NSPanel`:
 //! its buttons take clicks while the call app keeps focus and Hex never
@@ -54,6 +54,7 @@ use crate::meeting::detection::{MeetingCandidate, OfferId};
 use crate::meeting::watcher::{ControllerCommand, ControllerEvent};
 use crate::meeting::{self, MeetingManifest, TranscriptEntry};
 
+mod call_ended;
 mod handoff;
 mod offer;
 #[path = "meeting_capsules/offer/surface.rs"]
@@ -83,9 +84,9 @@ const MEETING_PANEL_HEIGHT: f32 = 64.0;
 const ACTIONS_INSET: f32 = 8.0;
 /// The reminder: the meeting's title beside up to three buttons.
 const REMINDER_PANEL_WIDTH: f32 = 520.0;
-/// "Microsoft Teams left the call" beside Keep recording and Stop &
-/// transcribe (#835).
-const CALL_ENDED_PANEL_WIDTH: f32 = 520.0;
+/// The call-ended capsule's width, beside Keep recording and Stop now /
+/// Stop & transcribe (#835).
+const CALL_ENDED_PANEL_WIDTH: f32 = call_ended::PANEL_WIDTH;
 /// How often an open reminder recounts "Starts in N min".
 const REMINDER_TICK: Duration = Duration::from_secs(5);
 /// Between a capsule's window edges and what it draws.
@@ -166,11 +167,12 @@ enum Kind {
         automatic: bool,
     },
     Offer(OfferId, MeetingCandidate),
-    /// `auto_stop` when the recording stops on its own after a grace (Labs
-    /// › Stop when the call ends); Keep recording then cancels that.
+    /// `stops` when the recording stops on its own then, after a grace;
+    /// Keep recording cancels that.
     CallEnded {
         app: String,
-        auto_stop: bool,
+        application: Option<String>,
+        stops: Option<(Instant, call_ended::Countdown)>,
     },
     Ready(Box<MeetingManifest>),
     /// An automatic recording while the recording indicator is off.
@@ -479,13 +481,7 @@ impl Capsule {
     /// panel of another kind stays, as [`ControllerEvent::ReminderWithdrawn`]
     /// leaves another reminder alone.
     fn withdraw_call_ended(&mut self) -> bool {
-        if !matches!(
-            self.state,
-            State::CallEnded {
-                auto_stop: true,
-                ..
-            }
-        ) {
+        if !matches!(self.state, State::CallEnded { stops: Some(_), .. }) {
             return false;
         }
         self.close();
@@ -952,11 +948,23 @@ impl MeetingCapsules {
                     );
                 }
             }
-            ControllerEvent::CallEnded { app, auto_stop } => {
+            ControllerEvent::CallEnded {
+                app,
+                application,
+                stops_at,
+            } => {
                 self.show_panel(
                     Kind::CallEnded {
                         app: app.clone(),
-                        auto_stop: *auto_stop,
+                        application: application.clone(),
+                        stops: stops_at.map(|at| {
+                            (
+                                at,
+                                call_ended::Countdown::new(
+                                    at.saturating_duration_since(Instant::now()),
+                                ),
+                            )
+                        }),
                     },
                     None,
                 );
@@ -1011,6 +1019,12 @@ impl MeetingCapsules {
         let panel = self.panel_handle().clone();
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let reminder = matches!(kind, Kind::Reminder { .. });
+        let (stops_at, call_ended_app) = match &kind {
+            Kind::CallEnded {
+                stops, application, ..
+            } => (stops.as_ref().map(|(at, _)| *at), application.clone()),
+            _ => (None, None),
+        };
         // The saved corner, and a finished meeting its recording's corner.
         let corner = panel::show_corner(
             &kind,
@@ -1044,7 +1058,46 @@ impl MeetingCapsules {
         float_on_xwayland(&panel);
         panel.show();
         if let Some(id) = offer_id {
-            offer_surface::load_icon(panel, id);
+            offer_surface::load_icon(panel.clone(), id);
+        }
+        if let Some(bundle) = call_ended_app {
+            let (panel, current) = (panel.clone(), self.generation.clone());
+            std::thread::spawn(move || {
+                if let Some(icon) = offer_surface::native_icon_sized(&bundle, call_ended::ICON_SIZE)
+                {
+                    panel.update(move |capsule, _| {
+                        if current.load(Ordering::SeqCst) != generation {
+                            return;
+                        }
+                        if let State::CallEnded { icon: slot, .. } = &mut capsule.state {
+                            *slot = Some(icon);
+                        }
+                    });
+                }
+            });
+        }
+        if let Some(stops_at) = stops_at {
+            // Recount "Recording stops in N s" as each second passes; the
+            // drain moves on its own on the frame clock.
+            let (panel, current) = (panel.clone(), self.generation.clone());
+            std::thread::spawn(move || {
+                while current.load(Ordering::SeqCst) == generation {
+                    let left = stops_at.saturating_duration_since(Instant::now());
+                    if left.is_zero() {
+                        break;
+                    }
+                    let fraction = left.as_secs_f64().fract();
+                    std::thread::sleep(Duration::from_secs_f64(if fraction > 0.0 {
+                        fraction
+                    } else {
+                        1.0
+                    }));
+                    if current.load(Ordering::SeqCst) != generation {
+                        break;
+                    }
+                    panel.update(|_, _| {});
+                }
+            });
         }
         if reminder && let Some(timeout) = timeout {
             // Recount "Starts in N min" while this reminder may show.
@@ -1243,38 +1296,36 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
         State::Offer { id, candidate, .. } => {
             return offer_surface::view(p, capsule, *id, candidate);
         }
-        State::CallEnded { app, auto_stop } => (
-            p.danger(),
-            tr_fill("{} left the call", app),
-            if *auto_stop {
-                tr("Hex stops recording in 30 s unless you keep recording.")
-            } else {
-                tr("Hex is still recording.")
-            }
-            .to_owned(),
-            vec![
-                button(p, "keep-recording", tr("Keep recording"), false, |c| {
-                    if matches!(
-                        c.state,
-                        State::CallEnded {
-                            auto_stop: true,
-                            ..
-                        }
-                    ) {
+        State::CallEnded { app, stops, icon } => {
+            let now = capsule.surface.clock();
+            let countdown = stops
+                .as_ref()
+                .map(|(at, countdown)| (countdown, at.saturating_duration_since(now)));
+            return call_ended::view(
+                p,
+                capsule,
+                call_ended::Content {
+                    app,
+                    icon: icon.as_ref(),
+                    countdown,
+                },
+                cx.is_reduced_motion(),
+                |c| {
+                    if matches!(c.state, State::CallEnded { stops: Some(_), .. }) {
                         c.send(ControllerCommand::KeepRecording);
                     }
                     if let Some(keep_recording) = &c.keep_recording {
                         keep_recording();
                     }
                     c.close();
-                }),
-                button(p, "stop-meeting", tr("Stop & transcribe"), true, |c| {
+                },
+                |c| {
                     if c.send(ControllerCommand::Stop) {
                         c.close();
                     }
-                }),
-            ],
-        ),
+                },
+            );
+        }
         State::Ready { manifest, .. } => return ready(p, capsule, manifest),
     };
     pill(p, capsule, parts)
@@ -2181,7 +2232,17 @@ mod tests {
     fn call_ended() -> Kind {
         Kind::CallEnded {
             app: MeetingSource::Teams.label().into(),
-            auto_stop: false,
+            application: None,
+            stops: None,
+        }
+    }
+
+    fn call_ended_countdown(left: u64) -> Kind {
+        let left = Duration::from_secs(left);
+        Kind::CallEnded {
+            app: MeetingSource::Teams.label().into(),
+            application: None,
+            stops: Some((Instant::now() + left, call_ended::Countdown::new(left))),
         }
     }
 
@@ -2451,15 +2512,10 @@ mod tests {
 
     #[test]
     fn an_automatic_stop_says_so_and_keep_recording_cancels_it() {
-        let auto = Kind::CallEnded {
-            app: MeetingSource::WhatsApp.label().into(),
-            auto_stop: true,
-        };
+        let auto = call_ended_countdown(30);
         let (mut rt, commands, _) = runtime(auto, false, true, CALL_ENDED);
-        assert!(
-            texts(&rt)
-                .contains(&"Hex stops recording in 30 s unless you keep recording.".to_string())
-        );
+        assert!(texts(&rt).contains(&"Recording stops in 30 s".to_string()));
+        assert!(texts(&rt).contains(&"Stop now".to_string()));
         tap(&mut rt, "keep-recording");
         assert!(matches!(
             commands.try_recv(),
@@ -2507,7 +2563,8 @@ mod tests {
         model.apply(
             &ControllerEvent::CallEnded {
                 app: "Zoom".into(),
-                auto_stop: false,
+                application: None,
+                stops_at: None,
             },
             start,
         );
@@ -2528,7 +2585,8 @@ mod tests {
         model.apply(
             &ControllerEvent::CallEnded {
                 app: "Zoom".into(),
-                auto_stop: false,
+                application: None,
+                stops_at: None,
             },
             start,
         );
@@ -2542,7 +2600,8 @@ mod tests {
         model.apply(
             &ControllerEvent::CallEnded {
                 app: "Zoom".into(),
-                auto_stop: false,
+                application: None,
+                stops_at: None,
             },
             start,
         );
@@ -2560,7 +2619,8 @@ mod tests {
         model.apply(
             &ControllerEvent::CallEnded {
                 app: "Zoom".into(),
-                auto_stop: true,
+                application: None,
+                stops_at: Some(start + Duration::from_secs(30)),
             },
             start,
         );
@@ -2572,15 +2632,7 @@ mod tests {
         );
 
         // The notice itself closes with it.
-        let (mut rt, _, _) = runtime(
-            Kind::CallEnded {
-                app: MeetingSource::WhatsApp.label().into(),
-                auto_stop: true,
-            },
-            false,
-            true,
-            CALL_ENDED,
-        );
+        let (mut rt, _, _) = runtime(call_ended_countdown(30), false, true, CALL_ENDED);
         rt.update(|capsule, _| assert!(capsule.withdraw_call_ended()));
         assert!(!rt.state.is_shown());
 
@@ -2589,10 +2641,7 @@ mod tests {
         rt.update(|capsule, _| assert!(!capsule.withdraw_call_ended()));
         assert!(matches!(
             rt.state.state,
-            State::CallEnded {
-                auto_stop: false,
-                ..
-            }
+            State::CallEnded { stops: None, .. }
         ));
 
         // A newer panel of another kind stays.
@@ -2622,24 +2671,67 @@ mod tests {
     }
 
     #[test]
-    fn the_call_ended_title_fits_beside_its_buttons() {
-        let kind = call_ended();
-        assert_eq!(panel_width(&kind), CALL_ENDED.0);
-        let (mut rt, _, _) = runtime(kind, false, false, CALL_ENDED);
+    fn the_call_ended_lines_fit_beside_its_buttons() {
+        let style = rune_theme_opencode::kit(false).ty;
+        for kind in [call_ended_countdown(23), call_ended()] {
+            assert_eq!(panel_width(&kind), CALL_ENDED.0);
+            let (mut rt, _, _) = runtime(kind, false, false, CALL_ENDED);
+            landed(&mut rt);
+            for (key, font) in [("title", style.ui_medium), ("subtitle", style.small)] {
+                let line = rt
+                    .elements()
+                    .into_iter()
+                    .find(|e| e.key.as_deref() == Some(key))
+                    .unwrap();
+                let words = line.text.clone().unwrap();
+                let (width, _) = rt.text.measure(&words, font, 2.0);
+                assert!(
+                    width <= line.rect[2] + 0.5,
+                    "{words:?} needs {width} pt, has {}",
+                    line.rect[2]
+                );
+            }
+            let title = rt
+                .elements()
+                .into_iter()
+                .find(|e| e.key.as_deref() == Some("title"));
+            assert_eq!(
+                title.and_then(|e| e.text).as_deref(),
+                Some("Teams call ended")
+            );
+        }
+    }
+
+    #[test]
+    fn call_ended_drain_omits_head_under_reduce_motion_and_omits_ring_when_manual() {
+        // Countdown: ring has track, line, and head.
+        let (mut rt, _, _) = runtime(call_ended_countdown(23), false, true, CALL_ENDED);
         landed(&mut rt);
-        let title = rt
-            .elements()
-            .into_iter()
-            .find(|e| e.key.as_deref() == Some("title"))
-            .unwrap();
-        assert_eq!(title.text.as_deref(), Some("Microsoft Teams left the call"));
-        let style = rune_theme_opencode::kit(false).ty.ui_medium;
-        let (width, _) = rt.text.measure("Microsoft Teams left the call", style, 2.0);
-        assert!(
-            width <= title.rect[2] + 0.5,
-            "title needs {width} pt, has {}",
-            title.rect[2]
-        );
+        let keys = |rt: &Runtime<Capsule>| -> Vec<String> {
+            rt.elements().into_iter().filter_map(|e| e.key).collect()
+        };
+        let normal = keys(&rt);
+        assert!(normal.contains(&"track".to_string()));
+        assert!(normal.contains(&"line".to_string()));
+        assert!(normal.contains(&"head".to_string()));
+
+        // Reduce Motion: keeps track and line, drops bright head.
+        let (mut rt_reduced, _, _) = runtime(call_ended_countdown(23), false, true, CALL_ENDED);
+        rt_reduced.set_system_reduced_motion(true);
+        rt_reduced.update(|_, tx| tx.instant());
+        landed(&mut rt_reduced);
+        let reduced = keys(&rt_reduced);
+        assert!(reduced.contains(&"track".to_string()));
+        assert!(reduced.contains(&"line".to_string()));
+        assert!(!reduced.contains(&"head".to_string()));
+
+        // Manual recording (no countdown): icon stays, ring track and drain are omitted.
+        let (mut rt, _, _) = runtime(call_ended(), false, true, CALL_ENDED);
+        landed(&mut rt);
+        let manual = keys(&rt);
+        assert!(manual.contains(&"icon".to_string()));
+        assert!(!manual.contains(&"track".to_string()));
+        assert!(!manual.contains(&"drain".to_string()));
     }
 
     include!("meeting_capsules/motion_fixture.rs");
@@ -2674,7 +2766,8 @@ mod tests {
             ("reminder", reminder(true, false), false, REMINDER),
             ("reminder-no-link", reminder(false, false), false, REMINDER),
             ("reminder-automatic", reminder(true, true), false, REMINDER),
-            ("call-ended", call_ended(), false, CALL_ENDED),
+            ("call-ended", call_ended_countdown(23), false, CALL_ENDED),
+            ("call-ended-manual", call_ended(), false, CALL_ENDED),
             (
                 "recording-automatic",
                 Kind::Recording(Recording {
@@ -2794,7 +2887,16 @@ mod tests {
                 } else {
                     size
                 };
-                rt.update(move |capsule, _| setup(capsule));
+                rt.update(move |capsule, _| {
+                    if let State::CallEnded {
+                        stops: Some((at, _)),
+                        ..
+                    } = &mut capsule.state
+                    {
+                        *at = Instant::now() + Duration::from_secs(23);
+                    }
+                    setup(capsule);
+                });
                 let (w, h, pixels) = render(&gpu, &mut rt, size);
                 let theme = if dark { "dark" } else { "light" };
                 let path = folder.join(format!("capsule-{name}-{theme}.png"));
@@ -2860,7 +2962,8 @@ mod tests {
         };
         let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden");
         let states = [
-            ("call-ended", call_ended(), CALL_ENDED),
+            ("call-ended", call_ended_countdown(23), CALL_ENDED),
+            ("call-ended-manual", call_ended(), CALL_ENDED),
             ("ready", ready_transcript(), ready_size()),
             ("auto-started", auto_started(), PANEL),
             ("recording-rest", live_recording("fixture"), RECORDING),
@@ -2875,6 +2978,17 @@ mod tests {
             let file = format!("meeting-capsule-{name}-{theme}");
             let path = folder.join(format!("{file}.png"));
             let (mut rt, _, _) = runtime(kind, false, dark, size);
+            if name == "call-ended" {
+                rt.update(|c, _| {
+                    if let State::CallEnded {
+                        stops: Some((at, _)),
+                        ..
+                    } = &mut c.state
+                    {
+                        *at = Instant::now() + Duration::from_secs(23);
+                    }
+                });
+            }
             if name.starts_with("recording-") {
                 rt.update(move |c, _| {
                     if let State::Recording {
