@@ -3307,8 +3307,10 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
     screen was open) and Undo (the last autocorrection reverted exactly as the Delete right
     after it does, shared through `KeyboardEngine.revert`; shown only while that correction is
     still right before the cursor, and only when no next-word suggestions fill the strip, though
-    the Delete right after an autocorrection still undoes it when they do). Changing the toggle
-    redraws a visible strip at once; off, the strip is unchanged.
+    the Delete right after an autocorrection still undoes it when they do). A field with no text
+    before the cursor and none after it shows them in the sentence starters' place, so they are
+    there when an empty field opens; typing anything fills the strip with predictions as before.
+    Changing the toggle redraws a visible strip at once; off, the strip is unchanged.
     Checks: `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` (includes
     `KeyboardToolsTest`) and `python3 scripts/code-shape.py --check`; the repo has no
     Android CI. Not tried on a device or emulator.

@@ -346,10 +346,12 @@ internal class KeyboardEngine(
         return hit
     }
 
-    /** Next words for the text before the cursor, capitalised as shift would be. */
+    /** Next words for the text before the cursor, capitalised as shift would be. An empty field with
+     * Keyboard tools on leaves the strip's line to the tools instead of sentence starters. */
     private fun showPredictions(before: String?) {
         val w = word
-        surface?.suggestions(if (w != null && before != null && !symbols && canEndWord())
+        val emptyField = before != null && KeyboardTools.showsInEmptyField(feedback.keyboardTools, before) { target.after(1) }
+        surface?.suggestions(if (w != null && before != null && !emptyField && !symbols && canEndWord())
             w.predictions(before, capitalize = capsWanted()).map { shown(Suggestion(it, Suggestion.Kind.Next)) } else emptyList())
     }
 
