@@ -92,14 +92,22 @@ internal object SpeechModel {
 
     /** Where dictation's threads are kept, for Labs › Diagnostics: the loaded model's pool (-1 for none, 0 for any core,
      * else a bit per core), or, before a model loads, where its pool would be (the same check, the kernel asked). */
-    @Synchronized fun dictationCores(): Long = if (handle != 0L) Whisper.poolCores(handle) else Whisper.usableCores(poolMask, threads)
+    @Synchronized fun dictationCores(): Long =
+        (if (handle != 0L) Whisper.poolCores(handle) else -1L).takeIf { it >= 0 } ?: Whisper.usableCores(poolMask, threads)
+
+    /** The debug ratings standing in for the kernel's, or null (always null outside debug builds). */
+    val debugRatings: List<Int?>? get() = capacityOverride?.takeIf { BuildConfig.DEBUG }
+
+    /** Dictation's pool, made on the calling thread (the transcription thread) when the model has none, as after the
+     * speed test, which leaves none of its own behind. A no-op when it is already there. */
+    private fun ensurePool() { if (handle != 0L) Whisper.threadPool(handle, threads, poolMask) }
 
     /** Models opened since the process started (today's or the faster one), so a caller can tell whether a load read one. */
     private var opened = 0L
 
     @Synchronized fun prepare(app: Context, engine: Engine): Boolean {
         val before = opened
-        if (engine == Engine.Standard || openEnglish(app) != null) load(app)
+        if (engine == Engine.Standard || openEnglish(app) != null) { load(app); ensurePool() }
         keep()
         return opened != before
     }
@@ -162,6 +170,7 @@ internal object SpeechModel {
 
     private fun decodeStandard(app: Context, pcm: ShortArray, count: Int, language: String, translate: Boolean, prompt: String?, job: Long): String? {
         val small = load(app)
+        ensurePool()
         decodeStarts()
         // whisper.cpp's timings belong to this decode only once one ran; with no model they are an earlier one's.
         if (handle != 0L) whisperRan = true
@@ -177,12 +186,15 @@ internal object SpeechModel {
     /** Labs › Diagnostics' speed test: decodes [pcm] as English on [threads] threads, as a dictation does, the model
      * already loaded, and returns the text and whisper.cpp's timings, or null when it failed. [pool] threads are kept
      * ready with the model for this decode, on the cores [mask] names (0: any core), or none (0 threads: new ones for
-     * every graph, ggml's default). The model keeps dictation's own pool afterwards. */
+     * every graph, ggml's default). Each run makes its own pool on the calling thread (the test's), so its workers take
+     * that thread's name, which is how the core sampler finds them, and frees it afterwards: no worker the test made,
+     * pinned or not, outlives the run, and dictation makes its own pool again on its own thread when it next starts. */
     @Synchronized fun measure(app: Context, pcm: ShortArray, threads: Int, pool: Int, mask: Long, job: Long): Measured? {
         val small = load(app)
         if (handle == 0L) return null
         try {
-            if (!Whisper.threadPool(handle, pool, if (pool > 0) mask else 0)) return null
+            Whisper.threadPool(handle, 0, 0)
+            if (pool > 0 && !Whisper.threadPool(handle, pool, mask)) return null
             val cpu = android.os.Process.getElapsedCpuTime()
             val started = System.nanoTime()
             val bytes = Whisper.decode(handle, small, pcm, pcm.size, threads, "en", false, null, job)
@@ -193,8 +205,9 @@ internal object SpeechModel {
             return if (bytes == null || timings == null) null
                 else Measured(small, wall, processor, timings, bytes.decodeToString().trim())
         } finally {
-            // Whatever the decode did, the model gets dictation's pool back, never this run's or none.
-            Whisper.threadPool(handle, SpeechModel.threads, poolMask)
+            // This run's pool goes, whatever the decode did: its workers exit (they were pinned on a fast-cores run), and the
+            // thread that measured had its own affinity put back by decode. Dictation's next start makes its pool again.
+            Whisper.threadPool(handle, 0, 0)
         }
     }
     /** Labs › Diagnostics' speed test with Faster English dictation's model, as an English dictation with that switch on

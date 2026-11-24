@@ -31,6 +31,7 @@ import ly.anoma.hex.diagnostics.DICTATION_ROW
 import ly.anoma.hex.diagnostics.KEPT_ANY
 import ly.anoma.hex.diagnostics.KEPT_FAST
 import ly.anoma.hex.diagnostics.poolWords
+import ly.anoma.hex.diagnostics.processorLine
 import ly.anoma.hex.diagnostics.threadWords
 import ly.anoma.hex.speech.DictationPlace
 import ly.anoma.hex.speech.DictationTimes
@@ -73,6 +74,12 @@ class StripTextTest {
         assertEquals("cpu 0-1: capacity not readable, top frequency not reported", clusterSummary(listOf(Core(0, null, null), Core(1, null, null))))
         // An emulator's cpufreq says 2 (kHz): no real core runs at that.
         assertEquals("cpu 0-3: capacity 1024, top frequency not reported", clusterSummary((0..3).map { Core(it, 1024, 2) }))
+        // A debug build's stand-in ratings (the emulator check) say so on the Processor line; a phone's line is unchanged.
+        val emulator = (0..3).map { Core(it, null, 2) }
+        assertEquals("Processor: Google Ranchu, 4 cores; cpu 0-3: capacity not readable, top frequency not reported " +
+            "(debug core ratings: 300, 300, 1024, 1024)", processorLine("Google Ranchu", emulator, listOf(300, 300, 1024, 1024)))
+        assertEquals("Processor: QTI SM8750, 8 cores; cpu 0-5: capacity 870, up to 3.53 GHz; cpu 6-7: capacity 1024, up to 4.32 GHz",
+            processorLine("QTI SM8750", cores, null))
     }
     @Test fun diagnosticsCountFastCoresForTheSixThreadRun() {
         assertEquals(8, fastCores(List(6) { 870 } + List(2) { 1024 })) // Snapdragon 8 Elite

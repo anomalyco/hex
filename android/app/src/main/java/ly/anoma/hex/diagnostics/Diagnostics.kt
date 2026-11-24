@@ -198,7 +198,7 @@ internal object Diagnostics {
             // ROM's builder name, so it isn't used.
             "Phone: ${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}), " +
                 "build ${Build.ID}, security patch ${Build.VERSION.SECURITY_PATCH}",
-            "Processor: ${Build.SOC_MANUFACTURER} ${Build.SOC_MODEL}, ${cores.size} cores; ${clusterSummary(cores)}",
+            processorLine("${Build.SOC_MANUFACTURER} ${Build.SOC_MODEL}", cores, SpeechModel.debugRatings),
             "Memory: ${gb(memory.totalMem)} total, ${gb(memory.availMem)} available" + if (memory.lowMemory) ", low" else "",
             "Speech: ${SpeechModel.threads} threads, $library, downloaded model " +
                 (if (ModelStore.small.installed(c) != null) "installed" else "not installed") +
@@ -412,6 +412,11 @@ internal fun parseCpuList(text: String?): Set<Int> = text.orEmpty().split(',').f
     val bounds = part.trim().split('-').map { it.trim().toIntOrNull() ?: return@flatMap emptyList() }
     when (bounds.size) { 1 -> bounds; 2 -> (bounds[0]..bounds[1]).toList(); else -> emptyList() }
 }.toSet()
+
+/** The Processor line; a debug build's stand-in core ratings say so, so its report can't pass for a phone's. */
+internal fun processorLine(soc: String, cores: List<Core>, debugRatings: List<Int?>?) =
+    "Processor: $soc, ${cores.size} cores; ${clusterSummary(cores)}" +
+        (debugRatings?.let { r -> " (debug core ratings: ${r.joinToString(", ") { it?.toString() ?: "none" }})" } ?: "")
 
 internal fun clusterSummary(cores: List<Core>): String =
     clusters(cores).joinToString("; ") { group ->
