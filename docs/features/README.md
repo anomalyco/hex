@@ -3164,8 +3164,11 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 │   the keys' geometry: the strip keeps what was typed and your own dictionary words as
 │   completions, and text shortcuts, double-space period, capitals and the literal chip stay.
 │   No English completions, next words, autocorrection, tap correction, swipe typing or emoji
-│   keywords. A layout pinned in Keyboard > Keyboard layout brings that layout's model.
-│   Checks: `aDictationLanguageWithoutItsOwnLayoutHasNoTypingModel` in InsertionTest.kt and
+│   keywords. A swipe types nothing; the first in a field puts "Swipe typing isn't available
+│   in <language> yet" in the strip until typing, a tap or its ✕. A layout pinned in Keyboard >
+│   Keyboard layout brings that layout's model.
+│   Checks: `aDictationLanguageWithoutItsOwnLayoutHasNoTypingModel` and
+│   `aSwipeNamesTheDictationLanguageWithoutATypingModel` in InsertionTest.kt and
 │   `standInOffersYourWordsAndShortcutsButNoEnglishCompletionsOrNextWords` /
 │   `standInTurnsOffAutocorrectButKeepsYourTextReplacements` in StandInTypingTest.kt; not
 │   tried on a device.

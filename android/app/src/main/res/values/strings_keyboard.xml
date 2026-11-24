@@ -11,6 +11,10 @@
     <string name="keyboard_note_model">Speech model unavailable</string>
     <!-- A recording reached its 1-minute limit: its text is inserted with this note. -->
     <string name="keyboard_note_minute">Stopped at 1 minute</string>
+    <!-- A swipe while a dictation language without a typing model is dictated (no layout pinned) types nothing: the
+         strip says so, once per field. %1$s is the language as the space bar names it (Nederlands, Polski…). -->
+    <string name="keyboard_note_swipe">Swipe typing isn’t available in %1$s yet</string>
+    <string name="keyboard_note_dismiss">Dismiss</string>
     <string name="keyboard_cancel_dictation">Cancel dictation</string>
     <string name="keyboard_finish_dictation">Finish dictation</string>
     <string name="keyboard_undo_dictation">Undo dictation</string>

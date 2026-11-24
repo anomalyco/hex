@@ -74,6 +74,8 @@ internal class KeyboardEngine(
     private val background: Executor = Executor { it.run() },
     /** The bundled emoji words (Labs › Keyboard › Emoji suggestions), read lazily. */
     private val emoji: EmojiWords? = null,
+    /** A swipe that can't be read ([swipeUnreadable]) went down: the strip says why, the first time in a field. */
+    private val swipeUnavailable: () -> Unit = {},
     private val clock: () -> Long = { SystemClock.uptimeMillis() },
     private val main: Handler = Handler(Looper.getMainLooper()),
 ) {
@@ -131,6 +133,8 @@ internal class KeyboardEngine(
     /** A swipe is under way: from the touch becoming one until it ends. */
     var swiping = false
         private set
+    /** The strip already said, in this field, that its swipes can't be read. */
+    private var toldSwipe = false
 
     fun startInput(attribute: EditorInfo) {
         edited()
@@ -148,7 +152,7 @@ internal class KeyboardEngine(
             variation !in setOf(InputType.TYPE_TEXT_VARIATION_URI, InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
                 InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_FILTER) &&
             attribute.inputType and (InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_FLAG_AUTO_COMPLETE) == 0
-        resetTyping(); word = null; clearSpaces(); forgetSwipe()
+        resetTyping(); word = null; clearSpaces(); forgetSwipe(); toldSwipe = false
         pad = Pad.of(attribute.inputType)
         symbols = pad != null
         more = false; shift.reset()
@@ -642,11 +646,17 @@ internal class KeyboardEngine(
      * (not a password, address, URL or number, where Hex reads no words), with its typing model loaded and not
      * English's list standing in for a language without one. */
     val swipes get() = feedback.swipe && !secure && word?.standIn == false && !symbols && pad == null && target.connected
+    /** Where [swipes] would be but English's list only stands in for the dictation language's words: a swipe types
+     * nothing, as before, and the strip says so ([swipeUnavailable]). */
+    val swipeUnreadable get() = feedback.swipe && !secure && word?.standIn == true && !symbols && pad == null && target.connected
 
     /** A letter touch became a swipe: its key no longer types. Null when it can't be one here. */
     fun beginSwipe(): SwipeContext? {
         val w = word ?: return null
-        if (!swipes) return null
+        if (!swipes) {
+            if (swipeUnreadable && !toldSwipe) { toldSwipe = true; swipeUnavailable() }
+            return null
+        }
         // A word delete took back stays remembered for this swipe; anything else ends the Undo dictation offer.
         if (dictated != null) offerUndo(null)
         continuation.clear(); cancelChip(); forgetSwipe()

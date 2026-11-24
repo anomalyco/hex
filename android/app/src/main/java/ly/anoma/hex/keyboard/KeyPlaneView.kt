@@ -658,7 +658,8 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     /** A finger went down on a letter key: it may become a swipe. */
     private fun strokeBegan(k: KeyCap, e: MotionEvent) {
         if (swipe != null) finishSwipe()
-        if (!ime.engine.swipes || geometry() == null) { forgetStroke(); return }
+        // A stroke that can't be read is followed too, only so the strip can say why once it travels as a swipe would.
+        if (!(ime.engine.swipes || ime.engine.swipeUnreadable) || geometry() == null) { forgetStroke(); return }
         val row = k.parent as View
         stroke = SwipeStroke(e.getPointerId(e.actionIndex)).also { it.add(k.left + e.getX(e.actionIndex).toDouble(), row.top + e.getY(e.actionIndex).toDouble(), e.eventTime / 1000.0) }
         strokeKey = k

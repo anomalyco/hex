@@ -23,6 +23,7 @@ import ly.anoma.hex.speech.SpokenPunctuation
 import ly.anoma.hex.speech.SpokenText
 import ly.anoma.hex.speech.SpeechOptions
 import ly.anoma.hex.speech.Style
+import ly.anoma.hex.speech.swipeUnreadableIn
 import ly.anoma.hex.speech.typingLayout
 import ly.anoma.hex.speech.SpeechEdges
 import ly.anoma.hex.speech.speechSpan
@@ -575,6 +576,19 @@ class InsertionTest {
         assertEquals(Spoken.English, typingLayout(Spoken.English, DictationLanguage.Dutch))
         assertEquals(Spoken.Spanish, typingLayout(null, DictationLanguage.Spanish))
         assertEquals(Spoken.French, typingLayout(Spoken.French, DictationLanguage.Spanish))
+    }
+    @Test fun aSwipeNamesTheDictationLanguageWithoutATypingModel() {
+        // A swipe there types nothing, so the strip says swipes aren't available in the language, as the space bar names it.
+        assertEquals("Nederlands", swipeUnreadableIn(null, DictationLanguage.Dutch)?.label)
+        assertEquals("Português", swipeUnreadableIn(null, DictationLanguage.Portuguese)?.label)
+        assertEquals("Polski", swipeUnreadableIn(null, DictationLanguage.Polish)?.label)
+        assertEquals("Русский", swipeUnreadableIn(null, DictationLanguage.Russian)?.label)
+        // A pinned layout's model reads swipes, and so does a dictation language with its own: nothing to say.
+        assertEquals(null, swipeUnreadableIn(Spoken.English, DictationLanguage.Dutch))
+        assertEquals(null, swipeUnreadableIn(Spoken.German, DictationLanguage.Polish))
+        for (language in listOf(DictationLanguage.English, DictationLanguage.Spanish, DictationLanguage.German,
+                DictationLanguage.Norwegian, DictationLanguage.French, DictationLanguage.Italian))
+            assertEquals(null, swipeUnreadableIn(null, language))
     }
     // Batch 3 (Rollover, holds, field kinds). These belong in a KeyboardTouchTest once new test files are agreed.
     @Test fun overlappingKeysTypeInTheOrderTheyWentDown() {
