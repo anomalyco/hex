@@ -130,29 +130,43 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
 
     // An Italian or French elision typed without its apostrophe, joined back up ("laltro" ->
     // "l'altro", "dellanno" -> "dell'anno", "lheure" -> "l'heure"), or null. The longest elision the
-    // language has whose remainder is a word of its own of two letters or more starting with a vowel
-    // (accents and ligatures included) or a silent h; "dellanno" gives "dell'anno", never "d'ellanno".
-    // A spelling the model knows as typed is no elision ("lago", "della"), nor are your own words.
-    // The straight apostrophe is the strip's spelling, as suggestOnly's contractions are: shown() and
-    // smartWord (KeyboardEngine) make it ’ when Labs › Keyboard › Smart quotes is on. A suggestion
-    // only, like those: space never applies it.
+    // language has whose remainder is a reasonably common word of its own of two letters or more
+    // ("dellanno" gives "dell'anno", never "d'ellanno"); a spelling only the books have as typed is
+    // read as an elision only when the word after it is much likelier than it. A word of the model's
+    // own word list, and your own words, are no elision ("lago", "della"). The straight apostrophe is
+    // the strip's spelling, as suggestOnly's contractions are: shown() and smartWord (KeyboardEngine)
+    // make it ’ when Labs › Keyboard › Smart quotes is on. A suggestion only, like those: space never
+    // applies it.
     private fun elided(word: String): String? {
         val elisions = ELISIONS[model.language] ?: return null
         if (model.index(word) >= 0 || (decoder.personal?.index(word) ?: -1) >= 0) return null
+        // What the books charge for the spelling as typed, in nats, or null when they have no such word.
+        val typed = model.validCost(word)
         for (cut in word.length - 2 downTo 1) {
             val prefix = word.substring(0, cut)
             if (prefix !in elisions) continue
             val rest = word.substring(cut)
-            if (!elidesInto(rest[0]) || model.index(rest) < 0) continue
+            if (!elidesInto(model.language, rest)) continue
+            val index = model.index(rest)
+            if (index < 0 || model.frequencyCost(index) > ELISION_REST_COST) continue
+            // "laltro" and "lanno" are the books' run-together spellings too, so a known spelling alone
+            // can't rule the elision out: the word after it must be much likelier than it is
+            // ("allodio" -> "all'odio" and "noh" -> "n'oh" are not that much likelier).
+            if (typed != null && typed - model.unigramCost(index) < ELISION_MARGIN) continue
             // A listed slur or swear stays out of an elision too (your own words are yours to offer).
             if (model.neverSuggest.blocks(rest, suggestSwearWords, -1) && decoder.personal?.owns(rest) != true) continue
             return prefix + "'" + rest
         }
         return null
     }
-    // A vowel an elision runs into, accents and ligatures included ("un'altra", "l'uomo", "l'heure"),
-    // and h, which French elides too ("l'homme").
-    private fun elidesInto(c: Char) = c.lowercaseChar() in "aeiouàèéìíîòóùúâêëïôûüÿœæ" || c.lowercaseChar() == 'h'
+    // Whether an elision runs into [rest]: a vowel, accents and ligatures included ("un'altra",
+    // "l'uomo", "l'heure"), and an h. Italian elides the h of the avere forms alone (l'ho, l'hai,
+    // l'ha, l'hanno), never another ("l'hotel" is no elision); French elides h generally ("l'homme").
+    private fun elidesInto(language: String, rest: String): Boolean {
+        val c = rest[0].lowercaseChar()
+        if (c in "aeiouàèéìíîòóùúâêëïôûüÿœæ") return true
+        return c == 'h' && (language != "it" || rest in ITALIAN_AVERE)
+    }
 
     /** The strip while a word is typed (iOS AutocorrectEngine.suggestions): what was typed
      * ([Suggestion.Kind.Typed]), then what space will put in ([Suggestion.Kind.Fix]) or the likeliest
@@ -183,7 +197,10 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         if (autocorrect && fix == null && !standIn && model.language == "en") suggestOnly[lower]?.let { add(matchCase(token, it)) }
         // An elision typed without its apostrophe ("laltro", "dellanno"): Italian and French write the
         // article against the word, so the strip offers the two joined up, as English's contractions are.
-        if (autocorrect && !standIn && '\'' !in lower) elided(lower)?.let { add(matchCase(token, it)) }
+        // A whole-word decoder fix already reads the token ("diro" -> "dirò"), so the elision would only
+        // be a second guess at it; a fix that splits the token in two ("l ho") is no such reading.
+        if (autocorrect && !standIn && '\'' !in lower && (fix == null || ' ' in fix))
+            elided(lower)?.let { add(matchCase(token, it)) }
         // Your own word, completed once two letters match, before the dictionary's: a word you added is
         // likelier what you mean than a reading's runner-up ("zor" offers "Zorbex" beside the fix "or").
         if (token.length >= 2) decoder.personal?.completions(lookup(token))?.firstOrNull()?.let { add(yours(it)) }
@@ -502,6 +519,17 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         // The word before the cursor, lowercase; an elided one without its apostrophe ("l'" as "l").
         fun previousWord(before: String) = before.trimEnd().takeLastWhile { it.isLetter() || it == '\'' || it == '\u2019' }
             .lowercase().replace('\u2019', '\'').trimEnd('\'')
+        // The remainder of an elision must be one of the model's reasonably common words: its unigram
+        // cost in eighths of a nat at most this. Every remainder the junk report names ("ol", "om",
+        // "aco", "ae", "hy", "hun", "hopper", "hack", "ope", "hh") costs 99 or more; "uva" (93) and
+        // "insalata" (98) still fit.
+        private const val ELISION_REST_COST = 100
+        // A run-together spelling the books list ("laltro", "lanno") is read as an elision only when the
+        // word after it is much likelier: at least this many nats (about 3,600 times). It sits between
+        // the lowest wanted case ("lanno", 8.55 nats) and the highest unwanted one ("noh", 8.05).
+        private const val ELISION_MARGIN = 8.2
+        // The only Italian words whose h an elision takes.
+        private val ITALIAN_AVERE = setOf("ho", "hai", "ha", "hanno")
         // The articles and pronouns French and Italian elide before a vowel; a word starts after them.
         private val ELISIONS = mapOf(
             "fr" to setOf("c", "d", "j", "l", "m", "n", "s", "t", "qu", "jusqu", "lorsqu", "puisqu", "quoiqu", "presqu"),
