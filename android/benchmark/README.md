@@ -50,7 +50,7 @@ The external editor received the notebook sentence **1.91 s after mic stop** and
 
 ## Faster English dictation (Labs)
 
-On 24 Nov 2026, an API 35 Google ARM64 emulator (4 vCPUs, 4 GiB) on the M5 Ultra Studio, which was also running two other emulators (load average about 13), so the absolute times below are slower than the 20 Nov ones above: read the ratios. Both engines are the app's own release native builds through [native.cpp](native.cpp): `HEX_APP=1 ./whisperbench` is the downloaded small model exactly as `hexspeech.cpp` decodes it (window sized to the speech up to 8 s, full window above, the token cap and single retry), and `./englishbench` (built with `-DTRANSCRIBE`) is Parakeet TDT-CTC 110M Q8_0 through transcribe.cpp as `hexenglish.cpp` runs it. Four threads; each clip's figure is the median of two runs. English only: the faster model is never used for another language.
+On 24 Nov 2026, an API 35 Google ARM64 emulator (4 vCPUs, 4 GiB) on the M5 Ultra Studio, which was also running two other emulators (load average about 13), so the absolute times below are slower than the 20 Nov ones above: read the ratios. Both engines are the app's own release native builds through [native.cpp](native.cpp): `HEX_APP=1 ./whisperbench` is the downloaded small model exactly as `hexspeech.cpp` decodes it (window sized to the speech up to 8 s and, before #2716, the full window above; the token cap and single retry), and `./englishbench` (built with `-DTRANSCRIBE`) is Parakeet TDT-CTC 110M Q8_0 through transcribe.cpp as `hexenglish.cpp` runs it. Four threads; each clip's figure is the median of two runs. English only: the faster model is never used for another language.
 
 | English clips | Small: wall / CPU | Faster: wall / CPU | Faster, ×less | Word errors (small / faster) |
 |---|---:|---:|---:|---:|
@@ -79,6 +79,17 @@ Parakeet TDT-CTC 110M sometimes runs two sentences together in its own output ("
 | Any capitalised word with ≥ 100 ms | 9 | 0 |
 
 The one end not restored is "on Saturday I didn't": "I" is never taken as a sentence start. 100 ms is the middle of the band with no stray period; a capital alone after a pause added nothing here, so names are left as they are. Ten missing ends is a small sample; the rule has to be watched on real voices.
+
+## Long clips and the encoder window
+
+Past 8 s of audio the app gives the small model's encoder the speech plus 640 frames (12.8 s), rounded up to 64, instead of Whisper's full 1500 ([hexspeech.cpp](../app/src/main/cpp/hexspeech.cpp)). [long.tsv](long.tsv) joins the 40 utterances end to end into 26 long clips of 9.8–26 s in English, Spanish, German and Norwegian (the corpus's consecutive groups of 4 and 8 per language, and groups of 4 and 5 from other starting points). The check decodes them with the app's decode at that window and at the full one. **It passes when no clip has more word errors than with the full window.** Clips start to lose words from a margin of 576 frames, so don't lower the margin without rerunning this check, and the wider 53-clip set in #2716 when possible.
+
+1. `python3 benchmark/generate.py "$WORK/wavs"` writes the long clips after the 40 (their digests change with the 40's; see step 1 below).
+2. Build [native.cpp](native.cpp) as in step 2 below, or for the host with Apple clang against a host build of the same whisper.cpp (`-DGGML_NATIVE=OFF -DGGML_CPU_ARM_ARCH=armv8-a`, as the app builds it).
+3. From the folder holding `wavs/`, with `awk -F '\t' 'NR>1{print $1,$2}' benchmark/long.tsv > long.list`, run `HEX_APP=full ./whisperbench models/small.bin 4 long.list > results/long-full.tsv` and `HEX_APP=1 ./whisperbench models/small.bin 4 long.list > results/long-app.tsv`. `HEX_APP` is the app's decode (a fresh state for every clip, its token limit and single retry, its window); `HEX_APP=full` keeps the full window past 8 s.
+4. `python3 benchmark/score.py results` adds both to the per-clip output and exits with status 1, naming the clips, if any is worse.
+
+On 24 Nov 2026 (Apple M5 host, armv8-a kernels, four threads; 34 of the 40 WAVs matched [audio.tsv](audio.tsv) with that Mac's voices) both made 43 errors on 900 words: no clip worse, three reworded with the same error count. The median decode went from 2.63 s to 1.96 s on that host.
 
 ## Sources and licences
 

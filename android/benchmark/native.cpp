@@ -76,11 +76,14 @@ int main(int argc, char **argv) {
         if (getenv("HEX_SHORT_WINDOW") && audio.size() <= 8*16000) p.audio_ctx=512;
         p.n_threads=threads;p.language=lang.c_str();p.no_context=true;p.no_timestamps=true;p.suppress_nst=true;
         p.print_progress=p.print_special=p.print_timestamps=p.print_realtime=false;
-        // HEX_APP: the downloaded model exactly as app/src/main/cpp/hexspeech.cpp decodes it (window sized to the
-        // speech up to 8 s, the token cap, one retry at 0.2, a fresh state per clip).
-        const bool app=getenv("HEX_APP")!=nullptr; const int count=(int)audio.size();
+        // HEX_APP: the downloaded model exactly as app/src/main/cpp/hexspeech.cpp decodes it (the window sized to the
+        // speech: up to 8 s plus 192 frames, at most 512, longer plus 640 until the full 1500; the token cap, one retry
+        // at 0.2, a fresh state per clip). HEX_APP=full keeps Whisper's full window past 8 s, for the long-clip check.
+        const char *appv=getenv("HEX_APP"); const bool app=appv!=nullptr; const int count=(int)audio.size();
         if (app) {
-            if (count<=8*16000) p.audio_ctx=std::min(512,((int)std::ceil(count*50.0/16000)+192+63)/64*64);
+            const int speech=(int)std::ceil(count*50.0/16000);
+            const int frames=count<=8*16000?std::min(512,(speech+192+63)/64*64):std::strcmp(appv,"full")?(speech+640+63)/64*64:1500;
+            if (frames<1500) p.audio_ctx=frames;
             p.max_tokens=std::min(220,(int)std::ceil(std::min(count,30*16000)*15.0/16000)+16);
             p.greedy.best_of=1;p.temperature=-0.8f;p.temperature_inc=1.0f;
         }
