@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -17,6 +18,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
@@ -38,6 +43,15 @@ internal fun DiagnosticsPage() {
     val app by Diagnostics.app.collectAsState()
     val keyboard by Diagnostics.keyboard.collectAsState()
     val busy = app is Diagnostics.Speed.Running || keyboard is Diagnostics.Speed.Running
+    val view = LocalView.current
+    // The tap counts change while the person types in another app: read again on coming back and after each test tap.
+    var taps by remember { mutableStateOf(Diagnostics.tapCounts()) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) taps = Diagnostics.tapCounts() }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
     Label(stringResource(R.string.diagnostics_contents), muted = true, size = 14, lines = Int.MAX_VALUE)
     Card { Entry(stringResource(R.string.diagnostics_check), value = "", action = { Diagnostics.check(context) }) }
     Group(stringResource(R.string.diagnostics_speed)) {
@@ -50,7 +64,19 @@ internal fun DiagnosticsPage() {
             if (busy) null else Diagnostics::runInKeyboard)
     }
     Group(stringResource(R.string.diagnostics_haptics)) {
-        Entry(stringResource(R.string.diagnostics_tick), stringResource(R.string.diagnostics_tick_detail), "", { Diagnostics.testTick(context) })
+        Label(stringResource(R.string.diagnostics_haptics_detail), size = 14, muted = true, lines = Int.MAX_VALUE,
+            mod = Modifier.padding(horizontal = 16.dp).padding(top = 12.dp))
+        Entry(stringResource(R.string.diagnostics_tick), stringResource(R.string.diagnostics_tick_detail), "",
+            { Diagnostics.testTick(context); taps = Diagnostics.tapCounts() })
+        Rule()
+        Entry(stringResource(R.string.diagnostics_android_tap), stringResource(R.string.diagnostics_android_tap_detail), "",
+            { Diagnostics.androidTap(view) })
+        // What each of Hex's taps plays here, once the person has checked the phone.
+        if (facts != null) {
+            val lines = remember { tapLines(Diagnostics.tapWords(context), Diagnostics.tapPlays(context)) }
+            if (lines.isNotEmpty()) Label(lines.joinToString("\n"), size = 13, muted = true, lines = Int.MAX_VALUE,
+                mod = Modifier.padding(horizontal = 16.dp).padding(bottom = 10.dp))
+        }
         Rule()
         Entry(stringResource(R.string.diagnostics_pulse), stringResource(R.string.diagnostics_pulse_detail), "", { Diagnostics.strongPulse(context) })
     }
@@ -58,7 +84,7 @@ internal fun DiagnosticsPage() {
         Label(stringResource(R.string.diagnostics_none), muted = true, size = 14, lines = Int.MAX_VALUE)
         return
     }
-    val text = report(facts, app, keyboard)
+    val text = report(facts, app, keyboard, taps)
     var copied by remember(text) { mutableStateOf(false) }
     Card {
         SelectionContainer {
