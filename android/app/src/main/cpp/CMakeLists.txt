@@ -21,7 +21,7 @@ add_compile_options(-fvisibility=hidden -ffunction-sections -fdata-sections)
 # A keyboard's process should not carry code that forks, executes programs, sets a ptracer or loads shared objects from
 # a path: the patch keeps ggml_abort's backtrace in process (stock ggml forks gdb or lldb). A bump it no longer fits fails.
 # whisper-state-timings.patch reads a decode's encoder and decoder time from its own state, and whisper-threadpool.patch
-# lets a decode's state run on a thread pool kept with the model, both for Labs › Diagnostics.
+# lets a decode's state run on a thread pool kept with the model, which dictation keeps and Labs › Diagnostics compares.
 find_program(PATCH_EXECUTABLE patch REQUIRED)
 FetchContent_Declare(whisper_cpp
     URL https://codeload.github.com/ggml-org/whisper.cpp/tar.gz/d1be6fde11ac6e0407606b4e42fe72d34add8037

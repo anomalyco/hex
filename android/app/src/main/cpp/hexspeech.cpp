@@ -7,6 +7,8 @@
 #include <ggml-cpu.h>
 #include <whisper.h>
 
+#include <sched.h>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -23,9 +25,10 @@
 // dictation pays only for its own audio. Load, decode, threadPool and free are called under one lock.
 
 // A model's thread pool (Whisper.threadPool): ggml's worker threads made once and reused for every graph, where by
-// default ggml starts and joins a new pool for each one, every encoder pass and every decoded token. Only Labs ›
-// Diagnostics' speed test asks for one today. A pool lives with its model and is freed with it.
-struct Pool { ggml_threadpool *threads; int count; };
+// default ggml starts and joins a new pool for each one, every encoder pass and every decoded token. Dictation keeps one
+// with its model (SpeechModel.open); Labs › Diagnostics' speed test makes its own. A pool lives with its model and is
+// freed with it.
+struct Pool { ggml_threadpool *threads; int count; jlong mask; };
 static std::mutex pools_lock;
 static std::unordered_map<whisper_context *, Pool> pools;
 
@@ -88,24 +91,49 @@ static std::atomic<jlong> abandoned{0};
 extern "C" JNIEXPORT void JNICALL
 Java_ly_anoma_hex_speech_Whisper_abort(JNIEnv *, jobject, jlong job) { abandoned.store(job); }
 
+// [fast]'s bits this thread may run on, or 0 when that leaves fewer cores than the pool has threads: sharing what is
+// left is slower than letting the kernel place them, as before.
+static jlong pool_mask(jlong fast, int threads) {
+    if (fast == 0) return 0;
+    cpu_set_t allowed;
+    if (sched_getaffinity(0, sizeof(allowed), &allowed) != 0) return 0;
+    jlong usable = 0;
+    int cores = 0;
+    for (int core = 0; core < GGML_MAX_N_THREADS && core < 64; ++core) {
+        const jlong bit = static_cast<jlong>(1) << core;
+        if ((fast & bit) && CPU_ISSET(core, &allowed)) { usable |= bit; ++cores; }
+    }
+    return cores >= threads ? usable : 0;
+}
+
 // Keeps a pool of [threads] worker threads with the model for its decodes, or none (0), ggml's default. A pool of
-// another size is replaced. ggml's default pool parameters, as its per-graph pools use: only reuse differs.
+// another size or cores is replaced. ggml's default pool parameters, as its per-graph pools use: only reuse, the cores
+// and the paused start differ. [fast] has a bit per core to keep them on (0: no restriction); a short encode then stays
+// off the little ones instead of being one of them.
 extern "C" JNIEXPORT jboolean JNICALL
-Java_ly_anoma_hex_speech_Whisper_threadPool(JNIEnv *, jobject, jlong handle, jint threads) {
+Java_ly_anoma_hex_speech_Whisper_threadPool(JNIEnv *, jobject, jlong handle, jint threads, jlong fast) {
     auto ctx = reinterpret_cast<whisper_context *>(handle);
     if (!ctx) return false;
+    const jlong mask = threads > 0 ? pool_mask(fast, threads) : 0;
     {
         std::lock_guard<std::mutex> hold(pools_lock);
         auto found = pools.find(ctx);
-        if (found != pools.end() && found->second.count == threads) return true;
+        if (found != pools.end() && found->second.count == threads && found->second.mask == mask) return true;
     }
     drop_pool(ctx);
     if (threads <= 0) return true;
     auto params = ggml_threadpool_params_default(threads);
+    // Started paused: the workers sleep as soon as they start instead of polling for a graph, and the first decode's
+    // kickoff is where ggml applies the mask to the thread that runs it (ggml-cpu.c: kickoff resumes a paused pool), then
+    // hexspeech's decode puts that thread's own affinity back. Not strict, as ggml's per-graph pools are: every worker
+    // may use every core of the mask.
+    params.paused = true;
+    for (int core = 0; core < GGML_MAX_N_THREADS && core < 64; ++core)
+        if (mask & (static_cast<jlong>(1) << core)) params.cpumask[core] = true;
     auto pool = ggml_threadpool_new(&params);
     if (!pool) return false;
     std::lock_guard<std::mutex> hold(pools_lock);
-    pools[ctx] = {pool, threads};
+    pools[ctx] = {pool, threads, mask};
     return true;
 }
 
@@ -204,20 +232,32 @@ Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jlong handle, jboo
     std::unique_ptr<whisper_state, decltype(&whisper_free_state)> state(whisper_init_state(ctx), whisper_free_state);
     if (!state) return nullptr;
     ggml_threadpool *pool = nullptr;
+    jlong mask = 0;
     {
         std::lock_guard<std::mutex> hold(pools_lock);
         auto found = pools.find(ctx);
-        if (found != pools.end()) { pool = found->second.threads; params.n_threads = std::min(params.n_threads, found->second.count); }
+        if (found != pools.end()) {
+            pool = found->second.threads;
+            mask = found->second.mask;
+            params.n_threads = std::min(params.n_threads, found->second.count);
+        }
     }
+    // ggml gives the thread that computes a graph the pool's own mask too (ggml-cpu.c: ggml_graph_compute_kickoff
+    // applies workers[0]'s). That is this thread, which for dictation also loads models and runs Parakeet's graphs,
+    // and for the speed test also times the no-pool run: keep what it had and put it back once the decode ends. A
+    // masked pool runs only when that is saved, else this decode keeps ggml's own threads and no pinning.
+    cpu_set_t mine;
+    const bool attach = pool && (!mask || sched_getaffinity(0, sizeof(mine), &mine) == 0);
     // The pool outlives the state, which never frees it. A decode stopped by abort ends between graphs, so the pool is
     // idle and the next graph resets its abort flag.
-    if (pool) hex_whisper_state_set_threadpool(state.get(), pool);
+    if (attach) hex_whisper_state_set_threadpool(state.get(), pool);
 #ifndef NDEBUG
     const auto started = std::chrono::steady_clock::now();
 #endif
     const int status = whisper_full_with_state(ctx, state.get(), params, pcm.data(), count);
     // Paused workers wait on a condition variable until the next graph instead of polling.
-    if (pool) ggml_threadpool_pause(pool);
+    if (attach) ggml_threadpool_pause(pool);
+    if (attach && mask) sched_setaffinity(0, sizeof(mine), &mine);
     whisper_timings spent{};
     hex_whisper_state_timings(state.get(), &spent);
     const jlong now[7] = {static_cast<jlong>(spent.sample_ms * 1000), static_cast<jlong>(spent.encode_ms * 1000),
