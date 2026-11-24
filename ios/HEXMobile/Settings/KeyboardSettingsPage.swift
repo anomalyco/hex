@@ -318,7 +318,7 @@ struct KeyboardSettingsPage: View {
 
                     SettingsToggleRow(
                         title: String(localized: "Emoji suggestions"),
-                        detail: String(localized: "Suggests an emoji for the word you type, like 😭 for cry"),
+                        detail: String(localized: "Suggests 😭 as you type cry"),
                         isOn: binding(\.emojiSuggestions)
                     )
                 }

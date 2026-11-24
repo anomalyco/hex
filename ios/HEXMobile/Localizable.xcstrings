@@ -660,12 +660,12 @@
         }
       }
     },
-    "Suggests an emoji for the word you type, like 😭 for cry" : {
+    "Suggests 😭 as you type cry" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "为你输入的词推荐表情符号，比如 cry 推荐 😭"
+            "value" : "输入 cry 时推荐 😭"
           }
         }
       }
