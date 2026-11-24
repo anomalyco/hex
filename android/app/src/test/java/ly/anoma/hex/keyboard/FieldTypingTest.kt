@@ -18,6 +18,7 @@ class FieldTypingTest {
         assertTrue(plain.corrects)
         assertFalse(plain.secure)
         assertTrue(plain.learns)
+        assertFalse(plain.exact)
     }
 
     @Test fun noLearningKeepsWordsAndAutocorrectionButRemembersNothing() {
@@ -29,15 +30,38 @@ class FieldTypingTest {
         assertFalse(private.learns)
     }
 
-    @Test fun addressesStayLiteral() {
-        for (variation in listOf(InputType.TYPE_TEXT_VARIATION_URI, InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
-            InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS)) {
+    @Test fun emailAddressesStayLiteral() {
+        for (variation in listOf(InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS)) {
             assertFalse("variation $variation", text(variation).words)
             assertFalse("variation $variation", text(variation).corrects)
+            assertFalse("variation $variation", text(variation).exact)
+            assertFalse("variation $variation", text(variation).secure)
         }
-        // The flag exempts none of them: an incognito tab's URL field is still a URL field.
-        assertFalse(text(InputType.TYPE_TEXT_VARIATION_URI,
+        assertFalse(text(InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
             options = EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING).words)
+    }
+
+    @Test fun urlFieldsReadWordsButChangeNothingTyped() {
+        // A plain URL field: suggestions and swipes as Gboard's, no autocorrection, no space or fix of Hex's own.
+        val url = text(InputType.TYPE_TEXT_VARIATION_URI)
+        assertTrue(url.words)
+        assertFalse(url.corrects)
+        assertTrue(url.exact)
+        assertFalse(url.secure)
+        assertTrue(url.learns)
+        // Chrome's address bar (a web search field too): URI | NO_SUGGESTIONS, imeOptions 0x12000002.
+        val omnibox = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        assertEquals(0x80011, omnibox)
+        val chrome = FieldTyping.of(omnibox, 0x12000002)
+        assertTrue(chrome.words)
+        assertFalse(chrome.corrects)
+        assertTrue(chrome.exact)
+        // An incognito tab's address bar is still a URL field, and remembers nothing typed there.
+        val incognito = FieldTyping.of(omnibox, 0x12000002 or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING)
+        assertTrue(incognito.words)
+        assertFalse(incognito.corrects)
+        assertTrue(incognito.exact)
+        assertFalse(incognito.learns)
     }
 
     @Test fun fieldsThatAskForNoSuggestionsKeepWordsWithoutAutocorrection() {
@@ -57,6 +81,7 @@ class FieldTypingTest {
         val google = FieldTyping.of(search, 0)
         assertTrue(google.words)
         assertFalse(google.corrects)
+        assertFalse(google.exact)
     }
 
     @Test fun editorsThatKeepTheirOwnTextTakeKeyEvents() {
@@ -77,6 +102,7 @@ class FieldTypingTest {
             assertTrue("variation $variation", text(variation).secure)
             assertFalse("variation $variation", text(variation).words)
             assertFalse("variation $variation", text(variation).corrects)
+            assertFalse("variation $variation", text(variation).exact)
         }
         val pin = FieldTyping.of(InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD, 0)
         assertTrue(pin.secure)

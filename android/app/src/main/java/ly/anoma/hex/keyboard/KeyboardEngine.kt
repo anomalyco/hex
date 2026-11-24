@@ -94,6 +94,9 @@ internal class KeyboardEngine(
     // also autocorrects on space and punctuation: a field asking for no suggestions keeps the words, not the fix.
     private var wordField = false
     private var correctingField = false
+    // A URL or web search field (FieldTyping.exact): no double-space period, text replacement or nearby letter, and
+    // a picked word's space gives way to any joining mark ("github." and "github/").
+    private var exactField = false
     // A field that keeps its own text (TYPE_NULL, a terminal's): nothing can be read back or edited as text, so
     // delete, the cursor and Enter go in as key events.
     private var keyEventEditor = false
@@ -150,6 +153,7 @@ internal class KeyboardEngine(
         secure = field.secure
         wordField = field.words
         correctingField = field.corrects
+        exactField = field.exact
         keyEventEditor = field.keyEvents
         learnsTyping = field.learns
         resetTyping(); word = null; clearSpaces(); forgetSwipe()
@@ -366,10 +370,10 @@ internal class KeyboardEngine(
     }
     /** The letter a touch near a key's edge types: the key it landed on, or a neighbour within
      * TypingWord.REACH dp ([near], distances in dp) that the word list makes clearly likelier next. Only
-     * while autocorrect is on in a word field on the letters page, and never with caps lock. */
+     * while autocorrect is on in a word field on the letters page, never in a URL field, and never with caps lock. */
     fun likelierLetter(hit: Char, near: Map<Char, Double>, keys: Collection<Char>): Char {
         val w = word ?: return hit
-        if (w.standIn || near.isEmpty() || symbols || shift.locked || !feedback.autocorrect || !target.connected) return hit
+        if (w.standIn || exactField || near.isEmpty() || symbols || shift.locked || !feedback.autocorrect || !target.connected) return hit
         return w.likelierKey(before(), hit, near, keys)
     }
     /** Shift as the keys show it: letters type capitals while it is on or held. */
@@ -422,7 +426,7 @@ internal class KeyboardEngine(
     /** A strip slot was tapped. What was typed, a fix or a word goes in with its space, unless the text
      * after the cursor already starts with a space or closing mark: then the space waits for the next
      * key that starts a word. A space right after a picked word is swallowed (it still counts towards
-     * double-space), and a closing mark takes its place. */
+     * double-space), and a closing mark takes its place (in a URL field, also / and the other joiners). */
     fun pickSuggestion(text: String) {
         val w = word ?: return
         if (pickSwiped(text)) return
@@ -466,7 +470,7 @@ internal class KeyboardEngine(
             // The text after the cursor already separates the picked word: space has nothing to add.
             heldAnchor != null && heldAnchor == b -> { clearSpaces(); showPredictions(b); return }
             pickedAnchor != null && pickedAnchor == b -> { clearSpaces(); spaceAnchor = b; spaceAt = now; showPredictions(b); return }
-            word != null && spaceAnchor == b && now - spaceAt <= SpaceRules.DOUBLE_SPACE_MS && SpaceRules.periodFits(b) -> {
+            word != null && !exactField && spaceAnchor == b && now - spaceAt <= SpaceRules.DOUBLE_SPACE_MS && SpaceRules.periodFits(b) -> {
                 clearSpaces()
                 if (replace(" ", ". ")) { resetTyping(); showPredictions(before()); inputDone(); return }
             }
@@ -475,7 +479,7 @@ internal class KeyboardEngine(
         val afterSwipe = swipeAnchor != null && swipeAnchor == b
         clearSpaces()
         val w = word
-        if (w != null && !symbols && canEndWord() && !afterSwipe) {
+        if (w != null && !symbols && !exactField && canEndWord() && !afterSwipe) {
             val old = w.token; val lang = w.decoder.model.language
             // Your text replacements first, whatever autocorrect is set to; they never offer an undo.
             val swap = w.textReplacement(b)
@@ -515,8 +519,9 @@ internal class KeyboardEngine(
         if (value == " ") { space(); return }
         val b = before()
         val mark = value.length == 1 && TypingWord.endsWord(value[0])
-        // A clause-ending mark takes the space a picked suggestion typed ("Hello,").
-        if (mark && value[0] in SpaceRules.CLAUSE_MARKS && pickedAnchor != null && pickedAnchor == b && b.endsWith(" ")) {
+        // A clause-ending mark takes the space a picked suggestion typed ("Hello,"); in a URL field, so does any mark
+        // that joins a word ("github." and "github/", never "github /").
+        if (value.length == 1 && SpaceRules.takesPickedSpace(value[0], exactField) && pickedAnchor != null && pickedAnchor == b && b.endsWith(" ")) {
             clearSpaces()
             if (replace(" ", value)) { resetTyping(); showPredictions(before()); inputDone(); return }
         }
@@ -525,7 +530,7 @@ internal class KeyboardEngine(
         val text = if (value.any { it in SpaceRules.JOINERS || it.isWhitespace() }) b else takeHeldSpace(b)
         clearSpaces()
         val w = word
-        if (mark && w != null && pad == null && canEndWord() && !afterSwipe) {
+        if (mark && w != null && pad == null && !exactField && canEndWord() && !afterSwipe) {
             val swap = w.textReplacement(text)
             if (swap != null && replace(swap.original, smartWord(swap.replacement) + value)) { resetTyping(); showPredictions(before()); inputDone(); return }
             if (feedback.autocorrect && correctingField && w.token.isNotEmpty() && endsWith(prefix + w.token)) {
@@ -704,7 +709,7 @@ internal class KeyboardEngine(
     class SwipeContext(val reader: SwipeReader, val previous: String?)
 
     /** Whether a letter touch may become a swipe now: the setting on, on the letters page of a word field
-     * (not a password, address, URL or number, where Hex reads no words), with its typing model loaded and not
+     * (not a password, email address or number, where Hex reads no words), with its typing model loaded and not
      * English's list standing in for a language without one. */
     val swipes get() = feedback.swipe && !secure && word?.standIn == false && !symbols && pad == null && target.connected
 
