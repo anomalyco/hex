@@ -689,7 +689,8 @@ enum DriverCandidate {
 /// Whether this build was published to a channel (stable or dev) rather than
 /// made on this machine. A published build requires the driver to carry
 /// Anomaly's Developer ID signature, and never installs the build script's
-/// cache output; debug, test, and `HEX_LOCAL_BUILD` builds keep installing
+/// cache output; a local build (debug, test, `HEX_LOCAL_BUILD`,
+/// `HEX_TEST_BUILD`, or an unmarked `-dev` checkout) keeps installing
 /// whatever the script produced, ad-hoc signed or another team's included.
 /// The dev channel is published and signed, so it is not local.
 fn shipped_build() -> bool {
@@ -708,12 +709,14 @@ fn verify_driver_signature(bundle: &std::path::Path) -> Result<(), String> {
     })
 }
 
-/// What `path` holds. A bundle copy must also carry Anomaly's signature in a
-/// shipped build; the cache only ever reaches a local build.
+/// What `path` holds. `verify_signature` also checks a bundle copy against
+/// Anomaly's requirement; only the install worker asks for it, so reading the
+/// bundled version never spawns `codesign`. The cache only ever reaches a
+/// local build.
 fn inspect_driver_candidate(
     location: DriverLocation,
     path: &std::path::Path,
-    shipped: bool,
+    verify_signature: bool,
 ) -> DriverCandidate {
     if !path.exists() {
         return DriverCandidate::Missing;
@@ -721,7 +724,7 @@ fn inspect_driver_candidate(
     if let Err(reason) = validate_driver_bundle(path) {
         return DriverCandidate::Invalid(reason);
     }
-    if shipped
+    if verify_signature
         && location == DriverLocation::Bundle
         && let Err(reason) = verify_driver_signature(path)
     {
@@ -798,24 +801,36 @@ fn select_driver_candidate(
     }
 }
 
-/// The driver bundle `install_driver_async` copies into the HAL folder, or why
-/// there is none Hex will install.
-fn bundled_driver_path() -> Result<PathBuf, String> {
-    let shipped = shipped_build();
-    let inspected = driver_candidate_paths()
+/// The candidate paths, inspected in the install's order.
+/// `verify_signatures` checks bundle copies against Anomaly's requirement (a
+/// `codesign` spawn); only the install worker sets it.
+fn driver_candidates(
+    verify_signatures: bool,
+) -> impl Iterator<Item = (DriverLocation, PathBuf, DriverCandidate)> {
+    driver_candidate_paths()
         .into_iter()
-        .map(|(location, path)| {
-            let candidate = inspect_driver_candidate(location, &path, shipped);
+        .map(move |(location, path)| {
+            let candidate = inspect_driver_candidate(location, &path, verify_signatures);
             (location, path, candidate)
-        });
-    select_driver_candidate(inspected, shipped)
+        })
 }
 
+/// The driver bundle `install_driver_async` copies into the HAL folder, or why
+/// there is none Hex will install. This is the one path that checks code
+/// signatures, on the install worker and before the admin prompt.
+fn bundled_driver_path() -> Result<PathBuf, String> {
+    let shipped = shipped_build();
+    select_driver_candidate(driver_candidates(shipped), shipped)
+}
+
+/// The bundled driver's version for the pane. It reads no code signature:
+/// `status()` asks for it on the UI thread, and `codesign` is a process
+/// spawn. Candidate order and the cache policy are the install's.
 fn bundled_driver_version() -> String {
     static CACHED: OnceLock<String> = OnceLock::new();
     CACHED
         .get_or_init(|| {
-            bundled_driver_path()
+            select_driver_candidate(driver_candidates(false), shipped_build())
                 .ok()
                 .and_then(|path| read_driver_bundle_version(&path))
                 .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
@@ -1768,7 +1783,7 @@ mod tests {
     }
 
     #[test]
-    fn only_a_local_build_accepts_a_driver_without_anomalys_signature() {
+    fn a_driver_without_anomalys_signature_is_refused_only_when_verified() {
         let root = std::env::temp_dir().join(format!("hex-mic-candidate-{}", std::process::id()));
         let bundle = root.join("HexMicrophone.driver");
         std::fs::create_dir_all(bundle.join("Contents/MacOS")).unwrap();
@@ -1783,8 +1798,9 @@ mod tests {
         )
         .unwrap();
 
-        // The bundle looks right and carries no signature at all: a local
-        // build installs it, while a shipped build's check refuses it.
+        // The bundle looks right and carries no signature at all: reading it
+        // without a signature check (a local build, and the version read on
+        // the UI thread) accepts it, while the install's check refuses it.
         assert_eq!(
             inspect_driver_candidate(DriverLocation::Bundle, &bundle, false),
             DriverCandidate::Installable

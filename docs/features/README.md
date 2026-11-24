@@ -1710,8 +1710,9 @@ or the driver installed; off, the pane is hidden  // fun.hex-microphone; macOS, 
 │   │   ├── Not installed -> Install -> stable and dev-channel builds check the bundled driver's code signature first
 │   │   │    (`app/driver-requirement.txt`: anomaly.hex.microphone.driver, Anomaly Developer ID team 5NZ4Q7NXJ4)
 │   │   │    -> macOS admin prompt -> copies HexMicrophone.driver + restarts coreaudiod
-│   │   │    (debug, test, and local HEX_LOCAL_BUILD builds may also install ~/Library/Caches/hex-mic's
-│   │   │     build output, ad-hoc signed included; a broken bundled copy fails instead of falling back to it)
+│   │   │    (debug, test, HEX_LOCAL_BUILD, HEX_TEST_BUILD, and unmarked -dev checkout builds may also
+│   │   │     install ~/Library/Caches/hex-mic's build output, ad-hoc signed included; a broken bundled
+│   │   │     copy fails instead of falling back to it)
 │   │   └── Inline state -> Installing… / Uninstalling… / Cancelled / Failed with reason
 ├── Live microphone capture -> Raw audio to Hex transcription (unmodified)
 │   ├── Source -> Hex's dictation microphone (System default follows the OS default, never Hex Microphone itself), never a meeting's second stream
@@ -1741,7 +1742,7 @@ and [rune_ui/fun.rs](../../src/rune_ui/fun.rs). Checks:
 `driver_plugin_loopback_streams_at_48khz_under_20ms_latency`,
 `driver_plist_version_and_status_mismatch_are_detected`,
 `a_shipped_build_installs_only_a_valid_bundle_copy`,
-`only_a_local_build_accepts_a_driver_without_anomalys_signature`,
+`a_driver_without_anomalys_signature_is_refused_only_when_verified`,
 `the_driver_requirement_pins_anomalys_team_and_the_driver_identifier`,
 `the_driver_requirement_compiles`, `osascript_failure_classifies_user_cancel_and_errors`,
 `audio_service_restart_interrupts_stream_and_recovers`,
@@ -1760,9 +1761,10 @@ automated check covers it, and no call app was tried.
 Proof limit: in-process `dlopen` loopback proves the compiled driver's 48 kHz
 `WriteMix`/`ReadInput` path at 5.33 ms (256 frames), not an interactive macOS
 admin authorization prompt or an active Slack/Zoom call. The candidate
-selection is tested without spawning `codesign`; the requirement's words are
-pinned against `app/update-requirement.txt`, and only `csreq`/an install on a
-signed build exercises the signature check itself. The pass-through
+selection is tested without spawning `codesign`; a test checks the
+requirement names the driver's `anomaly.hex.microphone.driver` identifier and
+the team ID `app/update-requirement.txt` pins, and only `csreq`/an install on
+a signed build exercises the signature check itself. The pass-through
 checks simulate callback timing and sizes; clock drift between the microphone
 and the virtual device is not corrected, so a skip or zero-fill click every
 minute or two remains possible.
