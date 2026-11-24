@@ -49,7 +49,7 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
 /// Hungarian, for the strings above.
 #[rustfmt::skip]
 pub(super) const HUNGARIAN: &[(&str, &str)] = &[
-    ("Dictate while annotating", "Diktálás jegyzetelés közben"),
+    ("Dictate while annotating", "Diktálás annotálás közben"),
     (
         "Dictate while a capture records: the text pastes as usual, and the capture keeps going",
         "Diktáljon, miközben egy felvétel készül: a szöveg a szokásos módon beillesztődik, a felvétel pedig folytatódik",

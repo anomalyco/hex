@@ -1,6 +1,7 @@
 //! Hungarian (hu) interface strings; not yet reviewed by a native speaker.
 //! Terms: dictation "diktálás", shortcut "billentyűparancs", Settings
-//! "Beállítások", meetings "megbeszélések", and vocabulary "szókincs".
+//! "Beállítások", meetings "megbeszélések", vocabulary "szókincs", Annotate
+//! "Annotálás", and Labs "Labor".
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -1249,7 +1250,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("to hear you", "hogy hallja Önt"),
     ("to follow your clicks", "hogy kövesse a kattintásait"),
     ("turn Hex on in System Settings", "kapcsolja be a Hexet a Rendszerbeállításokban"),
-    ("restart Hex to start annotating", "indítsa újra a Hexet a jegyzeteléshez"),
+    ("restart Hex to start annotating", "indítsa újra a Hexet az annotáláshoz"),
     ("All sessions", "Minden munkamenet"),
     ("always", "mindig"),
     ("taken back", "visszavonva"),
@@ -1452,7 +1453,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("If a shortcut is made only of Option, Command, Shift, Control, or Globe, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish", "Ha egy billentyűparancs csak Option, Command, Shift, Control vagy Globe billentyűkből áll, betű vagy szám nélkül, akkor az első másodperc után egy másik billentyű megnyomása vagy egy kattintás már nem fejezi be a diktálást; engedje el a befejezéshez"),
     ("Apps that use Hex's local API can ask for text with Global mode's replacements, corrections, rewriting, and transformations applied", "A Hex helyi API-ját használó alkalmazások a Globális mód cseréivel, javításaival, átfogalmazásával és átalakításaival ellátott szöveget kérhetnek"),
     ("A command such as hex dictation start --print gets the text back when a dictation ends, without pasting or copying it", "Egy ilyen parancs: hex dictation start --print, a diktálás végén visszaadja a szöveget, beillesztés és másolás nélkül"),
-    ("A finished Annotate capture copies as one zip file, without the video or audio", "Az elkészült annotálásfelvétel egy zip-fájlként másolódik, videó és hang nélkül"),
+    ("A finished Annotate capture copies as one zip file, without the video or audio", "Az elkészült Annotálás-rögzítés egy zip-fájlként másolódik, videó és hang nélkül"),
     ("Add a Stats button to History that summarizes the dictations you kept, with time saved against your typing speed, the hour you dictate most, a year-long heatmap, and all-time totals kept beyond History's retention (counts only, no text). The hex history stats command prints it too", "Statisztika gombot ad az Előzményekhez, amely összegzi a megtartott diktálásokat: a gépelési sebességéhez mért megspórolt időt, a leggyakoribb diktálási órát, egy éves hőtérképet és az Előzmények megőrzési idején túl is megmaradó összesített adatokat (csak darabszámok, szöveg nélkül). A hex history stats parancs is kiírja"),
     ("Stats on History", "Statisztika az előzményekben"),
     ("Show your dictation totals in a compact strip at the top of History. Needs Dictation stats.", "A diktálási összesítőit egy kompakt sávban mutatja az Előzmények tetején. Diktálási statisztika szükséges hozzá."),
