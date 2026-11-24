@@ -449,7 +449,7 @@ final class AccentCalloutView: UIView {
                 context.fillPath()
                 context.restoreGState()
             }
-            let attributes: [NSAttributedString.Key: Any] = [.font: Self.font, .foregroundColor: palette.textBase]
+            let attributes: [NSAttributedString.Key: Any] = [.font: Self.font, .foregroundColor: palette.keyText]
             let size = (option as NSString).size(withAttributes: attributes)
             (option as NSString).draw(
                 at: CGPoint(x: cell.midX - size.width / 2, y: cell.midY - size.height / 2),

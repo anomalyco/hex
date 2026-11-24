@@ -134,8 +134,8 @@ final class KeyboardKeyPlaneView: UIView {
                     // The docked iPad's two-symbol keys: the shifted one over the one typed, as Apple's.
                     let font = UIFont.systemFont(ofSize: 18, weight: .regular)
                     let half = labelFrame.height / 2
-                    drawText(upper, in: CGRect(x: labelFrame.minX, y: labelFrame.minY + 0.2 * half, width: labelFrame.width, height: half), font: font, color: palette.textBase)
-                    drawText(lower, in: CGRect(x: labelFrame.minX, y: labelFrame.midY - 0.2 * half, width: labelFrame.width, height: half), font: font, color: palette.textBase)
+                    drawText(upper, in: CGRect(x: labelFrame.minX, y: labelFrame.minY + 0.2 * half, width: labelFrame.width, height: half), font: font, color: palette.keyText)
+                    drawText(lower, in: CGRect(x: labelFrame.minX, y: labelFrame.midY - 0.2 * half, width: labelFrame.width, height: half), font: font, color: palette.keyText)
                     continue
                 }
                 if KeyboardFlicks.isEnabled, let flick = key.flick, layout.metrics.pad?.isDocked == true {
@@ -156,7 +156,7 @@ final class KeyboardKeyPlaneView: UIView {
                 if !isLandscape, layout.layer == .letters, label.first?.isLetter == true {
                     drawLetter(label, in: labelFrame, style: style, capital: isUpperLetter)
                 } else {
-                    drawText(label, in: labelFrame, font: style.font, color: palette.textBase, yOffset: style.yOffset)
+                    drawText(label, in: labelFrame, font: style.font, color: palette.keyText, yOffset: style.yOffset)
                 }
             case .space:
                 // Apple's space bar unshades as it becomes the trackpad.
@@ -167,7 +167,7 @@ final class KeyboardKeyPlaneView: UIView {
                     spaceLabel,
                     in: labelFrame,
                     font: .systemFont(ofSize: isLandscape ? 13 : 14.5, weight: .regular),
-                    color: palette.textMuted
+                    color: palette.keyTextMuted
                 )
             case .returnKey:
                 let isPressed = pressed.contains(.returnKey) && returnIsEnabled
@@ -185,7 +185,7 @@ final class KeyboardKeyPlaneView: UIView {
                 } else if activeAction {
                     .white
                 } else {
-                    palette.textBase
+                    palette.keyText
                 }
                 context.fillKeycap(frame, fill: fill, shadow: palette.keyShadow, radius: radius)
                 guard showGlyphs() else { continue }
@@ -211,12 +211,12 @@ final class KeyboardKeyPlaneView: UIView {
                     case .locked: "capslock.fill"
                     }
                 }
-                drawSymbol(symbol, in: labelFrame, color: palette.textBase, pointSize: isLandscape ? 18 : 19, yOffset: isLandscape ? -0.16 : 0.67)
+                drawSymbol(symbol, in: labelFrame, color: palette.keyText, pointSize: isLandscape ? 18 : 19, yOffset: isLandscape ? -0.16 : 0.67)
             case .delete:
                 let lit = pressed.contains(.delete)
                 context.fillKeycap(frame, fill: lit ? palette.functionHeldFill : palette.keyFill, shadow: palette.keyShadow, radius: radius)
                 guard showGlyphs() else { continue }
-                drawSymbol(lit ? "delete.left.fill" : "delete.left", in: labelFrame, color: palette.textBase, pointSize: isLandscape ? 18.5 : 19, yOffset: isLandscape ? -0.16 : 0.33)
+                drawSymbol(lit ? "delete.left.fill" : "delete.left", in: labelFrame, color: palette.keyText, pointSize: isLandscape ? 18.5 : 19, yOffset: isLandscape ? -0.16 : 0.33)
             case .layerSwitch:
                 let lit = pressed.contains(key.kind)
                 context.fillKeycap(frame, fill: lit ? palette.keyHeldFill : palette.keyFill, shadow: palette.keyShadow, radius: radius)
@@ -230,12 +230,12 @@ final class KeyboardKeyPlaneView: UIView {
                     : key.label == "#+=" ? LabelStyle.symbolsPageKey
                     : LabelStyle(size: 15.5, yOffset: 0)
                 style = style.scaled(by: labelScale)
-                drawText(key.label, in: labelFrame, font: style.font, color: palette.textBase, yOffset: style.yOffset)
+                drawText(key.label, in: labelFrame, font: style.font, color: palette.keyText, yOffset: style.yOffset)
             case .globe:
                 let lit = pressed.contains(.globe)
                 context.fillKeycap(frame, fill: lit ? palette.functionHeldFill : palette.keyFill, shadow: palette.keyShadow, radius: radius)
                 guard showGlyphs() else { continue }
-                drawSymbol("globe", in: labelFrame, color: palette.textBase, pointSize: isLandscape ? 16 : 19, yOffset: isLandscape ? 0 : -1)
+                drawSymbol("globe", in: labelFrame, color: palette.keyText, pointSize: isLandscape ? 16 : 19, yOffset: isLandscape ? 0 : -1)
             case .emoji:
                 let lit = pressed.contains(.emoji)
                 let fill = lit ? palette.functionHeldFill : palette.keyFill
@@ -246,7 +246,7 @@ final class KeyboardKeyPlaneView: UIView {
                 let lit = pressed.contains(.dismiss)
                 context.fillKeycap(frame, fill: lit ? palette.functionHeldFill : palette.keyFill, shadow: palette.keyShadow, radius: radius)
                 guard showGlyphs() else { continue }
-                drawSymbol("keyboard.chevron.compact.down", in: labelFrame, color: palette.textBase, pointSize: 19, yOffset: 0)
+                drawSymbol("keyboard.chevron.compact.down", in: labelFrame, color: palette.keyText, pointSize: 19, yOffset: 0)
             }
         }
     }
@@ -266,12 +266,17 @@ final class KeyboardKeyPlaneView: UIView {
         showGlyphs: () -> Bool
     ) {
         let digit = key.character.map { KeyboardNumberPad.letters(for: $0) != nil || $0.first?.isNumber == true } ?? false
-        if digit || pressed {
-            context.fillKeycap(frame, fill: pressed ? palette.keyHeldFill : palette.keyFill, shadow: digit ? palette.keyShadow : .clear, radius: radius)
+        // The digits are keys and take a theme; delete and the separator stand on iOS's glass,
+        // so they keep the system's grey and ink even pressed.
+        if digit {
+            context.fillKeycap(frame, fill: pressed ? palette.keyHeldFill : palette.keyFill, shadow: palette.keyShadow, radius: radius)
+        } else if pressed {
+            context.fillKeycap(frame, fill: palette.systemHeldFill, shadow: .clear, radius: radius)
         }
+        let ink = digit ? palette.keyText : palette.textBase
         guard showGlyphs() else { return }
         if key.kind == .delete {
-            drawSymbol(pressed ? "delete.left.fill" : "delete.left", in: frame, color: palette.textBase, pointSize: 20)
+            drawSymbol(pressed ? "delete.left.fill" : "delete.left", in: frame, color: ink, pointSize: 20)
             return
         }
         guard let text = key.character else { return }
@@ -279,11 +284,11 @@ final class KeyboardKeyPlaneView: UIView {
         let scale = frame.height / 48
         let letters = KeyboardNumberPad.letters(for: text)
         let lettersAttributes: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 10, weight: .semibold), .kern: 2.0, .foregroundColor: palette.textBase,
+            .font: UIFont.systemFont(ofSize: 10, weight: .semibold), .kern: 2.0, .foregroundColor: ink,
         ]
         if landscape {
             let digitSize = (text as NSString).size(withAttributes: [.font: digitFont])
-            drawText(text, in: frame, font: digitFont, color: palette.textBase)
+            drawText(text, in: frame, font: digitFont, color: ink)
             if let letters {
                 let size = (letters as NSString).size(withAttributes: lettersAttributes)
                 (letters as NSString).draw(
@@ -294,7 +299,7 @@ final class KeyboardKeyPlaneView: UIView {
             return
         }
         let digitFrame = CGRect(x: frame.minX, y: frame.minY + 19 * scale - frame.height / 2, width: frame.width, height: frame.height)
-        drawText(text, in: digitFrame, font: digitFont, color: palette.textBase)
+        drawText(text, in: digitFrame, font: digitFont, color: ink)
         guard let letters else { return }
         let size = (letters as NSString).size(withAttributes: lettersAttributes)
         // Kern adds space after the last letter too: centre the ink, not the advance.
@@ -327,12 +332,12 @@ final class KeyboardKeyPlaneView: UIView {
         let labelFont = UIFont.systemFont(ofSize: 21 * scale, weight: .regular)
         if p < 1 {
             let labelFrame = frame.offsetBy(dx: 0, dy: (11 + 8 * p) * scale)
-            drawText(labelText, in: labelFrame, font: labelFont, color: palette.textBase.withAlphaComponent(max(0, 1 - 2 * p)))
+            drawText(labelText, in: labelFrame, font: labelFont, color: palette.keyText.withAlphaComponent(max(0, 1 - 2 * p)))
         }
         let size = (13 + 8 * p) * scale
         let centre = frame.minY + (14.5 + (frame.height / scale / 2 - 14.5) * p) * scale
         let flickFrame = CGRect(x: frame.minX, y: centre - frame.height / 2, width: frame.width, height: frame.height)
-        let color = palette.textBase.withAlphaComponent(0.45 + 0.55 * min(1, 2 * p))
+        let color = palette.keyText.withAlphaComponent(0.45 + 0.55 * min(1, 2 * p))
         drawText(flick, in: flickFrame, font: UIFont.systemFont(ofSize: size, weight: .regular), color: color)
     }
 
@@ -353,7 +358,7 @@ final class KeyboardKeyPlaneView: UIView {
     /// Each key's letter also strays up to about 0.6 pt from that, in a pattern that differs from
     /// one iPhone to the next, so it isn't modelled.
     private func drawLetter(_ text: String, in frame: CGRect, style: LabelStyle, capital: Bool) {
-        let attributes: [NSAttributedString.Key: Any] = [.font: style.font, .foregroundColor: palette.textBase]
+        let attributes: [NSAttributedString.Key: Any] = [.font: style.font, .foregroundColor: palette.keyText]
         let size = (text as NSString).size(withAttributes: attributes)
         let nudge: CGFloat = traitCollection.displayScale >= 3 ? (capital ? 0 : 0.17) : (capital ? 0.23 : 0.55)
         (text as NSString).draw(
@@ -371,7 +376,7 @@ final class KeyboardKeyPlaneView: UIView {
     /// wide, its top 0.5 below the centre at the corners and 1.5 in the middle, its bottom an arc
     /// 6.5 down; teeth a 1 pt band 1 under its top, always the light colour.
     private func drawEmojiFace(in frame: CGRect, diameter: CGFloat, context: CGContext, keyFill: UIColor) {
-        let ink = palette.textBase.cgColor
+        let ink = palette.keyText.cgColor
         context.saveGState()
         context.translateBy(x: frame.midX, y: frame.midY - 0.67)
         let k = diameter / 19
@@ -385,7 +390,7 @@ final class KeyboardKeyPlaneView: UIView {
         mouth.addCurve(to: CGPoint(x: 0, y: 6.5), control1: CGPoint(x: w, y: 0.5 + 6 * kappa), control2: CGPoint(x: w * kappa, y: 6.5))
         mouth.addCurve(to: CGPoint(x: -w, y: 0.5), control1: CGPoint(x: -w * kappa, y: 6.5), control2: CGPoint(x: -w, y: 0.5 + 6 * kappa))
         mouth.closeSubpath()
-        if palette.isDark {
+        if palette.keysAreDark {
             // A solid face, its eyes and mouth cut through to the keycap.
             let face = CGMutablePath()
             face.addEllipse(in: CGRect(x: -9.5, y: -9.5, width: 19, height: 19))
@@ -415,7 +420,7 @@ final class KeyboardKeyPlaneView: UIView {
         context.addPath(mouth)
         context.addPath(mouth.copy(strokingWithWidth: 1.8, lineCap: .butt, lineJoin: .round, miterLimit: 10))
         context.clip(using: .evenOdd)
-        context.setFillColor(palette.isDark ? ink : keyFill.cgColor)
+        context.setFillColor(palette.keysAreDark ? ink : keyFill.cgColor)
         context.addPath(band)
         context.fillPath()
         context.restoreGState()
@@ -928,7 +933,7 @@ final class KeyCalloutView: UIView {
 
         let attributes: [NSAttributedString.Key: Any] = [
             .font: labelStyle.font,
-            .foregroundColor: palette.textBase,
+            .foregroundColor: palette.keyText,
         ]
         let shown = labelStyle.shows ?? label
         let size = (shown as NSString).size(withAttributes: attributes)

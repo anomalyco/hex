@@ -44,12 +44,44 @@
         }
       }
     },
+    "Color" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Color"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "颜色"
+          }
+        }
+      }
+    },
     "Couldn't translate the last dictation. If it keeps happening, reinstall Apple's Translate app." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "上一次听写未能翻译。如果反复出现，请重新安装 Apple 的“翻译” App。"
+          }
+        }
+      }
+    },
+    "Key colors" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Key colors"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按键颜色"
           }
         }
       }
@@ -806,6 +838,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "蓝牙"
+          }
+        }
+      }
+    },
+    "Burgundy" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Burgundy"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "勃艮第红"
           }
         }
       }
@@ -4557,22 +4605,6 @@
         }
       }
     },
-    "Keyboard themes" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Keyboard themes"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "键盘主题"
-          }
-        }
-      }
-    },
     "Navy" : {
       "localizations" : {
         "en" : {
@@ -4585,22 +4617,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "海军蓝"
-          }
-        }
-      }
-    },
-    "Theme" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Theme"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "主题"
           }
         }
       }
