@@ -77,7 +77,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         capture = MicCapture(LocalSpeech(applicationContext),
-            update = { next, reason -> phase = next; notice = speechNote(reason) },
+            // Home's Dictate bar too: onStop cancels, so the screen mustn't sleep mid-dictation.
+            update = { next, reason -> phase = next; notice = speechNote(reason); window.keepAwake(next) },
             meter = {}, insert = { text, _ -> transcript = text })
         page = prefs.getInt("page", 0).coerceIn(0, 3)
         // The keyboard's Settings tool opens Hex on its Keyboard page for the launch that carried the extra.

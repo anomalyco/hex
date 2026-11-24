@@ -3169,6 +3169,13 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   path receives none
 └── Proof limits: unit tests only; no CI compiles the iOS targets
 Android keyboard -> English, Spanish, German and Bokmål typing assistance
+├── Hands-free dictation keeps the screen on -> the keyboard's window and Home's add Android's
+│   `FLAG_KEEP_SCREEN_ON` (no permission) while a dictation is opening, listening or transcribing,
+│   and clear it once idle, so the display timing out can't hide the IME, whose leave cancels the
+│   recording, or take Home out of sight, which cancels it too. Idle again, the screen sleeps
+│   normally. Checks: it compiles and the existing unit tests pass (`./gradlew :app:compileDebugKotlin
+│   :app:testDebugUnitTest -x prepareSpeechModel` on OpenJDK 21 and Android SDK 36), but no automated
+│   test covers the flag, and nothing was tried on a device or emulator. The repo has no Android CI.
 ├── Symbol pages -> Gboard's ?123 and =< pages (Pixel 8 emulator, API 36), the same on every
 │   layout: ?123 draws 1–0, then @ # $ _ & - + ( ) /, then * " ' : ; ! ? between the page switch
 │   and delete, and =< draws ~ ` | • √ π ÷ × § Δ, then £ ¢ € ¥ ^ ° = { } \, then % © ® ™ ✓ [ ]
