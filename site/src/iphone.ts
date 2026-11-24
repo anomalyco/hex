@@ -135,7 +135,7 @@ export function renderAndroid(origin: string): string {
 <li>On your phone, tap <strong>Download Hex Preview</strong> above and open the file when it has downloaded.</li>
 <li>Android asks whether your browser or Files app may install apps. Tap <strong>Settings</strong>, turn on <strong>Allow from this source</strong>, then go back and tap <strong>Install</strong>.</li>
 <li>If Google Play Protect says <strong>App scan recommended</strong>, tap <strong>Scan app</strong>, then <strong>Install</strong> when it says the app looks safe.</li>
-<li>Open Hex Preview and tap <strong>Get started</strong>.</li>
+<li>Open Hex Preview and tap <strong>Allow microphone</strong>. Its button then names each next step.</li>
 <li>Allow the microphone, then turn on <strong>Hex Preview</strong> in Android's keyboard list and choose it as your keyboard. Hex downloads its speech model (190 MB) once.</li>
 <li>Try it: tap a text field, hold the Hex key, say a few words, then let go.</li>
 </ol>
