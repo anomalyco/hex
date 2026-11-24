@@ -3305,8 +3305,11 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
     Android's picker when there is no previous keyboard. It never switches away while text is still
     being transcribed. The full-keyboard subtype behaves exactly as before in every case.
     Checks: `VoiceInputTest` (the bar only with the lab on in the "voice" subtype) and
-    `python3 scripts/code-shape.py --check`; not compiled or run here (this machine has no Android
-    SDK or JDK 21, and the repo has no Android CI), and nothing was tried on a device or emulator.
+    `python3 scripts/code-shape.py --check`; also
+    `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin :app:assembleDebug` passed with 158 tests
+    (VoiceInputTest 2/2) in https://github.com/anomalyco/hex/actions/runs/45365728804, a one-off
+    GitHub-hosted run on Temurin JDK 21 and Android SDK 36 with NDK 27.2.12479018; the repo has no
+    Android CI, and nothing was tried on a device or emulator.
 Unmerged Windows / deferred features -> Not part of this map
 ```
 
