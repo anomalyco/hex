@@ -11,7 +11,7 @@ struct FullKeyboardPalette: Equatable {
     /// Light or dark, as iOS's glass behind the keyboard is: everything drawn on the glass
     /// follows it, with or without a theme.
     let isDark: Bool
-    /// Settings › Experiments › Keyboard themes: the keys' own colours. Automatic keeps
+    /// Settings › Experiments › Key colors: the keys' own colours. Automatic keeps
     /// iOS's light or dark keys; a theme changes the keys and nothing on the glass around them.
     let theme: KeyboardTheme
 
@@ -65,7 +65,10 @@ struct FullKeyboardPalette: Equatable {
     var systemPressedFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.28) : Self.rgb(0xD8DCE4) }
     /// A held key on the key plane, under its pop-up: Apple's grey (222 on white keys; 105 on
     /// dark ones, iOS 27.2).
-    var keyHeldFill: UIColor { colors?.keyHeldFill ?? (isDark ? UIColor(white: 1, alpha: 0.32) : Self.rgb(0xDEDEDE)) }
+    var keyHeldFill: UIColor { colors?.keyHeldFill ?? systemHeldFill }
+    /// Automatic's held key, for what's held on the glass rather than on a key: the number
+    /// pad's delete and separator.
+    var systemHeldFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.32) : Self.rgb(0xDEDEDE) }
     /// A held shift, delete, globe, emoji or return key: Apple's darker grey (197, 197, 201;
     /// 131 on dark keys).
     var functionHeldFill: UIColor { colors?.functionHeldFill ?? (isDark ? UIColor(white: 1, alpha: 0.44) : Self.rgb(0xC5C5C9)) }

@@ -266,12 +266,17 @@ final class KeyboardKeyPlaneView: UIView {
         showGlyphs: () -> Bool
     ) {
         let digit = key.character.map { KeyboardNumberPad.letters(for: $0) != nil || $0.first?.isNumber == true } ?? false
-        if digit || pressed {
-            context.fillKeycap(frame, fill: pressed ? palette.keyHeldFill : palette.keyFill, shadow: digit ? palette.keyShadow : .clear, radius: radius)
+        // The digits are keys and take a theme; delete and the separator stand on iOS's glass,
+        // so they keep the system's grey and ink even pressed.
+        if digit {
+            context.fillKeycap(frame, fill: pressed ? palette.keyHeldFill : palette.keyFill, shadow: palette.keyShadow, radius: radius)
+        } else if pressed {
+            context.fillKeycap(frame, fill: palette.systemHeldFill, shadow: .clear, radius: radius)
         }
+        let ink = digit ? palette.keyText : palette.textBase
         guard showGlyphs() else { return }
         if key.kind == .delete {
-            drawSymbol(pressed ? "delete.left.fill" : "delete.left", in: frame, color: palette.textBase, pointSize: 20)
+            drawSymbol(pressed ? "delete.left.fill" : "delete.left", in: frame, color: ink, pointSize: 20)
             return
         }
         guard let text = key.character else { return }
@@ -279,11 +284,11 @@ final class KeyboardKeyPlaneView: UIView {
         let scale = frame.height / 48
         let letters = KeyboardNumberPad.letters(for: text)
         let lettersAttributes: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 10, weight: .semibold), .kern: 2.0, .foregroundColor: palette.textBase,
+            .font: UIFont.systemFont(ofSize: 10, weight: .semibold), .kern: 2.0, .foregroundColor: ink,
         ]
         if landscape {
             let digitSize = (text as NSString).size(withAttributes: [.font: digitFont])
-            drawText(text, in: frame, font: digitFont, color: palette.textBase)
+            drawText(text, in: frame, font: digitFont, color: ink)
             if let letters {
                 let size = (letters as NSString).size(withAttributes: lettersAttributes)
                 (letters as NSString).draw(
@@ -294,7 +299,7 @@ final class KeyboardKeyPlaneView: UIView {
             return
         }
         let digitFrame = CGRect(x: frame.minX, y: frame.minY + 19 * scale - frame.height / 2, width: frame.width, height: frame.height)
-        drawText(text, in: digitFrame, font: digitFont, color: palette.textBase)
+        drawText(text, in: digitFrame, font: digitFont, color: ink)
         guard let letters else { return }
         let size = (letters as NSString).size(withAttributes: lettersAttributes)
         // Kern adds space after the last letter too: centre the ink, not the advance.
@@ -327,12 +332,12 @@ final class KeyboardKeyPlaneView: UIView {
         let labelFont = UIFont.systemFont(ofSize: 21 * scale, weight: .regular)
         if p < 1 {
             let labelFrame = frame.offsetBy(dx: 0, dy: (11 + 8 * p) * scale)
-            drawText(labelText, in: labelFrame, font: labelFont, color: palette.textBase.withAlphaComponent(max(0, 1 - 2 * p)))
+            drawText(labelText, in: labelFrame, font: labelFont, color: palette.keyText.withAlphaComponent(max(0, 1 - 2 * p)))
         }
         let size = (13 + 8 * p) * scale
         let centre = frame.minY + (14.5 + (frame.height / scale / 2 - 14.5) * p) * scale
         let flickFrame = CGRect(x: frame.minX, y: centre - frame.height / 2, width: frame.width, height: frame.height)
-        let color = palette.textBase.withAlphaComponent(0.45 + 0.55 * min(1, 2 * p))
+        let color = palette.keyText.withAlphaComponent(0.45 + 0.55 * min(1, 2 * p))
         drawText(flick, in: flickFrame, font: UIFont.systemFont(ofSize: size, weight: .regular), color: color)
     }
 
