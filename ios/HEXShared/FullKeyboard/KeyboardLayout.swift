@@ -41,6 +41,9 @@ nonisolated struct KeyboardKey: Equatable, Sendable {
     /// keys (, and !, . and ?), which show both (`KeyboardLayout.padPairs`), and the Dvorak
     /// punctuation keys (<, > and :).
     var shifted: String?
+    /// What pulling the key down types, drawn small above its label: Apple's key flicks on a
+    /// docked iPad (`KeyboardFlicks`); nil elsewhere.
+    var flick: String?
 
     var character: String? {
         if case .character(let text) = kind { return text }

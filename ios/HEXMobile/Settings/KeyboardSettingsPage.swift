@@ -72,6 +72,10 @@ struct KeyboardSettingsPage: View {
 
     private var settings: FullKeyboardSettings { FullKeyboardSettings() }
 
+    /// Hex is an iPhone app, so on an iPad its idiom says phone; the device's model doesn't.
+    /// There the keyboard has Apple's iPad rows: no number row, and key flicks instead.
+    private static let runsOnIPad = UIDevice.current.model.hasPrefix("iPad")
+
     private var fullKeyboard: Bool {
         _ = revision
         return settings.isEnabled
@@ -205,11 +209,19 @@ struct KeyboardSettingsPage: View {
 
                     SettingsDivider()
 
-                    SettingsToggleRow(
-                        title: String(localized: "Number row"),
-                        detail: String(localized: "Shows 1 to 0 above the letters"),
-                        isOn: binding(\.numberRow)
-                    )
+                    if Self.runsOnIPad {
+                        SettingsToggleRow(
+                            title: String(localized: "Key flicks"),
+                            detail: String(localized: "Pull a key down to type the character above its letter"),
+                            isOn: binding(\.keyFlicks)
+                        )
+                    } else {
+                        SettingsToggleRow(
+                            title: String(localized: "Number row"),
+                            detail: String(localized: "Shows 1 to 0 above the letters"),
+                            isOn: binding(\.numberRow)
+                        )
+                    }
                 }
             }
 

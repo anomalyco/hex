@@ -849,7 +849,8 @@ Spatial autocorrect, next-letter touch help or Swipe typing (a drag from a digit
 swipe), and a word holding digits is never corrected. Where iOS gives less height, the
 number row shrinks with the others (`KeyboardMetrics.fitted`). The iPad keeps Apple's rows
 for now: its docked keyboards would need Apple's own number row on the 13-inch and room
-above the strip on the others.
+above the strip on the others. There the switch is hidden (Hex is an iPhone app, so the page
+reads the device's model, not its idiom), and Key flicks takes its place.
 
 ## Web search fields (full keyboard)
 
@@ -1017,7 +1018,28 @@ two-symbol keys (§ | ~ … \ < > ! ? on #+=), and row 4 as the letters' with AB
 undo or redo key there, so ABC takes the room of Apple's undo and second ABC.
 German is QWERTZ without ü, ö and ä as Apple's iPad German is, holding them on u, o and a.
 Measured against Apple's iPad mini in English, German and French (every key within a point);
-the other languages' rows follow the same rule unmeasured. Docked, a held key's accents open
+the other languages' rows follow the same rule unmeasured. **Key flicks** (Settings ›
+Keyboard › Key flicks, on by default, shown only on an iPad; `settings.keyboardKeyFlicks`,
+App Group): as on Apple's mini and 11-inch keyboards, every docked letter key carries a small
+grey character over its letter, and pulling the key down types it (`KeyboardFlicks`): 1 to 0
+over row 1, @ # $ & * ( ) ' " over row 2 and % - + = / ; : over row 3 in English and German,
+AZERTY's own (@ # & " $ ( ! ) - *, % _ + = / ;) in French, and on the 123 page the #+= page's
+character over each symbol (€ over @, § over %); the two-symbol keys and the digits keep
+none. Other languages get the digits over a ten-letter row 1, and rows 2 and 3 only with
+English's nine and seven letters (Apple's own for them unmeasured). Drawn as Apple's (iPad
+mini, iPadOS 27.2): the character about 12.5 pt high and grey, 14.5 pt below the keycap's
+top, the letter 11 pt below the middle. Once the finger has gone down more than across, the
+key keeps the touch: no slide onto the key below and no swipe (a swipe still starts any other
+way); from 8 pt down the character slides to the middle, growing and darkening as the letter
+fades, all the way by 26 pt; let go past half way (17 pt) and it goes in as a typed character
+(a mark after a word corrects it, as a slide from 123 does; a digit is just a digit), short
+of it or pulled back, the letter. A rollover commits it the same way. With Reduce Motion the
+character takes the letter's place at once, half way. Holding first opens the key's accents,
+as before, and the pull then moves through them. Apple's own switch (Settings › General ›
+Keyboard › Enable Key Flicks) can't be read by a keyboard extension, hence Hex's. Typing
+logs mark it `ui flick` and `insert` `src: flick`. On the simulator Apple's keys animate
+the pull the same way but synthetic touches never made one type its character, so where it
+commits is Hex's choice, not a measurement. Never on the floating keyboard or an iPhone. Docked, a held key's accents open
 in Apple's iPad cells (below). The sizes are Apple's iPad key sizes (`KeyboardPadSize`,
 `KeyboardPadPlacement`, `KeyboardMetrics.pad`), measured beside Apple's keyboard in the iPadOS 27.2 simulator:
 docked, Apple's key heights, row pitch, gaps and side inset for the iPad mini (under 800 pt

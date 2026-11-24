@@ -1711,6 +1711,26 @@
         }
       }
     },
+    "Key flicks" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按键轻扫"
+          }
+        }
+      }
+    },
+    "Pull a key down to type the character above its letter" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "向下拉按键即可输入其字母上方的字符"
+          }
+        }
+      }
+    },
     "Key pop-ups" : {
       "localizations" : {
         "zh-Hans" : {
