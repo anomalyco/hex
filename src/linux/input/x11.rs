@@ -172,6 +172,7 @@ impl Backend {
             options
                 .second_dictation
                 .map(|key| (Shortcut::SecondDictation, key)),
+            options.model_switch.map(|key| (Shortcut::ModelSwitch, key)),
         ];
         for (shortcut, key) in requested.into_iter().flatten() {
             let mouse = mouse_button(&key.key);

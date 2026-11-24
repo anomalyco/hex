@@ -384,6 +384,9 @@ General > Dictation > Speech model, then Language below it   // setup.language-s
 │   └── Choose it -> ChooseModel(model, model's default: English, else its first)
 │       ├── Warmed on silence without the vocabulary prompt; a warm-up that
 │       │   stops at its output limit still counts as warm (same as the menu bar)
+│       ├── On Linux, another choice while a download or load runs -> that
+│       │   work is canceled and the new choice queued; it starts by itself
+│       │   once the old worker exits
 │       └── Saved -> Language row: "<Model> doesn't support Japanese, so the
 │           language changed to English" until the next choice
 ├── Language -> Select of the saved model's languages (alphabetical by name,
@@ -850,6 +853,15 @@ General > Shortcut mode -> Hold or double-tap (default), Hold, Tap, Double-tap
 Dictate without processing (Output pane; unbound)   // dictation.md
   -> records and pastes as heard, skipping Output; History kind Raw
   -> a shortcut on the dictation chord is cleared when settings load or save
+
+Labs > Model switch shortcut (off)      // labs.md; swaps the dictation model with a saved other one, and back
+  -> General shows "Model switch shortcut" and "Other model" (installed model + language)
+  -> macOS: a hotkey action beside Paste Last (suppression::model_switch_action)
+  -> Windows: its own hook trigger and HotkeyAction::ModelSwitch
+  -> Linux: an X11 grab or the shortcuts portal's "Model switch shortcut"
+  -> hex model switch                      // the same swap from a terminal
+  -> the host's installed-only preparation saves both selections on commit
+  -> the same choice again is a no-op; a failed preparation keeps the active model
 
 Labs > Second dictation shortcut (off)   // labs.md; issue 627
   -> General shows "Second dictation shortcut" under Shortcut (unbound, clearable)

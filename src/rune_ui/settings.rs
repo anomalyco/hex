@@ -882,6 +882,7 @@ pub(super) fn input_source_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                     title: &source.name,
                     description: None,
                     choice: mapped,
+                    empty_label: tr("Don't switch"),
                     model_menu: Menu::InputSourceModel(index),
                     language_menu: Menu::InputSourceLanguage(index),
                 },
@@ -985,6 +986,7 @@ pub(super) fn hotkey_key(target: ShortcutTarget) -> &'static str {
         #[cfg(all(hex_capture, target_os = "macos"))]
         ShortcutTarget::CaptureReplay => "capture-replay-hotkey",
         ShortcutTarget::SecondDictation => "second-dictation-hotkey",
+        ShortcutTarget::ModelSwitch => "model-switch-hotkey",
         // Settings keeps at most four rows, so every one has its own key.
         #[cfg(target_os = "macos")]
         ShortcutTarget::ExtraDictation(index) => EXTRA_HOTKEY_KEYS

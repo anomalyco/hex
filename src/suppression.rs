@@ -1247,6 +1247,23 @@ fn paste_action(input: InputEvent, hotkeys: RuntimeHotkeys) -> Option<HotkeyActi
         .map(|_| HotkeyAction::PasteLast)
 }
 
+/// Labs › Model switch shortcut, matched like Paste Last: its press is Hex's
+/// and nothing else acts on it.
+fn model_switch_action(input: InputEvent, hotkeys: RuntimeHotkeys) -> Option<HotkeyAction> {
+    let InputEvent::Key {
+        code,
+        down: true,
+        flags,
+    } = input
+    else {
+        return None;
+    };
+    hotkeys
+        .model_switch
+        .filter(|binding| binding.matches_key_press(code, flags))
+        .map(|_| HotkeyAction::ModelSwitch)
+}
+
 #[cfg(test)]
 fn paste_action_on(input: InputEvent, paste_key_code: u16) -> Option<HotkeyAction> {
     let mut hotkeys = RuntimeHotkeys::default();

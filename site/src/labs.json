@@ -123,6 +123,19 @@
       "title": "Switch model with keyboard language"
     },
     {
+      "added": "2026-11-24",
+      "group": "models",
+      "groupTitle": "Models",
+      "id": "model-switch-shortcut",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "One shortcut swaps dictation to another model and language, and pressing it again swaps back",
+      "title": "Model switch shortcut"
+    },
+    {
       "added": "2026-10-30",
       "group": "shortcuts",
       "groupTitle": "Shortcuts",

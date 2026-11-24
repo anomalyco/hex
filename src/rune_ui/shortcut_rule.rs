@@ -41,6 +41,7 @@ pub(super) fn slot_of(target: ShortcutTarget) -> HotkeySlot {
         #[cfg(all(hex_capture, target_os = "macos"))]
         ShortcutTarget::CaptureReplay => HotkeySlot::CaptureReplay,
         ShortcutTarget::SecondDictation => HotkeySlot::SecondDictation,
+        ShortcutTarget::ModelSwitch => HotkeySlot::ModelSwitch,
         #[cfg(target_os = "macos")]
         ShortcutTarget::ExtraDictation(index) => HotkeySlot::ExtraDictation(index),
         #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -68,6 +69,10 @@ pub(crate) fn shortcut_rule(slot: HotkeySlot, binding: &HotkeyBinding) -> Result
         // OS, so Windows and Linux require a key and macOS keeps accepting a
         // shortcut without one.
         HotkeySlot::SecondDictation => ShortcutTarget::SecondDictation,
+        // Labs › Model switch shortcut: its own shortcut's rules on every
+        // OS. Every OS matches it as a key press, so the recorder requires a
+        // key on macOS too.
+        HotkeySlot::ModelSwitch => ShortcutTarget::ModelSwitch,
         // Labs › More dictation shortcuts (macOS): each row records under its
         // own shortcut's rules where they exist, the dictation shortcut's
         // everywhere else.

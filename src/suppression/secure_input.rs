@@ -104,6 +104,8 @@ enum Target {
     Capture,
     CaptureReplay,
     PasteLast,
+    /// Labs › Model switch shortcut.
+    ModelSwitch,
     #[cfg_attr(not(hex_capture), allow(dead_code))]
     Screenshot,
     #[cfg_attr(not(hex_capture), allow(dead_code))]
@@ -116,6 +118,7 @@ impl Target {
             Self::Capture => "annotate",
             Self::CaptureReplay => "annotate-replay",
             Self::PasteLast => "paste-last",
+            Self::ModelSwitch => "model-switch",
             Self::Screenshot => "screenshot",
             Self::ScreenshotRecord => "screenshot-record",
         }
@@ -163,6 +166,7 @@ fn chords(hotkeys: RuntimeHotkeys, screenshots: [Option<RuntimeHotkey>; 2]) -> V
         (Target::Capture, hotkeys.capture),
         (Target::CaptureReplay, hotkeys.capture_replay),
         (Target::PasteLast, hotkeys.paste_last),
+        (Target::ModelSwitch, hotkeys.model_switch),
         (Target::Screenshot, screenshot),
         (Target::ScreenshotRecord, screenshot_record),
     ];

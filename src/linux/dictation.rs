@@ -125,6 +125,8 @@ impl Drop for OutputWorker {
 /// dictation records, so changing one never stops listening.
 pub(crate) enum ListenerUpdate {
     Settings(Box<AppSettings>),
+    /// A model switch failed; show it beside the HUD (Labs › Failure notices).
+    Notice(String),
     /// A model the host prepared, swapped in once no transcription is pending.
     Transcriber {
         selection: crate::transcription::models::TranscriptionSelection,
@@ -521,6 +523,7 @@ pub(crate) fn run(
         for update in updates.try_iter() {
             match update {
                 ListenerUpdate::Settings(next) => next_settings = Some(*next),
+                ListenerUpdate::Notice(message) => indicator.failed(message),
                 ListenerUpdate::Transcriber {
                     selection,
                     transcriber,
@@ -922,6 +925,17 @@ pub(crate) fn run(
                             return Err(eyre!("dictation worker is unavailable"));
                         }
                     }
+                }
+                // Labs › Model switch shortcut: ask the host that owns model
+                // preparation to swap, installed only. A capture, an accepted
+                // job, or a client's dictation keeps the model it started with.
+                HotkeyEvent::ModelSwitch
+                    if !capture.is_recording()
+                        && !start_pending
+                        && finishing.is_none()
+                        && !service.is_active() =>
+                {
+                    crate::transcription::other_model::request();
                 }
                 HotkeyEvent::Cancel if capture.is_recording() => {
                     capture.cancel();

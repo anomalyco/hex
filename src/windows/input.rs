@@ -210,6 +210,9 @@ pub enum HotkeyAction {
     Finish,
     Cancel,
     PasteLast,
+    /// Labs › Model switch shortcut: swap the dictation model with the saved
+    /// other one. It starts no capture.
+    ModelSwitch,
     /// The Annotate key went down, and came up (`CaptureUp`).
     Capture,
     CaptureUp,
@@ -269,6 +272,11 @@ struct CallbackState {
     second: Option<WindowsHotkey>,
     second_trigger_vk: Option<u32>,
     second_trigger_down: bool,
+    /// Labs › Model switch shortcut, while the lab is on and it is bound.
+    model_switch: Option<WindowsHotkey>,
+    model_switch_vk: Option<u32>,
+    /// The model switch key went down while Hex held it; its release is ours.
+    model_switch_down: bool,
     annotate: Option<WindowsHotkey>,
     annotate_trigger_vk: Option<u32>,
     annotate_trigger_down: bool,
@@ -472,6 +480,7 @@ impl WindowsHotkeyMonitor {
         raw: Option<WindowsHotkey>,
         terminal_paste: Option<WindowsHotkey>,
         second: Option<WindowsHotkey>,
+        model_switch: Option<WindowsHotkey>,
         annotate: Option<WindowsHotkey>,
         cancel: Option<WindowsHotkey>,
         double_tap_enabled: bool,
@@ -491,6 +500,7 @@ impl WindowsHotkeyMonitor {
         let terminal_paste_trigger_vk =
             chord_virtual_key(terminal_paste.as_ref(), "Terminal paste shortcut")?;
         let second_trigger_vk = chord_virtual_key(second.as_ref(), "Second dictation shortcut")?;
+        let model_switch_vk = chord_virtual_key(model_switch.as_ref(), "Model switch shortcut")?;
         let annotate_trigger_vk = chord_virtual_key(annotate.as_ref(), "Annotate")?;
         let label = binding.label();
         let (event_sender, events) = mpsc::sync_channel(EVENT_CAPACITY);
@@ -513,6 +523,9 @@ impl WindowsHotkeyMonitor {
             second,
             second_trigger_vk,
             second_trigger_down: false,
+            model_switch,
+            model_switch_vk,
+            model_switch_down: false,
             annotate,
             annotate_trigger_vk,
             annotate_trigger_down: false,
@@ -1020,6 +1033,28 @@ fn process_button(
                 } else if is_up {
                     state.paste_trigger_down = false;
                 }
+            } else if state.model_switch_vk == Some(vk)
+                && (state.model_switch_down
+                    || (is_down
+                        && state
+                            .model_switch
+                            .as_ref()
+                            .is_some_and(|binding| state.holds(binding))))
+            {
+                // Labs › Model switch shortcut: its key is Hex's whatever
+                // records, so a modifier it shares with a modifier-only
+                // dictation never reaches the app as a chord. The swap itself
+                // waits until no capture records.
+                suppressed = true;
+                state.mask_release |= is_down && holds_menu(state.model_switch.as_ref());
+                if is_down && !state.model_switch_down {
+                    state.model_switch_down = true;
+                    if state.capture.is_idle() && !state.dirty {
+                        send_event(state, HotkeyAction::ModelSwitch, time);
+                    }
+                } else if is_up {
+                    state.model_switch_down = false;
+                }
             } else if state.trigger_vk == Some(vk) {
                 if is_down {
                     if state.trigger_down {
@@ -1421,6 +1456,9 @@ mod tests {
             second: None,
             second_trigger_vk: None,
             second_trigger_down: false,
+            model_switch: None,
+            model_switch_vk: None,
+            model_switch_down: false,
             annotate: None,
             annotate_trigger_vk: None,
             annotate_trigger_down: false,
@@ -2361,5 +2399,61 @@ mod tests {
         assert_eq!(state.press(true, true, 1_000), None);
         assert_eq!(state.release(true, 1_040), None);
         assert!(!state.is_locked());
+    }
+    /// Labs › Model switch shortcut shares a modifier with a modifier-only
+    /// dictation (Right Alt holds the capture, Alt+M switches). Pressed while
+    /// that capture records, the switch key is Hex's own and must neither
+    /// reach the app nor end the capture; the modifier's release still
+    /// finishes it.
+    #[test]
+    fn the_model_switch_key_never_ends_a_modifier_only_capture() {
+        let _state = state_lock();
+        let right_alt = WindowsHotkey {
+            alt: Some(ModifierSide::Right),
+            ..WindowsHotkey::default()
+        };
+        let (mut state, events) = callback_state_value(right_alt, false);
+        let m = virtual_key("m").expect("m is a key");
+        state.model_switch = Some(WindowsHotkey {
+            alt: Some(ModifierSide::Either),
+            key: Some("m".into()),
+            ..WindowsHotkey::default()
+        });
+        state.model_switch_vk = Some(m);
+        // A modifier-only binding starts the capture on its modifier alone.
+        state.trigger_vk = None;
+        *CALLBACK_STATE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(state);
+
+        let alt = u32::from(VK_RMENU);
+        let alt_held = |key: u16| key == VK_RMENU;
+
+        // Right Alt alone starts the modifier-only capture.
+        let _ = process_button(alt, LeftControl::Other, true, 1_000, alt_held);
+        assert_eq!(
+            events.try_recv().map(|event| event.action),
+            Ok(HotkeyAction::Start)
+        );
+
+        // Alt+M while it records: swallowed, and nothing is sent.
+        let switch = process_button(m, LeftControl::Other, true, 1_100, alt_held);
+        assert_eq!(switch.disposition, Disposition::Suppress);
+        assert!(events.try_recv().is_err());
+        let release = process_button(m, LeftControl::Other, false, 1_150, alt_held);
+        assert_eq!(release.disposition, Disposition::Suppress);
+        assert!(events.try_recv().is_err());
+
+        // Its modifier still finishes the capture.
+        let _ = process_button(alt, LeftControl::Other, false, 1_200, |_| false);
+        assert_eq!(
+            events.try_recv().map(|event| event.action),
+            Ok(HotkeyAction::Finish)
+        );
+
+        CALLBACK_STATE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
     }
 }

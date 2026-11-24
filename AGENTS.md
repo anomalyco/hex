@@ -46,7 +46,7 @@ a stable build with the driver keeps its pane for Uninstall alone), Playground
 picker and History, `labs.paste_last_picker`), Live text, Live chapters,
 Vocabulary files, Words on screen, Learn from corrections
 (macOS), Rewrite reads nearby text (macOS), Switch model with keyboard
-language (#216), Mouse shortcuts (#209, macOS), Also pause the browser (#301,
+language (#216), Model switch shortcut, Mouse shortcuts (#209, macOS), Also pause the browser (#301,
 macOS), Share dictation shortcut (#176, Windows), Free memory when idle
 (#442), Smaller model files (macOS), Terminal paste (Windows), Terminal
 paste shortcut (Windows, Linux), Stop phrase, Signature, Clipboard phrase, Hold through other keys

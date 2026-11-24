@@ -746,6 +746,8 @@ fn rows(ui: &Ui) -> Vec<Row> {
     if caps.keyboard_model_switching {
         rows.push(row(Feature::KeyboardModelSwitching, Some(&KEYBOARD)));
     }
+    // One key swaps the dictation model with the other saved one, and back.
+    rows.push(row(Feature::ModelSwitchShortcut, Some(&KEYBOARD)));
     // Every OS's paster can leave a dictation on the clipboard; only macOS's
     // and Windows' can skip the paste.
     rows.push(row(Feature::KeepOnClipboard, None));
@@ -1050,6 +1052,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::LearnFromCorrections => "lab-learn-from-corrections",
         Feature::TerminalPaste => "lab-terminal-paste",
         Feature::KeyboardModelSwitching => "lab-keyboard-model-switching",
+        Feature::ModelSwitchShortcut => "lab-model-switch-shortcut",
         Feature::MouseShortcuts => "lab-mouse-shortcuts",
         Feature::PauseBrowser => "lab-pause-browser",
         Feature::ShareShortcut => "lab-share-shortcut",

@@ -460,6 +460,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
                 shutdown,
                 (!setup_ready).then_some(recognition_start),
                 listener_failure,
+                indicator.clone(),
             )
         })?;
     // A closed window is only ordered out, and AppKit keeps it on the Space

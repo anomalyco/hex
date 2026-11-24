@@ -261,6 +261,48 @@ impl Pump {
                         }),
                 ))
             }
+            ControlCommand::ModelSwitch => {
+                use crate::transcription::other_model;
+                let settings = match load() {
+                    Ok(settings) => settings,
+                    Err(error) => return Some(error.into()),
+                };
+                let capture = match capture_snapshot(&runtime) {
+                    Ok(capture) => capture,
+                    Err(error) => return Some(error.into()),
+                };
+                if capture.recording.is_some() || capture.pending_jobs > 0 {
+                    return Some(ControlReply::error(
+                        "busy",
+                        "Hex is dictating; try again once it finishes",
+                    ));
+                }
+                let plan = match other_model::planned(&settings) {
+                    Ok(Some(plan)) => plan,
+                    Ok(None) => {
+                        return Some(ControlReply::unchanged(format!(
+                            "Already using {} · {}",
+                            crate::transcription::models::definition(settings.transcription.model)
+                                .name,
+                            crate::transcription::models::language_name(
+                                &settings.transcription.language
+                            )
+                        )));
+                    }
+                    Err(error) => return Some(switch_error_reply(error)),
+                };
+                if let Err(error) = other_model::installed(&plan) {
+                    return Some(switch_error_reply(error));
+                }
+                match runtime.send(Request::SwapModel) {
+                    Ok(()) => Some(ControlReply::done(format!(
+                        "Switching to {} · {}; Hex keeps the current model if it fails",
+                        crate::transcription::models::definition(plan.to.model).name,
+                        crate::transcription::models::language_name(&plan.to.language)
+                    ))),
+                    Err(error) => Some(ControlReply::error("unavailable", error.to_string())),
+                }
+            }
             ControlCommand::ModelCancel => {
                 let preparing = runtime
                     .published()
@@ -628,6 +670,19 @@ fn background(
     });
 }
 
+/// A refused `hex model switch`, with the code the CLI prints.
+fn switch_error_reply(error: crate::transcription::other_model::SwitchError) -> ControlReply {
+    let code = if matches!(
+        &error,
+        crate::transcription::other_model::SwitchError::NotInstalled(_)
+    ) {
+        "not-installed"
+    } else {
+        "unavailable"
+    };
+    ControlReply::error(code, error.message())
+}
+
 fn load() -> Result<AppSettings, ControlError> {
     AppSettings::load().map_err(|error| {
         ControlError::new("internal", format!("couldn't read settings: {error:#}"))
@@ -971,6 +1026,8 @@ mod tests {
             ),
             app_switcher: crate::transcription::app_model_switching::Switcher::new(false, None),
             automatic_preparation: None,
+            pending_swap: None,
+            hud: crate::dictation::indicator::channel().0,
             preparation,
             recognition_start: None,
             listener_failure: Default::default(),

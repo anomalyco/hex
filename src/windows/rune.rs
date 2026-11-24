@@ -71,6 +71,9 @@ pub(crate) enum Request {
         language: String,
     },
     CancelModel,
+    /// Labs › Model switch shortcut, or `hex model switch`: swap the
+    /// dictation model with the saved other one, installed only.
+    SwapModel,
     /// The window saved `settings.json`; adopt it.
     ReloadSettings,
     /// The tray's Enable / Disable Hex.
@@ -97,6 +100,9 @@ pub(crate) enum ShortcutTarget {
     /// Labs › Second dictation shortcut: another key that dictates exactly
     /// like the dictation shortcut.
     SecondDictation,
+    /// Labs › Model switch shortcut: swaps the dictation model with the
+    /// saved other one.
+    ModelSwitch,
     /// Toggle mode's cancel shortcut.
     Cancel,
 }
@@ -603,6 +609,10 @@ impl crate::control::host::Host for WindowsControl {
             model: selection.model,
             language: selection.language,
         })
+    }
+
+    fn model_switch(&self) -> std::result::Result<(), ControlError> {
+        self.send(Request::SwapModel)
     }
 
     fn cancel_model(&self) {
