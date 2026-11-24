@@ -90,7 +90,10 @@ internal class KeyboardEngine(
     private val models = HashMap<String, SpatialDecoder>()
     private var word: TypingWord? = null
     private var editor: EditorInfo? = null
-    private var ordinaryField = false
+    // Whether the field reads words at all (suggestions, next words, swipes, tap correction) and whether it
+    // also autocorrects on space and punctuation: a field asking for no suggestions keeps the words, not the fix.
+    private var wordField = false
+    private var correctingField = false
     // A field that keeps its own text (TYPE_NULL, a terminal's): nothing can be read back or edited as text, so
     // delete, the cursor and Enter go in as key events.
     private var keyEventEditor = false
@@ -145,7 +148,8 @@ internal class KeyboardEngine(
         editor = attribute
         val field = FieldTyping.of(attribute.inputType, attribute.imeOptions)
         secure = field.secure
-        ordinaryField = field.ordinary
+        wordField = field.words
+        correctingField = field.corrects
         keyEventEditor = field.keyEvents
         learnsTyping = field.learns
         resetTyping(); word = null; clearSpaces(); forgetSwipe()
@@ -271,13 +275,13 @@ internal class KeyboardEngine(
         val language = typing ?: layoutLanguage().layoutCode
         val standIn = typing == null
         val active = word
-        if (ordinaryField && keepWord && active != null && active.standIn == standIn && active.decoder.model.language == language &&
+        if (wordField && keepWord && active != null && active.standIn == standIn && active.decoder.model.language == language &&
             active.spatial == feedback.spatial && active.token.isNotEmpty() && endsWith(prefix + active.token)) {
             active.addsCapitals = feedback.autoCapitalize
             showPlane(); showSuggestions(active); return
         }
         resetTyping()
-        word = if (ordinaryField) {
+        word = if (wordField) {
             try {
                 TypingWord(models.getOrPut(language) { loadDecoder(language).also(::loadPersonal) }, feedback.spatial)
                     .also {
@@ -298,7 +302,8 @@ internal class KeyboardEngine(
         if (w != null && w.token.isNotEmpty()) {
             surface?.suggestions(Suggestion.withEmoji(w.strip(autocorrect = false).map(::shown), emojiFor(w)))
             // A stand-in's strip already is the finished one: nothing there changes after the pause.
-            if (!feedback.autocorrect || w.standIn || !canEndWord()) return
+            // A field that asked for no suggestions of its own gets no fix: space leaves its words alone.
+            if (!feedback.autocorrect || !correctingField || w.standIn || !canEndWord()) return
             val token = w.token
             pendingChip = Runnable {
                 pendingChip = null
@@ -354,7 +359,7 @@ internal class KeyboardEngine(
     }
     /** The letter a touch near a key's edge types: the key it landed on, or a neighbour within
      * TypingWord.REACH dp ([near], distances in dp) that the word list makes clearly likelier next. Only
-     * while autocorrect is on in an ordinary text field on the letters page, and never with caps lock. */
+     * while autocorrect is on in a word field on the letters page, and never with caps lock. */
     fun likelierLetter(hit: Char, near: Map<Char, Double>, keys: Collection<Char>): Char {
         val w = word ?: return hit
         if (w.standIn || near.isEmpty() || symbols || shift.locked || !feedback.autocorrect || !target.connected) return hit
@@ -468,7 +473,7 @@ internal class KeyboardEngine(
             // Your text replacements first, whatever autocorrect is set to; they never offer an undo.
             val swap = w.textReplacement(b)
             if (swap != null && replace(swap.original, smartWord(swap.replacement) + " ")) { resetTyping(); afterSpace(now); return }
-            if (feedback.autocorrect && old.isNotEmpty() && endsWith(prefix + old)) {
+            if (feedback.autocorrect && correctingField && old.isNotEmpty() && endsWith(prefix + old)) {
                 val fix = w.finish(' ', point, grid, ::smartWord)
                 if (fix != null && !feedback.blocked(lang, fix.original, fix.replacement) &&
                     replace(fix.original, fix.replacement + " ")) {
@@ -516,7 +521,7 @@ internal class KeyboardEngine(
         if (mark && w != null && !symbols && canEndWord() && !afterSwipe) {
             val swap = w.textReplacement(text)
             if (swap != null && replace(swap.original, smartWord(swap.replacement) + value)) { resetTyping(); showPredictions(before()); inputDone(); return }
-            if (feedback.autocorrect && w.token.isNotEmpty() && endsWith(prefix + w.token)) {
+            if (feedback.autocorrect && correctingField && w.token.isNotEmpty() && endsWith(prefix + w.token)) {
                 val fix = w.finish(value[0], commit = ::smartWord)
                 if (fix != null && !feedback.blocked(w.decoder.model.language, fix.original, fix.replacement) &&
                     replace(fix.original, fix.replacement + value)) { resetTyping(); showPredictions(before()); inputDone(); return }
@@ -691,7 +696,7 @@ internal class KeyboardEngine(
     /** What a swipe here is read with: the layout's reader and the word before. */
     class SwipeContext(val reader: SwipeReader, val previous: String?)
 
-    /** Whether a letter touch may become a swipe now: the setting on, on the letters page of an ordinary text field
+    /** Whether a letter touch may become a swipe now: the setting on, on the letters page of a word field
      * (not a password, address, URL or number, where Hex reads no words), with its typing model loaded and not
      * English's list standing in for a language without one. */
     val swipes get() = feedback.swipe && !secure && word?.standIn == false && !symbols && pad == null && target.connected

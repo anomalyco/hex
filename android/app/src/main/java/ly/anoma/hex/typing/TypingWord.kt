@@ -197,7 +197,7 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
      * border types e). [near] gives each neighbouring letter's distance from the touch to its touch
      * area, in dp (iOS's points), only those under [REACH]; [keys] is every letter on the keyboard,
      * so a letter without a key of its own counts as its base letter's (é as e). Only while
-     * autocorrect is on in an ordinary text field, never with caps lock; the keyboard decides that. */
+     * autocorrect is on in a word field, never with caps lock; the keyboard decides that. */
     fun likelierKey(before: String, hit: Char, near: Map<Char, Double>, keys: Collection<Char>): Char {
         if (standIn || near.isEmpty()) return hit
         val token = currentToken(before)
