@@ -1777,6 +1777,28 @@ fn history_stats_strip_fits_the_smallest_window_in_russian() {
     }
 }
 
+/// The agent card's request field fits beside its actions in the smallest
+/// window: a long translation wraps inside the card instead of running
+/// under Open file and Edit with agent.
+#[test]
+fn output_agent_card_keeps_a_long_request_beside_its_actions() {
+    let mut rt = runtime("output", true, MIN_WINDOW_SIZE);
+    // The examples cycle in a shuffled order; the first is the longest one.
+    rt.state.output.order = Default::default();
+    crate::desktop::i18n::apply(Some("hu"));
+    rt.invalidate();
+    settle(&mut rt);
+    let (actions, _) = rt.presented("actions").expect("the agent card's actions");
+    for key in ["example-title", "example-request"] {
+        let (rect, _) = rt.presented(key).unwrap_or_else(|| panic!("{key} draws"));
+        assert!(
+            rect[0] + rect[2] <= actions[0],
+            "{key} ends before the actions: {rect:?} before {actions:?}"
+        );
+    }
+    crate::desktop::i18n::apply(None);
+}
+
 /// The full Stats button and dialog stay exactly as they were with the strip
 /// on, and the strip stays behind them.
 #[test]
