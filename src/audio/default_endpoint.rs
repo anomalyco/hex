@@ -112,14 +112,17 @@ fn run(requests: Receiver<Request>) {
     }
     .inspect_err(|error| tracing::warn!(%error, "could not read the default audio endpoint"))
     .ok();
-    if let Some(enumerator) = &enumerator {
-        watch_default(enumerator);
-    }
+    let Some(enumerator) = enumerator else {
+        for Request { reply, .. } in requests {
+            let _ = reply.send(None);
+        }
+        return;
+    };
+    // The registration does not keep its client alive, so this thread holds
+    // both the enumerator and the client for as long as it answers requests.
+    let _notifications = watch_default(&enumerator);
     for Request { flow, reply } in requests {
-        let id = enumerator
-            .as_ref()
-            .and_then(|enumerator| endpoint_id_on(enumerator, flow));
-        let _ = reply.send(id);
+        let _ = reply.send(endpoint_id_on(&enumerator, flow));
     }
 }
 
@@ -132,11 +135,16 @@ fn endpoint_id_on(enumerator: &IMMDeviceEnumerator, flow: EDataFlow) -> Option<S
 }
 
 /// Registers the client that bumps the route generations on any endpoint
-/// change. It is kept alive by the caller for as long as the thread answers.
-fn watch_default(enumerator: &IMMDeviceEnumerator) {
+/// change, returning it so the caller can keep it alive: the enumerator is
+/// not guaranteed to hold a reference while the callback is registered.
+fn watch_default(enumerator: &IMMDeviceEnumerator) -> Option<IMMNotificationClient> {
     let client: IMMNotificationClient = EndpointNotifications.into();
-    if let Err(error) = unsafe { enumerator.RegisterEndpointNotificationCallback(&client) } {
-        tracing::warn!(%error, "could not watch the default audio endpoints");
+    match unsafe { enumerator.RegisterEndpointNotificationCallback(&client) } {
+        Ok(()) => Some(client),
+        Err(error) => {
+            tracing::warn!(%error, "could not watch the default audio endpoints");
+            None
+        }
     }
 }
 
