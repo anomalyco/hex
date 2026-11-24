@@ -49,3 +49,19 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
     ("Its summary and chapters will be removed. Summarize again for a fresh one.", "Сводка и разделы будут удалены. Запустите сводку снова, чтобы создать новые."),
     ("Lines could not be deleted.", "Не удалось удалить строки."),
 ];
+
+/// Hungarian, for the strings above.
+#[rustfmt::skip]
+pub(super) const HUNGARIAN: &[(&str, &str)] = &[
+    ("Delete transcript lines", "Átirat sorainak törlése"),
+    ("Select lines in a saved meeting transcript and delete them. Summaries, copies, and the Markdown file use what's left", "Jelöljön ki sorokat egy mentett megbeszélés átiratában, és törölje őket. Az összefoglalók, a másolatok és a Markdown-fájl a maradékot használják"),
+    ("Select lines", "Sorok kijelölése"),
+    ("{} lines selected", "{} sor kijelölve"),
+    ("1 line selected", "1 sor kijelölve"),
+    ("Delete lines…", "Sorok törlése…"),
+    ("Delete {} lines", "{} sor törlése"),
+    ("Delete 1 line", "1 sor törlése"),
+    ("Select the lines to delete.", "Jelölje ki a törölni kívánt sorokat."),
+    ("Its summary and chapters will be removed. Summarize again for a fresh one.", "Az összefoglalója és a fejezetei törlődnek. Új összefoglalóhoz futtassa újra az összegzést."),
+    ("Lines could not be deleted.", "A sorokat nem sikerült törölni."),
+];

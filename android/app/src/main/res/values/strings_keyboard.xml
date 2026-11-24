@@ -4,6 +4,11 @@
     <string name="keyboard_hint_hold">Hold Hex to talk</string>
     <string name="keyboard_hint_password">Dictation off in password fields</string>
     <string name="keyboard_hint_microphone">Allow the microphone in Hex</string>
+    <!-- Labs › Keyboard › Voice-only mode's bar. -->
+    <string name="voice_only_hint">Say what you want to type</string>
+    <string name="voice_only_listening">Listening…</string>
+    <string name="voice_only_unavailable">Dictation can’t start here</string>
+    <string name="voice_only_back">Back to your keyboard</string>
     <!-- Dictation's notes, the same sentences MicCapture sends (HexKeyboard.speechNote). -->
     <string name="keyboard_note_microphone">Microphone unavailable. Try again.</string>
     <string name="keyboard_note_transcribe">Couldn’t transcribe. Try again.</string>
@@ -11,6 +16,9 @@
     <string name="keyboard_note_model">Speech model unavailable</string>
     <!-- A recording reached its 1-minute limit: its text is inserted with this note. -->
     <string name="keyboard_note_minute">Stopped at 1 minute</string>
+    <!-- Labs › Faster English dictation: a shortage of memory sent an English dictation to the standard model. At most
+         once a day. -->
+    <string name="keyboard_note_low_memory">Phone was low on memory, so this one used standard dictation.</string>
     <string name="keyboard_cancel_dictation">Cancel dictation</string>
     <string name="keyboard_finish_dictation">Finish dictation</string>
     <string name="keyboard_undo_dictation">Undo dictation</string>

@@ -1777,6 +1777,29 @@ fn history_stats_strip_fits_the_smallest_window_in_russian() {
     }
 }
 
+/// The agent card's request field fits beside its actions in the smallest
+/// window: a long translation wraps inside the card instead of running
+/// under Open file and Edit with agent.
+#[test]
+fn output_agent_card_keeps_a_long_request_beside_its_actions() {
+    let mut rt = runtime("output", true, MIN_WINDOW_SIZE);
+    // The examples cycle in a shuffled order; pin the default order so the
+    // first example shows.
+    rt.state.output.order = Default::default();
+    crate::desktop::i18n::apply(Some("hu"));
+    rt.invalidate();
+    settle(&mut rt);
+    let (actions, _) = rt.presented("actions").expect("the agent card's actions");
+    for key in ["example-title", "example-request"] {
+        let (rect, _) = rt.presented(key).unwrap_or_else(|| panic!("{key} draws"));
+        assert!(
+            rect[0] + rect[2] <= actions[0],
+            "{key} ends before the actions: {rect:?} before {actions:?}"
+        );
+    }
+    crate::desktop::i18n::apply(None);
+}
+
 /// The full Stats button and dialog stay exactly as they were with the strip
 /// on, and the strip stays behind them.
 #[test]
@@ -3609,6 +3632,276 @@ fn a_found_model_moves_on_without_a_download_and_back_returns_to_it() {
     assert!(rt.find("model-list").is_some());
 }
 
+/// A model this build doesn't have: an import that isn't here, which
+/// `available()` refuses the way it refuses Parakeet Ultra with its Labs
+/// switch off.
+fn unavailable_model() -> TranscriptionModelId {
+    use crate::transcription::models::CustomModelId;
+    TranscriptionModelId::Custom(
+        CustomModelId::parse("custom-0123456789abcdef").expect("a custom id"),
+    )
+}
+
+/// A model file the service is preparing: a fresh import.
+fn imported_model() -> TranscriptionModelId {
+    use crate::transcription::models::CustomModelId;
+    TranscriptionModelId::Custom(
+        CustomModelId::parse("custom-fedcba9876543210").expect("a custom id"),
+    )
+}
+
+/// A pick onboarding refuses: the saved selection can't run, so the tour
+/// marks it failed and the page names it.
+fn refused_pick(rt: &mut Runtime<Ui>) {
+    rt.update(|ui, _| {
+        let selection = TranscriptionSelection {
+            model: unavailable_model(),
+            language: "en".into(),
+        };
+        ui.settings.transcription = selection.clone();
+        ui.found.choice = Some(selection);
+    });
+    rt.update(|ui, _| {
+        onboarding::input(
+            ui,
+            crate::desktop::onboarding::Input::Grant(crate::desktop::onboarding::SetupItem::Model),
+        )
+    });
+    settle(rt);
+}
+
+/// A found file this build can't run is dropped from the scan's answer: it
+/// never fills the model step, and never holds the recommended download.
+#[test]
+fn a_found_model_this_build_cannot_run_is_not_offered() {
+    let unavailable = || {
+        let mut found = super::found::fixture_catalog(TranscriptionModelId::ParakeetV3);
+        found.catalog = Some(unavailable_model());
+        found
+    };
+    let open = |models: Vec<crate::transcription::found_models::Found>| {
+        let mut ui = portal_fixture();
+        ui.found.models = models;
+        onboarding::fixture(&mut ui, crate::desktop::onboarding::Step::Setup, false);
+        onboarding_kit::live::fixture(&mut ui, Page::Download);
+        runtime_for(ui, false, PANE_SIZE)
+    };
+
+    // What the scan finds on its own still lists it, and holds ours back.
+    let rt = open(vec![unavailable()]);
+    assert!(texts(&rt).contains(&"Choose a speech model".to_owned()));
+    assert!(sent(&rt).is_empty(), "the download waits for the list");
+
+    // The window keeps only what this build can run: no list, and the
+    // recommended model downloads by itself.
+    let rt = open(super::found::keep_usable(vec![unavailable()]));
+    assert!(!texts(&rt).contains(&"Choose a speech model".to_owned()));
+    assert!(
+        matches!(
+            sent(&rt),
+            [Request::ChooseModel { model, .. }] if *model == rt.state.settings.transcription.model
+        ),
+        "{:?}",
+        sent(&rt)
+    );
+}
+
+/// A pick that can't run says why on the page instead of waiting at "0 of
+/// N MB" for a download that never starts.
+#[test]
+fn an_unavailable_pick_fails_the_page_instead_of_downloading_forever() {
+    let mut ui = portal_fixture();
+    onboarding::fixture(&mut ui, crate::desktop::onboarding::Step::Setup, false);
+    onboarding_kit::live::fixture(&mut ui, Page::Download);
+    let mut rt = runtime_for(ui, false, PANE_SIZE);
+    assert!(matches!(sent(&rt), [Request::ChooseModel { .. }]));
+    let before = sent(&rt).len();
+
+    // The list's pick isn't a model this build has.
+    rt.update(|ui, _| {
+        let selection = TranscriptionSelection {
+            model: unavailable_model(),
+            language: "en".into(),
+        };
+        ui.settings.transcription = selection.clone();
+        ui.found.choice = Some(selection);
+        ui.found.picked = Some(1);
+    });
+    rt.update(|ui, _| {
+        onboarding::input(
+            ui,
+            crate::desktop::onboarding::Input::Grant(crate::desktop::onboarding::SetupItem::Model),
+        )
+    });
+    settle(&mut rt);
+
+    assert_eq!(sent(&rt).len(), before, "nothing is asked of the service");
+    assert_eq!(
+        rt.state.tour.as_ref().unwrap().flow.view().model,
+        crate::desktop::onboarding::ItemStatus::Failed
+    );
+    assert!(rt.state.found.picked.is_none(), "the pick is cleared");
+    assert!(
+        rt.state.error.is_none(),
+        "the reason belongs to the pick, not Settings' status: {:?}",
+        rt.state.error
+    );
+    let shown = texts(&rt);
+    assert!(
+        shown.iter().any(|text| text.ends_with("is unavailable")),
+        "{shown:?}"
+    );
+    assert!(!shown.contains(&"0 of 731 MB".to_owned()), "{shown:?}");
+    assert!(shown.contains(&"Try again".to_owned()), "{shown:?}");
+}
+
+/// Try again after a refused pick forgets that pick's reason: the next
+/// failure is the one this attempt earned, not the old one.
+#[test]
+fn retrying_after_a_refused_pick_shows_the_next_download_failure() {
+    let mut ui = portal_fixture();
+    onboarding::fixture(&mut ui, crate::desktop::onboarding::Step::Setup, false);
+    onboarding_kit::live::fixture(&mut ui, Page::Download);
+    let mut rt = runtime_for(ui, false, PANE_SIZE);
+    let before = sent(&rt).len();
+
+    // A pick that can't run: the page names it.
+    refused_pick(&mut rt);
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text.ends_with("is unavailable")),
+        "the refused pick says why"
+    );
+
+    // Try again asks for the saved model and clears the old reason.
+    tap(&mut rt, "retry-download");
+    assert!(
+        rt.state.found.error.is_none(),
+        "the pick's reason goes with it"
+    );
+    assert_eq!(sent(&rt).len(), before + 1, "the retry asks again");
+
+    // That attempt fails: its own failure is what the page names.
+    rt.update(|ui, _| {
+        if let Some(view) = &mut ui.view {
+            view.transcription.preparing = None;
+            view.transcription.error =
+                Some("Couldn't reach huggingface.co: the connection was reset".into());
+        }
+    });
+    settle(&mut rt);
+    let shown = texts(&rt);
+    assert!(
+        shown
+            .iter()
+            .any(|text| text.contains("the connection was reset")),
+        "{shown:?}"
+    );
+    assert!(
+        !shown.iter().any(|text| text.ends_with("is unavailable")),
+        "the old pick's reason must not come back: {shown:?}"
+    );
+    assert!(shown.contains(&"Try again".to_owned()), "{shown:?}");
+}
+
+/// A pick the tour still reports failed keeps its actions even when the
+/// reason itself is gone (the file chooser that clears nothing, a message
+/// someone dismissed): no page is left with no way forward.
+#[test]
+fn a_failed_pick_keeps_its_actions_without_a_reason() {
+    let mut ui = portal_fixture();
+    onboarding::fixture(&mut ui, crate::desktop::onboarding::Step::Setup, false);
+    onboarding_kit::live::fixture(&mut ui, Page::Download);
+    let mut rt = runtime_for(ui, false, PANE_SIZE);
+    refused_pick(&mut rt);
+    assert!(
+        rt.find("retry-download").is_some(),
+        "the refused pick offers Try again"
+    );
+
+    rt.update(|ui, _| ui.found.error = None);
+    settle(&mut rt);
+    assert!(
+        rt.state.tour.as_ref().unwrap().flow.pick_failed(),
+        "the tour still reports the pick"
+    );
+    assert!(rt.find("retry-download").is_some(), "Try again stays");
+    assert!(rt.find("use-file").is_some(), "Use a model file… stays");
+    assert!(
+        rt.find("continue-without-model").is_some(),
+        "Continue without a model stays"
+    );
+    assert!(
+        !texts(&rt).contains(&"0 of 731 MB".to_owned()),
+        "the page never reads as a download: {:?}",
+        texts(&rt)
+    );
+}
+
+/// A model file being prepared replaces the refused pick: no stale reason and
+/// no Try again over the load, which would cancel the import.
+#[test]
+fn a_model_being_prepared_hides_the_refused_pick() {
+    let mut ui = portal_fixture();
+    onboarding::fixture(&mut ui, crate::desktop::onboarding::Step::Setup, false);
+    onboarding_kit::live::fixture(&mut ui, Page::Download);
+    let mut rt = runtime_for(ui, false, PANE_SIZE);
+    refused_pick(&mut rt);
+    assert!(
+        rt.find("retry-download").is_some(),
+        "the refused pick offers Try again"
+    );
+
+    // The import the person chose is loading; the window's settings catch up
+    // only once it is ready.
+    rt.update(|ui, _| {
+        if let Some(view) = &mut ui.view {
+            view.transcription.preparing = Some(imported_model());
+        }
+    });
+    settle(&mut rt);
+    assert!(
+        rt.find("retry-download").is_none(),
+        "no Try again over the load"
+    );
+    assert!(
+        !texts(&rt)
+            .iter()
+            .any(|text| text.ends_with("is unavailable")),
+        "the refused pick's reason stays gone: {:?}",
+        texts(&rt)
+    );
+    assert!(
+        rt.find("download-failed").is_none(),
+        "the page is not a failure while the file prepares"
+    );
+}
+
+/// Try again after a plain download failure asks for that model once.
+#[test]
+fn try_again_after_a_network_failure_asks_once() {
+    let mut ui = portal_fixture();
+    onboarding::fixture(&mut ui, crate::desktop::onboarding::Step::Setup, false);
+    onboarding_kit::live::fixture(&mut ui, Page::Download);
+    let mut rt = runtime_for(ui, false, PANE_SIZE);
+    let before = sent(&rt).len();
+    rt.update(|ui, _| {
+        if let Some(view) = &mut ui.view {
+            view.transcription.preparing = None;
+            view.transcription.error =
+                Some("Couldn't reach huggingface.co: the connection was reset".into());
+        }
+    });
+    settle(&mut rt);
+    assert!(
+        rt.find("retry-download").is_some(),
+        "the failure offers Try again"
+    );
+    tap(&mut rt, "retry-download");
+    assert_eq!(sent(&rt).len(), before + 1, "{:?}", sent(&rt));
+}
+
 #[test]
 fn a_failed_download_names_its_cause_and_offers_a_model_file() {
     let mut rt = runtime("onboarding", false, PANE_SIZE);
@@ -4151,6 +4444,98 @@ fn the_trust_prompt_lists_what_a_config_reaches_until_it_is_allowed() {
         Some("0".repeat(64).as_str())
     );
     assert!(rt.find("allow-transformations").is_none());
+}
+
+/// The agent card keeps its text clear of its buttons when a longer
+/// interface language makes the title and example wrap (#2711). 536 pt is
+/// the narrowest window the report shows, below the window's usual minimum.
+#[test]
+fn hungarian_output_keeps_the_agent_cards_text_clear_of_its_buttons() {
+    // The language is per test thread; put English back for whichever test
+    // this thread runs next, even if an assertion below fails.
+    struct RestoreEnglish;
+    impl Drop for RestoreEnglish {
+        fn drop(&mut self) {
+            crate::desktop::i18n::apply(Some("en"));
+        }
+    }
+    let _english = RestoreEnglish;
+    let case = |scene: &str, width: f32| {
+        let mut rt = runtime(scene, true, (width, 500.0));
+        crate::desktop::i18n::apply(Some("hu"));
+        rt.invalidate();
+        settle(&mut rt);
+        rt
+    };
+
+    let overlaps = |a: [f32; 4], b: [f32; 4]| {
+        a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3]
+    };
+
+    // At the usual window width the actions share the text's row, so their
+    // left edge is the line the copy must not cross.
+    let wide = case("output", 980.0);
+    let title = element(&wide, "example-title").rect;
+    let request = element(&wide, "example-request").rect;
+    let open = element(&wide, "open-settings-file").rect;
+    let edit = element(&wide, "edit-with-agent").rect;
+    let card = element(&wide, "agent-card").rect;
+    assert!(
+        title[0] + title[2] <= open[0],
+        "the title runs under Open file: {title:?} vs {open:?}"
+    );
+    assert!(
+        request[0] + request[2] <= open[0],
+        "the example runs under Open file: {request:?} vs {open:?}"
+    );
+    assert!(
+        edit[0] + edit[2] <= card[0] + card[2],
+        "Edit with agent leaves the card: {edit:?} vs {card:?}"
+    );
+
+    let output = case("output", 536.0);
+    let title = element(&output, "example-title").rect;
+    let request = element(&output, "example-request").rect;
+    let open = element(&output, "open-settings-file").rect;
+    let edit = element(&output, "edit-with-agent").rect;
+    let card = element(&output, "agent-card").rect;
+    for (name, text) in [("title", title), ("example", request)] {
+        assert!(
+            !overlaps(text, open),
+            "the {name} runs under Open file: {text:?} vs {open:?}"
+        );
+        assert!(
+            !overlaps(text, edit),
+            "the {name} runs under Edit with agent: {text:?} vs {edit:?}"
+        );
+    }
+    assert!(
+        edit[0] + edit[2] <= card[0] + card[2],
+        "Edit with agent leaves the card: {edit:?} vs {card:?}"
+    );
+
+    // After Edit with agent, the same title is a plain line instead of the
+    // animated one, so it must wrap on its own.
+    let copied = case("output-open", 536.0);
+    let title = copied
+        .elements()
+        .into_iter()
+        .find(|e| !e.exiting && e.path.contains("agent-card") && e.path.ends_with("/copy/title"))
+        .map(|e| e.rect)
+        .expect("the copied title");
+    let open = element(&copied, "open-settings-file").rect;
+    let edit = element(&copied, "edit-with-agent").rect;
+    let card = element(&copied, "agent-card").rect;
+    for (button, name) in [(open, "Open file"), (edit, "Edit with agent")] {
+        assert!(
+            !overlaps(title, button),
+            "the copied title runs under {name}: {title:?} vs {button:?}"
+        );
+    }
+    assert!(
+        edit[0] + edit[2] <= card[0] + card[2],
+        "Edit with agent leaves the card: {edit:?} vs {card:?}"
+    );
 }
 
 /// Labs › Transform typed text: Output's Typed text section and its

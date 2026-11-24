@@ -34,8 +34,10 @@ list starts at the top. The pages, one file each in `HEXMobile/Settings/`
   Into field when Type as I speak's is on, In bar when only Show what I say's is, Off when
   neither; picking one writes both, so the two together, which 1.0.4 allowed, keep working
   until another is picked); then Clean up what I say and Custom vocabulary (its list below
-  the switch); and last Speech model in keyboard (its status below it), Keep mic warm and
-  Microphone.
+  the switch); and last Speech model in keyboard, then **Model**: **English** (the
+  default) or **Multilingual** (`SpeechModelChoice`, from Experiments until 2026-11-24, on
+  iPhones with 6 GB or more), with what the picked one means and its status below,
+  Keep mic warm and Microphone.
 - **Keyboard:** Keyboard, **Full** (the default) or **Dictation bar** (stored
   as `FullKeyboardSettings.isEnabled`, App Group key `experiments.fullKeyboard`
   from when the full keyboard was an experiment: unset or true is Full, false
@@ -47,14 +49,14 @@ list starts at the top. The pages, one file each in `HEXMobile/Settings/`
   autocorrect below it while it's on), Swipe typing, Suggest swear words and Vocabulary (Hex's
   custom vocabulary list, how many words it holds); under **Feedback**, Key pop-ups (Full
   only), Haptics (the dictation bar uses it too; Strength below it while it's on: Light, the
-  default until you choose, Medium or Strong; choosing one plays a key tick at it) and Emoji (Clear emoji history while it's on,
-  which asks first); and a field to try the keyboard in.
+  default until you choose, Medium or Strong; choosing one plays a key tick at it), Emoji key,
+  Emoji suggestions (Full only; the strip's emoji, with or without the key) and Clear emoji
+  history while either is on, which asks first; and a field to try the keyboard in.
 - **Privacy:** "Everything stays on this iPhone", Learn how I type (what it
   learned below the switch), and under **Advanced**, Record typing logs (off
   by default) with its Typing logs viewer while it's on; last, under **Feedback**, what
   Send feedback sends and when (only in a build with a report key).
-- **Experiments**, in four groups: **Dictation**: Multilingual model (Parakeet),
-  Two-language dictation, Voice isolation and Clean up with Apple Intelligence;
+- **Experiments**, in four groups: **Dictation**: Two-language dictation, Voice isolation and Clean up with Apple Intelligence;
   **Languages**: Hinglish (Hindi in Latin letters), Greeklish (Greek in Latin letters),
   Korean keyboard (두벌식), Swipe typing in more languages and German spatial autocorrect
   (greyed, its value kept, unless Autocorrect and Spatial autocorrect are on); **Keyboard
@@ -73,7 +75,7 @@ added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
 `model-card-<waiting|downloading|ready>` (Home's speech model card, with English
 dictation and no keyboard limit, so nothing downloads). Each settings scene writes
 its page's switches to the App Group: off by default, on with `-on`; switches that are
-on by default (Spatial autocorrect, Swipe typing, Emoji) stay on.
+on by default (Spatial autocorrect, Swipe typing, Emoji key, Emoji suggestions) stay on.
 `-end` starts the page scrolled to the bottom. `settings-privacy-confirm`
 opens Record typing logs' consent dialog. `--experiment-keyboard-themes` turns
 Keyboard themes on, and `--keyboard-theme automatic|black|white|navy|forest|ember`

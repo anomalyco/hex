@@ -26,3 +26,12 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
         "Записывайте диктовку через обработку голоса Apple, чтобы режим микрофона мог включить «Изоляцию голоса» и уменьшить фоновый шум.",
     ),
 ];
+
+/// Hungarian, for the strings above.
+pub(super) const HUNGARIAN: &[(&str, &str)] = &[
+    ("Voice isolation", "Hangizoláció"),
+    (
+        "Record dictation through Apple's voice processing so Mic Mode can turn on Voice Isolation and cut background noise.",
+        "Rögzítse a diktálást az Apple hangfeldolgozásán keresztül, hogy a Mikrofon mód bekapcsolhassa a hangizolációt és csökkenthesse a háttérzajt.",
+    ),
+];

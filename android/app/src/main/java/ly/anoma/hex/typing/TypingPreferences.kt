@@ -40,7 +40,8 @@ internal class TypingPreferences(context: Context) {
     var numberRow: Boolean
         get() = prefs.getBoolean(NUMBER_ROW, false)
         set(value) { prefs.edit().putBoolean(NUMBER_ROW, value).apply() }
-    /** Labs › Keyboard › Local currency: the phone's own currency on the 123 page instead of $. Off by default. */
+    /** Labs › Keyboard › Local currency: the phone's own currency on the ?123 page and d's held symbol
+     * instead of $. Off by default. */
     var localCurrency: Boolean
         get() = prefs.getBoolean(LOCAL_CURRENCY, false)
         set(value) { prefs.edit().putBoolean(LOCAL_CURRENCY, value).apply() }
@@ -57,6 +58,21 @@ internal class TypingPreferences(context: Context) {
     var smartQuotes: Boolean
         get() = prefs.getBoolean(SMART_QUOTES, false)
         set(value) { prefs.edit().putBoolean(SMART_QUOTES, value).apply() }
+    /** Labs › Keyboard › Delete swiped words letter by letter: delete right after a swipe removes one letter
+     * instead of taking the word back, as iPhone Hex's experiment (#2323). Off by default. */
+    var swipeDeleteLetters: Boolean
+        get() = prefs.getBoolean(SWIPE_DELETE_LETTERS, false)
+        set(value) { prefs.edit().putBoolean(SWIPE_DELETE_LETTERS, value).apply() }
+    /** Labs › Keyboard › Password manager suggestions: Android's inline autofill suggestions in the
+     * strip, off by default. Hex shows the service's own chips and never reads them. */
+    var passwordManagerSuggestions: Boolean
+        get() = prefs.getBoolean(PASSWORD_MANAGER_SUGGESTIONS, false)
+        set(value) { prefs.edit().putBoolean(PASSWORD_MANAGER_SUGGESTIONS, value).apply() }
+    /** Labs › Keyboard › Voice-only mode: a "voice" subtype other keyboards switch to for dictation
+     * alone, off by default. */
+    var voiceOnly: Boolean
+        get() = prefs.getBoolean(VOICE_ONLY, false)
+        set(value) { prefs.edit().putBoolean(VOICE_ONLY, value).apply() }
 
     // Remember only explicit rejection of this exact pair in this language; never save typed text.
     private fun pair(language: String, original: String, replacement: String): String {
@@ -79,5 +95,8 @@ internal class TypingPreferences(context: Context) {
         const val EMOJI_SUGGESTIONS = "emojiSuggestions"
         const val KEYBOARD_TOOLS = "keyboardTools"
         const val SMART_QUOTES = "smartQuotes"
+        const val SWIPE_DELETE_LETTERS = "swipeDeleteLetters"
+        const val PASSWORD_MANAGER_SUGGESTIONS = "passwordManagerSuggestions"
+        const val VOICE_ONLY = "voiceOnly"
     }
 }

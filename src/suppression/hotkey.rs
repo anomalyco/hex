@@ -16,6 +16,9 @@ pub enum HotkeyAction {
     /// or Escape while a Hold capture is held.
     CancelShortcut,
     PasteLast,
+    /// Labs › Model switch shortcut: swap the dictation model with the saved
+    /// other one. It records nothing and ends no capture.
+    ModelSwitch,
 }
 
 impl HotkeyAction {
@@ -820,6 +823,19 @@ impl DictationHotkey {
         if fresh_key_down
             && let Some(action) = paste_action(event, crate::app_settings::runtime_hotkeys())
         {
+            self.state = State::Dirty;
+            return Some(action);
+        }
+        if fresh_key_down
+            && let Some(action) = model_switch_action(event, crate::app_settings::runtime_hotkeys())
+        {
+            // While a capture records, the tap already keeps this key from the
+            // app; the press switches nothing and leaves the capture state
+            // alone, so a Hold release still finishes and a Locked capture
+            // still finishes on the next press.
+            if self.is_recording() {
+                return None;
+            }
             self.state = State::Dirty;
             return Some(action);
         }

@@ -56,6 +56,8 @@ impl RunningListener {
 enum AutomaticSwitch {
     Keyboard,
     App,
+    /// Labs › Model switch shortcut: the preparation swaps both selections.
+    Swap,
 }
 
 /// The Windows runtime: owns the listener, model preparation, OpenCode
@@ -95,6 +97,8 @@ pub(crate) struct WindowsDesktopHost {
     input_sources: Option<crate::keyboard_input_sources::Watcher>,
     /// Which automatic switcher owns the in-flight preparation, if any.
     automatic_preparation: Option<AutomaticSwitch>,
+    /// The selection a running swap preparation swaps back to.
+    pending_swap: Option<crate::app_settings::KeyboardModelChoice>,
     updater: crate::updater::Updater,
     /// The newest foreground window of another app, where the tray's Paste
     /// last dictation goes once its menu has taken the foreground.
@@ -276,6 +280,7 @@ impl WindowsDesktopHost {
             app_switcher,
             input_sources: None,
             automatic_preparation: None,
+            pending_swap: None,
             updater: crate::updater::Updater::start(),
             foreground: ForeignWindow::default(),
             dictations,
@@ -318,6 +323,7 @@ impl WindowsDesktopHost {
                 self.remember_listening(self.listen_when_ready);
             }
             Request::ChooseModel { model, language } => self.choose_model(model, language),
+            Request::SwapModel => self.swap_model(),
             Request::CancelModel => {
                 self.manual_choice();
                 self.checking = false;
@@ -381,11 +387,63 @@ impl WindowsDesktopHost {
         false
     }
 
+    /// Labs › Model switch shortcut: prepares the saved other model,
+    /// installed only, and swaps both selections together once it loads. A
+    /// failure leaves the running model and the saved selection as they were.
+    fn swap_model(&mut self) {
+        use crate::transcription::other_model;
+        if crate::transcription::engine::dictation_busy() {
+            tracing::info!("the model switch request was ignored while dictating");
+            return;
+        }
+        let plan = match other_model::planned(&self.settings) {
+            Ok(Some(plan)) => plan,
+            Ok(None) => return,
+            Err(error) => {
+                self.report_switch_error(&error);
+                return;
+            }
+        };
+        if let Err(error) = other_model::installed(&plan) {
+            self.report_switch_error(&error);
+            return;
+        }
+        self.manual_choice();
+        self.checking = false;
+        self.pending_swap = Some(plan.other);
+        self.preparation.start(plan.to, true);
+        self.automatic_preparation = Some(AutomaticSwitch::Swap);
+    }
+
+    /// Shows a failed switch in Settings, and beside the HUD when Labs ›
+    /// Failure notices is on.
+    fn report_switch_error(&self, error: &crate::transcription::other_model::SwitchError) {
+        self.preparation.set_error(Some(error.message()));
+        if self.settings.labs.failure_notices
+            && let Some((template, detail)) = error.notice()
+        {
+            self.indicator.send(crate::rune_hud::HudEvent::Failed {
+                message: Some(tr_fill(template, detail)),
+            });
+        }
+    }
+
     fn choose_model(&mut self, model: TranscriptionModelId, language: String) {
         self.manual_choice();
         self.checking = false;
         let selection = crate::transcription::models::TranscriptionSelection { model, language };
-        self.preparation.start(selection, false);
+        self.start_preparation(selection, false);
+    }
+
+    /// Starts a preparation that isn't a swap, dropping any swap it
+    /// supersedes so that swap's way back can never commit.
+    fn start_preparation(
+        &mut self,
+        selection: crate::transcription::models::TranscriptionSelection,
+        installed_only: bool,
+    ) {
+        self.pending_swap = None;
+        self.preparation.start(selection, installed_only);
     }
 
     /// A layout change not yet polled counts as before this choice, so it
@@ -412,6 +470,7 @@ impl WindowsDesktopHost {
             match source {
                 AutomaticSwitch::Keyboard => self.keyboard_switcher.cancel_applying(),
                 AutomaticSwitch::App => self.app_switcher.cancel_applying(),
+                AutomaticSwitch::Swap => self.pending_swap = None,
             }
         }
     }
@@ -453,7 +512,7 @@ impl WindowsDesktopHost {
                 self.app_switcher.cancel_applying();
             }
             self.checking = false;
-            self.preparation.start(selection, true);
+            self.start_preparation(selection, true);
             self.automatic_preparation = Some(AutomaticSwitch::Keyboard);
         } else {
             // The current model stays, but an older manual preparation must
@@ -463,6 +522,7 @@ impl WindowsDesktopHost {
             if self.automatic_preparation.take() == Some(AutomaticSwitch::App) {
                 self.app_switcher.cancel_applying();
             }
+            self.pending_swap = None;
             self.preparation.cancel();
         }
     }
@@ -512,7 +572,7 @@ impl WindowsDesktopHost {
             self.keyboard_switcher.cancel_applying();
         }
         self.checking = false;
-        self.preparation.start(selection, true);
+        self.start_preparation(selection, true);
         self.automatic_preparation = Some(AutomaticSwitch::App);
     }
 
@@ -534,7 +594,10 @@ impl WindowsDesktopHost {
             return false;
         }
         self.checking = true;
-        self.preparation.start(selection, true);
+        // This is Enable's check, not the swap it replaced: a failed check
+        // must not say "Couldn't switch the speech model".
+        self.automatic_preparation = None;
+        self.start_preparation(selection, true);
         self.status = ListenerStatus::Enabling;
         true
     }
@@ -774,21 +837,32 @@ impl WindowsDesktopHost {
     }
 
     pub(crate) fn refresh(&mut self) {
+        if crate::transcription::other_model::take_request() {
+            self.swap_model();
+        }
         self.switch_with_keyboard();
         self.switch_with_app();
         let mut checked = false;
         if let Some(result) = self.preparation.poll() {
             let automatic = self.automatic_preparation.take();
             self.checking = false;
+            // A swap's way back is saved with the selection it swaps in, in
+            // one write, only once the new model has loaded.
+            let swap_other = (automatic == Some(AutomaticSwitch::Swap))
+                .then(|| self.pending_swap.take())
+                .flatten();
             let result = result.and_then(|selection| {
                 crate::transcription::models::validate(&selection).map_err(|e| e.to_string())?;
                 // Only a preparation that changes what Hex runs replaces the
                 // saved choice: a check of that same model, or of a lost
                 // import's fallback, leaves the saved selection alone.
-                if selection == self.runtime_selection() {
+                if selection == self.runtime_selection() && swap_other.is_none() {
                     return Ok(());
                 }
                 let mut candidate = self.settings.clone();
+                if let Some(other) = swap_other {
+                    candidate.model_switch_other = Some(other);
+                }
                 candidate.remember_transcription(selection);
                 let saved = self
                     .settings
@@ -802,7 +876,7 @@ impl WindowsDesktopHost {
                     match automatic {
                         Some(AutomaticSwitch::Keyboard) => self.keyboard_switcher.commit(),
                         Some(AutomaticSwitch::App) => self.app_switcher.commit(),
-                        None => {}
+                        Some(AutomaticSwitch::Swap) | None => {}
                     }
                     checked = true;
                     if self.status == ListenerStatus::Enabling && !self.model_ready() {
@@ -817,7 +891,14 @@ impl WindowsDesktopHost {
                             self.keyboard_switcher.fail(Instant::now())
                         }
                         Some(AutomaticSwitch::App) => self.app_switcher.fail(Instant::now()),
-                        None => {}
+                        Some(AutomaticSwitch::Swap) | None => {}
+                    }
+                    if automatic == Some(AutomaticSwitch::Swap)
+                        && self.settings.labs.failure_notices
+                    {
+                        self.indicator.send(crate::rune_hud::HudEvent::Failed {
+                            message: Some(tr_fill("Couldn't switch the speech model: {}", &error)),
+                        });
                     }
                     // An Enable that stopped to check a model failed to reach
                     // listening; say so instead of Enabling… forever.

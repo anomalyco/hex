@@ -157,17 +157,21 @@ impl Capsule {
         &mut self,
         kind: Kind,
         presentation: offer_surface::Presentation,
-        corner: MeetingIndicatorCorner,
+        anchor: screen::Anchor,
         timer: Option<offer::After>,
         tx: &mut Tx,
     ) {
         self.state = State::from_kind(kind, false, timer);
         self.presentation = presentation;
         self.stage = Default::default();
+        // Windows: this window's size is the show's, not the last kind's.
+        #[cfg(target_os = "windows")]
+        self.recording_window.reset();
         self.arm_offer_timeout();
         self.live = Live::default();
         self.waveform = None;
-        self.corner = corner;
+        self.corner = anchor.corner;
+        self.display = anchor.display;
         self.throw.stop();
         // Nothing in it mounts with an entrance of its own.
         tx.instant();

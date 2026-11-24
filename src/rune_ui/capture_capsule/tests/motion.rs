@@ -605,12 +605,21 @@ fn clicks_on_the_capsule_do_what_they_say() {
             bundle: "marked.scrawl".into(),
             routing: true,
         };
-        let (mut rt, actions) = live(vec![written.clone(), Input::Routed(guess())]);
+        // Without suggestions, Paste acts directly on the saved capture.
+        let (mut rt, actions) = live(vec![Input::Written {
+            bundle: "marked.scrawl".into(),
+            routing: false,
+        }]);
         click_on(&mut rt, "paste", 0);
         assert_eq!(
             *actions.lock().unwrap(),
             [Action::Paste("marked.scrawl".into())]
         );
+
+        // With a suggestion, clicking the left half of the split chip sends at once.
+        let (mut rt, actions) = live(vec![written.clone(), Input::Routed(guess())]);
+        click_on(&mut rt, "send", 0);
+        assert_eq!(*actions.lock().unwrap(), [send("SEER")]);
 
         // Return in the explicitly opened search confirms its selected row once.
         let (mut rt, actions) = live(vec![written, Input::Routed(guess()), Input::OpenList]);
@@ -619,22 +628,19 @@ fn clicks_on_the_capsule_do_what_they_say() {
         tap(&mut rt, Input::Send { always: false });
         assert_eq!(*actions.lock().unwrap(), [send("HEX")]);
 
-        // A suggestion in the list under the capsule.
+        // Clicking ⌄ opens the Send-to list without sending; clicking a row sends there.
         let (mut rt, actions) = live(routed(guess()));
+        click_on(&mut rt, "more", 0);
+        assert!(keys(&rt).iter().any(|k| k == "field"), "{:?}", keys(&rt));
         click_on(&mut rt, "row-HEX", 0);
         assert_eq!(*actions.lock().unwrap(), vec![send("HEX")]);
 
-        // A search result, opened over the suggestions.
+        // A search result in the opened list.
         let mut inputs = routed(guess());
         inputs.push(Input::OpenList);
         let (mut rt, actions) = live(inputs);
         click_on(&mut rt, "row-RUNE", 0);
         assert_eq!(*actions.lock().unwrap(), vec![send("RUNE")]);
-
-        // The magnifier opens the search without picking a destination.
-        let (mut rt, _) = live(routed(guess()));
-        click_on(&mut rt, "search", 0);
-        assert!(keys(&rt).iter().any(|k| k == "field"), "{:?}", keys(&rt));
 
         // A rule's send: pointing at Undo holds it, Undo takes it back and
         // offers the list again, where a click redirects it.
@@ -692,11 +698,13 @@ fn shift_marks_and_saves_the_row_under_the_pointer() {
     };
     tuning::with_flow(CapsuleFlow::List, || {
         for search in [false, true] {
-            let mut inputs = vec![processing_input(), Input::Routed(guess())];
-            if search {
-                inputs.push(Input::OpenList);
-            }
+            let inputs = if search {
+                vec![processing_input(), Input::Routed(guess()), Input::OpenList]
+            } else {
+                vec![processing_input(), Input::Routed(rule()), Input::Undo]
+            };
             let (mut rt, actions) = live(inputs);
+            actions.lock().unwrap().clear();
             point_at(&mut rt, "row-HOME");
             tap(&mut rt, Input::Shift(true));
             assert_eq!(always(&rt), ["HOME"], "search: {search}");

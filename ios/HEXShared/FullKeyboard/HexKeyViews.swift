@@ -1,7 +1,8 @@
 import UIKit
 
 /// The Hex key right of space. Warm session: an orange core, and a hold records here.
-/// Otherwise the mark is faded with ↗, and a hold leaves for Hex to start one.
+/// Otherwise the plain mark: the keyboard dictates itself, says why it can't with Open Hex
+/// (iOS 26 and later), or before iOS 26 opens Hex to record.
 /// A tap dictates, a hold dictates until released (push to talk), and sliding opens the
 /// style menu (`HexKeyGesture`).
 @MainActor
@@ -10,6 +11,8 @@ final class HexKeyControl: UIControl {
     /// Sits in the suggestion strip instead of the bottom row (prototype).
     var inStrip = false { didSet { if inStrip != oldValue { setNeedsDisplay() } } }
     var isWarm = false { didSet { if isWarm != oldValue { setNeedsDisplay(); updateAccessibility() } } }
+    /// A tap opens Hex to record there (before iOS 26, where the keyboard can't dictate itself).
+    var opensHexToDictate = false { didSet { if opensHexToDictate != oldValue { updateAccessibility() } } }
     /// Dictations paste translated into this target (BCP 47): the key wears its code ("EN")
     /// in the corner, so a dictation never comes out in another language by surprise.
     var translatingTo: String? { didSet { if translatingTo != oldValue { setNeedsDisplay(); updateAccessibility() } } }
@@ -61,7 +64,7 @@ final class HexKeyControl: UIControl {
     }
 
     private func updateAccessibility() {
-        let label = isWarm ? "Dictate with Hex" : "Open Hex to dictate"
+        let label = opensHexToDictate ? "Open Hex to dictate" : "Dictate with Hex"
         accessibilityLabel = translatingTo.map { "\(label), \(TranslationPasteChoice.translatingLabel(target: $0))" } ?? label
         accessibilityHint = "Tap to dictate, hold to talk, slide for styles"
     }

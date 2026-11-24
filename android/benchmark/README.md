@@ -48,6 +48,51 @@ The external editor received the notebook sentence **1.91 s after mic stop** and
 
 **Model setup:** before downloading, bundled tiny inserted “The coffee is still warm.” offline. Retrying online showed download progress, then ready; the file’s verified device SHA-256 matched the small pin below. Airplane mode with Wi-Fi disabled was sufficient for both paste languages afterwards.
 
+## Faster English dictation (Labs)
+
+On 24 Nov 2026, an API 35 Google ARM64 emulator (4 vCPUs, 4 GiB) on the M5 Ultra Studio, which was also running two other emulators (load average about 13), so the absolute times below are slower than the 20 Nov ones above: read the ratios. Both engines are the app's own release native builds through [native.cpp](native.cpp): `HEX_APP=1 ./whisperbench` is the downloaded small model exactly as `hexspeech.cpp` decodes it (window sized to the speech up to 8 s and, before #2716, the full window above; the token cap and single retry), and `./englishbench` (built with `-DTRANSCRIBE`) is Parakeet TDT-CTC 110M Q8_0 through transcribe.cpp as `hexenglish.cpp` runs it. Four threads; each clip's figure is the median of two runs. English only: the faster model is never used for another language.
+
+| English clips | Small: wall / CPU | Faster: wall / CPU | Faster, ×less | Word errors (small / faster) |
+|---|---:|---:|---:|---:|
+| 24 short (2.2–3.7 s), median | 1,563 / 3,975 ms | 76 / 263 ms | 21× / 15× | 0 / 0 of 186 |
+| 6 of 11.3–13.3 s, each | 2,552–2,698 / 9,603–10,082 ms | 207–222 / 786–852 ms | 12.0–13.1× / 11.8–12.8× | 8 / 0 of 186¹ |
+| 3 of 23.9–26.0 s, each | 2,894–2,979 / 10,603–10,968 ms | 414–487 / 1,565–1,867 ms | 5.9–7.2× / 5.7–7.0× | 8 / 0 of 186¹ |
+| One 60 s clip | 6,083 / 22,236 ms | 1,078 / 4,154 ms | 5.6× / 5.4× | — |
+| 4 short at 2 threads on 2 vCPUs, median | 1,071 ms wall | 96 ms wall | 11× | 0 / 0 |
+
+¹ Small leaves out the second of two identical sentences in the two clips that have one.
+
+Small's time is nearly flat from 8 to 30 s (the full 30 s window), while Parakeet's grows with the speech, so the gain is largest for 8–13 s and smallest for a minute. Peak native RSS: small 417 / 462 / 500 MiB (short / long / 60 s), faster 260 / 355 / 431 MiB; its weights are a read-only file mapping. Load: 27–117 ms. All 40 clips: small 5.26% WER (the same as on 20 Nov), faster 35.44%, all of it in Spanish, German and Norwegian, which it never sees in the app.
+
+### Sentence ends
+
+Parakeet TDT-CTC 110M sometimes runs two sentences together in its own output ("back of the bus We should", "Wednesday My brother"), from 11 s up; the 0.6B model and Whisper small wrote all 48 sentence ends of the long English clips. It isn't the attention window (forcing full attention on the 60 s clip left 4 of 30 missing) and no join is involved. The app puts them back in `SentenceEnds` (faster engine only, before Hex's shared formatting): a capitalised word that English writes in lowercase (in the English typing model, not on its capitals list, not "I") after a pause of at least 100 ms of quiet frames (MicCapture's −48 dBFS test) between the two words' starts. Counted on the host over every English clip (24 short, 9 long, the 60 s one, and 14 clips of 2–3 sentences full of names and places with 0.15 or 0.6 s between sentences), with word times from transcribe.cpp (which leave the text unchanged and cost no measurable time):
+
+| Rule | Missing ends restored | Stray periods |
+|---|---:|---:|
+| Capitalised common word, any pause | 9 of 10 | 8 (Dune, Main, Target, New, Godfather, Play…) |
+| … with ≥ 20 ms of quiet | 9 | 2 |
+| … with ≥ 40 ms | 9 | 0 (1 unaligned) |
+| … with ≥ 60 to ≥ 150 ms | 9 | 0 |
+| … with ≥ 180 ms | 8 | 0 |
+| … with ≥ 200 ms | 4 | 0 |
+| Any capitalised word with ≥ 100 ms | 9 | 0 |
+
+The one end not restored is "on Saturday I didn't": "I" is never taken as a sentence start. 100 ms is the middle of the band with no stray period; a capital alone after a pause added nothing here, so names are left as they are. Ten missing ends is a small sample; the rule has to be watched on real voices.
+
+## Long clips and the encoder window
+
+Past 8 s of audio the app gives the small model's encoder the speech plus 640 frames (12.8 s), rounded up to 64, instead of Whisper's full 1500 ([hexspeech.cpp](../app/src/main/cpp/hexspeech.cpp)). [long.tsv](long.tsv) joins the 40 utterances end to end into 26 long clips of 9.8–26 s in English, Spanish, German and Norwegian (the corpus's consecutive groups of 4 and 8 per language, and groups of 4 and 5 from other starting points). The check decodes them with the app's decode at that window and at the full one. **It passes when no clip has more word errors than with the full window.** Clips start to lose words from a margin of 576 frames, so don't lower the margin without rerunning this check, and the wider 53-clip set in #2716 when possible.
+
+1. `python3 benchmark/generate.py "$WORK/wavs"` writes the long clips after the 40 (their digests change with the 40's; see step 1 below).
+2. Build [native.cpp](native.cpp) as in step 2 below, or for the host with Apple clang against a host build of the same whisper.cpp (`-DGGML_NATIVE=OFF -DGGML_CPU_ARM_ARCH=armv8-a`, as the app builds it).
+3. From the folder holding `wavs/`, with `awk -F '\t' 'NR>1{print $1,$2}' benchmark/long.tsv > long.list`, run `HEX_APP=full ./whisperbench models/small.bin 4 long.list > results/long-full.tsv` and `HEX_APP=1 ./whisperbench models/small.bin 4 long.list > results/long-app.tsv`. `HEX_APP` is the app's decode (a fresh state for every clip, its token limit and single retry, its window); `HEX_APP=full` keeps the full window past 8 s.
+4. `python3 benchmark/score.py results` adds both to the per-clip output and exits with status 1, naming the clips, if any is worse, or if a clip past 30 s loses an utterance (half its words or more missing).
+
+On 24 Nov 2026 (Apple M5 host, armv8-a kernels, four threads; 34 of the 40 WAVs matched [audio.tsv](audio.tsv) with that Mac's voices) both made 43 errors on 900 words: no clip worse, three reworded with the same error count. The median decode went from 2.63 s to 1.96 s on that host.
+
+**Past 30 s** Whisper needs more than one 30 s window. Four of the clips (en30s3k12, es30l0m0m0, de30x3, no30x3: 35–47 s, sentences repeating as people repeat themselves) check that every utterance comes out. The app decodes audio past 30 s with timestamps, so each window ends at the last sentence it finished and the next starts there. Without them whisper.cpp moves on a whole 30 s at a time, cutting mid-sentence. On 24 Nov 2026 the decode before that change lost 7 of the 15 German utterances (score.py exited 1); with it every utterance came out (59 errors on 1,263 words against 108).
+
 ## Sources and licences
 
 - OpenAI’s [multilingual Whisper weights](https://github.com/openai/whisper#license), **MIT**; Q5_1 files from [ggerganov/whisper.cpp at 5359861…](https://huggingface.co/ggerganov/whisper.cpp/tree/5359861c739e955e79d9a303bcbc70fb988958b1). SHA-256: tiny `818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7`; base `422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898`; small `ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb`. [whisper.cpp/ggml v1.9.5](https://github.com/ggml-org/whisper.cpp/tree/d1be6fde11ac6e0407606b4e42fe72d34add8037) **MIT**.

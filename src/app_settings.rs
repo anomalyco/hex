@@ -78,6 +78,9 @@ static MEETING_SUMMARIES: AtomicU8 = AtomicU8::new(MeetingSummaries::platform_de
 static MEETING_INDICATOR_ENABLED: AtomicBool =
     AtomicBool::new(meetings::DEFAULT_SHOW_RECORDING_INDICATOR);
 static MEETING_INDICATOR_CORNER: AtomicU8 = AtomicU8::new(MeetingIndicatorCorner::TopRight as u8);
+/// The display the recording capsule rests on (Labs › Indicator on any
+/// display): the OS's own name for it, `None` for the primary display.
+static MEETING_INDICATOR_DISPLAY: OnceLock<RwLock<Option<String>>> = OnceLock::new();
 /// [`MeetingRetention::encode`]d; [`RETENTION_UNSET`] until settings apply.
 static MEETING_RETENTION: AtomicU8 = AtomicU8::new(RETENTION_UNSET);
 /// [`MeetingRetention::encode`]d; [`RETENTION_UNSET`] until settings apply.
@@ -328,6 +331,12 @@ pub struct AppSettings {
     /// register or match.
     #[serde(default)]
     pub extra_dictation_hotkeys: Vec<ExtraDictationHotkey>,
+    /// Labs › Model switch shortcut: swaps the dictation selection with
+    /// this saved model and language, and back. Unset goes nowhere.
+    pub model_switch_other: Option<KeyboardModelChoice>,
+    /// Labs › Model switch shortcut: the shortcut that swaps the dictation
+    /// model. Unbound by default and ignored while its Labs toggle is off.
+    pub model_switch_hotkey: Option<HotkeyBinding>,
     /// Labs › Terminal paste shortcut: another shortcut that dictates like
     /// `dictation_hotkey` and always pastes with Ctrl+Shift+V (Windows,
     /// Linux). Unbound by default and ignored while its Labs toggle is off.
@@ -487,6 +496,8 @@ impl Default for AppSettings {
             raw_dictation_hotkey: None,
             typed_text_hotkey: None,
             second_dictation_hotkey: None,
+            model_switch_other: None,
+            model_switch_hotkey: None,
             extra_dictation_hotkeys: Vec::new(),
             terminal_paste_hotkey: None,
             show_dock_icon: true,
@@ -870,6 +881,11 @@ impl AppSettings {
             self.meetings.recording_indicator_corner as u8,
             Ordering::Release,
         );
+        *MEETING_INDICATOR_DISPLAY
+            .get_or_init(Default::default)
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) =
+            self.meetings.recording_indicator_display.clone();
         MEETING_RETENTION.store(
             MeetingRetention::encode(self.meetings.retention),
             Ordering::Release,
@@ -1124,6 +1140,9 @@ impl AppSettings {
             second_dictation: self
                 .active_second_dictation_hotkey()
                 .map(HotkeyBinding::runtime),
+            model_switch: self
+                .active_model_switch_hotkey()
+                .map(HotkeyBinding::runtime),
             extra_dictation: std::array::from_fn(|index| {
                 self.active_extra_dictation_hotkey(index)
                     .map(HotkeyBinding::runtime)
@@ -1152,6 +1171,20 @@ impl AppSettings {
             .as_ref()
             .filter(|binding| cfg!(target_os = "macos") || binding.key.is_some())
             .filter(|binding| !self.hotkey_in_use(HotkeySlot::SecondDictation, binding))
+    }
+
+    /// Labs › Model switch shortcut's binding while it takes effect: its
+    /// toggle on, a saved other model, bound with a key (every OS matches it
+    /// as a key press), and sharing no key with another active shortcut.
+    /// Otherwise nothing matches, suppresses, or registers it.
+    pub fn active_model_switch_hotkey(&self) -> Option<&HotkeyBinding> {
+        if !self.labs.model_switch_shortcut || self.model_switch_other.is_none() {
+            return None;
+        }
+        self.model_switch_hotkey
+            .as_ref()
+            .filter(|binding| binding.key.is_some())
+            .filter(|binding| !self.hotkey_in_use(HotkeySlot::ModelSwitch, binding))
     }
 
     /// Labs › Transform typed text's binding while it takes effect: Linux,

@@ -58,14 +58,103 @@ class KeyboardPageTest {
         // Its hold offers the symbol first, then the same accents, with no digit before either.
         assertEquals(listOf("@") + LetterFeedback.options('a', "fr"),
             LetterFeedback.holds('a', "fr", digitHint, symbolsOnLetters = true))
-        // A row-1 letter without a symbol keeps its accents alone, and its digit hint stays hidden.
-        assertNull(both.hint(0, 2))
-        assertEquals(LetterFeedback.options('e', "fr"),
-            LetterFeedback.holds('e', "fr", both.hint(0, 2), symbolsOnLetters = true))
+        // A row-1 letter shows its Gboard symbol in place of the hidden digit, and holds it first.
+        assertEquals("|", both.hint(0, 2)?.toString() ?: LetterFeedback.letterSymbol('e', topRow = true)?.toString())
+        assertEquals(listOf("|") + LetterFeedback.options('e', "fr"),
+            LetterFeedback.holds('e', "fr", both.hint(0, 2), symbolsOnLetters = true, topRow = true))
         // A QWERTY home-row key shows no digit either way, so its symbol hint and hold are unchanged.
         val qwerty = page(numberRow = true)
         assertNull(qwerty.hint(1, 0))
         assertEquals(listOf("@") + LetterFeedback.options('a', "en"),
             LetterFeedback.holds('a', "en", qwerty.hint(1, 0), symbolsOnLetters = true))
+    }
+
+    @Test fun withBothLabsTheTopRowShowsGboardsSymbols() {
+        // With the number row on, the hidden digit lets q to p show and hold Gboard's symbols.
+        val both = page(numberRow = true)
+        assertEquals(listOf("%", "\\", "|", "=", "[", "]", "<", ">", "{", "}"),
+            "qwertyuiop".map { LetterFeedback.letterSymbol(it, topRow = true)?.toString() })
+        assertEquals("%", both.hint(0, 0)?.toString() ?: LetterFeedback.letterSymbol('q', topRow = true)?.toString())
+        assertEquals("}", both.hint(0, 9)?.toString() ?: LetterFeedback.letterSymbol('p', topRow = true)?.toString())
+        assertEquals(listOf("%"), LetterFeedback.holds('q', "en", both.hint(0, 0), symbolsOnLetters = true, topRow = true))
+        assertEquals(listOf("}"), LetterFeedback.holds('p', "en", both.hint(0, 9), symbolsOnLetters = true, topRow = true))
+        // With the number row off, the digit is still the hint and the first hold, before any symbol.
+        val digits = page(numberRow = false)
+        assertEquals("1", digits.hint(0, 0)?.toString())
+        assertEquals(listOf("1"),
+            LetterFeedback.holds('q', "en", digits.hint(0, 0), symbolsOnLetters = true, topRow = true))
+        // Off the lab, the top row is what it always was: its digit and accents.
+        assertEquals(listOf("1"), LetterFeedback.holds('q', "en", digits.hint(0, 0)))
+    }
+
+    @Test fun theTopRowSymbolsStayOnTheTopRow() {
+        // Symbols follow the letter on the other rows; the top row's are its own, so a layout that draws
+        // one of those letters lower keeps the holds it had. AZERTY's q is on row 2 and w on row 3, and
+        // QWERTZ's y on row 3.
+        assertNull(LetterFeedback.letterSymbol('q', topRow = false))
+        val azerty = page(numberRow = true, language = Spoken.French)
+        assertEquals(emptyList<String>(),
+            LetterFeedback.holds('q', "fr", azerty.hint(1, 0), symbolsOnLetters = true, topRow = false))
+        assertEquals(emptyList<String>(),
+            LetterFeedback.holds('w', "fr", azerty.hint(2, 0), symbolsOnLetters = true, topRow = false))
+        assertEquals(LetterFeedback.options('y', "de"),
+            LetterFeedback.holds('y', "de", null, symbolsOnLetters = true, topRow = false))
+        // AZERTY's own top row reads Gboard's symbols where its letters have none of their own, and
+        // keeps the home-row symbol a key already had where it draws one of those instead.
+        assertEquals("|", LetterFeedback.letterSymbol('e', topRow = true)?.toString())
+        assertEquals("@", LetterFeedback.letterSymbol('a', topRow = true)?.toString())
+        assertEquals("*", LetterFeedback.letterSymbol('z', topRow = true)?.toString())
+    }
+
+    @Test fun theHomeAndBottomRowsShowGboardsSymbols() {
+        // Gboard's English QWERTY: the marks its ?123 page draws on the same rows.
+        assertEquals(listOf("@", "#", "$", "_", "&", "-", "+", "(", ")"),
+            "asdfghjkl".map { LetterFeedback.letterSymbol(it)?.toString() })
+        assertEquals(listOf("*", "\"", "'", ":", ";", "!", "?"),
+            "zxcvbnm".map { LetterFeedback.letterSymbol(it)?.toString() })
+        // ! and ? are holdable from n and m, as Gboard has them; $ stays d's own symbol.
+        assertEquals(listOf("!") + LetterFeedback.options('n', "en"),
+            LetterFeedback.holds('n', "en", null, symbolsOnLetters = true))
+        assertEquals(listOf("?"), LetterFeedback.holds('m', "en", null, symbolsOnLetters = true))
+        assertEquals(listOf("$"), LetterFeedback.holds('d', "en", null, symbolsOnLetters = true))
+    }
+
+    /** Every symbol the letters page shows in a key's corner with both labs on, exactly as KeyPlaneView
+     * resolves it: its digit, else its letter symbol. */
+    private fun letterHints(shown: KeyboardPage): List<Char> = shown.lines.flatMapIndexed { row, line ->
+        line.withIndex().mapNotNull { (position, c) ->
+            shown.hint(row, position) ?: LetterFeedback.letterSymbol(c, topRow = row == 0, currency = shown.currency)
+        }
+    }
+
+    @Test fun noSymbolIsDrawnOnTwoLetterKeys() {
+        // With both labs on, every letter key's corner is a symbol and no mark lands on two keys, on every
+        // layout and for every currency d can hold: r's = is no longer j's too.
+        val currencies = listOf<Char?>(null) + listOf("GBP", "EUR", "JPY", "CNY", "INR", "PHP", "KRW", "RUB", "UAH")
+            .map { LocalCurrency.symbol(it) }
+        for (language in Spoken.entries) for (currency in currencies) {
+            val shown = letterHints(page(numberRow = true, language = language).copy(currency = currency))
+            assertEquals("${language.code} with ${currency ?: '$'}", emptyList<Char>(),
+                shown.groupBy { it }.filterValues { it.size > 1 }.keys.toList())
+        }
+    }
+
+    @Test fun theLocalCurrencyTakesDsSymbol() {
+        // Off, or in a region with no symbol Hex knows, d holds Gboard's $.
+        assertEquals("$", LetterFeedback.letterSymbol('d')?.toString())
+        // On, d holds the phone's own, as the ?123 page shows it.
+        assertEquals("£", LetterFeedback.letterSymbol('d', currency = '£')?.toString())
+        assertEquals("€", LetterFeedback.letterSymbol('D', currency = '€')?.toString())
+        assertEquals(listOf("¥"), LetterFeedback.holds('d', "en", null, symbolsOnLetters = true, currency = '¥'))
+        // As the letters page resolves it: with both labs on, d's corner shows the page's currency, and $
+        // when the lab is off or the region has none.
+        val letters = page(numberRow = true).copy(currency = '£')
+        val d = letters.lines[1].indexOf('d')
+        assertEquals("£", letters.hint(1, d)?.toString()
+            ?: LetterFeedback.letterSymbol('d', topRow = false, currency = letters.currency)?.toString())
+        assertEquals("$", LetterFeedback.letterSymbol('d', currency = page(numberRow = true).currency)?.toString())
+        // Only d: the rest of the rows keep Gboard's marks.
+        assertEquals("@", LetterFeedback.letterSymbol('a', currency = '¥')?.toString())
+        assertEquals("?", LetterFeedback.letterSymbol('m', currency = '¥')?.toString())
     }
 }

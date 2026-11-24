@@ -130,7 +130,7 @@ Hex Preview is the [Hex keyboard](https://anoma.ly/hex) for Android, before it r
 ## Install
 
 1. Open the download link above on your phone and download the APK.
-2. Open it. Android asks whether your browser or Files app may install apps: tap **Settings**, turn on **Allow from this source**, then go back and tap **Install**.
+2. Open it. Android asks whether your browser or Files app may install apps: tap **Settings**, turn on **Allow from this source**, then go back, tap the download again and tap **Install**.
 3. Open Hex Preview and follow its setup: the microphone, Hex Preview as your keyboard, and the 190 MB speech model.
 
 Updates install the same way: open the APK that Download update downloads and tap **Update** when Android asks.

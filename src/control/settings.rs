@@ -381,6 +381,13 @@ pub fn apply(
                     .map_err(|error| invalid(name, &error.to_string()))?;
             }
         }
+        "model_switch_other" => {
+            if let Some(choice) = &candidate.model_switch_other {
+                choice
+                    .validate()
+                    .map_err(|error| invalid(name, &error.to_string()))?;
+            }
+        }
         "dictation_processing.default_mode" => {
             candidate.dictation_processing.default_mode.name = "Global".into();
             validate_mode_speech(name, &candidate.dictation_processing.default_mode)?;
@@ -793,6 +800,7 @@ mod tests {
                 retention: Some(crate::app_settings::MeetingRetention::Day),
                 audio_retention: Some(crate::app_settings::MeetingRetention::Day),
                 opencode_model: Some("anthropic/claude-haiku".into()),
+                recording_indicator_display: Some(r"\\.\DISPLAY2".into()),
                 ..Default::default()
             },
             ..Default::default()
@@ -1024,6 +1032,52 @@ mod tests {
         }
         assert_eq!(
             change.settings.labs.voice_prompt_phrase, "say it better",
+            "a refused draft leaves the saved phrase"
+        );
+    }
+
+    #[test]
+    fn a_clipboard_phrase_needs_two_words_and_six_letters() {
+        let change = apply(
+            &AppSettings::default(),
+            "labs.clipboard_phrase",
+            "on",
+            &rules(),
+        )
+        .unwrap();
+        assert!(change.settings.labs.clipboard_phrase);
+        assert_eq!(
+            change.settings.labs.clipboard_phrase_text,
+            crate::dictation::clipboard_phrase::DEFAULT_PHRASE
+        );
+        let change = apply(
+            &change.settings,
+            "labs.clipboard_phrase_text",
+            "  what I copied ",
+            &rules(),
+        )
+        .unwrap();
+        assert_eq!(
+            change.settings.labs.clipboard_phrase_text, "what I copied",
+            "a saved phrase is trimmed"
+        );
+        for (raw, reason) in [
+            ("clipboard", "two words"),
+            ("a clip", "six letters"),
+            ("", "two words"),
+        ] {
+            let error = apply(
+                &change.settings,
+                "labs.clipboard_phrase_text",
+                raw,
+                &rules(),
+            )
+            .unwrap_err();
+            assert_eq!(error.code, "invalid-value", "{raw}");
+            assert!(error.message.contains(reason), "{raw}: {}", error.message);
+        }
+        assert_eq!(
+            change.settings.labs.clipboard_phrase_text, "what I copied",
             "a refused draft leaves the saved phrase"
         );
     }

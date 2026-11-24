@@ -45,6 +45,11 @@ impl LocalMeetings {
             MeetingRequest::DeleteTranscript { id, entries } => {
                 crate::meeting::runtime::request(Controller::DeleteTranscript { id, entries })
             }
+            // The control and its visible states are macOS's; elsewhere the
+            // request is taken and the controller leaves it alone.
+            MeetingRequest::SetMicrophoneMuted(muted) => {
+                crate::meeting::runtime::request(Controller::SetMicrophoneMuted(muted))
+            }
             MeetingRequest::Summarize(id) => {
                 crate::meeting::runtime::request(Controller::Summarize(id))
             }

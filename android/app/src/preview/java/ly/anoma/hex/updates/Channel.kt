@@ -40,9 +40,10 @@ internal object Channel {
 
     fun latest(context: Context): Release {
         val channel = context.getString(R.string.update_channel)
-        val text = open(URL(channel)).use { http ->
-            http.inputStream.use { it.readLimited(64 * 1024) }
-        }
+        // The body read (a connection dropped after the 200) and openConnection() are outside open()'s try: their
+        // IOException is a failed check too, never an exception that ends the app and the keyboard with it.
+        val text = try { open(URL(channel)).use { http -> http.inputStream.use { it.readLimited(64 * 1024) } } }
+            catch (e: IOException) { throw Failure(Updates.Problem.Connection) }
         return Release.parse(text, channel) ?: throw Failure(Updates.Problem.Server)
     }
 

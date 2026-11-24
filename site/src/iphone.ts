@@ -12,12 +12,12 @@
 // default and write only to the App Group. The Android page is checked
 // against android/ the same way (the setup's labels, the 190 MB model,
 // Android 12, and Hex Preview's update check in src/preview).
-import { ANDROID_DOWNLOAD_PATH, withBase } from "./base"
+import { ANDROID_DOWNLOAD_PATH, ANDROID_PATH, withBase } from "./base"
 import { shell } from "./labs"
 
+export { ANDROID_PATH }
 export const IPHONE_PATH = withBase("/iphone")
 export const PRIVACY_PATH = withBase("/privacy")
-export const ANDROID_PATH = withBase("/android")
 // What each page's social card says (scripts/iphone.ts draws them). Bump CARD_VERSION
 // when a card changes, so link previews that cached the old one fetch it again.
 export const CARDS = {
@@ -30,7 +30,7 @@ export const IPHONE_CARD_PATH = withBase(`/iphone.png?v=${CARD_VERSION}`)
 export const PRIVACY_CARD_PATH = withBase(`/privacy.png?v=${CARD_VERSION}`)
 export const ANDROID_CARD_PATH = withBase(`/android.png?v=${CARD_VERSION}`)
 // The date the privacy policy last changed in substance; change it with the policy.
-export const PRIVACY_UPDATED = "November 23, 2026"
+export const PRIVACY_UPDATED = "November 24, 2026"
 const ISSUES = "https://github.com/anomalyco/hex/issues"
 // Each Hex Preview build's SHA-256 and signing certificate, beside its download.
 const ANDROID_BUILDS = "https://github.com/anomalyco/hex/blob/android-preview/README.md"
@@ -142,7 +142,7 @@ export function renderAndroid(origin: string): string {
 </section>
 <section>
 <h2>Updates</h2>
-<p>Hex Preview looks for a newer build when you open it and at most once a day from the keyboard, and shows what changed. Tap <strong>Download update</strong> and your browser downloads the new build from GitHub. Open the download and tap <strong>Update</strong> when Android asks.</p>
+<p>Hex Preview looks for a newer build when you open it and at most once a day from the keyboard, and shows what changed. Tap <strong>Download update</strong> and your browser downloads the new build from GitHub. Open the download and tap <strong>Update</strong> when Android asks. The first time, Android asks you to allow your browser to install apps: allow it, go back, and tap the download again.</p>
 <p>On a build before 2348, the button says <strong>Update</strong> and Hex Preview installs that one update itself. If Google Play Protect asks to scan it, tap <strong>Scan app</strong>, then <strong>Install</strong>.</p>
 <p>Updating closes the keyboard for a moment. Tap a text field to bring it back.</p>
 </section>
@@ -246,8 +246,8 @@ export function renderPrivacy(origin: string): string {
 <ul>
 <li><strong>Typing.</strong> Hex Keyboard uses the text around your cursor and where you tap to suggest and correct words on your phone, and keeps no log of what you type. In password and PIN fields it types exactly what you press, without reading the field, suggesting words, or dictating.</li>
 <li><strong>Dictation.</strong> Hex uses the microphone only while you dictate. It turns speech into text in memory on your phone, never saves a recording, and keeps no history of what you said. Clean up and translation also run on your phone.</li>
-<li><strong>The speech model.</strong> During setup, Hex downloads one public speech model (190 MB) from Hugging Face over HTTPS. The request carries none of your words, audio, or device identifiers; like any download, the server sees your IP address. If it fails, Hex uses the smaller model it comes with.</li>
-<li><strong>What Hex keeps.</strong> Your settings, setup progress, and the speech model, in Hex's private storage. When you undo an autocorrection, Hex keeps a count against a hash of that word pair, never the words, so it doesn't make the same correction again. Clearing Hex's storage or uninstalling Hex removes all of it, and you can turn off microphone access in Android's settings.</li>
+<li><strong>Speech models.</strong> During setup, Hex downloads one public speech model (190 MB) from Hugging Face over HTTPS, and a second one (135 MB) only if you turn on Faster English dictation in Labs and tap Download. Neither request carries your words, audio, or device identifiers; like any download, the server sees your IP address. If the first fails, Hex uses the smaller model it comes with.</li>
+<li><strong>What Hex keeps.</strong> Your settings, setup progress, and the speech models you downloaded, in Hex's private storage; Delete download in Labs removes the second one. When you undo an autocorrection, Hex keeps a count against a hash of that word pair, never the words, so it doesn't make the same correction again. If you turn on Learn from my fixes in Labs, Hex keeps the word pairs you corrected right after dictating, how often and when you last corrected each, on your phone only; it never sends them, and it learns nothing from password fields. Turning it off stops the learning but keeps the pairs until you tap Delete what Hex learned, which removes them. Clearing Hex's storage or uninstalling Hex removes all of it, and you can turn off microphone access in Android's settings.</li>
 <li><strong>Hex Preview.</strong> <a href="${ANDROID_PATH}">Hex Preview</a>, the build you install outside Google Play, also asks GitHub for its latest version when you open it and at most once a day from the keyboard. When you tap Download update, your browser downloads the new build from GitHub. Those requests carry nothing about you or what you type; like any download, the server sees your IP address. Turn the check off with Check for updates automatically.</li>
 </ul>
 </section>

@@ -35,3 +35,14 @@ for row in rows:
         out.setparams((1,2,rate,0,"NONE","not compressed"))
         out.writeframes(array.array("h",(round(s*gain) for s in samples)).tobytes())
     print(row["id"], len(samples), hashlib.sha256(wav.read_bytes()).hexdigest(), sep="\t")
+# The long clips (long.tsv): those utterances joined end to end, for the encoder-window check.
+with open(Path(__file__).with_name("long.tsv"), encoding="utf8") as src:
+    for row in csv.DictReader(src, delimiter="\t"):
+        joined = b""
+        for part in row["clips"].split(","):
+            with wave.open(str(dest / (part+".wav"))) as w: joined += w.readframes(w.getnframes())
+        wav = dest / (row["id"]+".wav")
+        with wave.open(str(wav), "wb") as out:
+            out.setparams((1,2,rate,0,"NONE","not compressed"))
+            out.writeframes(joined)
+        print(row["id"], len(joined)//2, hashlib.sha256(wav.read_bytes()).hexdigest(), sep="\t")

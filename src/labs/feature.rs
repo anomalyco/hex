@@ -154,6 +154,7 @@ define_features! {
     LearnFromCorrections => labs(learn_from_corrections), "learn-from-corrections", Dictation, Everyone, MACOS, 20261121;
     TerminalPaste => app(paste_with_shift), "terminal-paste", Output, Everyone, WINDOWS, 20261030;
     KeyboardModelSwitching => app(keyboard_model_switching.enabled), "keyboard-model-switching", Models, Everyone, EVERY, 20261030;
+    ModelSwitchShortcut => labs(model_switch_shortcut), "model-switch-shortcut", Models, Everyone, EVERY, 20261124;
     MouseShortcuts => labs(mouse_shortcuts), "mouse-shortcuts", Shortcuts, Everyone, MACOS, 20261030;
     PauseBrowser => app(pause_browser_media), "pause-browser", Dictation, Everyone, MACOS, 20261030;
     ShareShortcut => app(share_dictation_shortcut), "share-shortcut", Shortcuts, Everyone, WINDOWS, 20261030;
@@ -229,6 +230,10 @@ define_features! {
     VoiceIsolation => labs(voice_isolation), "voice-isolation", Dictation, Everyone, MACOS, 20261122;
     DictateWhileAnnotating => labs(dictate_while_annotating), "dictate-while-annotating", Annotate, Everyone, EVERY, 20261122;
     StopAnyCallRecording => labs(stop_any_call_recording), "stop-any-call-recording", Meetings, Everyone, EVERY, 20261123;
+    ClipboardPhrase => labs(clipboard_phrase), "clipboard-phrase", Output, Everyone, EVERY, 20261124, extra: ["labs.clipboard_phrase_text"];
+    MeetingMicrophoneMute => labs(meeting_microphone_mute), "meeting-microphone-mute", Meetings, Everyone, MACOS, 20261124;
+    MeetingIndicatorDisplay => labs(meeting_indicator_display), "meeting-indicator-display", Meetings, Everyone, MACOS_WINDOWS, 20261124;
+    MeetingAudioSource => labs(meeting_audio_source), "meeting-audio-source", Meetings, Everyone, EVERY, 20261124, extra: ["labs.meeting_audio_source_choice"];
 }
 
 impl Feature {

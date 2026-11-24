@@ -342,7 +342,11 @@ impl MeetingCandidate {
 /// microphone, so the user can choose to stop. It never stops anything.
 #[derive(Default)]
 pub struct CallPresence {
-    absent: Option<Run>,
+    /// When the current absence was first seen. Unlike a [`Run`], a gap
+    /// between observations never starts it over: a sleeping Mac can stall
+    /// the loop past [`MAX_OBSERVATION_GAP`], and the call is gone either way
+    /// (#2685).
+    absent_since: Option<Instant>,
     prompted: bool,
 }
 
@@ -354,12 +358,12 @@ impl CallPresence {
 
     fn observe_at(&mut self, present: bool, now: Instant) -> bool {
         if present {
-            self.absent = None;
+            self.absent_since = None;
             self.prompted = false;
             return false;
         }
-        let absent = self.absent.get_or_insert_with(|| Run::start(now));
-        if absent.extend(now) >= CALL_ENDED_AFTER && !self.prompted {
+        let since = *self.absent_since.get_or_insert(now);
+        if now.saturating_duration_since(since) >= CALL_ENDED_AFTER && !self.prompted {
             self.prompted = true;
             return true;
         }
@@ -1700,6 +1704,26 @@ mod tests {
         assert!(!presence.observe_at(false, at(5_500)));
         assert!(!presence.observe_at(false, at(8_000)));
         assert!(presence.observe_at(false, at(8_500)));
+    }
+
+    #[test]
+    fn a_gap_between_observations_never_restarts_a_call_ended_absence() {
+        let base = Instant::now();
+        let at = |s: u64| base + Duration::from_secs(s);
+        let mut presence = CallPresence::default();
+        // The call leaves and the Mac locks a moment later, and the
+        // controller's next pass comes 20 s on: the call still ended.
+        assert!(!presence.observe_at(false, at(0)));
+        assert!(presence.observe_at(false, at(20)));
+        // Once per absence, however long it runs.
+        assert!(!presence.observe_at(false, at(21)));
+        assert!(!presence.observe_at(false, at(60)));
+        // Back on the microphone: the next absence asks again on its own
+        // clock.
+        assert!(!presence.observe_at(true, at(61)));
+        assert!(!presence.observe_at(false, at(62)));
+        assert!(!presence.observe_at(false, at(64)));
+        assert!(presence.observe_at(false, at(65)));
     }
 
     #[test]

@@ -14,6 +14,10 @@ internal object SpaceRules {
      * straight forms do; the opening forms never do, so a long-pressed “ keeps the space before it. */
     const val JOINERS = ",.!?;:)]}'-/\"»…’”"
 
+    /** Whether [mark], typed right after a picked suggestion's space, takes that space: a clause mark anywhere, and
+     * in a URL field any joiner too ("github" picked, then "." or "/" gives "github." or "github/"). */
+    fun takesPickedSpace(mark: Char, url: Boolean) = mark in CLAUSE_MARKS || (url && mark in JOINERS)
+
     /** Whether ". " may replace the space that ends [before]: it follows a letter or a digit. */
     fun periodFits(before: String) = before.length >= 2 && before.last() == ' ' &&
         before[before.length - 2].let { it.isLetterOrDigit() }

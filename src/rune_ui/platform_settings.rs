@@ -117,12 +117,21 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
             }
             let stale =
                 warning.kind == PermissionKind::Accessibility && ui.platform.stale(warning.kind);
-            let description = if stale {
+            // macOS 27.3's post-event preflight reads stale until Hex restarts,
+            // so a TCC reset there would drop a grant that is already on: only
+            // a restart can settle the row.
+            let restart =
+                stale && ui.platform.accessibility_split && !ui.platform.accessibility_restart_done;
+            let description = if restart {
+                tr("Turns on when Hex restarts")
+            } else if stale {
                 tr("An older Hex entry can keep this off")
             } else {
                 description
             };
-            let action = if stale {
+            let action = if restart {
+                PermissionAction::Restart
+            } else if stale {
                 PermissionAction::ResetAndPrompt(warning.kind)
             } else {
                 warning.action
@@ -132,7 +141,15 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
                 &format!("{key}-allow"),
                 ui.platform.control_for(warning.kind, false),
                 ButtonKind::Secondary,
-                move |ui: &mut Ui| ui.ask(PlatformRequest::Permission(action)),
+                move |ui: &mut Ui| {
+                    if restart {
+                        // Only the stale Accessibility row's restart spends
+                        // the one 27.3 keystroke restart; another permission's
+                        // restart (Screen Recording, a microphone) does not.
+                        crate::desktop::onboarding::record_post_event_restart();
+                    }
+                    ui.ask(PlatformRequest::Permission(action));
+                },
             );
             setting_row(p, key, name, Some(description), control)
         })
@@ -521,6 +538,11 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                 ui.update(|settings| settings.meetings.show_recording_indicator = show);
             },
         ));
+        // Labs › Choose meeting audio: which app or output the system track
+        // records. Off, the row isn't there and every output is recorded.
+        if Feature::MeetingAudioSource.on(&ui.settings) {
+            rows.push(meeting_audio_row(ui, p, layer));
+        }
         after.extend(summaries_rows(ui, p, layer));
         after.push(retention_row(ui, p, layer).into());
         after.push(audio_retention_row(ui, p, layer).into());
@@ -638,6 +660,59 @@ fn retention_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             Some(_) => Some(tr("Moves audio, transcripts, and notes to the Trash")),
         },
         control,
+    )
+}
+
+/// Labs › Choose meeting audio: the app or output a meeting's system track
+/// records. All computer audio first, then every output, then every app
+/// playing now; a saved choice that isn't there stays listed with why.
+fn meeting_audio_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
+    let choice = ui.settings.labs.meeting_audio_source_choice.clone();
+    let options = super::meetings::audio_source::choices(&choice, ui.meeting_audio.sources());
+    // A chosen app that stopped or a device that was unplugged stays in the
+    // list, so the saved selection never silently vanishes.
+    let missing = options
+        .iter()
+        .find(|(option, _, hint)| option.same_source(&choice) && hint.is_some())
+        .and_then(|(_, _, hint)| *hint);
+    let menu = Menu::Pick("meeting-audio-source");
+    let labels: Vec<String> = options.iter().map(|(_, label, _)| label.clone()).collect();
+    let current = options
+        .iter()
+        .find(|(option, ..)| option.same_source(&choice))
+        .map_or_else(|| tr("All computer audio"), |(_, label, _)| label.as_str());
+    let trigger = rune_kit::Select::new("meeting-audio-source-control", &labels)
+        .appearance(rune_kit::SelectAppearance::Inline)
+        .current(Some(current))
+        .open(ui.open == Some(menu))
+        .on_toggle(move |ui: &mut Ui| toggle_menu(ui, menu))
+        .trigger(p.k)
+        .label(tr("Computer audio"))
+        .a11y_value(current);
+    let mut picker = rune_kit::Menu::new("meeting-audio-source-menu")
+        .trigger(trigger)
+        .placement(rune_kit::Placement::BottomEnd)
+        .gutter(4.0)
+        .min_width(360.0)
+        .open(ui.open == Some(menu))
+        .on_close(|ui: &mut Ui| ui.open = None);
+    for (option, label, hint) in options {
+        let mut item = rune_kit::MenuItem::new(label).checked(option.same_source(&choice));
+        if let Some(hint) = hint {
+            item = item.description(tr(hint));
+        }
+        picker = picker.item(item.on_select(move |ui: &mut Ui| {
+            ui.open = None;
+            ui.update(|settings| settings.labs.meeting_audio_source_choice = option.clone());
+        }));
+    }
+    icon_row(
+        p,
+        "meeting-audio-source",
+        &icons::SPEAKER,
+        tr("Computer audio"),
+        missing.map(tr),
+        picker.build(p.k, layer).mr(-8.0),
     )
 }
 

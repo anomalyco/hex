@@ -114,10 +114,17 @@ impl Worker {
         let live = look.local.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let ruled = rule_live(&look.router, &loaded, &live);
         let app = loaded.target.app.clone();
+        let bundle_id = loaded.target.bundle_id.clone();
         let rule = policy::rule_key(
             live.url.as_deref(),
             live.terminal.as_deref(),
-            loaded.target.bundle_id.as_deref(),
+            bundle_id.as_deref(),
+        );
+        let scope = rule_match::rule_match(
+            live.url.as_deref(),
+            live.terminal.as_deref(),
+            bundle_id.as_deref(),
+            app.as_deref(),
         );
         let site = rule.as_ref().map(site_of);
         let early = look.router.run(|| {
@@ -138,6 +145,7 @@ impl Worker {
             site,
             &live.candidates,
             now_ms(),
+            look.router.config().jev_auto_send(),
         );
         if answered.send.is_none() {
             answered.answer = match ruled.clues.first().map(|c| &c.pointer) {
@@ -168,7 +176,9 @@ impl Worker {
             router: look.router.clone(),
             url: live.url,
             app,
+            bundle_id,
             rule,
+            rule_match: scope,
             candidates: live.candidates,
             answer: answered.answer,
             send,
@@ -227,10 +237,11 @@ impl Worker {
                         smart::Policy::Ladder
                     };
                     let judgement = smart::decide(&evidence, policy);
-                    let refine = !ruled
-                        && look.router.config().jev_routing
-                        && look.router.config().smart_routing
-                        && !jev::settled(&judgement);
+                    // Jev is a hosted call with the capture's transcript and the desktop's
+                    // context: it runs only while `Auto-send with Jev` is on, whatever
+                    // flags an older settings file still holds.
+                    let refine =
+                        !ruled && look.router.config().jev_auto_send() && !jev::settled(&judgement);
                     let _ = updates.send(Update {
                         live: live.clone(),
                         judgement: judgement.clone(),
@@ -338,11 +349,21 @@ impl Worker {
                 site,
                 &update.live.candidates,
                 now_ms(),
+                current.router.config().jev_auto_send(),
+            );
+            let live_scope = rule_match::rule_match(
+                update.live.url.as_deref(),
+                update.live.terminal.as_deref(),
+                current.bundle_id.as_deref(),
+                current.app.as_deref(),
             );
             current.candidates = update.live.candidates;
             current.url = update.live.url;
             if let Some(rule) = live_rule {
                 current.rule = Some(rule);
+            }
+            if live_scope.is_some() {
+                current.rule_match = live_scope;
             }
             // The capsule starts a rule's Undo ring when it first shows the
             // rule, so a send whose rule was still being looked up holds from
@@ -358,7 +379,7 @@ impl Worker {
             if undelivered {
                 current.answer = keep_rows(&current.answer, answered.answer);
             } else if let (
-                RouteAnswer::Rule { to, site, .. },
+                RouteAnswer::Rule { to, site, by, .. },
                 RouteAnswer::Rule {
                     suggested, recent, ..
                 },
@@ -369,6 +390,7 @@ impl Worker {
                     suggested,
                     recent,
                     site: site.clone(),
+                    by: *by,
                 };
                 current.answer = keep_rows(&current.answer, next);
             }
@@ -468,7 +490,7 @@ fn keep_rows(shown: &RouteAnswer, next: RouteAnswer) -> RouteAnswer {
             .cloned(),
     );
     match next {
-        RouteAnswer::Rule { to, site, .. } => {
+        RouteAnswer::Rule { to, site, by, .. } => {
             suggested.retain(|dest| dest.session != to.session);
             recent.retain(|dest| dest.session != to.session);
             RouteAnswer::Rule {
@@ -476,6 +498,7 @@ fn keep_rows(shown: &RouteAnswer, next: RouteAnswer) -> RouteAnswer {
                 suggested,
                 recent,
                 site,
+                by,
             }
         }
         RouteAnswer::Guess { site, .. } => RouteAnswer::Guess {

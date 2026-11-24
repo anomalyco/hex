@@ -26,6 +26,10 @@ struct WindowsOutputAdapter<'a> {
 }
 
 impl OutputAdapter for WindowsOutputAdapter<'_> {
+    fn clipboard_text(&mut self) -> Option<String> {
+        crate::dictation::clipboard_phrase::system_text()
+    }
+
     fn insert(&mut self, text: &str, plan: InsertPlan) -> Result<InsertResult, String> {
         let paster = self.paster.as_mut().map_err(|error| format!("{error:#}"))?;
         match plan {

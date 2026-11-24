@@ -33,16 +33,16 @@ nonisolated enum DictationEngine: Equatable, Sendable {
         self != .onDeviceRecognizer
     }
 
-    /// Whether the keyboard's own speech preparation simply follows Hex's app engine:
-    /// Parakeet Ultra hands dictations to Hex, and Apple Speech shares the same on-device
-    /// model unless the keyboard is currently handing off to Hex (`keyboardNeedsHex`).
+    /// Whether the keyboard's own speech preparation simply follows Hex's app engine: Apple
+    /// Speech shares the same on-device model unless the keyboard can't get it
+    /// (`keyboardNeedsHex`). With Parakeet in Hex the keyboard still needs Apple's model, which
+    /// it dictates with until it has Parakeet loaded itself (the multilingual model's languages
+    /// too: they never go to Hex).
     func keyboardSpeechFollowsApp(keyboardNeedsHex: Bool) -> Bool {
         switch self {
-        case .parakeetUltra:
-            true
         case .appleSpeech, .onDeviceRecognizer:
             !keyboardNeedsHex
-        case .undecided, .parakeetV2:
+        case .undecided, .parakeetV2, .parakeetUltra:
             false
         }
     }

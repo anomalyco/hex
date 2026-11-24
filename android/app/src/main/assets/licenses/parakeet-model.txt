@@ -1,0 +1,13 @@
+Faster English dictation (Labs) downloads, only when you turn it on and tap Download:
+
+Parakeet TDT-CTC 110M, by NVIDIA.
+https://huggingface.co/nvidia/parakeet-tdt_ctc-110m
+Licensed under the Creative Commons Attribution 4.0 International License (CC BY 4.0):
+https://creativecommons.org/licenses/by/4.0/
+Full licence: cc-by-4.0.txt. Provided as is, without warranties, as that licence sets out.
+
+Changes: converted to GGUF and quantized to 8 bits (Q8_0) by the transcribe.cpp authors:
+https://huggingface.co/handy-computer/parakeet-tdt_ctc-110m-gguf
+(revision 1c3f0d5378fdd358905cc410a93ed9e64f52d170, file parakeet-tdt_ctc-110m-Q8_0.gguf,
+SHA-256 7dd44c74a331d788a4e5f8b16913b3feb29ced22cf5613aad0e0f6cd30516296).
+Hex uses that file unmodified and does not include it in the app.

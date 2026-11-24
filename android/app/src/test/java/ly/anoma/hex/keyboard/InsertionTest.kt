@@ -432,6 +432,17 @@ class InsertionTest {
         assertEquals(false, SpaceRules.separates("\nfox"))
         assertEquals(false, SpaceRules.separates("fox"))
         assertEquals(false, SpaceRules.separates(null))
+        // A picked word's space (Gboard adds one in Chrome's address bar too): a clause mark takes it anywhere, and in
+        // a URL field so do . / and the other joiners ("github." and "github/", never "github /").
+        for (mark in ",.!?;:)") {
+            assertEquals("$mark", true, SpaceRules.takesPickedSpace(mark, url = false))
+            assertEquals("$mark", true, SpaceRules.takesPickedSpace(mark, url = true))
+        }
+        assertEquals(false, SpaceRules.takesPickedSpace('/', url = false))
+        assertEquals(true, SpaceRules.takesPickedSpace('/', url = true))
+        assertEquals(true, SpaceRules.takesPickedSpace('-', url = true))
+        assertEquals(false, SpaceRules.takesPickedSpace('(', url = true))
+        assertEquals(false, SpaceRules.takesPickedSpace('w', url = true))
     }
     // iOS CleanupTaggerTests' English examples and its hand-written set, met with rules (no tagger).
     @Test fun englishCleanupRulesMeetTheTaggersExamples() {
@@ -603,12 +614,16 @@ class InsertionTest {
         // Off, every key offers exactly what it did: accents alone, and none on a letter without them.
         assertEquals(LetterFeedback.options('a', "en"), LetterFeedback.holds('a', "en", null))
         assertEquals(emptyList<String>(), LetterFeedback.holds('m', "en", null))
-        // On, a second or third row key offers its symbol first, then the same accents after it.
+        // On, a key without a digit offers its symbol first, then the same accents after it.
         val a = LetterFeedback.holds('a', "en", null, symbolsOnLetters = true)
         assertEquals("@", a.first())
         assertEquals(LetterFeedback.options('a', "en"), a.drop(1))
-        assertEquals(listOf("/"), LetterFeedback.holds('m', "en", null, symbolsOnLetters = true))
+        assertEquals(listOf("?"), LetterFeedback.holds('m', "en", null, symbolsOnLetters = true))
         assertEquals(LetterFeedback.options('e', "en"), LetterFeedback.holds('e', "en", null, symbolsOnLetters = true))
+        // On the top row, with the number row hiding its digit, a letter offers Gboard's symbol first.
+        assertEquals(listOf("%"), LetterFeedback.holds('q', "en", null, symbolsOnLetters = true, topRow = true))
+        assertEquals(listOf("|") + LetterFeedback.options('e', "en"),
+            LetterFeedback.holds('e', "en", null, symbolsOnLetters = true, topRow = true))
         // A capital offers the same symbol, and row 1 keeps its digit first.
         assertEquals("@", LetterFeedback.holds('A', "en", null, symbolsOnLetters = true).first())
         assertEquals("1", LetterFeedback.holds('q', "en", '1', symbolsOnLetters = true).first())
@@ -799,5 +814,15 @@ class InsertionTest {
         retries.tookBack("there", "Hello world ")
         retries.forget()
         assertEquals(readings, retries.typing(readings, "Hello world "))
+    }
+
+    // Labs › Keyboard › Delete swiped words letter by letter: on, delete after a swipe is an ordinary one.
+    @Test fun deleteTakesASwipedWordBackOnlyWhereTheSwipeLeftItAndOnlyWithTheLabOff() {
+        assertTrue(SwipeText.takesBack("Hello world", "Hello world", "world", letterByLetter = false))
+        assertFalse(SwipeText.takesBack("Hello world", "Hello world", "world", letterByLetter = true))
+        // The text changed or the cursor moved since the swipe: the word is ordinary text by then.
+        assertFalse(SwipeText.takesBack("Hello worl", "Hello world", "world", letterByLetter = false))
+        assertFalse(SwipeText.takesBack("Hello world", null, "world", letterByLetter = false))
+        assertFalse(SwipeText.takesBack("Hello world!", "Hello world!", "world", letterByLetter = false))
     }
 }

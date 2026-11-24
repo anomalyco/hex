@@ -27,9 +27,11 @@ use super::{SharedOutcomes, lock};
 
 mod opencode;
 mod preparation;
+pub(crate) mod rule_match;
 mod send;
 mod session_name;
 
+pub use rule_match::{AutoSendBy, RuleMatch};
 use send::{Clock, DeliverOutcome, PickAction, SavedRule, SendState, Sent, UndoPlan};
 
 #[cfg(test)]
@@ -63,6 +65,9 @@ pub struct CaptureRoute {
     /// capture went, as two sends agreed: `Send { to: <that session>,
     /// always: true }` saves it.
     pub offer: Option<String>,
+    /// Structured match scope for the post-send `Always…` configurator
+    /// (site subpath vs whole host, terminal folder, or non-general app).
+    pub rule_match: Option<RuleMatch>,
 }
 
 impl CaptureRoute {
@@ -71,6 +76,7 @@ impl CaptureRoute {
             answer,
             delivery: None,
             offer: None,
+            rule_match: None,
         }
     }
 
@@ -114,6 +120,7 @@ pub enum RouteAnswer {
         suggested: Vec<RouteDest>,
         recent: Vec<RouteDest>,
         site: Option<String>,
+        by: AutoSendBy,
     },
     /// Guesses, best first: everything else the router found (Jev's pick,
     /// HOME when Jev couldn't tell, a dev server's port, a page or its
@@ -204,9 +211,17 @@ fn opencode_managed() -> bool {
     crate::policy::Policy::current().locks(crate::policy::Lock::OpenCodeProcessing)
 }
 
+/// Whether Jev has an active credential available (`$OPENCODE_API_KEY` or
+/// OpenCode's credential) within `budget`. Blocks; call it off the UI thread.
+pub fn jev_available(budget: Duration) -> bool {
+    if opencode_managed() || std::env::var_os("SCRAWL_NO_OPENCODE").is_some() {
+        return false;
+    }
+    router().run(|| jev::available(budget))
+}
+
 /// Open OpenCode sessions, newest first, as Send to… lists them, read
 /// within `budget`. Blocks; call it off the UI thread.
-#[cfg(target_os = "macos")]
 pub fn recent_sessions(budget: Duration) -> anyhow::Result<Vec<RouteDest>> {
     anyhow::ensure!(!opencode_managed(), "OpenCode is turned off here");
     let read = router().run(|| {
@@ -307,6 +322,11 @@ pub(super) enum Job {
     Send {
         to: String,
         always: bool,
+    },
+    SaveRule {
+        kind: RuleKind,
+        key: String,
+        target: String,
     },
     Undo,
     /// The pointer is on the capsule (`true`) or left it: a rule's send
@@ -420,8 +440,11 @@ struct Routed {
     router: Router,
     url: Option<String>,
     app: Option<String>,
+    bundle_id: Option<String>,
     /// What an always-rule would match.
     rule: Option<(RuleKind, String)>,
+    /// Structured match scope for the post-send `Always…` configurator.
+    rule_match: Option<RuleMatch>,
     candidates: Vec<smart::Candidate>,
     answer: RouteAnswer,
     /// The send, hold, delivery, and undo lifecycle; [`CaptureRoute::delivery`]
@@ -435,6 +458,7 @@ impl Routed {
             answer: self.answer.clone(),
             delivery: self.send.delivery(),
             offer: self.send.offer_site(),
+            rule_match: self.rule_match.clone(),
         }
     }
 
@@ -507,6 +531,7 @@ impl Worker {
         match job {
             Job::Written { bundle, look } => self.written(bundle, look),
             Job::Send { to, always } => self.chosen(&to, always),
+            Job::SaveRule { kind, key, target } => self.save_rule(kind, key, target),
             Job::Undo => self.undo(),
             Job::Hold(on) => self.hold(on),
             Job::SendBundle {
@@ -596,6 +621,16 @@ impl Worker {
     fn chosen(&mut self, to: &str, always: bool) {
         if let Some(dest) = self.resolve(to) {
             self.choose(dest, always);
+        }
+    }
+
+    /// Saves a rule chosen from the post-send `Always…` configurator and
+    /// attaches it to the current capture so Undo can also revert it.
+    fn save_rule(&mut self, kind: RuleKind, key: String, target: String) {
+        if let Some(saved) = persist_rule((kind, key, target))
+            && let Some(current) = self.current.as_mut()
+        {
+            current.send.attach_saved_rule(saved);
         }
     }
 
@@ -1120,6 +1155,7 @@ fn answer_for(
     site: Option<String>,
     candidates: &[smart::Candidate],
     now_ms: u64,
+    jev_auto_send: bool,
 ) -> Answered {
     let scored = |scored: &smart::Scored| {
         let dest = smart::destination_of(scored, url);
@@ -1144,17 +1180,18 @@ fn answer_for(
             shown: Some(Shown::guess(why)),
         }
     };
+    let auto_by = |to: &smart::Scored| match to.lead().map(|r| r.basis) {
+        Some(smart::Basis::Clue(
+            smart::Source::Rule | smart::Source::AppRule | smart::Source::TerminalRule,
+        )) => Some(AutoSendBy::Rule),
+        Some(smart::Basis::Jev) if jev_auto_send => Some(AutoSendBy::Jev),
+        _ => None,
+    };
     let mut answered = match decided {
-        // The router also trusts a page naming its session. In Hex, only the
-        // user's saved site, terminal or app rule authorizes an automatic send.
-        Decided::Judged(smart::Decision::Send { to, instead })
-            if matches!(
-                to.lead().map(|r| r.basis),
-                Some(smart::Basis::Clue(
-                    smart::Source::Rule | smart::Source::AppRule | smart::Source::TerminalRule
-                ))
-            ) =>
-        {
+        // Saved site, terminal, or app rules always auto-send; confident Jev
+        // picks auto-send only when `Auto-send with Jev` is enabled.
+        Decided::Judged(smart::Decision::Send { to, instead }) if auto_by(&to).is_some() => {
+            let by = auto_by(&to).expect("checked");
             let dest = smart::destination_of(&to, url);
             let shown = Shown::rule(lead_why(&to));
             let to = scored(&to);
@@ -1168,6 +1205,7 @@ fn answer_for(
                     suggested,
                     recent,
                     site,
+                    by,
                 },
                 send: Some(dest),
                 shown: Some(shown),
@@ -1482,6 +1520,10 @@ mod tests {
     }
 
     fn sent_by(basis: smart::Basis, why: &str) -> Answered {
+        sent_by_with_jev(basis, why, false)
+    }
+
+    fn sent_by_with_jev(basis: smart::Basis, why: &str, jev_auto_send: bool) -> Answered {
         answer_for(
             Decided::Judged(smart::Decision::Send {
                 to: scored_by("ses_a", "Alpha", basis, why),
@@ -1494,6 +1536,7 @@ mod tests {
                 candidate("ses_c", "Gamma", 0),
             ],
             0,
+            jev_auto_send,
         )
     }
 
@@ -1554,6 +1597,7 @@ mod tests {
                 None,
                 &[candidate("ses_seer", "SEER", 0)],
                 0,
+                false,
             )
         };
         for answered in [rule(""), rule("ses_seer")] {
@@ -1577,6 +1621,7 @@ mod tests {
             None,
             &[],
             0,
+            false,
         );
         let RouteAnswer::Guess { suggested, .. } = &answered.answer else {
             panic!("not a guess: {:?}", answered.answer);
@@ -1650,11 +1695,30 @@ mod tests {
                 Some("ses_a".into()),
                 "{why}: sent at once"
             );
-            assert!(
-                matches!(answered.answer, RouteAnswer::Rule { ref to, .. } if to.why == "rule")
-            );
+            assert!(matches!(
+                answered.answer,
+                RouteAnswer::Rule {
+                    ref to,
+                    by: AutoSendBy::Rule,
+                    ..
+                } if to.why == "rule"
+            ));
             assert_eq!(answered.shown, Some(Shown::rule(why)));
         }
+        // With Auto-send with Jev on, Jev's confident pick auto-sends with
+        // Jev provenance; JevHome fallback and non-rule clues still suggest.
+        let jev_send = sent_by_with_jev(Basis::Jev, "Jev gave it 0.96", true);
+        assert!(jev_send.send.is_some());
+        assert!(matches!(
+            jev_send.answer,
+            RouteAnswer::Rule {
+                by: AutoSendBy::Jev,
+                ..
+            }
+        ));
+        let jev_home = sent_by_with_jev(Basis::JevHome, "Jev couldn't tell, so HOME", true);
+        assert!(jev_home.send.is_none());
+        assert!(matches!(jev_home.answer, RouteAnswer::Guess { .. }));
     }
 
     #[test]
@@ -1678,6 +1742,7 @@ mod tests {
             None,
             &candidates,
             63_000,
+            false,
         );
         assert_eq!(send.map(|dest| dest.session), Some("ses_a".into()));
         let RouteAnswer::Rule {
@@ -1714,6 +1779,7 @@ mod tests {
             Some("example.com".into()),
             &candidates,
             0,
+            false,
         );
         assert!(send.is_none());
         assert!(matches!(
@@ -1818,6 +1884,7 @@ mod tests {
             None,
             &[],
             0,
+            false,
         );
         assert!(send.is_none());
         assert_eq!(
@@ -2938,6 +3005,47 @@ mod tests {
                     "{auto_send:?}: {answer:?}"
                 );
                 assert_eq!(sent, None, "nothing is sent until it's picked");
+            }
+        }
+
+        /// The hosted Jev lookup runs only while `Auto-send with Jev` is on, so a
+        /// settings file left with `jevRouting` on and `autoSend` back at
+        /// `rules` never reaches Jev.
+        #[test]
+        fn only_an_on_auto_send_with_jev_asks_jev() {
+            static ASKED: AtomicU64 = AtomicU64::new(0);
+            fn ask(_: &[u8], _: Duration) -> anyhow::Result<Vec<u8>> {
+                ASKED.fetch_add(1, Ordering::Relaxed);
+                anyhow::bail!("test Jev")
+            }
+            for (auto_send, asks) in [
+                (policy::AutoSend::Rules, 0),
+                (policy::AutoSend::Confident, 1),
+            ] {
+                ASKED.store(0, Ordering::Relaxed);
+                let router = router_with(|c| {
+                    c.smart_routing = true;
+                    c.jev_routing = true;
+                    c.auto_send = auto_send;
+                });
+                let live = look::Live {
+                    candidates: vec![
+                        candidate("ses_board", "BOARD", 30),
+                        candidate("ses_home", "HOME", 20),
+                    ],
+                    ..look::Live::default()
+                };
+                let (mut look, found) = held_look(router, live.clone());
+                look.model.ask = ask;
+                let outcomes = SharedOutcomes::default();
+                let mut worker = worker(outcomes.clone());
+                let bundle = written("com.example.board");
+                lock(&outcomes).fail(bundle.clone(), "test".into());
+                worker.written(bundle.clone(), look);
+                found.send(Some(live)).unwrap();
+                settle(&mut worker);
+                assert_eq!(ASKED.load(Ordering::Relaxed), asks, "{auto_send:?}");
+                std::fs::remove_dir_all(bundle.parent().unwrap()).unwrap();
             }
         }
 
