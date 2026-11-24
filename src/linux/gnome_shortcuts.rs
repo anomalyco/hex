@@ -15,11 +15,12 @@ const LIST_SCHEMA: &str = "org.gnome.settings-daemon.plugins.media-keys";
 const ENTRY_SCHEMA: &str = "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding";
 const BASE: &str = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/";
 /// Every entry Hex may write, by path name.
-const ENTRIES: [&str; 4] = [
+const ENTRIES: [&str; 5] = [
     "hex-dictation",
     "hex-paste-last",
     "hex-typed-text",
     "hex-annotate",
+    "hex-model-switch",
 ];
 
 /// One custom shortcut: its path name, its name in GNOME Settings, the `hex`
@@ -137,6 +138,13 @@ fn entries(settings: &AppSettings) -> Vec<Entry> {
             settings.active_typed_text_hotkey(),
         );
     }
+    // Labs › Model switch shortcut: one key swaps the dictation model.
+    add(
+        "hex-model-switch",
+        "Hex: switch speech model",
+        "model switch",
+        settings.active_model_switch_hotkey(),
+    );
     #[cfg(hex_capture)]
     if settings.capture.enabled {
         add(

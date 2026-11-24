@@ -440,6 +440,7 @@ pub(super) fn validate_hotkey(
     if matches!(
         target,
         ShortcutTarget::PasteLast
+            | ShortcutTarget::ModelSwitch
             | ShortcutTarget::Cancel
             | ShortcutTarget::Screenshot
             | ShortcutTarget::ScreenshotRecord

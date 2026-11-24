@@ -58,6 +58,15 @@ pub(super) fn entries(ui: &Ui) -> Vec<Entry> {
                 tr("Dictates like the shortcut above"),
             );
         }
+        if Feature::ModelSwitchShortcut.on(&ui.settings) {
+            add(
+                g,
+                "model-switch-shortcut",
+                false,
+                tr("Model switch shortcut"),
+                tr("Swaps dictation to the other model, and back"),
+            );
+        }
         #[cfg(any(target_os = "windows", target_os = "linux"))]
         if Feature::TerminalPasteShortcut.on(&ui.settings) {
             add(

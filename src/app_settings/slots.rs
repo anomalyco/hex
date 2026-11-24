@@ -20,6 +20,8 @@ pub enum HotkeySlot {
     CaptureReplay,
     /// Labs › Second dictation shortcut.
     SecondDictation,
+    /// Labs › Model switch shortcut.
+    ModelSwitch,
     /// Labs › More dictation shortcuts (macOS): row `index`'s binding.
     ExtraDictation(usize),
     /// Labs › Terminal paste shortcut (Windows, Linux).
@@ -102,6 +104,23 @@ impl HotkeySlot {
                     && s.second_dictation_hotkey
                         .as_ref()
                         .is_some_and(|b| cfg!(target_os = "macos") || b.key.is_some())
+            },
+        },
+        SlotDescriptor {
+            slot: Self::ModelSwitch,
+            key: "model_switch_hotkey",
+            get: |s| s.model_switch_hotkey.as_ref(),
+            set: |s, b| s.model_switch_hotkey = Some(b),
+            reset: |s| s.model_switch_hotkey = None,
+            clear: Some(|s| s.model_switch_hotkey = None),
+            // Every OS matches it as a key press, so a keyless binding never
+            // runs and takes no key from another shortcut.
+            reserved_against: |s, _| {
+                s.labs.model_switch_shortcut
+                    && s.model_switch_other.is_some()
+                    && s.model_switch_hotkey
+                        .as_ref()
+                        .is_some_and(|b| b.key.is_some())
             },
         },
         SlotDescriptor {

@@ -154,6 +154,7 @@ define_features! {
     LearnFromCorrections => labs(learn_from_corrections), "learn-from-corrections", Dictation, Everyone, MACOS, 20261121;
     TerminalPaste => app(paste_with_shift), "terminal-paste", Output, Everyone, WINDOWS, 20261030;
     KeyboardModelSwitching => app(keyboard_model_switching.enabled), "keyboard-model-switching", Models, Everyone, EVERY, 20261030;
+    ModelSwitchShortcut => labs(model_switch_shortcut), "model-switch-shortcut", Models, Everyone, EVERY, 20261124;
     MouseShortcuts => labs(mouse_shortcuts), "mouse-shortcuts", Shortcuts, Everyone, MACOS, 20261030;
     PauseBrowser => app(pause_browser_media), "pause-browser", Dictation, Everyone, MACOS, 20261030;
     ShareShortcut => app(share_dictation_shortcut), "share-shortcut", Shortcuts, Everyone, WINDOWS, 20261030;

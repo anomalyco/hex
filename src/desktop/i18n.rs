@@ -25,6 +25,7 @@ mod labs;
 mod meeting_mute;
 mod meetings;
 mod menu;
+mod model_switch;
 pub(crate) mod numbers;
 mod onboarding;
 mod portuguese;

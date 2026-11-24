@@ -82,6 +82,7 @@ fn mouse_bindable(hotkeys: RuntimeHotkeys) -> impl Iterator<Item = RuntimeHotkey
         Some(hotkeys.dictation),
         hotkeys.raw_dictation,
         hotkeys.second_dictation,
+        hotkeys.model_switch,
         hotkeys.paste_last,
     ]
     .into_iter()

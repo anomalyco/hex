@@ -238,6 +238,19 @@ downloads or repairs one (`model install` does). It keeps that model's own
 remembered language, as the menu bar does; `--language`
 overrides only the language, and must be one the model supports.
 
+`model switch` asks the running Hex to swap the dictation model and
+language with the other choice Labs › Model switch shortcut saved
+(`model_switch_other`), exactly as its key does, through the same
+installed-only preparation as `model use`. It answers `busy` while Hex
+records or has accepted dictation jobs pending, and once the new model loads
+both selections are saved together;
+a failed preparation keeps the active model and the saved choice. Pressing
+the key again, or running it again, swaps back. It never downloads: an other
+model that isn't installed answers `not-installed`, a current model that
+can't be the saved other choice (Apple Speech) answers `unavailable`, the
+selection already running answers `changed: false`, and with the Lab off it
+answers `unavailable`.
+
 `vocabulary` edits the [shared vocabulary](features/vocabulary.md) through the
 running Hex, which saves settings and reloads them as a window edit would.
 Terms match in any case; `add` of a term already listed only merges new
@@ -625,6 +638,13 @@ support this lab.
   `labs.second_dictation_shortcut` is on (`hex labs on
   second-dictation-shortcut`) and shares no key with another shortcut. Linux
   and Windows need a key in it, as every shortcut there does.
+- `model_switch_hotkey` (unbound by default; `none` clears it) swaps the
+  dictation model and language with `model_switch_other`, and back. It acts
+  only while `labs.model_switch_shortcut` is on
+  (`hex labs on model-switch-shortcut`) and `model_switch_other` names an
+  installed model and language, and shares no key with another shortcut.
+  Every OS needs a key in it. Hex never downloads the other model for it:
+  while it is missing, the key does nothing and says so.
 - `extra_dictation_hotkeys` (macOS, an empty array by default) holds up to
   four more dictation shortcuts, each `{"binding": ..., "mode": ...}`. A row
   acts only while `labs.more_dictation_shortcuts` is on (`hex labs on
@@ -680,7 +700,8 @@ Writable keys: `release_microphone_while_idle`,
 `sound_effects`, `sound_effect_volume`, `sound_theme`, `microphone`,
 `avoid_bluetooth_microphone`, `recording_audio_behavior`, `recording_duck_volume`, `double_tap_lock`, `double_tap_only`,
 `shortcut_mode`, `dictation_hotkey`, `paste_last_hotkey`, `raw_dictation_hotkey`,
-`second_dictation_hotkey`, `extra_dictation_hotkeys`, `labs.second_dictation_shortcut`,
+`second_dictation_hotkey`, `model_switch_hotkey`, `model_switch_other`,
+`labs.model_switch_shortcut`, `extra_dictation_hotkeys`, `labs.second_dictation_shortcut`,
 `labs.more_dictation_shortcuts`, `labs.standalone_special_keys`, `labs.app_model_switching`, `show_dock_icon`, `vocabulary_boost`,
 `labs.keep_microphone_open`, `labs.keep_microphone_open_seconds`,
 `labs.hud_height`, `labs.hud_bottom_gap`,

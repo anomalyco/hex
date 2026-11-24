@@ -310,6 +310,9 @@ pub struct LabsSettings {
     /// A dictation mode's speech model and language follow the foreground
     /// application (macOS and Windows).
     pub app_model_switching: bool,
+    /// `model_switch_hotkey` swaps the dictation selection with the saved
+    /// other model and language, and back.
+    pub model_switch_shortcut: bool,
     /// The menu bar lists the next calendar meetings, each a local start and
     /// end time and title; choosing one with a call link opens it (macOS,
     /// with Meetings on and a calendar connected).
@@ -561,6 +564,7 @@ impl Default for LabsSettings {
             api_timestamps: false,
             speakers_only: false,
             app_model_switching: false,
+            model_switch_shortcut: false,
             calendar_menu: false,
             calendar_bulk_select: false,
             pause_menu: false,
