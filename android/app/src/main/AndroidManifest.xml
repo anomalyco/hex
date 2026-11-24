@@ -28,5 +28,13 @@
             </intent-filter>
             <meta-data android:name="android.view.im" android:resource="@xml/input_method" />
         </service>
+        <!-- A package update drops an IME's additional subtypes; a locale change moves the voice subtype's
+             language. Both re-register it from the saved Labs toggle. -->
+        <receiver android:name=".keyboard.VoiceInputReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.LOCALE_CHANGED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

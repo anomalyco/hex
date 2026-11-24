@@ -5,7 +5,7 @@
     <string name="keyboard_hint_password">Dictation off in password fields</string>
     <string name="keyboard_hint_microphone">Allow the microphone in Hex</string>
     <!-- Labs › Keyboard › Voice input mode: the voice-only bar has no Hex key to hold. -->
-    <string name="keyboard_hint_voice">Tap ✓ to talk</string>
+    <string name="keyboard_hint_voice">Tap Hex to talk</string>
     <!-- Dictation's notes, the same sentences MicCapture sends (HexKeyboard.speechNote). -->
     <string name="keyboard_note_microphone">Microphone unavailable. Try again.</string>
     <string name="keyboard_note_transcribe">Couldn’t transcribe. Try again.</string>

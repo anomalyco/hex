@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Rect
-import android.graphics.drawable.GradientDrawable
 import android.text.TextPaint
 import android.text.TextUtils
 import android.util.DisplayMetrics
@@ -124,7 +123,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         }
         noticeClose.apply {
             isFocusable = true
-            addView(icon(R.drawable.ic_cancel), LayoutParams(dp(16), dp(16), Gravity.CENTER))
+            addView(barIcon(context, R.drawable.ic_cancel, ink), LayoutParams(dp(16), dp(16), Gravity.CENTER))
             setOnClickListener { notice?.let { notice = null; update(); it.dismiss() } }
         }
         noticeRow.addView(noticeText, LinearLayout.LayoutParams(0, -1, 1f))
@@ -157,7 +156,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
             undoChip.apply {
                 text = context.getString(R.string.keyboard_undo_dictation); useInter(500); textSize = 14f; setTextColor(ink)
                 gravity = Gravity.CENTER; includeFontPadding = false; isFocusable = true
-                background = shape(key, dp(15).toFloat()); setPadding(dp(12), 0, dp(14), 0)
+                background = barShape(key, dp(15).toFloat()); setPadding(dp(12), 0, dp(14), 0)
                 compoundDrawablePadding = dp(6)
                 setCompoundDrawablesRelativeWithIntrinsicBounds(context.getDrawable(R.drawable.ic_undo)?.mutate()?.apply {
                     setTint(ink); setBounds(0, 0, dp(16), dp(16))
@@ -176,7 +175,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         idleRow.addView(menuKey, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, -1))
         addView(idleRow, LayoutParams(-1, -1).apply { marginStart = side; marginEnd = side + hexWidth })
 
-        well.background = shape(color(R.color.sheet), pill / 2f)
+        well.background = barShape(color(R.color.sheet), pill / 2f)
         well.clipToOutline = true
         well.addView(scope, LayoutParams(-1, -1).apply { marginStart = dp(10); marginEnd = dp(10) })
         // TalkBack says "Recording" as the bar appears and "Transcribing" when it changes (a live region:
@@ -191,9 +190,9 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         cancelKey.apply {
             contentDescription = context.getString(R.string.keyboard_cancel_dictation); isFocusable = true
             setOnClickListener { ime.cancelSpeech() }
-            addView(View(context).apply { isDuplicateParentStateEnabled = true; background = pressable(color(R.color.modifier)) },
+            addView(View(context).apply { isDuplicateParentStateEnabled = true; background = barPressable(context, color(R.color.modifier)) },
                 LayoutParams(pill, pill, Gravity.CENTER))
-            addView(icon(R.drawable.ic_cancel), LayoutParams(dp(19), dp(19), Gravity.CENTER))
+            addView(barIcon(context, R.drawable.ic_cancel, ink), LayoutParams(dp(19), dp(19), Gravity.CENTER))
         }
         addView(cancelKey, LayoutParams(cancelWidth, -1, Gravity.END).apply { marginEnd = side + hexWidth })
 
@@ -257,7 +256,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
             val emoji = slot?.kind == Suggestion.Kind.Emoji
             if (fix) chip = i
             this.words[i].text = if (typed) context.getString(R.string.keyboard_literal, s) else s
-            this.words[i].background = if (fix) shape(key, dp(15).toFloat()) else null
+            this.words[i].background = if (fix) barShape(key, dp(15).toFloat()) else null
             slotViews[i].contentDescription = when {
                 s.isEmpty() -> null
                 typed -> context.getString(R.string.keyboard_keep, s)
@@ -368,7 +367,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         well.visibility = if (idle) GONE else VISIBLE
         cancelKey.visibility = if (idle) GONE else VISIBLE
         mark.visibility = if (idle) VISIBLE else GONE
-        hexFace.background = if (idle) pressable(android.graphics.Color.TRANSPARENT) else pressable(key)
+        hexFace.background = if (idle) barPressable(context, android.graphics.Color.TRANSPARENT) else barPressable(context, key)
         well.clipBounds = null
         if (idle || !ValueAnimator.areAnimatorsEnabled()) return
         cancelKey.alpha = 0f
@@ -412,16 +411,10 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
     /** One of the strip's tools: its icon on the strip's line, with the cancel key's round press. */
     private fun toolButton(res: Int, label: Int, action: () -> Unit) = FrameLayout(context).apply {
         isFocusable = true; contentDescription = context.getString(label)
-        addView(View(context).apply { isDuplicateParentStateEnabled = true; background = pressable(android.graphics.Color.TRANSPARENT) },
+        addView(View(context).apply { isDuplicateParentStateEnabled = true; background = barPressable(context, android.graphics.Color.TRANSPARENT) },
             LayoutParams(pill, pill, Gravity.CENTER))
-        addView(icon(res), LayoutParams(dp(19), dp(19), Gravity.CENTER))
+        addView(barIcon(context, res, ink), LayoutParams(dp(19), dp(19), Gravity.CENTER))
         setOnClickListener { action() }
-    }
-    private fun icon(res: Int) = ImageView(context).apply { setImageResource(res); imageTintList = ColorStateList.valueOf(ink) }
-    private fun shape(fill: Int, radius: Float) = GradientDrawable().apply { setColor(fill); cornerRadius = radius }
-    private fun pressable(fill: Int) = android.graphics.drawable.StateListDrawable().apply {
-        addState(intArrayOf(android.R.attr.state_pressed), GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color(R.color.pressed)) })
-        addState(intArrayOf(), GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(fill) })
     }
 }
 

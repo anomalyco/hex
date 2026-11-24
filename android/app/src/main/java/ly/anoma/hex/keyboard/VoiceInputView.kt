@@ -3,7 +3,6 @@ package ly.anoma.hex.keyboard
 import android.content.Context
 import android.content.res.ColorStateList
 import android.content.res.Configuration
-import android.graphics.drawable.GradientDrawable
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
@@ -60,7 +59,7 @@ internal class VoiceInputView(context: Context, private val ime: HexKeyboard) : 
             setPadding(dp(16), 0, dp(4), 0)
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
-        well.background = shape(context.getColor(R.color.sheet), pill / 2f)
+        well.background = barShape(context.getColor(R.color.sheet), pill / 2f)
         well.clipToOutline = true
         well.addView(scope, FrameLayout.LayoutParams(-1, -1).apply { marginStart = dp(10); marginEnd = dp(10) })
         scope.importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
@@ -68,13 +67,13 @@ internal class VoiceInputView(context: Context, private val ime: HexKeyboard) : 
         cancelKey.apply {
             contentDescription = context.getString(R.string.keyboard_cancel_dictation); isFocusable = true
             setOnClickListener { ime.cancelVoice() }
-            addView(View(context).apply { isDuplicateParentStateEnabled = true; background = pressable(context.getColor(R.color.modifier)) },
+            addView(View(context).apply { isDuplicateParentStateEnabled = true; background = barPressable(context, context.getColor(R.color.modifier)) },
                 FrameLayout.LayoutParams(pill, pill, Gravity.CENTER))
-            addView(icon(R.drawable.ic_cancel), FrameLayout.LayoutParams(dp(19), dp(19), Gravity.CENTER))
+            addView(barIcon(context, R.drawable.ic_cancel, ink), FrameLayout.LayoutParams(dp(19), dp(19), Gravity.CENTER))
         }
         finishKey.apply {
             isFocusable = true
-            addView(View(context).apply { isDuplicateParentStateEnabled = true; background = pressable(key) },
+            addView(View(context).apply { isDuplicateParentStateEnabled = true; background = barPressable(context, key) },
                 FrameLayout.LayoutParams(pill, pill, Gravity.CENTER))
             mark.setImageResource(R.drawable.hex_mark); mark.imageTintList = ColorStateList.valueOf(ink)
             addView(mark, FrameLayout.LayoutParams(px(KeyboardMetrics.MARK), px(KeyboardMetrics.MARK), Gravity.CENTER))
@@ -128,10 +127,4 @@ internal class VoiceInputView(context: Context, private val ime: HexKeyboard) : 
     /** The editor went away: the next voice bar starts with an empty scope. */
     fun reset() = scope.clear()
 
-    private fun icon(res: Int) = ImageView(context).apply { setImageResource(res); imageTintList = ColorStateList.valueOf(ink) }
-    private fun shape(fill: Int, radius: Float) = GradientDrawable().apply { setColor(fill); cornerRadius = radius }
-    private fun pressable(fill: Int) = android.graphics.drawable.StateListDrawable().apply {
-        addState(intArrayOf(android.R.attr.state_pressed), GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(context.getColor(R.color.pressed)) })
-        addState(intArrayOf(), GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(fill) })
-    }
 }
