@@ -2327,11 +2327,13 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(holds["s"], ["s", "ß", "ś", "š"])
     }
 
-    /// While the keyboard switches between two or more languages, Automatic dictates in the
-    /// one it shows (TestFlight build 56: Spanish dictation came out "incomprehensible"),
-    /// in the iPhone's region; a language picked by hand, one keyboard language, or an iPhone
-    /// language without a layout (Hebrew) keeps dictation where it was, unless Switch dictation
-    /// too asks to follow.
+    /// With Switch dictation too on, while the keyboard switches between two or more languages,
+    /// Automatic dictates in the one it shows (TestFlight build 56: Spanish dictation came out
+    /// "incomprehensible"), in the iPhone's region; a language picked by hand or one keyboard
+    /// language keeps dictation where it was. Off, from iOS 26 it never follows (TestFlight
+    /// build 150: English speech came out as German with the keyboard on Deutsch); before
+    /// iOS 26, which offers no switch, it follows unless the iPhone's language has no layout
+    /// (Hebrew).
     func testAutomaticDictationFollowsTheKeyboardsLanguage() {
         let suite = "KeyboardLayoutTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -2343,6 +2345,18 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(settings.effectiveDictationLanguage, "en-US")
 
         settings.keyboardLanguages = [.english, .spanish]
+        settings.currentKeyboardLanguage = .spanish
+        XCTAssertFalse(settings.dictationFollowsKeyboard, "off by default")
+        XCTAssertNil(settings.keyboardDictationLanguage(preferred: ["en-US"], region: "ES", osMajorVersion: 26), "off: Automatic stays")
+        XCTAssertNil(settings.keyboardDictationLanguage(preferred: ["en-US"], region: "ES", osMajorVersion: 27))
+        XCTAssertEqual(settings.effectiveDictationLanguage, "en-US", "the keyboard on Español, dictation still English")
+        XCTAssertEqual(
+            settings.keyboardDictationLanguage(preferred: ["en-US"], region: "ES", osMajorVersion: 18),
+            "es-ES",
+            "before iOS 26, which has no switch, it follows"
+        )
+        settings.dictationFollowsKeyboard = true
+        settings.currentKeyboardLanguage = nil
         XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["en-US"]), "en-US", "the first until switched")
         settings.currentKeyboardLanguage = .spanish
         XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["en-US"], region: "ES"), "es-ES")
@@ -2354,14 +2368,12 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["es"], region: "MX"), "es-MX", "no Spanish region")
         XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["es"], region: "FR"), "es-ES")
         settings.chooseDictationLanguage("es-MX")
-        settings.dictationFollowsKeyboard = true
         settings.chooseDictationLanguage(nil)
         XCTAssertEqual(
             settings.keyboardDictationLanguage(preferred: ["en-US"], region: "ES"),
             "es-MX",
             "the variant picked by hand survives a swipe away and back"
         )
-        settings.dictationFollowsKeyboard = false
         settings.currentKeyboardLanguage = .english
         XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["en-GB"]), "en-GB")
         settings.currentKeyboardLanguage = .french
@@ -2377,7 +2389,9 @@ final class KeyboardLayoutTests: XCTestCase {
 
         settings.keyboardLanguages = [.english, .spanish]
         settings.automaticDictationLanguage = "he-IL"
-        XCTAssertNil(settings.keyboardDictationLanguage(preferred: ["he-IL"]), "Hebrew is dictated, never typed")
+        settings.dictationFollowsKeyboard = false
+        XCTAssertNil(settings.keyboardDictationLanguage(preferred: ["he-IL"], osMajorVersion: 18), "Hebrew is dictated, never typed")
+        XCTAssertNil(settings.keyboardDictationLanguage(preferred: ["he-IL"], osMajorVersion: 27))
         settings.dictationFollowsKeyboard = true
         XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["he-IL"]), "en-US", "Switch dictation too")
     }

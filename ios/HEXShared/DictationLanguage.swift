@@ -172,27 +172,33 @@ nonisolated struct LanguageSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.dictationFollowsKeyboard) }
     }
 
-    /// What Automatic dictates in while the keyboard switches between two or more languages:
-    /// the one the space bar shows now, in the iPhone's region where Apple Speech has it
-    /// (`KeyboardLanguage.dictationLanguage`), as the iPhone's own keyboards take dictation
-    /// with them, so Spanish speech is never transcribed as English, nor English as Spanish.
-    /// A variant picked by hand for that language's keyboard wins over the preferred
-    /// languages, so swiping back to Español returns to the Spanish picked last. Nil with a
-    /// dictation language picked by hand, with one keyboard language, and while the iPhone's
-    /// own language (what Automatic picks otherwise) has no layout to type it (Hebrew), where
-    /// dictating is how that language gets written, unless Switch dictation too asks for it.
+    /// What Automatic dictates in while the keyboard switches between two or more languages
+    /// and Switch dictation too is on: the one the space bar shows now, in the iPhone's region
+    /// where Apple Speech has it (`KeyboardLanguage.dictationLanguage`), so Spanish speech is
+    /// never transcribed as English, nor English as Spanish. A variant picked by hand for that
+    /// language's keyboard wins over the preferred languages, so swiping back to Español
+    /// returns to the Spanish picked last. Nil with a dictation language picked by hand, with
+    /// one keyboard language, and with Switch dictation too off: from iOS 26, where Settings
+    /// offers that switch, dictation then stays on Automatic's own language (TestFlight build
+    /// 150: with English and Deutsch ticked and the keyboard left on Deutsch, English speech
+    /// came out as German). Before iOS 26 the switch and the Dictation language menu aren't
+    /// offered, so Automatic still follows the keyboard there, except where the iPhone's own
+    /// language has no layout to type it (Hebrew) and dictating is how it gets written.
     func keyboardDictationLanguage(
         preferred: [String] = Locale.preferredLanguages,
-        region: String? = Locale.current.region?.identifier
+        region: String? = Locale.current.region?.identifier,
+        osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
     ) -> String? {
         guard dictationLanguage == nil else { return nil }
         let chosen = keyboardLanguages
         guard chosen.count > 1 else { return nil }
         let koreanEnabled = KoreanKeyboardExperiment.isEnabled(in: defaults)
-        if !dictationFollowsKeyboard,
-           let own = automaticDictationLanguage ?? preferred.first,
-           KeyboardLanguage.matching(own, koreanEnabled: koreanEnabled) == nil {
-            return nil
+        if !dictationFollowsKeyboard {
+            if osMajorVersion >= 26 { return nil }
+            if let own = automaticDictationLanguage ?? preferred.first,
+               KeyboardLanguage.matching(own, koreanEnabled: koreanEnabled) == nil {
+                return nil
+            }
         }
         let list = KeyboardLanguageList.resolve(chosen: chosen, stored: currentKeyboardLanguage, automatic: .english)
         return dictationLanguage(for: list.current, preferred: preferred, region: region)

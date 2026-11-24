@@ -481,8 +481,8 @@ dictation bar leaves the last reported language in place. A field gives a third-
 keyboard nothing else to go on: before this change `documentInputMode` was observed as nil
 in Messages and the plist's en-US in a field that asks for English; what it reports with
 the runtime language is unverified. **Dictation follows the keyboard:** with
-two or more languages and Dictation language on Automatic, dictation is in the language
-the space bar shows, in the iPhone's region where Apple Speech has it
+two or more languages, Dictation language on Automatic and **Switch dictation too** on,
+dictation is in the language the space bar shows, in the iPhone's region where Apple Speech has it
 (`LanguageSettings.keyboardDictationLanguage`,
 `KeyboardLanguage.dictationLanguage`; none for Srpski), in the keyboard and in Hex,
 which prepares the new language between dictations (TestFlight build 56: with the
@@ -494,12 +494,16 @@ follow the iPhone's Region (es-MX in Mexico, es-US in the United States, Puerto 
 and Latin America, es-ES elsewhere), and Spain and Equatorial Guinea stay on es-ES.
 A Spanish variant picked by hand for that language is used again
 when the space bar comes back to it: the recent pick goes ahead of the preferred
-languages, so es-US or es-MX survives the switch away and back. It doesn't where the
-iPhone's own language has no layout (Hebrew), as dictating is how that language gets
-written. **Switch dictation too** (off by default, shown with two or
-more on iOS 26+) follows there too, and puts a dictation language picked by hand back on
-Automatic at each switch (it used to write the keyboard's language as a pick, which
-stayed after Spanish was unticked or the switch turned off). **Bilingual autocorrect:**
+languages, so es-US or es-MX survives the switch away and back. **Switch dictation too**
+(off by default, shown with two or more on iOS 26+) is what turns this on: off, Automatic
+dictation stays on its own language whichever language the keyboard shows (until TestFlight
+build 150 it followed the keyboard with the switch off too, and with English and Deutsch
+ticked and the keyboard left on Deutsch, a tester's English came out as German). On, it also
+puts a dictation language picked by hand back on Automatic at each switch (it used to write
+the keyboard's language as a pick, which stayed after Spanish was unticked or the switch
+turned off). Before iOS 26, where the switch isn't offered, Automatic still follows the
+keyboard, except where the iPhone's own language has no layout (Hebrew), as dictating is
+how that language gets written. **Bilingual autocorrect:**
 the first other chosen language with Latin letters and
 an iOS dictionary (`KeyboardLanguageList.partner`: English beside French, French beside
 English; none for Русский, Українська, Ελληνικά, Srpski, or two French layouts) is checked on the same keys,

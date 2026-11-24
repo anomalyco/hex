@@ -599,8 +599,8 @@ extension FullKeyboardEngineTests {
     /// Settings › Keyboard › Languages with English, French and Russian: the space bar names
     /// the keyboard's language, switching changes the letters (AZERTY, ЙЦУКЕН), the accents and
     /// autocorrect (French with English beside it, Russian alone), and the keyboard comes back
-    /// in the language it was left in. Dictation follows on Automatic; Switch dictation too
-    /// puts a language picked by hand back on Automatic.
+    /// in the language it was left in. Dictation follows on Automatic only with Switch dictation
+    /// too on, which also puts a language picked by hand back on Automatic.
     func testTheSpaceBarSwitchesBetweenTheChosenLanguages() {
         let settings = LanguageSettings(defaults: defaults)
         settings.keyboardLanguages = [.english, .french, .russian]
@@ -627,7 +627,10 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(settings.currentKeyboardLanguage, .french)
 
         settings.supportedDictationLanguages = ["en-US", "fr-FR", "ru-RU"]
-        XCTAssertEqual(settings.keyboardDictationLanguage(), "fr-FR", "Automatic follows the keyboard")
+        XCTAssertNil(settings.keyboardDictationLanguage(osMajorVersion: 27), "Switch dictation too off: Automatic stays")
+        settings.dictationFollowsKeyboard = true
+        XCTAssertEqual(settings.keyboardDictationLanguage(), "fr-FR", "on: Automatic follows the keyboard")
+        settings.dictationFollowsKeyboard = false
         settings.dictationLanguage = "de-DE"
         var picked: [String?] = []
         model.onLanguageSelected = { picked.append($0) }
@@ -661,10 +664,12 @@ extension FullKeyboardEngineTests {
     /// English and Spanish chosen together type on the first one's keys, as Apple's bilingual
     /// English & Spanish keyboard does: English first, QWERTY without the ñ key (ñ on a held n)
     /// in both, the space bar still switching the language it names, autocorrects and
-    /// dictates in; Spanish first, its ñ key in both; Spanish alone, its own.
+    /// dictates in (with Switch dictation too on); Spanish first, its ñ key in both; Spanish
+    /// alone, its own.
     func testEnglishAndSpanishShareTheFirstLanguagesKeys() {
         let settings = LanguageSettings(defaults: defaults)
         settings.keyboardLanguages = [.english, .spanish]
+        settings.dictationFollowsKeyboard = true
         settings.supportedDictationLanguages = ["en-US", "es-ES"]
         let view = FullKeyboardView(model: KeyboardViewModel(), target: target)
         view.languageSettings = settings

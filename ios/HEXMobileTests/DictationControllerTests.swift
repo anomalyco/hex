@@ -1248,10 +1248,11 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(languages.recentDictationLanguages, ["de-DE", "nb-NO"], "picks in Hex are recents")
     }
 
-    /// With English and Spanish on the keyboard and dictation on Automatic, a switch on the
-    /// space bar prepares the other language before the next dictation (TestFlight build 56:
-    /// Spanish speech transcribed as English was "incomprehensible"); a language picked by
-    /// hand stays put.
+    /// With English and Spanish on the keyboard, dictation on Automatic and Switch dictation too
+    /// on, a switch on the space bar prepares the other language before the next dictation
+    /// (TestFlight build 56: Spanish speech transcribed as English was "incomprehensible"); a
+    /// language picked by hand stays put. With the switch off, a switch on the space bar
+    /// prepares nothing (TestFlight build 150: English speech came out as German).
     func testAutomaticDictationFollowsTheKeyboardsLanguage() async throws {
         let transcriber = ControlledTranscriber()
         let languages = LanguageSettings(defaults: defaults)
@@ -1274,6 +1275,13 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(preparations, 1)
 
         languages.keyboardLanguages = [.english, .spanish]
+        languages.currentKeyboardLanguage = .spanish
+        controller.followDictationLanguageSetting()
+        try await settle()
+        XCTAssertEqual(preparations, 1, "Switch dictation too off: the keyboard on Español changes nothing")
+        XCTAssertEqual(languages.effectiveDictationLanguage, "en-US")
+        languages.currentKeyboardLanguage = nil
+        languages.dictationFollowsKeyboard = true
         controller.followDictationLanguageSetting()
         try await settle()
         XCTAssertEqual(preparations, 2, "now following the keyboard's English")
