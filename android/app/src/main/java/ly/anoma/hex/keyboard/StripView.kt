@@ -373,7 +373,12 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
             undoChip.compoundDrawablePadding = if (look.label) dp(6) else 0
             undoChip.setPadding(dp(if (look.label) 12 else 13), 0, dp(if (look.label) 14 else 13), 0)
         }
-        statusText.maxLines = look.noteLines
+        if (statusText.maxLines != look.noteLines) {
+            // Two lines of 14 sp at font size 1.3 fit the strip's 44 dp only set close together.
+            statusText.maxLines = look.noteLines
+            statusText.includeFontPadding = look.noteLines == 1
+            statusText.setLineSpacing(0f, if (look.noteLines == 1) 1f else 0.85f)
+        }
         inlineArea.visibility = if (chips) VISIBLE else GONE
         slotRow.visibility = if (show) VISIBLE else GONE
         toolsRow.visibility = if (tools.isNotEmpty()) VISIBLE else GONE
