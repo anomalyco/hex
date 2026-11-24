@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react"
+import { ANDROID_PATH, IOS_PATH } from "./base"
 import type { Platform } from "./platform"
 import { RELEASE } from "./release"
 
@@ -26,37 +27,27 @@ export function LinuxMark() {
   )
 }
 
-export type Os = "mac" | "windows" | "linux"
-
-export const PLATFORM_NAMES: Record<Platform, string> = {
-  mac: "Mac",
-  "mac-intel": "Mac",
-  "windows-x64": "Windows",
-  "windows-arm64": "Windows",
-  linux: "Linux",
-  "linux-arm64": "Linux",
-  mobile: "Mac, Windows, and Linux",
+export function MobileMark() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className="mark mark--stroke">
+      <rect x="7" y="3.5" width="10" height="17" rx="2.2" />
+      <path d="M10.5 17.25h3" />
+    </svg>
+  )
 }
 
-export const SHORTCUTS: Record<Platform, string> = {
-  mac: "Option",
-  "mac-intel": "Option",
-  "windows-x64": "Alt",
-  "windows-arm64": "Alt",
-  linux: "Alt+Space",
-  "linux-arm64": "Alt+Space",
-  mobile: "a shortcut",
-}
+export type Os = "mac" | "windows" | "linux" | "mobile"
+export type DesktopOs = Exclude<Os, "mobile">
 
-// The key and name each operating system's tab shows, so the hero follows
-// the tab the visitor picks instead of staying on their own OS.
-export const OS_SHORTCUTS: Record<Os, string> = {
+// The key and name each desktop tab shows, so the hero follows the tab the
+// visitor picks instead of staying on their own OS.
+export const OS_SHORTCUTS: Record<DesktopOs, string> = {
   mac: "Option",
   windows: "Alt",
   linux: "Alt+Space",
 }
 
-export const OS_NAMES: Record<Os, string> = {
+export const OS_NAMES: Record<DesktopOs, string> = {
   mac: "Mac",
   windows: "Windows",
   linux: "Linux",
@@ -67,6 +58,7 @@ export const OS_KEY_LEGENDS: Record<Os, string> = {
   mac: "option",
   windows: "alt",
   linux: "alt + space",
+  mobile: "option",
 }
 
 function useCopy(): [boolean, (text: string) => void] {
@@ -95,6 +87,9 @@ interface Row {
   label: string
   note?: string
   file?: string
+  href?: string
+  external?: boolean
+  actionLabel?: string
   command?: string
   // A small switch inside the row, e.g. x64/ARM64 or the Linux package format.
   choices?: Choice[]
@@ -120,6 +115,7 @@ const OSES: { id: Os; label: string; mark: ReactNode }[] = [
   { id: "mac", label: "macOS", mark: <AppleMark /> },
   { id: "windows", label: "Windows", mark: <WindowsMark /> },
   { id: "linux", label: "Linux", mark: <LinuxMark /> },
+  { id: "mobile", label: "Mobile", mark: <MobileMark /> },
 ]
 
 function rows(os: Os, intelMac: boolean, { arch, setArch, pkg, setPkg }: Choices): Row[] {
@@ -136,6 +132,22 @@ function rows(os: Os, intelMac: boolean, { arch, setArch, pkg, setPkg }: Choices
     return [
       { label: "Installer", file: arch === "arm64" ? RELEASE.windowsArm64.url : RELEASE.windowsX64.url, ...archSwitch },
       { label: "PowerShell", command: RELEASE.windows.command },
+    ]
+  if (os === "mobile")
+    return [
+      {
+        label: "iOS",
+        note: "App Store, iOS 18 or later",
+        href: IOS_PATH,
+        external: true,
+        actionLabel: "Get Hex for iOS on the App Store",
+      },
+      {
+        label: "Android",
+        note: "Hex Preview APK, Android 12 or later",
+        href: ANDROID_PATH,
+        actionLabel: "Get Hex Preview for Android",
+      },
     ]
   const packages: (Choice & { command: string })[] = [
     { id: "deb", label: "Debian", command: linux.deb[arch] },
@@ -160,6 +172,7 @@ function rows(os: Os, intelMac: boolean, { arch, setArch, pkg, setPkg }: Choices
 export function osOf(platform: Platform): Os {
   if (platform.startsWith("windows")) return "windows"
   if (platform.startsWith("linux")) return "linux"
+  if (platform === "mobile") return "mobile"
   return "mac"
 }
 
@@ -192,6 +205,22 @@ function DownloadIcon() {
   )
 }
 
+function ExternalIcon() {
+  return (
+    <svg aria-hidden="true" className="stack__icon" {...ICON}>
+      <path d="M7 17 17 7M9 7h8v8" />
+    </svg>
+  )
+}
+
+function ArrowRightIcon() {
+  return (
+    <svg aria-hidden="true" className="stack__icon" {...ICON}>
+      <path d="M5 12h14M13 6l6 6-6 6" />
+    </svg>
+  )
+}
+
 function StackRow({ row }: { row: Row }) {
   const [copied, copy] = useCopy()
   return (
@@ -214,7 +243,7 @@ function StackRow({ row }: { row: Row }) {
         )}
         {row.command !== undefined ? <code title={row.command}>{row.command}</code> : <span>{row.note}</span>}
       </span>
-      {row.command === undefined && row.file === undefined ? null : row.command !== undefined ? (
+      {row.command === undefined && row.file === undefined && row.href === undefined ? null : row.command !== undefined ? (
         <button
           type="button"
           className="stack__action"
@@ -224,6 +253,15 @@ function StackRow({ row }: { row: Row }) {
         >
           {copied ? <CheckIcon /> : <CopyIcon />}
         </button>
+      ) : row.href !== undefined ? (
+        <a
+          className="stack__action stack__action--primary"
+          href={row.href}
+          aria-label={row.actionLabel ?? `Open ${row.label}`}
+          title={row.external ? "Open App Store" : "Open"}
+        >
+          {row.external ? <ExternalIcon /> : <ArrowRightIcon />}
+        </a>
       ) : (
         <a
           className="stack__action stack__action--primary"
@@ -270,6 +308,9 @@ interface PlainRow {
   label: string
   note?: string
   file?: string
+  href?: string
+  linkLabel?: string
+  accessibleName?: string
   command?: string
   // The architecture a download is for, read into its accessible name.
   arch?: string
@@ -308,6 +349,26 @@ const PLAIN_OSES: { id: Os; label: string; rows: PlainRow[] }[] = [
       { label: "Binary ARM64", arch: "ARM64", file: RELEASE.linux.binary.arm64 },
     ],
   },
+  {
+    id: "mobile",
+    label: "Mobile",
+    rows: [
+      {
+        label: "iOS",
+        note: "App Store, iOS 18 or later",
+        href: IOS_PATH,
+        linkLabel: "App Store",
+        accessibleName: "Get Hex for iOS on the App Store",
+      },
+      {
+        label: "Android",
+        note: "Hex Preview APK, Android 12 or later",
+        href: ANDROID_PATH,
+        linkLabel: "Hex Preview",
+        accessibleName: "Get Hex Preview for Android",
+      },
+    ],
+  },
 ]
 
 // "Download Hex for Windows x64", and just macOS without an architecture.
@@ -335,10 +396,10 @@ function PlainInstall() {
                       {row.note !== undefined && <span>{row.note}</span>}
                       <a
                         className="stack__link"
-                        href={row.file}
-                        aria-label={downloadName(platform.label, row.arch)}
+                        href={row.href ?? row.file}
+                        aria-label={row.accessibleName ?? downloadName(platform.label, row.arch)}
                       >
-                        Download
+                        {row.linkLabel ?? "Download"}
                       </a>
                     </>
                   ) : (

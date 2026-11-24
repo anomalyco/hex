@@ -6,6 +6,7 @@ import ly.anoma.hex.diagnostics.Run
 import ly.anoma.hex.diagnostics.Sched
 import ly.anoma.hex.diagnostics.cgroupSummary
 import ly.anoma.hex.diagnostics.clusterSummary
+import android.os.VibrationEffect
 import ly.anoma.hex.diagnostics.HapticsFacts
 import ly.anoma.hex.diagnostics.TapWords
 import ly.anoma.hex.diagnostics.tapLines
@@ -85,13 +86,14 @@ class StripTextTest {
     }
     @Test fun diagnosticsNameWhatEachTapPlays() {
         // The same decision tap() makes: Android's effect where offered, else Hex's pulse.
-        val offered = Tap.entries.map { it to it.plays(offered = true, amplitude = true) }
-        assertEquals(listOf("Key press: Android's tick", "Held key lifting: Android's tick", "Dictation start: Android's click",
+        val offered = Tap.entries.map { it to it.plays(offered = true) }
+        assertEquals(listOf("Key press: Android's click", "Held key lifting: Android's tick", "Dictation start: Android's click",
             "Dictation end: Android's tick"), tapLines(TapWords.English, offered))
-        assertEquals("Key press: a 12 ms pulse at 31% strength, because this phone doesn't offer Android's tick",
-            tapLines(TapWords.English, listOf(Tap.Press to Tap.Press.plays(offered = false, amplitude = true))).single())
-        assertEquals("Dictation start: a 20 ms pulse at the phone's default strength, because this phone doesn't offer Android's click",
-            tapLines(TapWords.English, listOf(Tap.Start to Tap.Start.plays(offered = false, amplitude = false))).single())
+        assertEquals("Key press: a 20 ms pulse at the phone's default strength, because this phone doesn't offer Android's click",
+            tapLines(TapWords.English, listOf(Tap.Press to Tap.Press.plays(offered = false))).single())
+        // A pulse at a set strength, as Hex played before #2718.
+        assertEquals("Held key lifting: a 12 ms pulse at 31% strength, because this phone doesn't offer Android's tick",
+            tapLines(TapWords.English, listOf(Tap.Release to TapPlay.Pulse(12, 80, VibrationEffect.EFFECT_TICK))).single())
     }
     @Test fun diagnosticsReadCpuLists() {
         assertEquals(setOf(0, 1, 2, 3, 6), parseCpuList("0-3,6"))

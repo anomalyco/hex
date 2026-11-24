@@ -1,6 +1,8 @@
 package ly.anoma.hex.keyboard
 
+import android.annotation.SuppressLint
 import android.content.Context
+import android.content.res.Resources
 import android.media.AudioAttributes
 import android.os.Build
 import android.os.VibrationAttributes
@@ -10,11 +12,12 @@ import android.os.VibratorManager
 import android.provider.Settings
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Hex's taps. Each plays the phone's predefined effect where its vibrator says it has one, or a short,
- * light pulse where it doesn't. */
+/** Hex's taps, Android's own keyboard pair (HapticFeedbackVibrationProvider: a key press is EFFECT_CLICK, a
+ * release EFFECT_TICK). Each plays the phone's predefined effect where its vibrator says it has one, or a
+ * short pulse at the phone's default strength where it doesn't. */
 internal enum class Tap(private val predefined: Int, private val millis: Long) {
-    /** A key going down, or an emoji picked: a light tick. */
-    Press(VibrationEffect.EFFECT_TICK, 12),
+    /** A key going down, or an emoji picked: a click. */
+    Press(VibrationEffect.EFFECT_CLICK, 20),
     /** A key held [KeyboardMetrics.RELEASE_TICK_MS] or more lifting: Gboard's second tick. */
     Release(VibrationEffect.EFFECT_TICK, 12),
     /** Dictation starting: a click. */
@@ -27,16 +30,12 @@ internal enum class Tap(private val predefined: Int, private val millis: Long) {
         is TapPlay.Pulse -> VibrationEffect.createOneShot(play.millis, play.amplitude)
     }
 
-    fun plays(vibrator: Vibrator) =
-        plays(vibrator.areAllEffectsSupported(predefined) == Vibrator.VIBRATION_EFFECT_SUPPORT_YES, vibrator.hasAmplitudeControl())
+    fun plays(vibrator: Vibrator) = plays(vibrator.areAllEffectsSupported(predefined) == Vibrator.VIBRATION_EFFECT_SUPPORT_YES)
 
-    /** What this tap plays on a vibrator that does or doesn't offer its predefined effect and amplitude control; also
-     * what Labs › Diagnostics names. */
-    fun plays(offered: Boolean, amplitude: Boolean): TapPlay =
-        if (offered) TapPlay.Predefined(predefined)
-        else TapPlay.Pulse(millis, if (amplitude) LIGHT else VibrationEffect.DEFAULT_AMPLITUDE, predefined)
-
-    private companion object { const val LIGHT = 80 }
+    /** What this tap plays on a vibrator that does or doesn't offer its predefined effect; also what Labs › Diagnostics
+     * names. */
+    fun plays(offered: Boolean): TapPlay =
+        if (offered) TapPlay.Predefined(predefined) else TapPlay.Pulse(millis, VibrationEffect.DEFAULT_AMPLITUDE, predefined)
 }
 
 internal sealed interface TapPlay {
@@ -46,9 +45,22 @@ internal sealed interface TapPlay {
     data class Pulse(val millis: Long, val amplitude: Int, val missing: Int) : TapPlay
 }
 
-/** Hex's Haptics setting and the system's Keyboard vibration both on. */
+/** Hex's Haptics setting on, and the system's Keyboard vibration switch too where the phone has one. */
 internal fun vibrates(context: Context, haptics: Boolean) =
-    haptics && Settings.System.getInt(context.contentResolver, "keyboard_vibration_enabled", 1) != 0
+    haptics && keyboardVibrationAllows(keyboardVibrationSupported,
+        Settings.System.getInt(context.contentResolver, "keyboard_vibration_enabled", 1))
+
+/** Android's own rule (VibrationSettings): the stored Keyboard vibration value counts only on a phone that
+ * declares the setting; elsewhere keyboard taps follow touch feedback, whatever value is stored. */
+internal fun keyboardVibrationAllows(supported: Boolean, stored: Int) = !supported || stored != 0
+
+/** Whether the phone declares Android's Keyboard vibration setting (Pixel does); a phone without the
+ * resource doesn't. */
+private val keyboardVibrationSupported: Boolean by lazy @SuppressLint("DiscouragedApi") {
+    val system = Resources.getSystem()
+    val id = system.getIdentifier("config_keyboardVibrationSettingsSupported", "bool", "android")
+    id != 0 && system.getBoolean(id)
+}
 
 /** Plays [tap] on the vibrator itself rather than through View.performHapticFeedback, whose keyboard
  * effects each phone maker may tie to its own keyboard's settings (One UI does), so the Haptics switch is

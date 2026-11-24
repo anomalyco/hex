@@ -583,6 +583,7 @@ button.download:hover {
   position: relative;
   /* Equal-width tabs, so the pill keeps one size as it slides. */
   display: inline-grid;
+  max-width: 100%;
   grid-auto-columns: 1fr;
   grid-auto-flow: column;
   gap: 0.25rem;
@@ -960,9 +961,29 @@ button.download:hover {
   background: #fff;
 }
 
-@media (max-width: 26rem) {
+@media (max-width: 30rem) {
+  .install__os {
+    width: 100%;
+  }
+
   .install__os button {
-    padding-inline: 0.6rem;
+    gap: 0.35rem;
+    padding: 0.5rem 0.5rem;
+    font-size: 0.8rem;
+  }
+
+  .install__os .mark {
+    width: 0.85rem;
+    height: 0.85rem;
+  }
+}
+
+@media (max-width: 24rem) {
+  .install__os button {
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.45rem 0.25rem;
+    font-size: 0.75rem;
   }
 }
 

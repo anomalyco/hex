@@ -5,6 +5,8 @@
 - Mac (Apple silicon, macOS 15 or later): https://anoma.ly/hex/files/releases/HEX-latest-arm64.dmg, or `brew install --cask anomalyco/tap/hex`
 - Windows 10 or 11 beta, x64 and ARM64: per-user Setup.exe installers at __ORIGIN__/
 - Linux beta, x86_64 Arch with glibc 2.44 or later: `curl -fsSL https://anoma.ly/hex/files/install-linux.sh | sh`
+- iOS (iPhone, iOS 18 or later): __ORIGIN__/ios (App Store) and __ORIGIN__/iphone (setup and FAQ)
+- Android (Hex Preview APK, Android 12 or later): __ORIGIN__/android
 
 ## Docs
 
