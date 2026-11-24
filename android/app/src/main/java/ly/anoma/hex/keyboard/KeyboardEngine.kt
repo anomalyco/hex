@@ -509,8 +509,11 @@ internal class KeyboardEngine(
         else {
             // A whole character as people see it: 👍🏽, a flag or a family is one, as on Gboard.
             val cluster = if (track || secure) 1 else DeleteSlide.lastCharacter(target.before(32).orEmpty())
+            // Drop the letter before the editor does: an editor in Hex's own process reports the new
+            // selection during the delete call, and that report must find the word already shorter.
+            if (track) { w!!.pop(); if (expectedCaret >= 0) expectedCaret-- }
             if (!(if (cluster > 1) target.deleteBefore(cluster) else target.deleteCodePointsBefore(1))) target.sendKey(KeyEvent.KEYCODE_DEL)
-            if (track) { w!!.pop(); if (expectedCaret >= 0) expectedCaret-- } else resetTyping()
+            if (!track) resetTyping()
         }
         if (w != null && w.token.isNotEmpty()) showSuggestions(w) else surface?.suggestions(emptyList())
     }
