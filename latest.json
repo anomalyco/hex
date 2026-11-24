@@ -1,19 +1,20 @@
 {
-  "versionCode": 2348,
-  "versionName": "0.2.2-preview.2348",
+  "versionCode": 2385,
+  "versionName": "0.2.2-preview.2385",
   "version": "0.2.2",
   "minSdk": 31,
   "published": "2026-11-24",
-  "commit": "1f467eff234f0785d7778ab445b71c9ef7c7a541",
+  "commit": "b5198054be705bb5dfe8e833bd6767693e960217",
   "apk": {
-    "url": "https://github.com/anomalyco/hex/releases/download/android-preview-2348/HexPreview-0.2.2-preview.2348.apk",
-    "size": 67893195,
-    "sha256": "dd0024c771b04a167d3bbf385d19aaa178f9c83a58ef5cc50eaf0e738102ee77"
+    "url": "https://github.com/anomalyco/hex/releases/download/android-preview-2385/HexPreview-0.2.2-preview.2385.apk",
+    "size": 67916763,
+    "sha256": "25e8c2892db58e1baa3d18dc14adbcf16572e088b5217b8880c7aedf1df0f557"
   },
   "notes": [
-    "Swipe typing: slide across a word's letters to type it. On by default, in Hex Preview › Keyboard.",
-    "Number row: switch it on in Hex Preview › Labs.",
-    "Dictation finishes sooner when you pause or stop talking, and ✕ stops it faster.",
-    "Hex Preview no longer installs its own updates, which is what Google Play Protect was flagging. From now on, Download update opens the download in your browser."
+    "Symbols are arranged like Gboard's, and swiping and suggestions now work in the browser's address bar.",
+    "Key haptics should now work on Samsung, realme and other phones where they were silent.",
+    "Autocorrect fixes a word when you add ? or ! from the 123 page.",
+    "Smaller fixes: suggestions stay after backspace, delete in remote-desktop and terminal apps, and the feedback form's Send button.",
+    "New in Hex Preview › Labs: smart quotes, local currency, voice-only mode and password manager suggestions."
   ]
 }
