@@ -1,20 +1,20 @@
 {
-  "versionCode": 2397,
-  "versionName": "0.2.2-preview.2397",
+  "versionCode": 2409,
+  "versionName": "0.2.2-preview.2409",
   "version": "0.2.2",
   "minSdk": 31,
   "published": "2026-11-24",
-  "commit": "0d6bddad9d41b1a8c3ae479c86c2907c7191cfc6",
+  "commit": "cd84cce59a75fa56a84868bafdc2a13e09947923",
   "apk": {
-    "url": "https://github.com/anomalyco/hex/releases/download/android-preview-2397/HexPreview-0.2.2-preview.2397.apk",
-    "size": 68324974,
-    "sha256": "06cf36e3a0da967809796443cfca35d74b93ec1f5964f4d3f8aae173577f2a32"
+    "url": "https://github.com/anomalyco/hex/releases/download/android-preview-2409/HexPreview-0.2.2-preview.2409.apk",
+    "size": 70726206,
+    "sha256": "3c2714a0f774a466dc043dd1e7399447b62a932ba663305e67bf134973676ab7"
   },
   "notes": [
-    "Key haptics are fixed on Samsung phones where the keys stayed silent: Hex's own Haptics switch now decides, and a key press plays a firmer click.",
-    "The screen stays on while you dictate, so a short screen timeout no longer cuts a dictation off.",
-    "New in Hex Preview › Labs: Diagnostics, a report with a speed test and test taps that you can copy and send us. Nothing is sent by itself.",
-    "If your keys are still silent or dictation is slow, the Diagnostics report shows us why.",
-    "Updating: if Android asks you to allow your browser to install apps, allow it, go back, and tap the download again."
+    "New in Hex Preview › Labs: Faster English dictation. Several times faster after a one-time 135 MB download. Numbers come out as words for now, and other languages are unchanged.",
+    "Dictations of 8 to 16 seconds finish sooner, in every language.",
+    "The bottom row is no longer cut off after you turn the phone with the keyboard open.",
+    "Labs › Diagnostics now shows how long each step of your last dictation took. Numbers only, nothing you said.",
+    "Also new: symbols on every letter row with Symbols on letter keys, forms like l'heure suggested in French and Italian, and Labs › Delete swiped words letter by letter."
   ]
 }
