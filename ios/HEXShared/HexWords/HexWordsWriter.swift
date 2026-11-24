@@ -85,6 +85,12 @@ nonisolated enum HexWordsWriter {
         )
     }
 
+    /// The running app's version, `CFBundleShortVersionString` (Hex for iPhone's
+    /// `MARKETING_VERSION`), for `madeBy.version`.
+    static func appVersion(bundle: Bundle = .main) -> String {
+        bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+    }
+
     /// Writes `data` to a private temporary folder, atomically (write, then rename).
     static func temporaryFile(_ data: Data) throws -> URL {
         let folder = FileManager.default.temporaryDirectory

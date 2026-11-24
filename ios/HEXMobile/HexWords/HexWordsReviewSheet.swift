@@ -6,9 +6,9 @@ extension Notification.Name {
 }
 
 /// The review sheet for a Hex words file: what it adds, what is already there, each clash
-/// (Keep mine by default), what can't be used here, what the file skipped, and a switch per
+/// (Keep mine by default), what this iPhone can't use, what the file skipped, and a switch per
 /// part. Nothing changes until Add. Every string from the file is shown verbatim (no Markdown,
-/// no links), shortened, in its own direction-isolated run.
+/// no links), shortened, in its own direction-isolated run. Words as Android's sheet has them.
 struct HexWordsReviewSheet: View {
     let result: HexWordsReadResult
     let onClose: () -> Void
@@ -22,65 +22,52 @@ struct HexWordsReviewSheet: View {
     @State private var closed = false
 
     private let customVocabularyWasOn = CustomVocabularySettings().isEnabled
-    private static let examples = 3
-    private static let shownEntries = 8
+    private static let shownRows = 20
+    private static let shownExamples = 3
 
     var body: some View {
-        NavigationStack {
-            Group {
-                switch result {
-                case .refused(let reason):
-                    message(Self.sentence(for: reason))
-                case .read(let file):
-                    if let added {
-                        message(undone ? String(localized: "Your lists are back as they were") : Self.confirmation(added.summary))
-                    } else {
-                        review(file)
-                    }
-                }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(title)
+                    .font(.system(size: 26, weight: .semibold))
+                    .foregroundStyle(HexTheme.textBase)
+                    .accessibilityAddTraits(.isHeader)
+                    .frame(minHeight: 52, alignment: .leading)
+                content
             }
-            .background(HexTheme.bgDeep.ignoresSafeArea())
-            .navigationTitle(String(localized: "Words from a file"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(HexTheme.bgDeep, for: .navigationBar)
-            .toolbar { toolbar }
+            .frame(maxWidth: 520, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+            .padding(.bottom, 24)
+            .frame(maxWidth: .infinity)
         }
+        .background(HexTheme.bgDeep.ignoresSafeArea())
         .onDisappear(perform: close)
     }
 
-    private var file: HexWordsFile? {
-        if case .read(let file) = result { file } else { nil }
+    private var title: String {
+        if let added, !undone, added.summary.changesAnything { return String(localized: "Words added") }
+        return String(localized: "Words from a file")
     }
 
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        if let file {
-            if added == nil {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(String(localized: "Cancel")) { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(String(localized: "Add")) { add(file) }
-                        .fontWeight(.semibold)
-                        .disabled(!customVocabularyWasOn && !turnsOnVocabulary)
+    @ViewBuilder
+    private var content: some View {
+        switch result {
+        case .refused(let reason):
+            paragraph(Self.sentence(for: reason))
+            buttons(primary: String(localized: "Done")) { dismiss() }
+        case .read(let file):
+            if undone {
+                paragraph(String(localized: "Your lists are back as they were."))
+                buttons(primary: String(localized: "Done")) { dismiss() }
+            } else if let added {
+                paragraph(Self.confirmation(added.summary))
+                buttons(primary: String(localized: "Done"), { dismiss() }, secondary: String(localized: "Undo")) {
+                    undone = HexWordsImport().undo()
+                    NotificationCenter.default.post(name: .hexWordsListsDidChange, object: nil)
                 }
             } else {
-                if !undone {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(String(localized: "Undo")) {
-                            undone = HexWordsImport().undo()
-                            NotificationCenter.default.post(name: .hexWordsListsDidChange, object: nil)
-                        }
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(String(localized: "Done")) { dismiss() }
-                        .fontWeight(.semibold)
-                }
-            }
-        } else {
-            ToolbarItem(placement: .confirmationAction) {
-                Button(String(localized: "Close")) { dismiss() }
+                review(file)
             }
         }
     }
@@ -104,161 +91,153 @@ struct HexWordsReviewSheet: View {
         onClose()
     }
 
-    private func message(_ text: String) -> some View {
-        VStack {
-            Text(text)
-                .font(.system(size: 17))
-                .foregroundStyle(HexTheme.textBase)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 32)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
     // MARK: Review
 
-    private func review(_ file: HexWordsFile) -> some View {
-        let preview = HexWordsImport().preview(file, parts: parts, useTheirs: useTheirs)
-        let byReason = Dictionary(grouping: preview.notApplied, by: \.reason)
-        let skipped = Dictionary(grouping: file.skipped, by: \.reason)
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                header(file)
-
-                if !customVocabularyWasOn {
-                    SettingsCard {
-                        SettingsToggleRow(
-                            title: String(localized: "Turn on Custom vocabulary"),
-                            detail: String(localized: "Words from this file go into Custom vocabulary and Word replacements"),
-                            isOn: $turnsOnVocabulary
-                        )
-                    }
-                }
-
-                SettingsCard {
-                    SettingsToggleRow(
-                        title: String(localized: "Vocabulary"),
-                        detail: Self.counts(new: preview.summary.addedTerms, there: preview.summary.alreadyHaveTerms),
-                        isOn: $parts.vocabulary
-                    )
-                    entries(preview.after.vocabulary.suffix(preview.summary.addedTerms).map { (nil, $0) })
-                }
-
-                SettingsCard {
-                    SettingsToggleRow(
-                        title: String(localized: "Replacements"),
-                        detail: Self.counts(new: preview.summary.addedReplacements, there: preview.summary.alreadyHaveReplacements),
-                        isOn: $parts.replacements
-                    )
-                    entries(preview.after.replacements.suffix(preview.summary.addedReplacements).map { ($0.heard, $0.write) })
-                }
-
-                if !preview.clashes.isEmpty {
-                    SettingsSectionHeader(title: "Replaced differently here")
-                    SettingsCard {
-                        ForEach(Array(preview.clashes.enumerated()), id: \.element.id) { index, clash in
-                            if index > 0 { SettingsDivider() }
-                            clashRow(clash)
-                        }
-                    }
-                }
-
-                if !byReason.isEmpty {
-                    SettingsSectionHeader(title: "Not usable on this iPhone")
-                    SettingsCard {
-                        ForEach(Array(HexWordsNotAppliedReason.allCases.filter { byReason[$0] != nil }.enumerated()), id: \.element) { index, reason in
-                            if index > 0 { SettingsDivider() }
-                            countRow(
-                                Self.sentence(for: reason),
-                                count: byReason[reason]?.count ?? 0,
-                                examples: (byReason[reason] ?? []).prefix(Self.examples).compactMap { file.text(at: $0.path) }
-                            )
-                        }
-                    }
-                }
-
-                if !skipped.isEmpty {
-                    SettingsSectionHeader(title: "Skipped in the file")
-                    SettingsCard {
-                        ForEach(Array(HexWordsSkipReason.allCases.filter { skipped[$0] != nil }.enumerated()), id: \.element) { index, reason in
-                            if index > 0 { SettingsDivider() }
-                            countRow(Self.sentence(for: reason), count: skipped[reason]?.count ?? 0, examples: [])
-                        }
-                    }
-                }
-
-                if !customVocabularyWasOn, !turnsOnVocabulary {
-                    Text(String(localized: "Turn on Custom vocabulary to add these words"))
-                        .font(.system(size: 12))
-                        .foregroundStyle(HexTheme.textMuted)
-                        .padding(.horizontal, 16)
-                }
-            }
-            .frame(maxWidth: 500)
-            .padding(.horizontal, 20)
-            .padding(.top, 8)
-            .padding(.bottom, 28)
-            .frame(maxWidth: .infinity)
-        }
-    }
-
-    private func header(_ file: HexWordsFile) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let app = file.madeByApp {
-                let claim = [app, file.madeByVersion].compactMap { $0 }.joined(separator: " ")
-                Text(verbatim: String(localized: "The file says it's from \(HexWordsText.display(claim))"))
-                    .font(.system(size: 13))
-                    .foregroundStyle(HexTheme.textMuted)
-            }
-            if file.isNewerVersion {
-                Text(String(localized: "Made by a newer Hex. Parts this version doesn't know are left out."))
-                    .font(.system(size: 13))
-                    .foregroundStyle(HexTheme.textMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(.horizontal, 16)
-    }
-
-    /// New entries: a term alone, or heard → write.
     @ViewBuilder
-    private func entries(_ items: [(String?, String)]) -> some View {
-        if !items.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(Array(items.prefix(Self.shownEntries).enumerated()), id: \.offset) { _, item in
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        if let heard = item.0 {
-                            Text(verbatim: HexWordsText.display(heard))
-                                .foregroundStyle(HexTheme.textMuted)
-                            Image(systemName: "arrow.right")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(HexTheme.textFaint)
-                        }
-                        Text(verbatim: HexWordsText.display(item.1))
-                            .foregroundStyle(HexTheme.textBase)
-                    }
-                    .font(.system(size: 14))
-                    .lineLimit(2)
-                }
-                if items.count > Self.shownEntries {
-                    Text(String(localized: "and \(items.count - Self.shownEntries) more"))
-                        .font(.system(size: 12))
-                        .foregroundStyle(HexTheme.textMuted)
+    private func review(_ file: HexWordsFile) -> some View {
+        let store = HexWordsImport()
+        let before = store.lists
+        // Counts and rows show the whole file; what Add does follows the switches.
+        let whole = store.preview(file, useTheirs: useTheirs)
+        let merged = store.preview(file, parts: parts, useTheirs: useTheirs)
+        let summary = whole.summary
+        let claim = [file.madeByApp, file.madeByVersion].compactMap { $0 }.joined(separator: " ")
+
+        if !claim.isEmpty {
+            note(String(localized: "Made by \(HexWordsText.display(claim)), as the file says"))
+        }
+        if file.isNewerVersion {
+            note(String(localized: "Made by a newer Hex. Anything this version doesn’t know is left out."))
+        }
+        if !customVocabularyWasOn {
+            SettingsCard {
+                SettingsToggleRow(
+                    title: String(localized: "Turn on Custom vocabulary"),
+                    detail: String(localized: "Off, the words are added but Hex doesn’t use them until you turn it on."),
+                    isOn: $turnsOnVocabulary
+                )
+            }
+        }
+        if !file.vocabulary.isEmpty {
+            SettingsCard {
+                SettingsToggleRow(
+                    title: String(localized: "Vocabulary"),
+                    detail: Self.counts(new: summary.addedTerms, there: summary.alreadyHaveTerms, clashes: 0),
+                    isOn: $parts.vocabulary
+                )
+                if parts.vocabulary {
+                    rows(whole.after.vocabulary.dropFirst(before.vocabulary.count).map { HexWordsText.display($0) })
                 }
             }
+        }
+        if !file.replacements.isEmpty || file.vocabulary.contains(where: { !$0.soundsLike.isEmpty }) {
+            SettingsCard {
+                SettingsToggleRow(
+                    title: String(localized: "Word replacements"),
+                    detail: Self.counts(new: summary.addedReplacements, there: summary.alreadyHaveReplacements, clashes: whole.clashes.count),
+                    isOn: $parts.replacements
+                )
+                if parts.replacements {
+                    rows(whole.after.replacements.dropFirst(before.replacements.count).map {
+                        HexWordsText.display($0.heard) + " → " + HexWordsText.display($0.write)
+                    })
+                    ForEach(whole.clashes) { clash in
+                        SettingsDivider()
+                        clashRow(clash)
+                    }
+                }
+            }
+        }
+        if !merged.notApplied.isEmpty {
+            section(String(localized: "Not usable on this iPhone")) {
+                let groups = HexWordsNotAppliedReason.allCases.compactMap { reason -> (HexWordsNotAppliedReason, [HexWordsNotApplied])? in
+                    let items = merged.notApplied.filter { $0.reason == reason }
+                    return items.isEmpty ? nil : (reason, items)
+                }
+                ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
+                    if index > 0 { SettingsDivider() }
+                    let texts = group.1.compactMap { file.text(at: $0.path) }.map { HexWordsText.display($0) }
+                    let examples = texts.prefix(Self.shownExamples).joined(separator: ", ")
+                        + (texts.count > Self.shownExamples ? ", …" : "")
+                    line(Self.notUsable(group.0, count: group.1.count, examples: examples))
+                }
+            }
+        }
+        if !file.skipped.isEmpty {
+            section(String(localized: "Skipped in the file")) {
+                let groups = HexWordsSkipReason.allCases.compactMap { reason -> (HexWordsSkipReason, Int)? in
+                    let count = file.skipped.filter { $0.reason == reason }.count
+                    return count == 0 ? nil : (reason, count)
+                }
+                ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
+                    if index > 0 { SettingsDivider() }
+                    line(String(localized: "\(group.1) skipped: \(Self.skipped(group.0))"))
+                }
+            }
+        }
+        buttons(primary: String(localized: "Add"), { add(file) }, secondary: String(localized: "Cancel")) { dismiss() }
+    }
+
+    private func note(_ text: String) -> some View {
+        Text(verbatim: text)
+            .font(.system(size: 14))
+            .foregroundStyle(HexTheme.textMuted)
+            .lineLimit(3)
+    }
+
+    private func paragraph(_ text: String) -> some View {
+        Text(verbatim: text)
+            .font(.system(size: 17))
+            .foregroundStyle(HexTheme.textBase)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func line(_ text: String, size: CGFloat = 14, muted: Bool = false) -> some View {
+        Text(verbatim: text)
+            .font(.system(size: size))
+            .foregroundStyle(muted ? HexTheme.textMuted : HexTheme.textBase)
+            .lineLimit(3)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
-            .padding(.bottom, 12)
+            .padding(.vertical, 12)
+    }
+
+    @ViewBuilder
+    private func rows(_ items: [String]) -> some View {
+        ForEach(Array(items.prefix(Self.shownRows).enumerated()), id: \.offset) { _, item in
+            SettingsDivider()
+            line(item, size: 16)
+        }
+        if items.count > Self.shownRows {
+            SettingsDivider()
+            line(String(localized: "and \(items.count - Self.shownRows) more"), muted: true)
+        }
+    }
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 14))
+                .foregroundStyle(HexTheme.textMuted)
+                .padding(.leading, 16)
+            SettingsCard { content() }
         }
     }
 
     private func clashRow(_ clash: HexWordsClash) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(verbatim: HexWordsText.display(clash.heard))
-                .font(.system(size: 15))
+                .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(HexTheme.textBase)
-            labeled(String(localized: "Yours"), clash.yours)
-            labeled(String(localized: "This file"), clash.theirs)
+                .lineLimit(2)
+            Text(verbatim: String(localized: "Yours: \(HexWordsText.display(clash.yours))"))
+                .font(.system(size: 13))
+                .foregroundStyle(HexTheme.textMuted)
+                .lineLimit(3)
+            Text(verbatim: String(localized: "This file: \(HexWordsText.display(clash.theirs))"))
+                .font(.system(size: 13))
+                .foregroundStyle(HexTheme.textMuted)
+                .lineLimit(3)
             SettingsSegments(
                 items: [false, true],
                 selected: useTheirs.contains(clash.path),
@@ -267,101 +246,108 @@ struct HexWordsReviewSheet: View {
                     if theirs { useTheirs.insert(clash.path) } else { useTheirs.remove(clash.path) }
                 }
             )
+            .padding(.top, 6)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
     }
 
-    private func labeled(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(label)
-                .foregroundStyle(HexTheme.textMuted)
-                .frame(width: 72, alignment: .leading)
-            Text(verbatim: HexWordsText.display(value))
-                .foregroundStyle(HexTheme.textBase)
-                .lineLimit(2)
-        }
-        .font(.system(size: 13))
-    }
-
-    private func countRow(_ sentence: String, count: Int, examples: [String]) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(sentence)
-                    .font(.system(size: 15))
+    /// A secondary text action and the one primary button, at the end of the row.
+    private func buttons(primary: String, _ onPrimary: @escaping () -> Void, secondary: String? = nil, _ onSecondary: @escaping () -> Void = {}) -> some View {
+        HStack(spacing: 8) {
+            Spacer(minLength: 0)
+            if let secondary {
+                Button(secondary, action: onSecondary)
+                    .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(HexTheme.textBase)
-                    .fixedSize(horizontal: false, vertical: true)
-                if !examples.isEmpty {
-                    Text(verbatim: examples.map { HexWordsText.display($0) }.joined(separator: ", "))
-                        .font(.system(size: 12))
-                        .foregroundStyle(HexTheme.textMuted)
-                        .lineLimit(2)
-                }
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 48)
+                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
             }
-            Spacer(minLength: 8)
-            Text(verbatim: count.formatted())
-                .font(.system(size: 15).monospacedDigit())
-                .foregroundStyle(HexTheme.textMuted)
+            Button(action: onPrimary) {
+                Text(primary)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(HexTheme.textContrast)
+                    .padding(.horizontal, 24)
+                    .frame(minHeight: 48)
+                    .background(HexTheme.bgContrast, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .frame(minHeight: 50)
     }
 
     // MARK: Words
 
-    static func counts(new: Int, there: Int) -> String {
-        String(localized: "\(new) new · \(there) already there")
+    static func counts(new: Int, there: Int, clashes: Int) -> String {
+        var pieces = [String(localized: "\(new) new")]
+        if there > 0 { pieces.append(String(localized: "\(there) already there")) }
+        if clashes > 0 { pieces.append(String(localized: "\(clashes) different from yours")) }
+        return pieces.joined(separator: " · ")
     }
 
-    /// One line: "Added 3 terms and 6 replacements · 2 already there · kept yours for 1".
+    static func terms(_ count: Int) -> String { String(localized: "\(count) terms") }
+    static func replacements(_ count: Int) -> String { String(localized: "\(count) replacements") }
+
+    /// One line: "Added 2 terms and 2 replacements · 1 already there · kept yours for 1".
     static func confirmation(_ summary: HexWordsSummary) -> String {
-        let there = summary.alreadyHaveTerms + summary.alreadyHaveReplacements
-        guard summary.changesAnything else {
-            return String(localized: "No new words in that file")
+        let terms = summary.addedTerms > 0 ? terms(summary.addedTerms) : nil
+        let replacements = summary.addedReplacements > 0 ? replacements(summary.addedReplacements) : nil
+        var pieces: [String] = []
+        if let terms, let replacements {
+            pieces.append(String(localized: "Added \(terms) and \(replacements)"))
+        } else if let one = terms ?? replacements {
+            pieces.append(String(localized: "Added \(one)"))
+        } else if summary.changedReplacements == 0 {
+            pieces.append(String(localized: "No new words in that file"))
         }
-        var pieces = [String(localized: "Added \(summary.addedTerms) terms and \(summary.addedReplacements) replacements")]
+        let there = summary.alreadyHaveTerms + summary.alreadyHaveReplacements
         if there > 0 { pieces.append(String(localized: "\(there) already there")) }
         if summary.keptYours > 0 { pieces.append(String(localized: "kept yours for \(summary.keptYours)")) }
-        if summary.changedReplacements > 0 { pieces.append(String(localized: "used this file's for \(summary.changedReplacements)")) }
+        if summary.changedReplacements > 0 { pieces.append(String(localized: "used the file’s for \(summary.changedReplacements)")) }
         return pieces.joined(separator: " · ")
     }
 
     static func sentence(for refusal: HexWordsRefusal) -> String {
         switch refusal {
-        case .tooLarge: String(localized: "This file is larger than 8 MB, so Hex didn't open it.")
-        case .notUTF8: String(localized: "Hex can't read this file because it isn't UTF-8 text.")
-        case .empty: String(localized: "This file is empty.")
-        case .tooDeep: String(localized: "Hex can't read this file because it's nested too deeply.")
-        case .duplicateKey: String(localized: "Hex can't read this file because a name in it appears twice.")
-        case .notJSON: String(localized: "Hex can't read this file because it isn't valid JSON.")
-        case .notAnObject, .notHexWords: String(localized: "This isn't a Hex words file.")
-        case .badVersion: String(localized: "Hex can't read this file because its version is missing or wrong.")
+        case .tooLarge: String(localized: "Hex didn’t open this file: it’s larger than 8 MB.")
+        case .notUTF8: String(localized: "Hex didn’t open this file: it isn’t text Hex can read.")
+        case .empty: String(localized: "Hex didn’t open this file: it’s empty.")
+        case .tooDeep: String(localized: "Hex didn’t open this file: it’s nested too deeply to be a words file.")
+        case .duplicateKey: String(localized: "Hex didn’t open this file: it names the same field twice.")
+        case .notJSON: String(localized: "Hex didn’t open this file: it’s damaged or isn’t a words file.")
+        case .notAnObject, .notHexWords: String(localized: "Hex didn’t open this file: it isn’t a Hex words file.")
+        case .badVersion: String(localized: "Hex didn’t open this file: its version isn’t one Hex understands.")
         }
     }
 
-    static func sentence(for reason: HexWordsNotAppliedReason) -> String {
+    static func notUsable(_ reason: HexWordsNotAppliedReason, count: Int, examples: String) -> String {
         switch reason {
-        case .tooShortForThisDevice: String(localized: "Terms need two or more letters or digits here")
-        case .deletionNotSupported: String(localized: "This iPhone can't delete words yet")
-        case .overDeviceLimit: String(localized: "Your list is full")
-        case .duplicate: String(localized: "The file already replaces these words")
+        case .tooShortForThisDevice:
+            String(localized: "\(count) terms have fewer than 2 letters or digits, too short for this iPhone: \(examples)")
+        case .overDeviceLimit:
+            String(localized: "\(count) didn’t fit, as this iPhone keeps up to 100 terms and 1,000 replacements: \(examples)")
+        case .deletionNotSupported:
+            String(localized: "\(count) replacements remove words instead of writing something, which this iPhone can’t do yet: \(examples)")
+        case .duplicate:
+            String(localized: "\(count) spellings repeat words the file already replaces, so the first one is used: \(examples)")
         }
     }
 
-    static func sentence(for reason: HexWordsSkipReason) -> String {
+    static func skipped(_ reason: HexWordsSkipReason) -> String {
         switch reason {
-        case .badPart: String(localized: "A list in the wrong shape")
-        case .badEntry: String(localized: "Entries in the wrong shape")
-        case .badField: String(localized: "Fields in the wrong shape")
-        case .unknownField: String(localized: "Fields this version of Hex doesn't know")
-        case .hiddenCharacters: String(localized: "Hidden characters")
-        case .noLetters: String(localized: "No letters or digits")
-        case .tooLong: String(localized: "Too long")
-        case .tooManyWords: String(localized: "More than 8 words")
-        case .duplicate: String(localized: "Repeated in the file")
-        case .sameAsTerm: String(localized: "A spelling the same as its term")
-        case .overLimit: String(localized: "Past the file format's limits")
+        case .badPart: String(localized: "a part that isn’t a list")
+        case .badEntry: String(localized: "entries of the wrong shape")
+        case .badField: String(localized: "fields of the wrong shape")
+        case .unknownField: String(localized: "fields this Hex doesn’t know")
+        case .hiddenCharacters: String(localized: "hidden characters")
+        case .noLetters: String(localized: "no letters or digits")
+        case .tooLong: String(localized: "longer than the limit")
+        case .tooManyWords: String(localized: "more than 8 words")
+        case .duplicate: String(localized: "already in the file")
+        case .sameAsTerm: String(localized: "a spelling the same as its term")
+        case .overLimit: String(localized: "past the file’s limit")
         }
     }
 }

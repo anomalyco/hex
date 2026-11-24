@@ -361,6 +361,27 @@ final class WordReplacementsTests: XCTestCase {
         }
     }
 
+    /// The review sheet's and confirmation's English, with its plurals.
+    @MainActor
+    func testReviewSheetWords() {
+        XCTAssertEqual(
+            HexWordsReviewSheet.notUsable(.tooShortForThisDevice, count: 1, examples: "C#"),
+            "1 term has fewer than 2 letters or digits, too short for this iPhone: C#"
+        )
+        XCTAssertEqual(
+            HexWordsReviewSheet.notUsable(.deletionNotSupported, count: 2, examples: "um, uh"),
+            "2 replacements remove words instead of writing something, which this iPhone can’t do yet: um, uh"
+        )
+        var summary = HexWordsSummary()
+        summary.addedTerms = 2
+        summary.addedReplacements = 1
+        summary.alreadyHaveTerms = 1
+        summary.keptYours = 1
+        XCTAssertEqual(HexWordsReviewSheet.confirmation(summary), "Added 2 terms and 1 replacement · 1 already there · kept yours for 1")
+        XCTAssertEqual(HexWordsReviewSheet.counts(new: 2, there: 1, clashes: 1), "2 new · 1 already there · 1 different from yours")
+        XCTAssertEqual(HexWordsReviewSheet.confirmation(HexWordsSummary()), "No new words in that file")
+    }
+
     /// Keys that differ only in normalization are two keys to JSON; bridging them into one Swift
     /// dictionary would trap, so the reader never does.
     func testKeysThatDifferOnlyInNormalizationAreTwoUnknownFields() {

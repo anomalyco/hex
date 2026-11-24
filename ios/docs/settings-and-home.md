@@ -34,8 +34,8 @@ list starts at the top. The pages, one file each in `HEXMobile/Settings/`
   Into field when Type as I speak's is on, In bar when only Show what I say's is, Off when
   neither; picking one writes both, so the two together, which 1.0.4 allowed, keep working
   until another is picked); then Clean up what I say and Custom vocabulary (below the
-  switch while it's on: its list, then **Word replacements** with **Export words** and,
-  after a words file was added, **Undo last import**; see
+  switch while it's on: its list, then the **Word replacements** and **Words file** rows,
+  and **Undo last import** while an import can still be undone; see
   [dictation.md](dictation.md#word-replacements-and-hex-words-files-settings--dictation--custom-vocabulary));
   and last Speech model in keyboard, then **Model**: **English** (the
   default) or **Multilingual** (`SpeechModelChoice`, from Experiments until 2026-11-24, on

@@ -553,52 +553,57 @@ Parakeet's batch path gets no hint.
 
 ## Word replacements and Hex words files (Settings › Dictation › Custom vocabulary)
 
-Both live behind Custom vocabulary's switch: off, nothing here shows or applies.
+While Custom vocabulary is on, its card adds two rows under the list (`HexWordsRows`), and
+**Undo last import** shows there whenever an import can still be undone. Off, nothing applies.
+The words are Android's (`words_*` strings), with "phone" as "iPhone".
 
-**Word replacements** (`WordReplacementsSettings`, App Group key `wordReplacements.entries`)
-is a list of up to 1,000 heard words → what to write, under the vocabulary list. Each entry
-keeps the words file's limits (heard: letters or digits, at most 128 characters and 8
-words; write: at most 1,000 characters), and an empty or blank output isn't allowed on the
-iPhone yet. They apply wherever Hex dictates (`DictationPipeline`, so the app and in-keyboard
-dictation alike) right before the learned dictation fixes, with `DictationCorrections.apply`'s
-whole-word, case-following matching, allowing up to 8 words. A replacement wins over a learned
-fix with the same heard words; learned fixes themselves never change. They never touch a
-translated dictation: while Translate what I say would translate one they wait, and apply
-only if it goes in as spoken (a failed or skipped translation).
+**Word replacements** (`WordReplacementsPage`; `WordReplacementsSettings`, App Group key
+`wordReplacements.entries`) is a list of up to 1,000 heard words → what to write. Each entry
+keeps the words file's limits (heard: letters or digits, at most 128 characters and 8 words;
+write: at most 1,000 characters), and an empty or blank output isn't allowed on the iPhone yet.
+They apply wherever Hex dictates (`DictationPipeline`, so the app and in-keyboard dictation
+alike) right before the learned dictation fixes, with `DictationCorrections.apply`'s whole-word,
+case-following matching, allowing up to 8 words. A replacement wins over a learned fix with the
+same heard words; learned fixes themselves never change. They never touch a translated
+dictation: while Translate what I say would translate one they wait, and apply only if it goes
+in as spoken (a failed or skipped translation).
 
-**Hex words files** (`.hexwords`, `docs/specs/hex-words.md`, code in `HEXShared/HexWords/`)
-carry vocabulary and replacements between every Hex. Hex declares `anomaly.hex.words`
-(conforming to `public.json`, extension `hexwords`, MIME type
+**Words file** (`WordsFilePage`) has **Open a words file…** (the Files picker), **Export** with
+**Include fixes Hex learned** (off by default, shown only while a learned fix is in use) and
+**Share…**, the share sheet with `hex-words.hexwords` (`HexWordsWriter`; its Save to Files is
+where Android's Save to… goes), written atomically to a temporary folder that is deleted once
+sharing ends. The line under it then says what was exported and what was left out and why. It
+writes Custom vocabulary's terms, Word replacements and, with the switch on, the learned
+dictation fixes in use (applied and not switched off in Typing insights) marked `learned`; a
+learned fix for words a replacement already covers is left out. `madeBy.version` is the app's
+`CFBundleShortVersionString` (`MARKETING_VERSION`).
+
+**Opening a file** (`.hexwords`, `docs/specs/hex-words.md`, code in `HEXShared/HexWords/`).
+Hex declares `anomaly.hex.words` (conforming to `public.json`, extension `hexwords`, MIME type
 `application/vnd.anomaly.hex-words+json`) and owns it as a document type that is copied in
 (`LSSupportsOpeningDocumentsInPlace` NO), so AirDrop, Files and Open in Hex all arrive in
-`onOpenURL` as a copy in `Documents/Inbox`. `HexInbox` copies it to a private temporary
-folder under a name Hex picks, reads it there (the spec's check pass, then
-`JSONSerialization`), shows the review sheet over whatever is on screen and deletes both copies
-when the sheet closes: after Add, Cancel or a refusal (a launch also clears copies a sheet
-never got to delete; Inbox copies only once an hour old). It logs counts and reasons only. A
-refused file shows one sentence. Otherwise the sheet (`HexWordsReviewSheet`) lists what it
-adds, what's already there, each clash (Keep mine by default, or Use this one), what can't be
-used on this iPhone grouped by reason (a term with fewer than two letters or digits, a
-deletion, a full list, a spelling the file already replaces), what the file skipped, and a
-switch for Vocabulary and Replacements. Every string from the file is shown verbatim
+`onOpenURL` as a copy in `Documents/Inbox`; Open a words file… arrives the same way.
+`HexInbox` copies the file to a private temporary folder under a name Hex picks, reads it there
+(the spec's check pass, then `JSONSerialization`), shows the review sheet over whatever is on
+screen and deletes both copies when the sheet closes: after Add, Cancel or a refusal (a launch
+also clears copies a sheet never got to delete; Inbox copies only once an hour old). It logs
+counts and reasons only. A refused file shows one sentence and Done. Otherwise the sheet
+(`HexWordsReviewSheet`) shows the file's claimed maker, a Vocabulary and a Word replacements
+switch with what each adds, what's already there and what differs from yours, each clash with
+Keep mine (the default) or Use this one, what can't be used on this iPhone grouped by reason
+with examples, and what the file skipped. Every string from the file is shown verbatim
 (`Text(verbatim:)`), each in its own direction-isolated run, and cut at 64 characters. While
-Custom vocabulary is off the sheet offers to turn it on, and Add waits for that. Add merges
-by the spec's phone column (`HexWordsMerge`): new terms are added without spellings, each
-spelling becomes a replacement to its term after the file's own replacements, `learned` is
-dropped, nothing is removed. The confirmation says what happened in one line with Undo.
+Custom vocabulary is off the sheet offers to turn it on; Add still adds the words, unused until
+it's on. Add merges by the spec's phone column (`HexWordsMerge`): new terms are added without
+spellings, each spelling becomes a replacement to its term after the file's own replacements,
+`learned` is dropped, nothing is removed. The sheet then reads **Words added**, one line of what
+happened, Undo and Done.
 
 **Undo** (`HexWordsImport`, App Group key `hexWords.undo`) keeps both lists from before the
 import and whether the sheet turned Custom vocabulary on. It is offered after Add and as
-**Undo last import** under Word replacements while both lists are still exactly as the import
-left them, so editing either list (here, on Keyboard › Vocabulary, or the keyboard's Add to
-vocabulary) or importing again ends it. It survives a restart and never holds the file.
-
-**Export words** opens a small sheet: **Include fixes Hex learned** (off by default), what
-goes in and what's left out and why, then the share sheet with `hex-words.hexwords`
-(`HexWordsWriter`), written atomically to a temporary folder that is deleted once sharing
-ends. It writes Custom vocabulary's terms, Word replacements and, with the switch on, the
-learned dictation fixes in use (applied and not switched off in Typing insights) marked
-`learned`; a learned fix for words a replacement already covers is left out.
+**Undo last import** while both lists are still exactly as the import left them, so editing
+either list (Word replacements, the vocabulary list, Keyboard › Vocabulary, or the keyboard's Add
+to vocabulary) or importing again ends it. It survives a restart and never holds the file.
 `HexWordsSharedCasesTests` runs the spec's shared cases from `tests/fixtures/hex-words/`.
 
 ## Dictation language (Settings › Dictation › Dictation language, iOS 26+)
@@ -690,313 +695,3 @@ never answered, and a check that gives up bumps its generation so a
 late answer can't reopen the row (`KeyboardSpeechPreparation`). Reservations make room
 under `AssetInventory.maximumReservedLocales` by releasing others first. Only
 Hex's own error text reaches the app or keyboard (`HexDescribedError`); Apple's
-and other packages' descriptions go to logs, however readable.
-The setup sheet's Speech model row names the language ("Norwegian Bokmål ·
-Apple"). Steps that only know English follow the language: Clean up what I
-say (an English tagger) uses word rules in Spanish, German and Norwegian and
-skips other languages; Clean up with Apple
-Intelligence runs only when the on-device model supports the language; the
-styles trim English fillers (um, uh, er, ah) only in English, Nordic ones (eh,
-ehm, øh, hm) in Norwegian, Danish and Swedish, Spanish ones (eh, em, mmm) in
-Spanish, German ones (äh, ähm, öhm) in German, and none elsewhere (Norwegian
-"er" is "is", Portuguese "um" is "a"); translation's source is the dictation
-language rather than a guess. Custom vocabulary works in any language.
-
-## Voice isolation (Settings › Experiments › Voice isolation)
-
-Off by default
-(`experiments.voiceIsolation`, App Group). While on, the app records in
-`AVAudioSession`'s `.voiceChat` mode instead of `.measurement`, so Control
-Center's Mic Mode can offer Voice Isolation while Hex records, and
-in-keyboard dictation asks `getUserMedia` for echo cancellation and noise
-suppression (automatic gain stays off). Other audio may be lowered while
-recording, and Bluetooth headphones may switch to their hands-free call
-profile. With it off, both record exactly as before. Not verified on a
-device: that Control Center actually offers Voice Isolation for Hex, and how
-the mode changes a recording's level.
-
-## Two-language dictation (Settings › Experiments › Two-language dictation, iOS 26+)
-
-Off by default (`experiments.twoLanguageDictation`, App Group). While on, and while
-dictation uses Apple Speech's `SpeechTranscriber`, one recording is read twice: in the
-language dictation resolved (unchanged) and in the first other language in Settings ›
-Keyboard › Languages whose base language differs from it, mapped by the same rule the
-keyboard-follow language uses (`LanguageSettings.dictationLanguage(for:)`). Both must
-resolve to `SpeechTranscriber`, and the second language's model must already be installed
-(`AssetInventory.status`): dictation never downloads for it, and a language whose
-`SpeechTranscriber` model was set aside as failing is skipped. So the switch does
-nothing for a language Apple reads only with `DictationTranscriber` (on macOS 27.2.1
-`SpeechTranscriber` lists 45 locales, without Ukrainian, Czech, Polish, Russian, Hebrew
-or Dutch), on either side of the pair. Two `SpeechAnalyzer`s
-read the same WAV, each with its own `AVAudioFile`, prepared with
-`prepareToAnalyze(in: nil)` before starting, and a `SpeechTranscriber(locale:`,
-`transcriptionOptions: [], reportingOptions: [],`
-`attributeOptions: [.audioTimeRange, .transcriptionConfidence])`; both get custom
-vocabulary's contextual strings. Each final result's timed runs give the merge its words
-(the run's own characters, leading whitespace included, start, end, confidence), and a
-run without letters or without a time range keeps its characters on the word before it.
-`TwoLanguageMerger` cuts both readings at the earlier of two word ends within 150 ms,
-and at any word end of one reading that no word of the other spans (more than 150 ms
-either side): where the language really changes, the reading that can't follow it hears
-a few long garbled words or none, so the two rarely end a word together there, and
-without those cuts the speech on both sides of the change fell in one piece and one
-language's words were dropped (an English-then-Chinese clip lost its last 6 s of
-English). It scores each reading in a segment by its confidence-weighted seconds clipped to the
-segment, and picks a reading per segment with a two-state Viterbi that charges 0.35 s of
-confident audio for each language change, ties going to the primary. A word the new
-reading starts with is dropped only when it repeats the last word kept, case and
-punctuation aside, and the two spans overlap by at least half of the shorter one. The
-winning runs are joined with their own characters, inserting one space at a language
-change only when neither side has whitespace there. Whenever the second language wins no
-piece, the primary's original text is used unchanged, so Chinese, Thai, punctuation and
-untimed runs are exactly as Apple gave them. The text then runs through the same pipeline
-with the primary language. No second installed language, a second analyzer that throws,
-or no timed words in either reading dictates exactly as before; a primary reading that
-finished without hearing anything reports empty so its caller throws its own no-speech
-error without transcribing again; with the switch off no two-language work starts.
-`TwoLanguageMergeTests` cover the merge and the run extraction. The app, keyboard,
-widgets, and tests built on a macOS 26 GitHub runner with 33 tests passing (run
-45005571072, the latest observed verification); nothing here has been measured on an
-iPhone, and the simulator can't transcribe.
-
-## Switching the dictation language in the keyboard (iOS 26+, Full Access)
-
-The dictation bar shows the language beside the style ("Norsk ⌄") and opens a
-tray of chips; the full keyboard's Hex key menu has a Language row with its
-own page, and the space bar names the language faintly ("English", "Norsk"),
-unless the keyboard switches between two or more languages: then it names the keyboard's.
-Both offer Automatic plus up to five languages: the one set, the ones picked
-lately (`settings.dictationLanguage.recent`), then the iPhone's preferred
-languages, each matched to one Apple Speech has (`DictationLanguageSwitch`;
-the keyboard lists Apple's languages once per process and caches them in
-`settings.dictationLanguage.supported`). One variant per language, the first
-of the current, the recents and the preferred winning, so Spain's Spanish and
-Mexico's never both take a chip; picking one drops its siblings from the
-recents (Norwegian's nb/nn/no aliases stay one language). Chinese stays
-apart, so Mandarin's zh-CN, Taiwan's zh-TW and Cantonese's zh-HK each keep a
-chip and a pick keeps the others in the recents. Names are each language's
-own ("Español", "Deutsch", "עברית"), with the region where Apple Speech has
-more than one of that language ("Español (US)" or "Español (ES)", "English
-(GB)"; Norwegian stays "Norsk"), so the menu and the dictation bar's chips
-say which variant dictation actually uses. Under Automatic, Settings ›
-Dictation language says the same itself while the keyboard follows: "Follows
-keyboard: English (US) · Spanish (US)" names each keyboard language's
-dictation language, and is refreshed when Hex comes back to the foreground,
-not only when the row
-appears. A long press on a language (a chip, or a row on the Hex key menu's Language
-page) shows **Remove**, which takes it off (`settings.dictationLanguage.removed`, so one
-of the iPhone's own languages stays off too) and puts the one set back on Automatic;
-Settings › Dictation language's **Remove from keyboard** does the same (TestFlight build
-56: a language couldn't be removed, and one could only be added in Hex). **More
-languages…** lists every other language Apple Speech has, the iPhone's own first, and
-picking one there adds it (in the dictation bar the list takes the keys' place). Removing
-or adding one never changes Automatic, which still follows the keyboard's language.
-A pick writes the same App Group setting as Hex's menu, so
-in-keyboard dictation uses it at once; a warm Hex session follows it within
-100 ms and prepares the language between dictations, and a handoff or the
-Action Button picks it up before recording.
-
-## Translate what I say (Settings › Dictation, iOS 26+)
-
-Off by default. Translates
-each dictation on the iPhone with Apple's Translation framework into the
-language picked under Insert in, once its pack is downloaded. When it
-can't (no pack, a pair Apple can't translate, or a translation that fails
-twice, each in a new `TranslationSession`, never one kept), the
-transcript goes in as spoken and the keyboard says so for 8 s:
-"Couldn't translate, pasted as spoken" over the fix ("Download Chinese in
-Settings"), with **Open Hex**, the only part that opens anything, and ✕, which
-puts it away, in both keyboards; Open Hex opens Settings ›
-Dictation (`hex-dictation://keyboard/translation`). Settings keeps the
-last failure (`experiments.translateDictation.lastFailure`, with Apple's
-error code, never the text) beside the download until a dictation
-translates. With Hinglish on, Hindi going into another language is
-translated from its Devanagari, and romanized only if it goes in as
-spoken; Greeklish does the same for Greek, translated from Greek letters.
-Where you dictate, a "Translate to
-English" switch turns it on or off without opening Hex (testers asked for
-a button, not a setting): a row in the full keyboard's Hex key menu, lit
-with a checkmark while on, and a chip in the dictation bar's language tray.
-It writes Settings' own switch (`experiments.translateDictation`), the
-only switch: nothing else turns translation off (build 56's "Paste in
-Hindi" left `experiments.translateDictation.pastesTranslation` false
-with Settings still on; that reads as off, and the next switch removes
-it), and Settings re-reads it when it shows. Below it, Translation language lists
-up to six targets (the current one, English, the dictation and preferred
-languages, then common ones, only those Apple translates into); picking one
-sets `experiments.translateDictation.target` and turns translation on.
-Settings keeps the full language list and the pack download under Insert in. While dictations paste translated, the Hex
-key wears the target's code ("EN") in its corner, the dictation bar shows
-"→ EN" beside the Hex mark, and the space bar reads "Español → English".
-The App Group carries the switch, so in-keyboard dictation, a warm
-session, and the Action Button all follow it. The keyboard shares the
-app's String Catalog, so the Hex key menu is in Chinese on a Chinese iPhone.
-
-Settings checks and downloads the pair the keyboard translates: from the
-language the keyboard dictates in (Settings › Dictation language, else the
-keyboard's language Automatic follows, else the language of the keyboard's
-last dictation on Automatic, which the keyboard writes as a code and a time in
-`experiments.translateDictation.keyboardAutomaticLanguage`, else what the
-keyboard's Automatic picks: the iPhone's first language Hex dictates, then US
-English), never Hex's
-own Automatic pick, which follows Hex's language when it is set apart from the
-iPhone's in iOS Settings (the keyboard keeps the iPhone's: TestFlight build
-149, Hex in English on a Chinese iPhone). Turning the switch on or picking a
-target there checks the pair and, when its packs aren't on the iPhone, shows
-Apple's download sheet at once; opening the page only shows where the pair
-stands ("Chinese to English is ready. Works offline.", or the download
-button), and before Hex has listed Apple's languages and the keyboard has
-dictated, it says to dictate once with the Hex keyboard. A first dictation from the keyboard's switch or menu
-still finds out from the keyboard's note. Debug simulator builds take
-`-hexTranslationStatus installed|supported|unsupported` in place of Apple's
-answer, which the simulator reports as unsupported for every pair.
-
-## Screen stays on while dictating in Hex
-
-Recording and transcribing set
-`isIdleTimerDisabled`, and every way out (done, cancel, failure) hands the
-screen back to Auto-Lock. It is Hex's own idle timer ("for the app", Apple's
-`UIApplication.isIdleTimerDisabled`), so it keeps the screen on only while Hex
-is in front: the handoff screen and in-app recording, not a warm session or
-in-keyboard dictation, where another app is in front. A keyboard extension has
-no public way to keep the screen on: an app extension can't reach
-`UIApplication.shared` (Apple's App Extension Programming Guide, "Some APIs Are
-Unavailable to App Extensions"). Apple doesn't say in so many words that the
-timer counts only while the app is in front, and the simulator has no
-Auto-Lock to check it.
-
-When the iPhone locks (Auto-Lock, or the side button), Hex's own recording
-goes on: the app, a warm session and the Action Button record in the
-background (`audio` background mode), up to the app's 60 s limit, and their
-text goes where it would have (the app's transcript, Paste dictation, the
-clipboard). In-keyboard dictation stops at the lock, since a keyboard
-can't record in the background, and keeps what was said up to it (below).
-Measured on the iOS 27.2 simulator (its lock button), locking 20, 45 and 80 s
-into a two-minute dictation: the keyboard kept 20.1, 44.9 and 79.5 s, and the
-app, a warm session and the Action Button each kept 59.8 s.
-
-## Resilient capture & expiry contract (`DictationController`)
-
-- Monotonic `jobGeneration`, retained `transcriptionTask`, and unique
-  per-capture WAV filenames ensure an expiring warm session never drops an
-  already-accepted transcription (deliverable for 30s), while a stale
-  winding-down inference can never overwrite a newer capture or delete its
-  audio file.
-- A keyboard's dictation never leaves the keyboard stuck. Hex reads the
-  keyboard's Done and Cancel and heartbeats the job's snapshot until its
-  text is in, in a warm session and in One shot alike (One shot used to
-  ignore them, so a handed-off recording ran to its 60 s limit), and asks
-  iOS for background time to finish the text. The keyboard takes a
-  recording or transcription whose heartbeat is more than 6 s old as over
-  (`KeyboardSnapshot.isOrphanedJob`): a Hex that ended, crashed or was
-  suspended mid-job used to hold every keyboard in recording for good. A
-  result that missed its 30 s to go in by itself stays offered as **Paste
-  dictation** for 10 minutes, in the full keyboard's strip and in the dictation
-  bar's top row (on an iPad it once offered nothing). A failure or note
-  from Hex ("Another app is using the microphone. Try again.") shows for 8 s
-  after Hex wrote it (`KeyboardSnapshot.messageAt`), not for as long as it
-  stays in the App Group; meanwhile both keyboards dictate in the keyboard, and
-  after it a warm session's next start is Hex's Try again.
-- An in-keyboard dictation the keyboard is dismissed from (the screen locks,
-  or another app comes forward) stops its capture at once, keeps what was
-  said, and finishes without the keyboard; its text is held in the App Group
-  (`keyboard.heldDictation`), goes into the same field if the keyboard
-  comes back there within 30 s, and is offered as Paste dictation
-  anywhere else or later. A capture that goes quiet for 6 s finishes with
-  what it heard, and a transcription stuck for 2 minutes is given up.
-- iOS freezes a keyboard seconds after the screen locks (11 s in the
-  simulator) and may end it before it has transcribed: the text then never
-  came, and the recording stayed in the keyboard's temporary folder, unheard
-  (simulator, the keyboard's process ended 20 s after the lock). Now the
-  recording of a dictation the keyboard closed during stays on disk, recorded
-  in the App Group (`keyboard.interruptedRecording`, `KeyboardInterruptedRecording`,
-  one at a time), until its text is held; the next keyboard that finds one
-  no process is transcribing transcribes it and holds its text as the first
-  would have, for up to 24 hours, after which it is deleted unheard. A
-  transcription the keyboard gave up on while it was away stays for the
-  next keyboard too. Paste dictation for a dictation cut short says for 8 s
-  where it stopped and why, "Stopped at 0:45" over "The screen locked or you
-  left the app" (the full keyboard's strip, with Paste), or on one line in
-  the dictation bar: a keyboard can't tell the screen locking from leaving
-  the app, so it names both. What was said after the lock is not recorded.
-- ✓, a tap on the live words or a push-to-talk release keeps what was said up to
-  the tap. The capture page hands its audio over 4,096 samples (85 ms at 48 kHz)
-  at a time, and its stop used to drop the part-filled buffer, so the recording
-  ended 50–110 ms before the finger lifted (TestFlight build 147 and App Store
-  1.0.4, Live words on or off, simulator); a tap as the last syllable still
-  sounded could lose its end. The stop now waits for that buffer (at most 85 ms,
-  250 ms for a context that went quiet) before it lets the microphone go, so the
-  spinner shows that much later; a start meanwhile waits for it. The keyboard
-  hiding still finishes at once.
-- An in-keyboard capture that another sound interrupts waits for it instead
-  of ending: a notification, an alarm or a call takes the audio session, and
-  WebKit interrupts or suspends the capture page's `AudioContext` and mutes
-  (or, if its capture fails, ends) the microphone track. The page reports each
-  `mute`, `unmute` and `ended` of its track and each `statechange` of its
-  context, with its time, and the keyboard writes every one to the probe log
-  (`page statechange at +4.2 s: context interrupted, track muted`). Every
-  250 ms the page resumes a context that isn't running, then opens the
-  microphone again for a track that ended or stayed muted for 3 s (again
-  after 1, 2, 4 and then every 8 s), into the same context and capture: the
-  same dictation goes on, with its file, live words and Type as I speak, and
-  the time away is missing audio. While the page says it's interrupted, the
-  6 s quiet rule doesn't count, and quiet counts again from when it's back
-  (`KeyboardCaptureWatch`). Interrupted for more than 15 s
-  (`KeyboardJobWatchdog.captureInterruption`: a call, an alarm), it
-  finishes with what was said, as before. In the simulator, which has no
-  microphone and no interruptions, `capture-debug.js` left in the App Group
-  runs once in the capture page (to stand a recording in for the microphone,
-  or suspend the context, mute or stop the track by hand), and each recording
-  is kept there as `capture-debug.wav`. What iOS sends a capture for a
-  notification on a phone, with the ringer on and on silent, is unverified.
-- Phone/FaceTime/Siri audio interruptions finalize captures `>= 300 ms` so
-  spoken words are not lost, cancel shorter taps cleanly out of `Listening`,
-  and resume warm keepalive when iOS signals `.shouldResume`. Hex's own
-  recording (the app, a warm session's keepalive and captures) is
-  `playAndRecord` with `mixWithOthers` and A2DP output, never `duckOthers`,
-  so it doesn't interrupt another app's video or music, and ending a session
-  deactivates with `notifyOthersOnDeactivation`. It sets no preferred sample
-  rate: `playAndRecord` runs the microphone and the output at one rate, and
-  the 16 kHz it used to ask for moved everything the iPhone played and
-  recorded (a screen recording's audio too) to 16 kHz while Hex held the
-  session (48 kHz to 16 kHz in the simulator). The recorder writes 16 kHz
-  itself, and the keepalive is input only (an `AVAudioEngine` input tap, no
-  output node: its output element is off). A keepalive that keeps stopping by
-  itself is restarted at once, then after 1 s, 2 s, … up to 30 s, not every
-  100 ms. **Microphone** (`MicrophoneChoice`, `MicrophoneRoute`) picks each
-  dictation's input: **Automatic** (the default) a wired or USB headset's
-  microphone, the car's in CarPlay (the driver's microphone Siri uses, where
-  the iPhone's hears the speakers and the road), else the iPhone's, so AirPods
-  and other Bluetooth headphones keep playing at full quality and nothing
-  waits for call audio; **iPhone** always the built-in one; **Bluetooth** also
-  Bluetooth hands-free microphones (AirPods, Bluetooth car kits, which iOS
-  can't tell from headphones), in call audio (8–16 kHz) and still mixing. Only
-  Bluetooth adds `allowBluetoothHFP`, and the input is always set
-  explicitly. The warm keepalive stays on the iPhone's microphone whatever the
-  choice, so a warm session never holds a car or headset in call audio between
-  dictations; a dictation moves to its input as it starts (a Bluetooth
-  headset's call link can take 0.5–2 s, unmeasured here). The setting replaced
-  Always use iPhone microphone: left on it reads as Automatic, turned off as
-  Bluetooth. In-keyboard dictation asks WebKit for the same input by name
-  (`deviceId`), read from the keyboard's own session; left to itself WebKit
-  takes the input of the route already playing, the iPhone's while a car or
-  headphones play over A2DP. Its capture session (`playAndRecord`,
-  `videoChat`, no `mixWithOthers`) no app can change: other apps' video and
-  music pause while it records and WebKit ends it without telling them, so
-  once it has ended the keyboard activates and deactivates its own session with
-  `notifyOthersOnDeactivation` (`InterruptedAudio`), for players that resume
-  on `.shouldResume`. Unverified on an iPhone: the simulator has no audio
-  interruptions.
-
-## Action Button, Control Center, Back Tap & Live Activity
-
-- `DictateWithHexIntent` (`AudioRecordingIntent` + `LiveActivityIntent`) and
-  `HexDictationControl` (`ControlWidget`) start recording on first press with
-  a Dynamic Island / Lock Screen Live Activity (`Stop` and `Cancel` buttons)
-  and transcribe + copy to the clipboard on second press.
-- Only these dictations get a Live Activity; the keyboard and the app show
-  their own recording UI. It shows Copied for 2 s, and a cancel, failure, or
-  empty capture ends it at once, under a background task so a suspending app
-  can't leave it behind (`LiveActivityCoordinator`). Every end also ends any
-  other Hex activity, and launch, returning to Hex, and ending the warm
-  session (Keep mic warm › Off) end any no dictation owns.

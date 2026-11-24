@@ -237,6 +237,23 @@ final class HexWordsSharedCasesTests: XCTestCase {
         return problems
     }
 
+    // MARK: madeBy
+
+    /// `madeBy.version` is the running app's `CFBundleShortVersionString` (`MARKETING_VERSION`),
+    /// never a placeholder: Export passes `HexWordsWriter.appVersion()`, and the writer writes
+    /// whatever version it is given.
+    func testWriterWritesTheBundlesVersion() throws {
+        let bundleVersion = try XCTUnwrap(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
+        XCTAssertFalse(bundleVersion.isEmpty)
+        XCTAssertEqual(HexWordsWriter.appVersion(), bundleVersion)
+        for version in [HexWordsWriter.appVersion(), "1.0.7"] {
+            let output = HexWordsWriter.phone(vocabulary: ["Rune"], replacements: [], appVersion: version)
+            guard case .read(let file) = HexWordsReader.read(output.data) else { return XCTFail("refused") }
+            XCTAssertEqual(file.madeByApp, "Hex for iPhone")
+            XCTAssertEqual(file.madeByVersion, version)
+        }
+    }
+
     // MARK: The cross-check's iPhone file
 
     func testCrossCheckExport() throws {
