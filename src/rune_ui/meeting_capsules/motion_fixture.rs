@@ -213,11 +213,12 @@ fn the_timer_and_saved_corner_hold_through_a_hover_reversal() {
                     "{corner:?} timer at {i}"
                 );
             } else {
-                // In a left corner the time rides the wall, 14 pt inside it.
-                let [px, _, pw, _] = laid_out(&rt, "pill");
+                // In a left corner the time rides the wall, 14 pt inside it
+                // and beyond the ✕'s room as the panel opens.
+                let [px, _, pw, ph] = laid_out(&rt, "pill");
                 let [tx, _, tw, _] = laid_out(&rt, "elapsed");
                 assert!(
-                    (px + pw - REST_PX - (tx + tw)).abs() < 0.03
+                    (px + pw - REST_PX - discard_room_at(pw, ph, 0.) - (tx + tw)).abs() < 0.03
                         && x > timer.0 - 0.02
                         && (y - timer.1).abs() < 0.02,
                     "{corner:?} timer at {i}"
@@ -546,6 +547,18 @@ fn tab_focus_tracks_the_whole_action_row_without_changing_its_bounds() {
     rt.update(|c, _| c.live.entries = call());
     rt.frame(0.);
     open_recording(&mut rt);
+    // The header's ✕ comes first, in its own 28 pt box.
+    rt.key(rune::KeyEvent {
+        key: rune::Key::Tab,
+        mods: Default::default(),
+    });
+    rt.frame(0.);
+    let focused = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.focus_visible && e.focused)
+        .unwrap();
+    assert_eq!(focused.key.as_deref(), Some("discard"));
     for key in ["stop", "copy-prompt", "copy-all"] {
         rt.key(rune::KeyEvent {
             key: rune::Key::Tab,
@@ -628,6 +641,9 @@ fn capture_end_and_publication_retarget_one_anchored_surface() {
 
 /// Measure what Rune presented, not just Taffy's destination. In particular,
 /// a transient but perfectly anchored 18 pt dip used to pass the anchor test.
+/// The finished meeting is its own layout (a title link over the copies), so
+/// the clock and rows hold until it is published, and from the summary on
+/// the panel only grows.
 #[test]
 fn notes_grow_past_the_copies_without_a_height_dip_or_a_clock_hop() {
     use MeetingIndicatorCorner::*;
@@ -674,18 +690,24 @@ fn notes_grow_past_the_copies_without_a_height_dip_or_a_clock_hop() {
                     });
                 }
                 rt.frame(1. / 60.);
+                let published = frame > delay;
+                let summarized = frame > 4 + delay;
                 let now = rect(&rt, "pill")[3];
-                assert!(
-                    now >= height - 0.02,
-                    "{corner:?} f{frame}: {height} → {now}"
-                );
+                if !published || summarized {
+                    assert!(
+                        now >= height - 0.02,
+                        "{corner:?} f{frame}: {height} → {now}"
+                    );
+                }
                 height = now;
-                let t = rect(&rt, "elapsed");
-                assert!(
-                    (t[1] - clock[1]).abs() < 0.02 && t[2..] == clock[2..],
-                    "{corner:?} f{frame} timer {t:?} / {clock:?}"
-                );
-                assert!((t[0] - clock[0]).abs() < 0.02, "timer moved at {frame}");
+                if !published {
+                    let t = rect(&rt, "elapsed");
+                    assert!(
+                        (t[1] - clock[1]).abs() < 0.02 && t[2..] == clock[2..],
+                        "{corner:?} f{frame} timer {t:?} / {clock:?}"
+                    );
+                    assert!((t[0] - clock[0]).abs() < 0.02, "timer moved at {frame}");
+                }
                 if frame > delay {
                     let w = rect(&rt, "title")[2];
                     assert!(
@@ -696,7 +718,7 @@ fn notes_grow_past_the_copies_without_a_height_dip_or_a_clock_hop() {
                 for (key, original) in rows.into_iter().zip(at) {
                     let row = rect(&rt, key);
                     assert_eq!(row[2..], original[2..]);
-                    if !long {
+                    if !long && !published {
                         assert!(
                             (row[1] - original[1]).abs() < 0.02,
                             "{corner:?} f{frame} {key}: {row:?} / {original:?}"
@@ -704,12 +726,8 @@ fn notes_grow_past_the_copies_without_a_height_dip_or_a_clock_hop() {
                     }
                 }
             }
-            let header = rect(&rt, "header")[3];
-            assert!(if long {
-                header > OPEN_HEADER
-            } else {
-                (header - OPEN_HEADER).abs() < 0.02
-            });
+            // The finished panel: its title band, the summary, the copies.
+            assert!(rt.find("open-meeting").is_some() && rt.find("summary").is_some());
         }
     }
 }
@@ -755,7 +773,10 @@ fn a_long_recording_keeps_its_timer_and_stop_inside_each_corner() {
                 let [px, _, pw, _] = laid_out(&rt, "pill");
                 let [tx, _, tw, _] = laid_out(&rt, "elapsed");
                 let inset = px + pw - (tx + tw);
-                assert!((inset - REST_PX).abs() < 0.25, "{corner:?}: {inset}");
+                assert!(
+                    (inset - REST_PX - panel::DISCARD_ROOM).abs() < 0.25,
+                    "{corner:?}: {inset}"
+                );
             }
             let [_, y, w, h] = laid_out(&rt, "stop");
             let [_, my, _, mh] = laid_out(&rt, "meta");

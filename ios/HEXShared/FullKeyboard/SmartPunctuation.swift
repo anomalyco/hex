@@ -7,7 +7,8 @@ import UIKit
 /// - The keys' language picks the marks (`SmartQuotes.forLanguage`), as each of Apple's
 ///   keyboards does: „ “ and ‚ ‘ in German (Swiss too, the apostrophe key typing ‘ even in a
 ///   word), « » with no-break spaces inside in French (France, Canada and Switzerland), „ ”
-///   and ‚ ’ in Polish, « » without spaces in Norwegian, Russian and Ukrainian, and “ ” and
+///   and ‚ ’ in Polish, « » without spaces in Norwegian, Russian and Ukrainian, ” and ’ both
+///   opening and closing in Swedish (”Hej” sa hon, ’ok’), and “ ” and
 ///   ‘ ’ in English, Spanish, Italian, Portuguese and Romanian. Serbian, which the simulator
 ///   has no keyboard for, gets those too.
 /// - Autocorrect's and suggestions' apostrophes (don’t, I’d) are ’.
@@ -27,6 +28,7 @@ nonisolated struct SmartQuotes: Equatable, Sendable {
     static let german = SmartQuotes(openDouble: "\u{201E}", closeDouble: "\u{201C}", openSingle: "\u{201A}", closeSingle: "\u{2018}")
     static let french = SmartQuotes(openDouble: "\u{00AB}\u{00A0}", closeDouble: "\u{00A0}\u{00BB}", openSingle: "\u{2018}", closeSingle: "\u{2019}")
     static let polish = SmartQuotes(openDouble: "\u{201E}", closeDouble: "\u{201D}", openSingle: "\u{201A}", closeSingle: "\u{2019}")
+    static let swedish = SmartQuotes(openDouble: "\u{201D}", closeDouble: "\u{201D}", openSingle: "\u{2019}", closeSingle: "\u{2019}")
     static let guillemets = SmartQuotes(openDouble: "\u{00AB}", closeDouble: "\u{00BB}", openSingle: "\u{2018}", closeSingle: "\u{2019}")
 
     static func forLanguage(_ language: KeyboardLanguage) -> SmartQuotes {
@@ -34,6 +36,7 @@ nonisolated struct SmartQuotes: Equatable, Sendable {
         case .german: .german
         case .french, .frenchCanadian, .frenchSwiss: .french
         case .polish: .polish
+        case .swedish: .swedish
         case .norwegian, .russian, .ukrainian: .guillemets
         default: .english
         }

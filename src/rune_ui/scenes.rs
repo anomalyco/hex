@@ -779,6 +779,16 @@ pub(super) const SCENES: &[Scene] = &[
         ui.meetings = meetings::MeetingsPane::chapters_fixture();
         ui.pane = Pane::Meetings;
     }),
+    ("meetings-audio-off", |ui| {
+        *ui = mac_fixture();
+        ui.platform.system_audio = false;
+        ui.pane = Pane::Meetings;
+    }),
+    ("meetings-off-sidebar", |ui| {
+        *ui = mac_fixture();
+        ui.settings.meetings.enabled = false;
+        ui.pane = Pane::Meetings;
+    }),
     ("meetings-empty", |ui| {
         *ui = mac_fixture();
         ui.meetings = meetings::MeetingsPane::default();
