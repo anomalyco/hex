@@ -488,6 +488,12 @@ h1 {
   text-wrap: pretty;
 }
 
+/* The detected OS is the page's first guess with scripts. index.html's
+   <noscript> stylesheet shows this line in its place when they are off. */
+.hero__any {
+  display: none;
+}
+
 .hero__action {
   display: flex;
   width: min(100%, 41rem);
@@ -979,6 +985,69 @@ button.download:hover {
   .stack__row:has(.stack__choices) .stack__value {
     grid-row: 2;
     grid-column: 1 / -1;
+  }
+}
+
+/* Every OS, architecture, and package, for the no-script fallback. It stays
+   hidden while scripts run, so the switcher above looks exactly as it did;
+   index.html's <noscript> stylesheet swaps the two. */
+.install__plain {
+  display: none;
+  width: 100%;
+  flex-direction: column;
+  gap: 0.75rem;
+  text-align: left;
+}
+
+.install__plain-note {
+  color: #777b82;
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.install__plain .stack__row {
+  grid-template-columns: 7rem minmax(0, 1fr);
+  padding-right: 1.1rem;
+}
+
+/* The list has no copy button, so its commands wrap and stay selectable
+   instead of truncating. */
+.install__plain code {
+  flex-basis: 100%;
+  overflow: visible;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+
+.stack__title {
+  margin: 0;
+  padding: 0.8rem 1.1rem 0.65rem;
+  color: #f2f2ef;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.stack__title + .stack__row {
+  border-top: 1px solid rgba(242, 242, 239, 0.07);
+}
+
+/* A download in the no-script list names itself; the switcher's icon button
+   carries the name in its aria-label. */
+.stack__link {
+  color: #f2f2ef;
+  text-decoration: underline rgba(255, 255, 255, 0.28);
+  text-underline-offset: 2px;
+  transition: color 160ms ease;
+}
+
+.stack__link:hover {
+  color: #fff;
+}
+
+@media (max-width: 34rem) {
+  .install__plain .stack__row {
+    grid-template-columns: 5rem minmax(0, 1fr);
   }
 }
 

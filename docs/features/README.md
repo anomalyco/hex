@@ -105,6 +105,7 @@ Download Hex                              // setup.download-recovery
 │   ├── Windows x64 / ARM64 (UA-CH) -> hex-setup-<version>-windows-<arch>.exe + SmartScreen note
 │   ├── Linux -> copyable `curl … install-linux.sh | sh` + Arch/glibc requirement
 │   ├── Phone -> Send yourself the link
+│   ├── Scripting off -> every OS and architecture, with no tabs or switches
 │   └── Other platforms -> every build, Homebrew, the GitHub release
 ├── Website, README, installers, apps, feeds, appcast -> anoma.ly/hex/files (Worker hex-production-site):
 │   installers and appcast from the site build, dev notes from the dev-notes branch, frozen feeds and artifacts from R2
@@ -156,7 +157,8 @@ bytes Setup extracts to `%TEMP%`) has a valid, timestamped Authenticode
 signature, and Release runs it that way. No interactive install, Smart App
 Control decision, SmartScreen prompt, or first launch on a real PC has been
 observed. The Linux library diagnosis has no automated check. The site's
-platform states were captured once in headless Chromium with `?platform=`.
+platform states were captured once in headless Chromium with `?platform=`, and
+its scripting-off page with JavaScript disabled.
 
 Sources: [website](../../site/src/Download.tsx), [installer](../../packaging/windows/hex.iss),
 [release publisher](../../.github/release/release-service.sh),
