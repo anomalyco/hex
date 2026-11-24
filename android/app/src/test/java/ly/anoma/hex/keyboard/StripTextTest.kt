@@ -22,6 +22,7 @@ import ly.anoma.hex.diagnostics.FASTER_MODE
 import ly.anoma.hex.diagnostics.fasterEnglishLine
 import ly.anoma.hex.diagnostics.libraryLabel
 import ly.anoma.hex.speech.Engine
+import ly.anoma.hex.speech.fastCoreMask
 import ly.anoma.hex.diagnostics.report
 import ly.anoma.hex.diagnostics.taskStat
 import ly.anoma.hex.diagnostics.wavSamples
@@ -72,6 +73,20 @@ class StripTextTest {
         assertEquals(8, fastCores(List(6) { 870 } + List(2) { 1024 })) // Snapdragon 8 Elite
         assertEquals(2, fastCores(List(6) { 160 } + List(2) { 1024 })) // Snapdragon 695
         assertEquals(0, fastCores(listOf(1024, null)))
+    }
+    @Test fun dictationKeepsItsThreadsOnTheFastCores() {
+        // A MediaTek phone's four little cores at 477, three at 871 and one at 1024: cores 4-7.
+        assertEquals(0xF0, fastCoreMask(List(4) { 477 } + List(3) { 871 } + listOf(1024)))
+        // A Snapdragon 695's six at 160 and two at 1024: cores 6 and 7.
+        assertEquals(0xC0, fastCoreMask(List(6) { 160 } + List(2) { 1024 }))
+        // Nothing to choose between: every core counts as fast (a Snapdragon 8 Elite's eight), none is rated, or none
+        // the kernel rates above zero. No restriction is better than one bit for every core.
+        assertEquals(0, fastCoreMask(List(8) { 1024 }))
+        assertEquals(0, fastCoreMask(List(6) { 870 } + List(2) { 1024 }))
+        assertEquals(0, fastCoreMask(listOf(0, 0, 0, 0)))
+        // One core Hex can't rate leaves placement to the kernel, as before.
+        assertEquals(0, fastCoreMask(listOf(477, 871, 1024, null)))
+        assertEquals(0, fastCoreMask(emptyList()))
     }
     @Test fun diagnosticsGiveFrequenciesFromKilohertz() {
         assertEquals("2.00 GHz", frequency(2_000_000))

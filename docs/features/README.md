@@ -3188,6 +3188,22 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   normally. Checks: it compiles and the existing unit tests pass (`./gradlew :app:compileDebugKotlin
 │   :app:testDebugUnitTest -x prepareSpeechModel` on OpenJDK 21 and Android SDK 36), but no automated
 │   test covers the flag, and nothing was tried on a device or emulator. The repo has no Android CI.
+├── Dictation keeps its threads ready on the fast cores -> the model opens with a pool of its
+│   `threads` (`SpeechModel.open`) instead of ggml starting and joining a new pool for every graph,
+│   each encoder pass and each decoded token, and a decode keeps those workers on the cores the kernel
+│   rates fast (the same cpu_capacity rule, as a bit per core in `fastCoreMask`, through the pool's
+│   cpumask). ggml gives the thread that computes a graph the same mask, so `decode` saves that
+│   thread's affinity first and puts it back when the decode ends: loading a model, Parakeet's own
+│   graphs and the speed test's no-pool run keep their own placement. A mask with fewer usable cores
+│   than the pool has threads is dropped for ggml's default placement, as are a core Hex can't rate
+│   and a phone where every core counts as fast. Labs › Diagnostics' speed test runs this way as
+│   "as now", beside "threads kept ready, any core" and "new threads every graph".
+│   Checks: `dictationKeepsItsThreadsOnTheFastCores` in StripTextTest.kt (a MediaTek 477×4/871×3/1024
+│   phone's 0xF0, a Snapdragon 695's 0xC0, 0 when every core counts as fast, is unrated, is zero or
+│   there are none), and `./gradlew :app:testDebugUnitTest -x prepareSpeechModel` passed 237 tests and
+│   `:app:assembleDebug` built the arm64 libraries (the native import check included) on 2026-11-24 on
+│   OpenJDK 21 and Android SDK 36 (NDK 27.2.12479018); the repo has no Android CI, and nothing was tried
+│   on a device or emulator.
 ├── Symbol pages -> Gboard's ?123 and =< pages (Pixel 8 emulator, API 36), the same on every
 │   layout: ?123 draws 1–0, then @ # $ _ & - + ( ) /, then * " ' : ; ! ? between the page switch
 │   and delete, and =< draws ~ ` | • √ π ÷ × § Δ, then £ ¢ € ¥ ^ ° = { } \, then % © ® ™ ✓ [ ]

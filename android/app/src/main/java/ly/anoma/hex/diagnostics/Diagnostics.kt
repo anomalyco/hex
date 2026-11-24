@@ -55,18 +55,20 @@ internal object Diagnostics {
     private const val THREAD = "Hex speed test"
     private const val RUNS = 2
 
-    /** A way to run the clip: [threads] threads, [pool] of them kept ready with the model (0: new ones per graph), or
-     * with Faster English dictation's model ([english]). */
-    private class Mode(val label: String, val threads: Int, val pool: Int, val english: Boolean = false)
+    /** A way to run the clip: [threads] threads, [pool] of them kept ready with the model (0: new ones per graph) on
+     * the cores [mask] names (0: any core), or with Faster English dictation's model ([english]). */
+    private class Mode(val label: String, val threads: Int, val pool: Int, val mask: Long = 0, val english: Boolean = false)
 
-    /** Today's threads, the same kept ready, and six kept ready on a processor whose kernel rates six or more cores
-     * fast (at least half the strongest core's cpu_capacity, Hex's own rule). */
+    /** As dictation runs now (its threads kept ready, on the fast cores), the same pool on any core, ggml's default of
+     * new threads for every graph, and six kept ready on a processor whose kernel rates six or more cores fast (at least
+     * half the strongest core's cpu_capacity, Hex's own rule). */
     private fun modes(c: Context): List<Mode> {
         val threads = SpeechModel.threads
         val capacities = (0 until Runtime.getRuntime().availableProcessors())
             .map { read("/sys/devices/system/cpu/cpu$it/cpu_capacity")?.toIntOrNull() }
-        return listOfNotNull(Mode("as now", threads, 0), Mode("threads kept ready", threads, threads),
-            Mode("threads kept ready, 6", 6, 6).takeIf { fastCores(capacities) >= 6 },
+        return listOfNotNull(Mode("as now", threads, threads, SpeechModel.poolMask),
+            Mode("threads kept ready, any core", threads, threads), Mode("new threads every graph", threads, 0),
+            Mode("6 threads kept ready", 6, 6, SpeechModel.poolMask).takeIf { fastCores(capacities) >= 6 },
             // Labs › Faster English dictation's model, once it is downloaded, whether or not its switch is on.
             Mode(FASTER_MODE, threads, 0, english = true).takeIf { ModelStore.english.installed(c) != null })
     }
@@ -172,7 +174,7 @@ internal object Diagnostics {
             val sampler = CoreSampler(THREAD, cores(), parseCpuList(before.allowed)).also { it.start() }
             // Negative jobs: no dictation's ✕ (MicCapture counts up from 1) can stop this decode.
             val measured = if (mode.english) SpeechModel.measureEnglish(c, pcm, -(++jobs))
-                else SpeechModel.measure(c, pcm, mode.threads, mode.pool, -(++jobs))
+                else SpeechModel.measure(c, pcm, mode.threads, mode.pool, mode.mask, -(++jobs))
             val (cores, clocks) = sampler.stop()
             if (measured == null) { into.value = Speed.Failed; return }
             runs += Run(mode.label, number, measured.downloaded, measured.wallMs, measured.cpuMs, measured.timings, measured.text,
