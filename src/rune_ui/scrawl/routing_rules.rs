@@ -179,12 +179,12 @@ fn eligible_apps(ui: &Ui) -> Vec<(String, String)> {
 
 /// Whether Jev auto-send is currently enabled in persisted settings.
 fn jev_auto_send_on(ui: &Ui) -> bool {
-    let config = ui.settings.capture.routing.config();
-    config.auto_send == AutoSend::Confident && config.jev_enabled()
+    ui.settings.capture.routing.config().jev_auto_send()
 }
 
 /// Toggles `Auto-send with Jev` between `Confident` (+ `jev_routing` +
-/// `smart_routing`) and `Rules`.
+/// `smart_routing`) and `Rules` (clearing `jev_routing`, so Jev is never
+/// asked; `smart_routing` stays, since it only weighs evidence locally).
 fn toggle_jev(ui: &mut Ui) {
     let enable = !jev_auto_send_on(ui);
     ui.update(|settings| {
@@ -195,6 +195,7 @@ fn toggle_jev(ui: &mut Ui) {
                 config.smart_routing = true;
             } else {
                 config.auto_send = AutoSend::Rules;
+                config.jev_routing = false;
             }
         });
     });
@@ -1148,10 +1149,10 @@ mod tests {
         assert!(cfg.jev_routing && cfg.smart_routing);
 
         toggle_jev(&mut ui);
-        assert_eq!(
-            ui.settings.capture.routing.config().auto_send,
-            AutoSend::Rules
-        );
+        let cfg = ui.settings.capture.routing.config();
+        assert_eq!(cfg.auto_send, AutoSend::Rules);
+        assert!(!cfg.jev_routing, "Jev is turned off, not just auto-send");
+        assert!(cfg.smart_routing, "weighing evidence stays a local choice");
         assert!(!jev_auto_send_on(&ui));
     }
 
