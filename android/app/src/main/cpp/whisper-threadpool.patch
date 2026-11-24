@@ -1,0 +1,32 @@
+--- a/include/whisper.h
++++ b/include/whisper.h
+@@ -267,6 +267,9 @@
+     // Frees all allocated memory
+     WHISPER_API void whisper_free      (struct whisper_context * ctx);
+     WHISPER_API void whisper_free_state(struct whisper_state * state);
++    // Hex: runs [state]'s CPU graphs on [threadpool], which the caller owns and frees after the state. NULL, ggml's
++    // default, starts and joins a new pool of threads for every graph: each encoder pass and each decoded token.
++    WHISPER_API void hex_whisper_state_set_threadpool(struct whisper_state * state, struct ggml_threadpool * threadpool);
+     WHISPER_API void whisper_free_params(struct whisper_full_params * params);
+     WHISPER_API void whisper_free_context_params(struct whisper_context_params * params);
+ 
+--- a/src/whisper.cpp
++++ b/src/whisper.cpp
+@@ -3924,6 +3924,17 @@
+     return whisper_init_with_params_no_state(loader, whisper_context_default_params());
+ }
+ 
++void hex_whisper_state_set_threadpool(struct whisper_state * state, struct ggml_threadpool * threadpool) {
++    for (ggml_backend_t backend : state->backends) {
++        ggml_backend_dev_t dev = ggml_backend_get_device(backend);
++        ggml_backend_reg_t reg = dev ? ggml_backend_dev_backend_reg(dev) : nullptr;
++        auto * set_threadpool = reg ? (void (*)(ggml_backend_t, ggml_threadpool_t)) ggml_backend_reg_get_proc_address(reg, "ggml_backend_cpu_set_threadpool") : nullptr;
++        if (set_threadpool) {
++            set_threadpool(backend, threadpool);
++        }
++    }
++}
++
+ void whisper_free_state(struct whisper_state * state) {
+     if (state) {
+         whisper_kv_cache_free(state->kv_self);

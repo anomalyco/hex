@@ -92,6 +92,16 @@ Agent or terminal                                  // control.cli; every OS
 ├── hex meetings record [--title] | stop | copy-last | delete <id>
 │   ├── Meetings off -> feature-off; recording shows in the menu bar and HUD
 │   │   exactly like a menu-bar recording
+│   ├── record while the last meeting stops (or was still starting) ->
+│   │   busy, exit 1: the recorder finishes that one before it takes
+│   │   another, so "Already recording" would hide that nothing started;
+│   │   transcribing answers busy too
+│   ├── stop while it already stops -> unchanged, exit 0; nothing new starts
+│   ├── stop replies once the recorder is transcribing, or discarded a
+│   │   recording with no speech (macOS answers a failure with its error;
+│   │   Linux and Windows answer a stop that ends otherwise as done), never
+│   │   on the stop request alone; after 8 s it answers anyway, and status
+│   │   may still read stopping
 │   ├── No meetings cancel: Hex cannot discard a recording
 │   └── delete -> the pane's Delete for the exact `meetings list --json` id:
 │       Markdown, tracked notes file, then recording folder to the Trash,
@@ -178,7 +188,11 @@ reload as the window's do, and `settings set` refuses a key whose capability
 the OS lacks
 (`settings list` marks it "not on this OS"). `meetings record|stop|copy-last`
 go to the meeting recorder (`meeting/runtime`) as the tray's items do, and
-`meetings delete` calls the pane's own delete (`meeting/delete`);
+`meetings delete` calls the pane's own delete (`meeting/delete`).
+`control::meetings` holds the rules both hosts and `hex status` share: the
+record/stop decision from the mirrored state (a recording or a start whose
+stop is under way answers `record` with `busy` and `stop` with `unchanged`)
+and the state `hex status` reports, including `stopping`;
 `window story` answers `unsupported`; Windows sends every `annotate`
 command to the running Hex. `hex history`, `hex meetings list|show|search`, and
 `hex mcp` read files on every OS.
@@ -243,7 +257,12 @@ covers `cancel` and its flags; local API's
 bounds, and error codes; `tests::control_commands_parse_beside_the_read_commands`
 covers parsing next to `history` and `meetings`; `control::host::tests` cover
 the quit refusal, printing stops (and Linux's and Windows' `unsupported` for a
-printing start), and runtime `unsupported` replies;
+printing start), and runtime `unsupported` replies; `control::meetings::tests`
+cover the record/stop decision from a mirrored state (a recording whose stop
+is under way refuses `record` with `busy` and answers `stop` unchanged, so
+the CLI never reads a refusal as `ok`) and the `stopping` status state;
+`meeting::runtime::tests::a_stop_moves_the_mirror_through_stopping_to_idle`
+covers the mirror the tray reads;
 `quit_and_status_use_the_owner_even_without_dictating_log_events` covers SDK
 capture, pending jobs, and an unanswered listener. `dictation::service::tests`
 cover the recording query through SDK opening, capture, and completion, and

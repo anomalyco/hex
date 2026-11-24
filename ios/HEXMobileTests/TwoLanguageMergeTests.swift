@@ -60,6 +60,37 @@ final class TwoLanguageMergeTests: XCTestCase {
         XCTAssertTrue(merged.usedSecondary)
     }
 
+    func testLanguageChangeWhereTheReadingsNeverEndAWordTogetherKeepsBothStretches() {
+        // English, then Chinese, in one recording (times and confidences as Apple Speech gave
+        // them for a Samantha-then-Tingting clip, shortened). The Chinese reading hears the
+        // English as one long garbled word that ends after the English does, and the English
+        // reading hears the Chinese as garbled words, so the readings never end a word
+        // together until the very end.
+        let primary = [
+            word(" Thanks", 0.0, 0.3, 0.98),
+            word(" again", 0.3, 0.6, 1.0),
+            word(" for", 0.6, 0.9, 1.0),
+            word(" your", 0.9, 1.1, 1.0),
+            word(" help", 1.1, 1.4, 1.0),
+            word(" last", 1.4, 1.7, 1.0),
+            word(" week.", 1.7, 2.3, 0.72),
+            word(" Zen", 2.7, 3.2, 0.2),
+            word(" wash", 3.2, 3.9, 0.15),
+            word(" so", 3.9, 4.6, 0.1),
+        ]
+        let secondary = [
+            word("fromiauthch", 0.0, 2.5, 0.3),
+            word("现在", 2.7, 3.0, 0.95),
+            word("我", 3.0, 3.25, 0.95),
+            word("说", 3.25, 3.45, 0.95),
+            word("中文。", 3.45, 4.6, 0.95),
+        ]
+
+        let merged = TwoLanguageMerger.merge(primary: primary, secondary: secondary)
+        XCTAssertEqual(merged.text, "Thanks again for your help last week. 现在我说中文。")
+        XCTAssertTrue(merged.usedSecondary)
+    }
+
     func testSwitchCostKeepsASingleDoubtfulWordInThePrimaryReading() {
         // The middle word is much better in the secondary reading, but two changes cost more
         // than that one word gains.

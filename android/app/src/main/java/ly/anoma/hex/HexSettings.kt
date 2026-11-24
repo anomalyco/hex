@@ -1,5 +1,6 @@
 package ly.anoma.hex
 
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -22,8 +23,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
@@ -36,14 +40,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ly.anoma.hex.diagnostics.DiagnosticsPage
+import ly.anoma.hex.feedback.Feedback
+import ly.anoma.hex.feedback.FeedbackForm
+import ly.anoma.hex.keyboard.VoiceOnly
 import ly.anoma.hex.speech.*
 import ly.anoma.hex.typing.TypingPreferences
+import ly.anoma.hex.updates.Updates
 
 private enum class Page(val title: Int) {
     Home(R.string.app_name), Dictation(R.string.settings_dictation), Keyboard(R.string.settings_keyboard), Privacy(R.string.settings_privacy),
+    Labs(R.string.settings_labs),
     Language(R.string.settings_dictation_language), Layout(R.string.settings_keyboard_layout), Styles(R.string.settings_style),
-    Policy(R.string.settings_privacy_policy), Licences(R.string.settings_licences), Licence(R.string.settings_licences);
+    Policy(R.string.settings_privacy_policy), Licences(R.string.settings_licences), Licence(R.string.settings_licences),
+    Feedback(R.string.feedback_send_feedback), Diagnostics(R.string.diagnostics);
     val parent get() = when (this) {
+        Diagnostics -> Labs
         Language, Styles -> Dictation
         Layout -> Keyboard
         Policy, Licences -> Privacy
@@ -68,8 +80,14 @@ private fun licenceFiles(context: Context) =
 internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: TypingPreferences,
                          model: ModelStore.State, download: () -> Unit, phase: SpeechPhase, transcript: String,
                          notice: String?, dictate: () -> Unit, cancel: () -> Unit, clear: () -> Unit, setupPage: (Int) -> Unit,
-                         systemSettings: () -> Unit) {
-    var page by rememberSaveable { mutableStateOf(Page.Home) }
+                         systemSettings: () -> Unit, startPage: String? = null) {
+    var page by rememberSaveable {
+        mutableStateOf(when (startPage) {
+            MainActivity.PAGE_KEYBOARD -> Page.Keyboard
+            MainActivity.PAGE_DIAGNOSTICS -> Page.Diagnostics
+            else -> Page.Home
+        })
+    }
     var licence by rememberSaveable { mutableStateOf("") }
     var practice by remember { mutableStateOf("") }
     val context = LocalContext.current
@@ -94,15 +112,61 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val spokenPunctuation = remember(revision) { speech.spokenPunctuation }
     val customVocabulary = remember(revision) { speech.customVocabulary }
     var vocabularyDraft by remember { mutableStateOf(speech.vocabularyTerms.joinToString("\n")) }
+    val signature = remember(revision) { speech.signature }
+    val fastEnglish = remember(revision) { speech.fastEnglish }
+    val learnFixes = remember(revision) { speech.learnFixes }
+    val fixStore = remember(context) { DictationFixStore(context) }
+    val learnedFixes = remember(revision, learnFixes) { if (learnFixes) fixStore.learned() else emptyList() }
+    val disabledFixes = remember(revision, learnFixes) { if (learnFixes) fixStore.disabled() else emptySet() }
+    // The lab off stops learning and applying, not the records already on the phone: Delete stays reachable.
+    val storedFixes = remember(revision) { fixStore.hasRecords() }
+    var forgetting by remember { mutableStateOf(false) }
+    val english = ModelStore.english.state.collectAsState().value
+    var signatureDraft by remember { mutableStateOf(speech.signatureText) }
+    val emojiSuggestions = remember(revision) { typing.emojiSuggestions }
+    val keyboardTools = remember(revision) { typing.keyboardTools }
+    val smartQuotes = remember(revision) { typing.smartQuotes }
+    val swipeDeleteLetters = remember(revision) { typing.swipeDeleteLetters }
+    val passwordManager = remember(revision) { typing.passwordManagerSuggestions }
+    val voiceOnly = remember(revision) { typing.voiceOnly }
+    // A hidden field or leaving Labs shows the saved line again, never an unsaved draft.
+    LaunchedEffect(page, signature) { if (page != Page.Labs || !signature) signatureDraft = speech.signatureText }
+    LaunchedEffect(page, learnFixes) { if (page != Page.Labs || !learnFixes) forgetting = false }
     val autoCapitalize = remember(revision) { typing.autoCapitalize }
     val autocorrect = remember(revision) { typing.autocorrect }
     val swearWords = remember(revision) { typing.suggestSwearWords }
     val spatial = remember(revision) { typing.spatial }
+    val swipe = remember(revision) { typing.swipe }
     val popups = remember(revision) { typing.popups }
     val haptics = remember(revision) { typing.haptics }
+    val letterSymbols = remember(revision) { typing.letterSymbols }
+    val numberRow = remember(revision) { typing.numberRow }
+    val localCurrency = remember(revision) { typing.localCurrency }
     var copied by remember(transcript) { mutableStateOf(false) }
-    fun open(next: Page) { if (phase != SpeechPhase.Idle) cancel(); page = next }
+    fun open(next: Page) {
+        // A send in progress keeps the form; leaving it otherwise drops what was written.
+        if (page == Page.Feedback && next != Page.Feedback) { if (Feedback.sending) return; Feedback.close() }
+        if (phase != SpeechPhase.Idle) cancel(); page = next
+    }
     BackHandler(page != Page.Home) { open(page.parent) }
+    // Home's dictation result, painted over in the form's picture of Hex: a transcript never leaves the phone.
+    var transcriptCard by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    var transcriptCut by remember { mutableStateOf(false) }
+    var capturing by remember { mutableStateOf(false) }
+    val cardRadius = with(LocalDensity.current) { 14.dp.toPx() }
+    fun sendFeedback() {
+        val activity = context as? Activity ?: return
+        if (capturing) return
+        capturing = true
+        val hide = transcriptCard?.takeIf { transcript.isNotEmpty() }
+        // Square when scrolled part out of view, so the cut edge's corners are covered too.
+        Feedback.captureWindow(activity, hide?.let { android.graphics.RectF(it.left, it.top, it.right, it.bottom) },
+            if (transcriptCut) 0f else cardRadius) { picture ->
+            capturing = false
+            Feedback.start("Home", picture)
+            open(Page.Feedback)
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(colorResource(R.color.page)).safeDrawingPadding(),
         contentAlignment = Alignment.TopCenter) {
@@ -120,7 +184,11 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 colorFilter = ColorFilter.tint(colorResource(R.color.ink)))
                         }
                         if (page == Page.Home) Spacer(Modifier.width(10.dp))
-                        Label(if (page == Page.Licence) licence else stringResource(page.title), size = 26, weight = FontWeight.SemiBold,
+                        Label(when {
+                            page == Page.Licence -> licence
+                            page == Page.Feedback && Feedback.phase is Feedback.Phase.Sent -> stringResource(R.string.feedback_thanks_title)
+                            else -> stringResource(page.title)
+                        }, size = 26, weight = FontWeight.SemiBold,
                             lines = 2, mod = Modifier.semantics { heading() })
                     }
                     if (page == Page.Home) {
@@ -150,7 +218,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             if (phase != SpeechPhase.Idle) Box(Modifier.fillMaxHeight().width(68.dp).clickable(role = Role.Button) { cancel() },
                                 contentAlignment = Alignment.Center) { Label(stringResource(R.string.home_cancel), inverted = true, size = 14) }
                         }
-                        if (transcript.isNotEmpty()) Card {
+                        if (transcript.isNotEmpty()) Card(Modifier.onGloballyPositioned {
+                            transcriptCard = it.boundsInWindow()
+                            transcriptCut = transcriptCard!!.height < it.size.height - 1 || transcriptCard!!.width < it.size.width - 1
+                        }) {
                             SelectionContainer { Label(transcript, mod = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp), lines = Int.MAX_VALUE) }
                             // iPhone Hex's Copy and Clear. Android 13 and later show their own copied preview.
                             Row(Modifier.padding(horizontal = 4.dp)) {
@@ -163,8 +234,9 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             }
                         }
                         if (notice != null) Label(notice, muted = true, size = 14, lines = 3)
+                        Updates.HomeCard()
                         Card {
-                            listOf(Page.Dictation, Page.Keyboard, Page.Privacy).forEachIndexed { i, dest ->
+                            listOf(Page.Dictation, Page.Keyboard, Page.Privacy, Page.Labs).forEachIndexed { i, dest ->
                                 if (i != 0) Rule()
                                 Entry(stringResource(dest.title), action = { open(dest) })
                             }
@@ -172,7 +244,9 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                         Card {
                             Entry(stringResource(R.string.home_keyboard_settings), value = "↗", action = systemSettings)
                             Rule(); Entry(stringResource(R.string.home_run_setup), action = { setupPage(0) })
+                            if (Feedback.available) { Rule(); Entry(stringResource(R.string.feedback_send_feedback), action = ::sendFeedback) }
                         }
+                        Updates.SettingsCard()
                     }
                     Page.Dictation -> {
                         Card {
@@ -208,6 +282,9 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             val action = modelAction(model)
                             Entry(stringResource(R.string.model_title), modelStatus(model), action?.let { stringResource(it) } ?: "",
                                 if (action != null) download else null)
+                            if (fastEnglish && english == ModelStore.State.Ready) {
+                                Rule(); Entry(stringResource(R.string.fast_english_in_use), action = { open(Page.Labs) })
+                            }
                         }
                     }
                     Page.Keyboard -> {
@@ -220,6 +297,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             Rule(); Toggle(stringResource(R.string.settings_autocorrect), stringResource(R.string.settings_autocorrect_detail), autocorrect) { typing.autocorrect = it }
                             // Shown under Autocorrect while it is on, as on iPhone (it was alone on an Experiments page, on by default).
                             if (autocorrect) { Rule(); Toggle(stringResource(R.string.settings_spatial), stringResource(R.string.settings_spatial_detail), spatial) { typing.spatial = it } }
+                            Rule(); Toggle(stringResource(R.string.settings_swipe), stringResource(R.string.settings_swipe_detail), swipe) { typing.swipe = it }
                             Rule(); Toggle(stringResource(R.string.settings_swear_words), stringResource(R.string.settings_swear_words_detail), swearWords) { typing.suggestSwearWords = it }
                             // The words the keyboard keeps and suggests are Android's own personal dictionary.
                             Rule(); Entry(stringResource(R.string.settings_personal_dictionary), stringResource(R.string.settings_personal_dictionary_detail), "↗",
@@ -249,6 +327,149 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             Rule(); Entry(stringResource(R.string.settings_licences), action = { open(Page.Licences) })
                         }
                     }
+                    Page.Feedback -> FeedbackForm(done = { open(Page.Home) })
+                    Page.Diagnostics -> DiagnosticsPage()
+                    Page.Labs -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Label(stringResource(R.string.labs_dictation), muted = true, size = 14,
+                                mod = Modifier.padding(start = 16.dp))
+                            Card {
+                                val size = ModelStore.english.megabytes
+                                                // Its line says what the download is, the numbers limit and what stays as it was, so it is
+                                // never cut off: three lines on a Pixel 8, five at font size 1.3.
+                                Toggle(stringResource(R.string.fast_english), stringResource(R.string.fast_english_detail, size),
+                                    fastEnglish, noteLines = Int.MAX_VALUE) {
+                                    speech.fastEnglish = it
+                                    // Off stops a download under way and drops its partial file; a finished one stays
+                                    // until Delete download.
+                                    if (!it && english != ModelStore.State.Ready) ModelStore.english.delete(context)
+                                }
+                                if (fastEnglish) {
+                                    Rule()
+                                    // The download starts only on this tap, with its size on the row.
+                                    when (english) {
+                                        ModelStore.State.Available -> Entry(stringResource(R.string.fast_english_download, size), value = "",
+                                            action = { ModelStore.english.download(context) })
+                                        is ModelStore.State.Loading -> Entry(stringResource(R.string.fast_english_loading, size, english.percent))
+                                        is ModelStore.State.Retry -> Entry(stringResource(when (english.problem) {
+                                            ModelStore.Problem.Connection -> R.string.fast_english_no_connection
+                                            ModelStore.Problem.Space -> R.string.fast_english_no_space
+                                            ModelStore.Problem.Server -> R.string.fast_english_stopped
+                                        }), value = stringResource(R.string.model_try_again), action = { ModelStore.english.download(context) })
+                                        ModelStore.State.Ready -> Entry(stringResource(R.string.fast_english_ready, size),
+                                            value = stringResource(R.string.fast_english_delete),
+                                            action = { ModelStore.english.delete(context); speech.fastEnglish = false })
+                                    }
+                                }
+                                Rule()
+                                // Labs › Learn from my fixes: off, the keyboard tracks nothing, applies nothing and
+                                // offers no hints; on, the learned word pairs are listed with a switch each.
+                                Toggle(stringResource(R.string.learn_fixes), stringResource(R.string.learn_fixes_detail),
+                                    learnFixes, noteLines = Int.MAX_VALUE) {
+                                    speech.learnFixes = it
+                                    if (!it) forgetting = false
+                                }
+                                if (learnFixes) {
+                                    if (learnedFixes.isEmpty()) {
+                                        Rule()
+                                        Label(stringResource(R.string.learn_fixes_empty), muted = true, size = 13,
+                                            lines = Int.MAX_VALUE, mod = Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+                                    } else {
+                                        learnedFixes.forEach { fix ->
+                                            Rule()
+                                            Toggle(fix.heard + " → " + fix.meant,
+                                                stringResource(R.string.learn_fixes_count, fix.count),
+                                                fix.id !in disabledFixes) { on -> fixStore.disable(fix.id, !on) }
+                                        }
+                                    }
+                                }
+                                if (learnFixes || storedFixes) {
+                                    Rule()
+                                    if (forgetting) {
+                                        Row(Modifier.fillMaxWidth().heightIn(min = 52.dp)
+                                            .padding(start = 16.dp, end = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically) {
+                                            Label(stringResource(R.string.learn_fixes_delete_confirm), size = 14,
+                                                lines = 2, mod = Modifier.weight(1f))
+                                            Action(stringResource(R.string.learn_fixes_cancel)) { forgetting = false }
+                                            Action(stringResource(R.string.learn_fixes_delete_action)) {
+                                                fixStore.clear(); forgetting = false
+                                            }
+                                        }
+                                    } else {
+                                        Entry(stringResource(R.string.learn_fixes_delete), action = { forgetting = true })
+                                    }
+                                }
+                            }
+                            Label(stringResource(R.string.labs_output), muted = true, size = 14,
+                                mod = Modifier.padding(start = 16.dp))
+                            Card {
+                                Toggle(stringResource(R.string.signature), stringResource(R.string.signature_detail),
+                                    signature) { speech.signature = it }
+                                if (signature) {
+                                    Rule()
+                                    val ink = colorResource(R.color.ink)
+                                    val problem = Signature.textProblem(signatureDraft)
+                                    Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        BasicTextField(value = signatureDraft, onValueChange = {
+                                            signatureDraft = it
+                                            // An invalid draft never replaces the saved line.
+                                            if (Signature.textProblem(it) == null) speech.signatureText = it.trim()
+                                        }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                                            textStyle = TextStyle(color = ink, fontFamily = inter, fontSize = 16.sp),
+                                            cursorBrush = SolidColor(ink), decorationBox = { field ->
+                                                Box { if (signatureDraft.isEmpty()) Label(Signature.DEFAULT_TEXT, muted = true); field() }
+                                            })
+                                        if (problem != null) Label(stringResource(when (problem) {
+                                            Signature.Problem.Line -> R.string.signature_one_line
+                                            Signature.Problem.Length -> R.string.signature_too_long
+                                        }), size = 13, muted = true)
+                                    }
+                                }
+                            }
+                            Label(stringResource(R.string.labs_keyboard), muted = true, size = 14,
+                                mod = Modifier.padding(start = 16.dp))
+                            Card {
+                                Toggle(stringResource(R.string.letter_symbols), stringResource(R.string.letter_symbols_detail),
+                                    letterSymbols) { typing.letterSymbols = it }
+                                Rule()
+                                Toggle(stringResource(R.string.number_row), stringResource(R.string.number_row_detail),
+                                    numberRow) { typing.numberRow = it }
+                                Rule()
+                                Toggle(stringResource(R.string.local_currency), stringResource(R.string.local_currency_detail),
+                                    localCurrency) { typing.localCurrency = it }
+                                Rule()
+                                Toggle(stringResource(R.string.emoji_suggestions), stringResource(R.string.emoji_suggestions_detail),
+                                    emojiSuggestions) { typing.emojiSuggestions = it }
+                                Rule()
+                                Toggle(stringResource(R.string.keyboard_tools), stringResource(R.string.keyboard_tools_detail),
+                                    keyboardTools) { typing.keyboardTools = it }
+                                Rule()
+                                Toggle(stringResource(R.string.smart_quotes), stringResource(R.string.smart_quotes_detail),
+                                    smartQuotes) { typing.smartQuotes = it }
+                                Rule()
+                                Toggle(stringResource(R.string.swipe_delete_letters), stringResource(R.string.swipe_delete_letters_detail),
+                                    swipeDeleteLetters) { typing.swipeDeleteLetters = it }
+                                Rule()
+                                Toggle(stringResource(R.string.password_manager_suggestions),
+                                    stringResource(R.string.password_manager_suggestions_detail),
+                                    passwordManager) { typing.passwordManagerSuggestions = it }
+                                Rule()
+                                Toggle(stringResource(R.string.voice_only_mode), stringResource(R.string.voice_only_detail),
+                                    voiceOnly) { typing.voiceOnly = it; VoiceOnly.setEnabledFromSettings(context, it) }
+                            }
+                            // Hex Preview and debug builds only.
+                            if (BuildConfig.DIAGNOSTICS) {
+                                Label(stringResource(R.string.labs_troubleshooting), muted = true, size = 14,
+                                    mod = Modifier.padding(start = 16.dp))
+                                Card {
+                                    Entry(stringResource(R.string.diagnostics), stringResource(R.string.diagnostics_detail),
+                                        action = { open(Page.Diagnostics) })
+                                }
+                            }
+                        }
+                    }
                     Page.Styles -> Card {
                         Style.entries.forEachIndexed { i, it ->
                             if (i != 0) Rule()
@@ -263,8 +484,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             else (listOf(null) + DictationLanguage.entries).map { Triple(it?.label, it == selectedLanguage, { speech.language = it }) }
                         choices.forEachIndexed { i, (label, chosen, pick) ->
                             if (i != 0) Rule()
+                            // Automatic dictates in one language it picks, never the one spoken: its entry says which, now.
                             Entry(label ?: stringResource(R.string.settings_automatic),
-                                if (label != null) null else stringResource(if (layout) R.string.settings_layout_automatic_detail else R.string.dictation_language_automatic_detail),
+                                if (label != null) null else if (layout) stringResource(R.string.settings_layout_automatic_detail)
+                                else automatic.label + " · " + stringResource(R.string.dictation_language_automatic_detail),
                                 if (chosen) "✓" else "", { pick(); open(page.parent) })
                         }
                     }
@@ -286,7 +509,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     }
 }
 
-@Composable private fun Label(text: String, size: Int = 16, weight: FontWeight = FontWeight.Normal,
+@Composable internal fun Label(text: String, size: Int = 16, weight: FontWeight = FontWeight.Normal,
                               muted: Boolean = false, inverted: Boolean = false, lines: Int = 1, mod: Modifier = Modifier) {
     BasicText(text, mod, style = TextStyle(fontFamily = inter, fontWeight = weight, fontSize = size.sp,
         lineHeight = (size + 5).sp, color = colorResource(if (inverted) R.color.page else if (muted) R.color.quiet else R.color.ink)),
@@ -312,23 +535,23 @@ private fun reflow(lines: List<String>) = buildString {
         append(if (ends) "\n" else " ")
     }
 }
-@Composable private fun Action(text: String, onClick: () -> Unit) {
+@Composable internal fun Action(text: String, onClick: () -> Unit) {
     Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center) { Label(text, weight = FontWeight.Medium, size = 15) }
 }
-@Composable private fun Card(content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(colorResource(R.color.sheet)), content = content)
+@Composable internal fun Card(mod: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Column(mod.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(colorResource(R.color.sheet)), content = content)
 }
-@Composable private fun Rule() {
+@Composable internal fun Rule() {
     Spacer(Modifier.fillMaxWidth().padding(start = 16.dp).height(1.dp).background(colorResource(R.color.rule)))
 }
-@Composable private fun RowScope.RowTitle(title: String, note: String?) {
+@Composable private fun RowScope.RowTitle(title: String, note: String?, noteLines: Int = 2) {
     Column(Modifier.weight(1f)) {
         Label(title, weight = FontWeight.Medium)
-        if (note != null) Label(note, size = 13, muted = true, lines = 2)
+        if (note != null) Label(note, size = 13, muted = true, lines = noteLines)
     }
 }
-@Composable private fun Entry(title: String, note: String? = null, value: String = "›", action: (() -> Unit)? = null) {
+@Composable internal fun Entry(title: String, note: String? = null, value: String = "›", action: (() -> Unit)? = null) {
     val click = if (action != null) Modifier.clickable(role = Role.Button, onClick = action) else Modifier
     Row(Modifier.fillMaxWidth().then(click).heightIn(min = 52.dp).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -336,11 +559,12 @@ private fun reflow(lines: List<String>) = buildString {
         if (action != null && value.isNotEmpty()) Label(value, muted = true, size = if (value == "›") 22 else 15)
     }
 }
-@Composable private fun Toggle(title: String, note: String, on: Boolean, enabled: Boolean = true, change: (Boolean) -> Unit) {
+@Composable internal fun Toggle(title: String, note: String, on: Boolean, enabled: Boolean = true, noteLines: Int = 2,
+                                change: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().toggleable(on, enabled = enabled, role = Role.Switch, onValueChange = change)
         .heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        RowTitle(title, note)
+        RowTitle(title, note, noteLines)
         Box(Modifier.size(38.dp, 23.dp).background(colorResource(if (on) R.color.ink else R.color.modifier), RoundedCornerShape(50))
             .padding(3.dp), contentAlignment = if (on) Alignment.CenterEnd else Alignment.CenterStart) {
             Spacer(Modifier.size(17.dp).background(colorResource(if (on) R.color.page else R.color.key), RoundedCornerShape(50)))

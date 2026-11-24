@@ -212,7 +212,7 @@ fn the_offer_has_no_default_key_and_names_each_focus_target() {
         assert!(commands.try_recv().is_err());
         key(&mut rt, rune::Key::Text(" ".into()));
         match tabs {
-            1 => assert!(rt.state.more_open),
+            1 => assert!(rt.state.more_open()),
             2 => assert!(matches!(
                 commands.try_recv(),
                 Ok(ControllerCommand::Dismiss)
@@ -335,7 +335,13 @@ fn a_record_click_keeps_its_corner_until_the_worker_is_live() {
                         let mut model = PillModel::default();
                         model.apply(&event, Instant::now());
                         let r = model.pill(true).unwrap().clone();
-                        rt.update(move |c, tx| c.start_recording(r, tx));
+                        rt.update(move |c, tx| {
+                            let anchor = Anchor {
+                                corner: c.corner,
+                                display: c.display.clone(),
+                            };
+                            c.start_recording(r, anchor, tx);
+                        });
                     }
                     if [1, started_frame + 50].contains(&frame) {
                         rt.pointer_down(x, y);
@@ -375,7 +381,7 @@ fn a_record_click_keeps_its_corner_until_the_worker_is_live() {
                             assert!(texts(&rt).contains(&tr("Starting…").to_owned()));
                         }
                     }
-                    assert!(rt.find("stop").is_none() && !rt.state.hovered);
+                    assert!(rt.find("stop").is_none() && !rt.state.hovered());
                     assert!(commands.try_recv().is_err());
                     last = (w, h);
                 }
@@ -393,8 +399,8 @@ fn a_record_click_keeps_its_corner_until_the_worker_is_live() {
 #[test]
 fn pending_offers_never_mask_a_failure_or_adopt_another_start() {
     use offer::{Host, Route};
-    let id = OfferId::at(Instant::now());
-    let other = OfferId::at(Instant::now() + Duration::from_secs(1));
+    let id = OfferId::next();
+    let other = OfferId::next();
     let failed = ControllerEvent::Failed {
         title: "Fixture".into(),
         error: "Permission denied".into(),

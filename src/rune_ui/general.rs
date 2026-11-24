@@ -29,6 +29,7 @@ use crate::desktop::login_item::LoginItemStatus;
 use crate::desktop::onboarding::PermissionKind;
 use crate::transcription::models as transcription_models;
 
+mod model_switch;
 mod page;
 mod shortcuts;
 
@@ -74,6 +75,11 @@ pub(super) fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
                 Some(tr("Dictates like the shortcut above")),
             ));
         }
+        // Labs › Model switch shortcut: one key that swaps dictation to the
+        // other speech model and language, and back.
+        if crate::labs::Feature::ModelSwitchShortcut.on(&ui.settings) {
+            rows.extend(model_switch::rows(ui, p, layer));
+        }
         // Labs › More dictation shortcuts (macOS): up to four more keys that
         // each dictate like the one above, each with its own shortcut mode.
         #[cfg(target_os = "macos")]
@@ -116,7 +122,7 @@ pub(super) fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
         p,
         "transcription-control",
         tr("Speech model"),
-        model.name,
+        model.name.as_ref(),
         &rune_theme_opencode::icons::CHEVRON_RIGHT,
         super::picker::open,
     );
@@ -238,7 +244,7 @@ pub(super) fn missing_model(ui: &Ui) -> Option<crate::desktop::onboarding::Model
     {
         let fallback = crate::transcription::custom_models::fallback();
         let model = transcription_models::definition(fallback.model);
-        if ui.picker.installed(model, &fallback.language) {
+        if ui.picker.installed(&model, &fallback.language) {
             return None;
         }
     }
@@ -1094,12 +1100,36 @@ pub(super) fn advanced_toggle(ui: &Ui, p: Paint, pane: Pane) -> El {
 }
 
 pub(super) fn disclosure_toggle(ui: &Ui, p: Paint, pane: Pane, label: &str) -> El {
+    disclosure_link(
+        p,
+        "advanced-toggle",
+        label,
+        advanced_open(ui, pane),
+        move |ui: &mut Ui| {
+            if let Some(index) = ui.advanced.iter().position(|open| *open == pane) {
+                ui.advanced.remove(index);
+            } else {
+                ui.advanced.push(pane);
+            }
+        },
+    )
+}
+
+/// The one-line control that opens and closes a fold: its label and a
+/// triangle that points down while `open`.
+pub(super) fn disclosure_link(
+    p: Paint,
+    key: &str,
+    label: &str,
+    open: bool,
+    flip: impl Fn(&mut Ui) + 'static,
+) -> El {
     let c = &p.k.c;
-    let open = advanced_open(ui, pane);
     row()
-        .key("advanced-toggle")
+        .key(key)
         .role("button")
         .label(label)
+        .expanded(open)
         .h(18.0)
         .px(6.0)
         .ml(METRICS.row_px - 6.0)
@@ -1111,13 +1141,7 @@ pub(super) fn disclosure_toggle(ui: &Ui, p: Paint, pane: Pane, label: &str) -> E
         .press(c.pressed)
         .focusable(true)
         .focus_ring(2.0, 0.0, c.border_focus)
-        .on_press(move |ui: &mut Ui| {
-            if let Some(index) = ui.advanced.iter().position(|open| *open == pane) {
-                ui.advanced.remove(index);
-            } else {
-                ui.advanced.push(pane);
-            }
-        })
+        .on_press(flip)
         .child(
             text(label)
                 .key("title")

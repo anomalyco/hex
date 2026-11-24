@@ -16,7 +16,10 @@ use objc2_core_audio::{
 };
 
 use crate::app_settings::{self, RecordingAudioBehavior};
+use crate::audio::CaptureInstant;
 use crate::audio::browser_media::{self, NativeBrowserAudio, PausedBrowser};
+pub(crate) use crate::audio::effect_holds::Effect;
+use crate::audio::effect_holds::{EffectHolds, Hold};
 use crate::audio::output_route;
 
 mod ducking;
@@ -80,47 +83,6 @@ impl MediaPlayer {
     }
 }
 
-/// One thing the environment changes while a session wants it. Each is
-/// held from the first session that wants it until the last one ends, so
-/// overlapping sessions with different policies compose and none restores
-/// what another still needs.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum Effect {
-    Sleep,
-    Mute,
-    Duck,
-    Pause,
-}
-
-impl Effect {
-    /// Restoration order: output is audible again before a session's
-    /// callback, and resuming media (AppleScript) never delays it.
-    const ALL: [Self; 4] = [Self::Sleep, Self::Mute, Self::Duck, Self::Pause];
-
-    const fn index(self) -> usize {
-        self as usize
-    }
-}
-
-/// What one session asks for: dictation prevents idle sleep and applies
-/// "While dictating"; a capture applies "While dictating" only.
-#[derive(Clone, Copy, Debug)]
-struct Hold {
-    dictation: bool,
-    audio: RecordingAudioBehavior,
-}
-
-impl Hold {
-    fn wants(self, effect: Effect) -> bool {
-        match effect {
-            Effect::Sleep => self.dictation,
-            Effect::Mute => self.audio == RecordingAudioBehavior::Mute,
-            Effect::Duck => self.audio == RecordingAudioBehavior::Duck,
-            Effect::Pause => self.audio == RecordingAudioBehavior::PauseMedia,
-        }
-    }
-}
-
 /// What the native environment holds for one effect until it is dropped.
 enum Held {
     Sleep {
@@ -131,9 +93,9 @@ enum Held {
     },
 }
 
-fn hold_native(effect: Effect) -> Held {
+fn hold_native(effect: Effect, report: Option<Sender<CaptureInstant>>) -> Held {
     let audio = |behavior| Held::Audio {
-        _guard: AudioBehaviorGuard::start(behavior),
+        _guard: AudioBehaviorGuard::start(behavior, report),
     };
     match effect {
         Effect::Sleep => Held::Sleep {
@@ -148,7 +110,9 @@ fn hold_native(effect: Effect) -> Held {
 type Callback = Box<dyn FnOnce() + Send + Sync>;
 
 enum EnvironmentCommand {
-    Start(Hold),
+    /// Starts a session, reporting the moment its effect actually changed
+    /// the environment, if it did.
+    Start(Hold, Option<Sender<CaptureInstant>>),
     /// Stops, then runs the callback, if any, once a muted output is
     /// audible again.
     Stop(Hold, Option<Callback>),
@@ -191,10 +155,12 @@ impl RecordingEnvironmentController {
 
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
-        Self::with_environment(|_| ()).0
+        Self::with_environment(|_, _| ()).0
     }
 
-    fn restoring<H: 'static>(hold: impl Fn(Effect) -> H + Send + 'static) -> Self {
+    fn restoring<H: 'static>(
+        hold: impl Fn(Effect, Option<Sender<CaptureInstant>>) -> H + Send + 'static,
+    ) -> Self {
         let (controller, restorer) = Self::with_environment(hold);
         let mut restorers = RESTORERS.lock().unwrap_or_else(|error| error.into_inner());
         restorers.retain(|restorer| !restorer.is_finished());
@@ -205,43 +171,17 @@ impl RecordingEnvironmentController {
     /// The thread that owns every held effect. `hold` changes the
     /// environment for one effect; dropping what it returns restores it.
     fn with_environment<H: 'static>(
-        hold: impl Fn(Effect) -> H + Send + 'static,
+        hold: impl Fn(Effect, Option<Sender<CaptureInstant>>) -> H + Send + 'static,
     ) -> (Self, JoinHandle<()>) {
         let (commands, receiver) = mpsc::channel();
         let restorer = thread::spawn(move || {
-            let mut sessions = [0_u32; Effect::ALL.len()];
-            let mut held: [Option<H>; Effect::ALL.len()] = std::array::from_fn(|_| None);
+            let mut holds = EffectHolds::new();
             while let Ok(command) = receiver.recv() {
                 match command {
-                    EnvironmentCommand::Start(wanted) => {
-                        for effect in Effect::ALL.into_iter().filter(|e| wanted.wants(*e)) {
-                            let count = &mut sessions[effect.index()];
-                            *count = count.saturating_add(1);
-                            if *count == 1 {
-                                held[effect.index()] = Some(hold(effect));
-                            }
-                        }
+                    EnvironmentCommand::Start(wanted, report) => {
+                        holds.acquire(wanted, |effect| hold(effect, report.clone()));
                     }
-                    EnvironmentCommand::Stop(wanted, mut then) => {
-                        for effect in Effect::ALL {
-                            if effect == Effect::Pause
-                                && let Some(then) = then.take()
-                            {
-                                then();
-                            }
-                            if !wanted.wants(effect) {
-                                continue;
-                            }
-                            let count = &mut sessions[effect.index()];
-                            *count = count.saturating_sub(1);
-                            if *count == 0 {
-                                held[effect.index()] = None;
-                            }
-                        }
-                        if let Some(then) = then {
-                            then();
-                        }
-                    }
+                    EnvironmentCommand::Stop(wanted, then) => holds.release(wanted, then),
                     #[cfg(test)]
                     EnvironmentCommand::Barrier(reply) => {
                         let _ = reply.send(());
@@ -252,31 +192,33 @@ impl RecordingEnvironmentController {
         (Self { commands }, restorer)
     }
 
-    /// A dictation session: prevents idle sleep and applies "While
-    /// dictating" until the session ends.
-    pub fn begin(&self) -> RecordingEnvironmentSession {
-        self.begin_as(Hold {
-            dictation: true,
-            audio: app_settings::recording_audio_behavior(),
-        })
-    }
-
     /// A capture session: applies `audio` ("While dictating") until the
     /// session ends. It is not a dictation, so it neither prevents sleep
     /// nor holds back meeting transcription.
     #[cfg(any(hex_capture, test))]
     pub fn begin_capture(&self, audio: RecordingAudioBehavior) -> RecordingEnvironmentSession {
-        self.begin_as(Hold {
-            dictation: false,
-            audio,
-        })
+        self.begin_as(Hold::capture(audio), None)
     }
 
-    fn begin_as(&self, hold: Hold) -> RecordingEnvironmentSession {
+    /// A dictation session that reports, on `report`, the moment its "While
+    /// dictating" effect actually changed the environment. Nothing is
+    /// reported when the effect was skipped or changed nothing.
+    pub fn begin_reporting(&self, report: Sender<CaptureInstant>) -> RecordingEnvironmentSession {
+        self.begin_as(
+            Hold::dictation(app_settings::recording_audio_behavior()),
+            Some(report),
+        )
+    }
+
+    fn begin_as(
+        &self,
+        hold: Hold,
+        report: Option<Sender<CaptureInstant>>,
+    ) -> RecordingEnvironmentSession {
         if hold.dictation {
             INTENTIONAL_RECORDINGS.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         }
-        let _ = self.commands.send(EnvironmentCommand::Start(hold));
+        let _ = self.commands.send(EnvironmentCommand::Start(hold, report));
         RecordingEnvironmentSession {
             commands: self.commands.clone(),
             hold,
@@ -349,7 +291,9 @@ pub fn capture_active() -> bool {
 }
 
 enum AudioBehaviorGuard {
-    Ducked(crate::audio::output_ducking::Guard),
+    Ducked {
+        guard: crate::audio::output_ducking::Guard,
+    },
     Muted {
         device: u32,
         previous: f32,
@@ -382,8 +326,14 @@ fn paused_guard(players: Vec<MediaPlayer>, browser: Option<PausedBrowser>) -> Au
     }
 }
 
+fn send_report(report: Option<Sender<CaptureInstant>>, at: CaptureInstant) {
+    if let Some(report) = report {
+        let _ = report.send(at);
+    }
+}
+
 impl AudioBehaviorGuard {
-    fn start(behavior: RecordingAudioBehavior) -> Self {
+    fn start(behavior: RecordingAudioBehavior, report: Option<Sender<CaptureInstant>>) -> Self {
         // Read once per recording, here on the environment worker thread, so
         // the event tap never waits on CoreAudio. With Labs › Only on
         // speakers on, headphones leave the output and media alone for this
@@ -397,14 +347,17 @@ impl AudioBehaviorGuard {
             return Self::None;
         }
         match behavior {
-            RecordingAudioBehavior::Mute => {
-                mute_output().map_or(Self::None, |(device, previous)| {
+            RecordingAudioBehavior::Mute => match mute_output() {
+                Some((device, previous)) => {
                     tracing::info!(previous, "muted system output while recording");
+                    // The write landed; this is when the output went silent.
+                    send_report(report, CaptureInstant::now());
                     Self::Muted { device, previous }
-                })
-            }
+                }
+                None => Self::None,
+            },
             RecordingAudioBehavior::PauseMedia => {
-                let players = pause_media();
+                let (players, players_at) = pause_media();
                 if !players.is_empty() {
                     tracing::info!(?players, "paused media while recording");
                 }
@@ -417,10 +370,25 @@ impl AudioBehaviorGuard {
                 if browser.is_some() {
                     tracing::info!("paused the browser while recording");
                 }
-                paused_guard(players, browser)
+                // Each source reports when its pause was issued: the browser
+                // confirms silence for up to 500 ms after sending the
+                // command, and that wait is not when it stopped playing.
+                let browser_at = browser.as_ref().map(|(_, at)| *at);
+                if let Some(at) = [(!players.is_empty()).then_some(players_at), browser_at]
+                    .into_iter()
+                    .flatten()
+                    .max()
+                {
+                    send_report(report, at);
+                }
+                paused_guard(players, browser.map(|(paused, _)| paused))
             }
-            RecordingAudioBehavior::Duck => ducking::start(app_settings::recording_duck_volume())
-                .map_or(Self::None, Self::Ducked),
+            RecordingAudioBehavior::Duck => {
+                match ducking::start(app_settings::recording_duck_volume(), report) {
+                    Some(guard) => Self::Ducked { guard },
+                    None => Self::None,
+                }
+            }
             RecordingAudioBehavior::DoNothing => Self::None,
         }
     }
@@ -430,13 +398,13 @@ impl Drop for AudioBehaviorGuard {
     fn drop(&mut self) {
         match self {
             Self::Muted { device, previous } => {
-                if output_volume(*device).is_some_and(|volume| volume <= 0.001)
+                if output_volume(*device).is_some_and(|volume| volume <= SILENT_VOLUME)
                     && set_output_volume(*device, *previous)
                 {
                     tracing::info!(volume = *previous, "restored system output after recording");
                 }
             }
-            Self::Ducked(guard) => guard.restore(),
+            Self::Ducked { guard } => guard.restore(),
             Self::Paused { players, browser } => {
                 // The browser first: its play goes to whatever macOS treats as
                 // playing, which a player resumed just before could become.
@@ -450,9 +418,20 @@ impl Drop for AudioBehaviorGuard {
     }
 }
 
+/// At or below this the output is already silent: muting it changes nothing.
+const SILENT_VOLUME: f32 = 0.001;
+
+/// Whether muting an output at `previous` changes anything.
+fn muting_changes(previous: f32) -> bool {
+    previous > SILENT_VOLUME
+}
+
 fn mute_output() -> Option<(u32, f32)> {
     let device = default_output_device()?;
     let previous = output_volume(device)?;
+    if !muting_changes(previous) {
+        return None;
+    }
     set_output_volume(device, 0.0).then_some((device, previous))
 }
 
@@ -513,30 +492,37 @@ fn volume_address() -> AudioObjectPropertyAddress {
     }
 }
 
-fn pause_media() -> Vec<MediaPlayer> {
+/// Pauses the running players, returning them with the instant the pause
+/// command was issued: the players stop from there, not when AppleScript
+/// finishes.
+fn pause_media() -> (Vec<MediaPlayer>, CaptureInstant) {
     let running = running_media_players();
     if running.is_empty() {
-        return Vec::new();
+        return (Vec::new(), CaptureInstant::now());
     }
     let script = pause_media_script(&running);
+    let issued_at = CaptureInstant::now();
     let output = Command::new("/usr/bin/osascript")
         .args(["-e", &script])
         .output();
     let Ok(output) = output else {
-        return Vec::new();
+        return (Vec::new(), issued_at);
     };
     if !output.status.success() {
         tracing::warn!(
             error = %String::from_utf8_lossy(&output.stderr).trim(),
             "could not pause media while recording"
         );
-        return Vec::new();
+        return (Vec::new(), issued_at);
     }
-    String::from_utf8_lossy(&output.stdout)
-        .split(',')
-        .map(str::trim)
-        .filter_map(MediaPlayer::from_name)
-        .collect()
+    (
+        String::from_utf8_lossy(&output.stdout)
+            .split(',')
+            .map(str::trim)
+            .filter_map(MediaPlayer::from_name)
+            .collect(),
+        issued_at,
+    )
 }
 
 fn resume_media(players: &[MediaPlayer]) {
@@ -617,7 +603,7 @@ pub(crate) mod observed {
 
     /// A controller that reports to `events`.
     pub(crate) fn reporting(events: Sender<Event>) -> RecordingEnvironmentController {
-        RecordingEnvironmentController::with_environment(move |effect| {
+        RecordingEnvironmentController::with_environment(move |effect, _report| {
             let _ = events.send(Event::Held(effect));
             Observed(effect, events.clone())
         })
@@ -662,6 +648,13 @@ mod tests {
     }
 
     #[test]
+    fn muting_an_already_silent_output_changes_nothing() {
+        assert!(!muting_changes(0.0));
+        assert!(!muting_changes(SILENT_VOLUME));
+        assert!(muting_changes(0.5));
+    }
+
+    #[test]
     fn a_pause_with_nothing_paused_holds_nothing() {
         assert!(matches!(
             paused_guard(Vec::new(), None),
@@ -677,10 +670,13 @@ mod tests {
         controller: &RecordingEnvironmentController,
         audio: RecordingAudioBehavior,
     ) -> RecordingEnvironmentSession {
-        controller.begin_as(Hold {
-            dictation: true,
-            audio,
-        })
+        controller.begin_as(
+            Hold {
+                dictation: true,
+                audio,
+            },
+            None,
+        )
     }
 
     #[test]
@@ -693,7 +689,7 @@ mod tests {
             }
         }
         let (events, restored) = mpsc::channel();
-        let controller = RecordingEnvironmentController::restoring(move |effect| {
+        let controller = RecordingEnvironmentController::restoring(move |effect, _report| {
             SlowRestore(events.clone(), effect)
         });
         let session = controller.begin_capture(MuteOutput);

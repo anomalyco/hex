@@ -133,6 +133,15 @@ capture actions. Keep the callback regressions for delayed releases and Fn
 evidence alongside physical Option-hold checks; a physical Fn/Globe smoke test
 and general cross-tap delivery-order validation remain outstanding.
 
+Linux and Windows hotkey captures still count audio the speakers made after
+the press as a missed opening. Their suppressors duck or mute after the hold
+like macOS, but only the macOS recording environment reports when the effect
+took effect, so their ignored head stays without that window
+(`docs/features/dictation.md`, opening after output suppression). Follow-up:
+report the effective moment from the Linux and Windows suppressors, raise the
+live stream's head with the same engine message, and mark the dictation map's
+line for every OS.
+
 Settings > Shortcut mode now offers Toggle (press to start, press again to
 finish) beside Hold on macOS, Linux, and Windows; see
 [dictation](docs/features/dictation.md#shortcut-mode). Physically check it with

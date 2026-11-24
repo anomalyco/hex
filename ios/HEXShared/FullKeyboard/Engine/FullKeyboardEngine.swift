@@ -28,10 +28,10 @@ final class FullKeyboardEngine {
     /// How far along the space bar a language swipe must go; a shorter one types a space.
     static let languageSwipeDistance: CGFloat = 24
 
-    private(set) var shift = ShiftStateMachine()
+    var shift = ShiftStateMachine()
     var layerState = KeyboardLayerState()
     private(set) var field: KeyboardFieldKind = .text
-    private(set) var touches: [Int: ActiveTouch] = [:]
+    var touches: [Int: ActiveTouch] = [:]
     /// Touch ids in the order they went down.
     private var touchOrder: [Int] = []
     var lastSpaceAt: TimeInterval?
@@ -255,7 +255,7 @@ final class FullKeyboardEngine {
     /// The key whose balloon shows: the newest character still held, or the one a 123, #+= or
     /// shift press slid onto (hidden while an accent menu is up).
     var previewKey: KeyboardKey? {
-        guard activeAccentMenu == nil else { return nil }
+        guard activeAccentMenu == nil, !layout.isNumberPad else { return nil }
         for id in touchOrder.reversed() {
             guard let touch = touches[id] else { continue }
             if let slid = touch.slideKey { return slid }
@@ -270,13 +270,9 @@ final class FullKeyboardEngine {
 
     /// Call when the keyboard appears or the field changes.
     func configureForField() {
-        switch KeyboardFieldRouting.route(for: target.keyboardType) {
-        case .keys(let kind, let initialLayer):
+        if case .keys(let kind, let initialLayer) = KeyboardFieldRouting.route(for: target.keyboardType) {
             field = kind
             layerState.reset(to: initialLayer)
-        case .handOff:
-            field = .text
-            layerState.reset(to: .numbers)
         }
         shift.reset()
         korean.reset()
@@ -393,6 +389,7 @@ final class FullKeyboardEngine {
             revertCorrection()
             return
         }
+        if suggestion.kind == .emoji { return acceptEmoji(suggestion) }
         // What the suggestion takes the place of: the word being typed, or a text
         // replacement's shortcut, which may hold digits or punctuation ("ad2").
         let before = textBefore
@@ -499,7 +496,7 @@ final class FullKeyboardEngine {
                 commitAccentSelection(menu.selectedOption)
                 activeAccentMenu = nil
                 activeAccentTouchID = nil
-            } else {
+            } else if !commitFlick(touch) {
                 commitCharacter(touch.key, at: touch.startPoint, down: touch.downPoint)
             }
             touch.committed = true
@@ -662,6 +659,7 @@ final class FullKeyboardEngine {
             return
         }
 
+        if moveFlick(&touch, id: id, to: point) { return }
         // 4. Sliding across character keys updates the active key and re-anchors the hold timer.
         // A letter the next-letter odds claimed keeps the touch while it stays within reach.
         if touch.key.character != nil, !touch.committed,
@@ -735,7 +733,7 @@ final class FullKeyboardEngine {
 
         switch touch.key.kind {
         case .character:
-            if !touch.committed {
+            if !touch.committed, !commitFlick(touch) {
                 commitCharacter(touch.key, at: touch.startPoint, down: touch.downPoint)
             }
         case .shift:
@@ -965,7 +963,7 @@ final class FullKeyboardEngine {
     /// Punctuation right after a word corrects it as space does ("teh," becomes "the,"), and
     /// goes in after the fix. Delete right after takes only the mark, as after a space.
     /// False when there is nothing to fix: the caller types the mark as usual.
-    private func correctWord(endingWith text: String) -> Bool {
+    func correctWord(endingWith text: String) -> Bool {
         guard text.count == 1, let mark = text.first, Self.wordEnders.contains(mark), swipedWord == nil else { return false }
         if applyTextReplacement(ending: text) { return true }
         let before = textBefore
@@ -1118,7 +1116,7 @@ final class FullKeyboardEngine {
     }
 
     /// Keeps the autocorrection just typed (`corrected` then `ending`) for the strip's revert.
-    private func recordCorrection(original: String, corrected: String, ending: String, changes: [AutocorrectEngine.AppliedCorrection.Change]) {
+    func recordCorrection(original: String, corrected: String, ending: String, changes: [AutocorrectEngine.AppliedCorrection.Change]) {
         let before = textBefore ?? ""
         let anchor = before.range(of: corrected, options: .backwards).map { String(before[..<$0.upperBound]) } ?? before
         autocorrect.recordAppliedCorrection(original: original, corrected: corrected, anchor: anchor, changes: changes)

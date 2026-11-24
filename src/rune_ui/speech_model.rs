@@ -1,5 +1,5 @@
-//! The speech model and language an input source's mapping in General
-//! switches to: the picker's installed GGUF models plus Don't switch, then a
+//! The speech model and language a row in General switches to: the
+//! picker's installed GGUF models plus the row's empty choice, then a
 //! language the model supports.
 
 use rune::{El, row};
@@ -9,7 +9,7 @@ use super::settings::toggle_menu;
 use super::{Menu, Ui};
 use crate::app_settings::KeyboardModelChoice;
 use crate::desktop::i18n::tr;
-use crate::transcription::models::{self as transcription_models, ModelDefinition, ModelRuntime};
+use crate::transcription::models::{self as transcription_models, ModelDefinition};
 
 /// One row's keys and copy.
 pub(super) struct SpeechRow<'a> {
@@ -21,13 +21,16 @@ pub(super) struct SpeechRow<'a> {
     pub(super) language_key: &'a str,
     pub(super) title: &'a str,
     pub(super) description: Option<&'a str>,
-    /// The saved choice; None shows Don't switch.
+    /// The saved choice; None shows `empty_label`.
     pub(super) choice: Option<KeyboardModelChoice>,
+    /// What the empty choice says: keyboard-language rows say "Don't switch",
+    /// the Other model row says "None".
+    pub(super) empty_label: &'a str,
     pub(super) model_menu: Menu,
     pub(super) language_menu: Menu,
 }
 
-/// A setting row choosing Don't switch or an installed GGUF model, then
+/// A setting row choosing its empty choice or an installed GGUF model, then
 /// the model's language. `language_for` picks the language a new choice starts
 /// on, given the model and its last-used language; `save` writes the choice
 /// or clears it with None.
@@ -46,11 +49,12 @@ pub(super) fn setting(
         title,
         description,
         choice,
+        empty_label,
         model_menu,
         language_menu,
     } = keys;
     let mut choices = vec![Choice {
-        label: tr("Don't switch").into(),
+        label: empty_label.into(),
         detail: None,
         selected: choice.is_none(),
         choose: {
@@ -63,20 +67,18 @@ pub(super) fn setting(
     }];
     for model in transcription_models::all_models() {
         let fallback = ui.settings.transcription_for_model(model.id).language;
-        if !model.available()
-            || !matches!(model.runtime, ModelRuntime::Gguf(_))
-            || !ui.picker.installed(model, &fallback)
+        if !model.available() || !model.runtime.is_gguf() || !ui.picker.installed(&model, &fallback)
         {
             continue;
         }
         let language = match &choice {
             Some(choice) if model.supports_language(&choice.language) => choice.language.clone(),
-            _ => language_for(model, &fallback),
+            _ => language_for(&model, &fallback),
         };
         let id = model.id;
         let save = save.clone();
         choices.push(Choice {
-            label: model.name.into(),
+            label: model.name.to_string(),
             detail: None,
             selected: choice.as_ref().is_some_and(|choice| choice.model == id),
             choose: Box::new(move |ui| {
@@ -92,11 +94,11 @@ pub(super) fn setting(
         });
     }
     let label = choice.as_ref().map_or_else(
-        || tr("Don't switch").to_string(),
+        || empty_label.to_string(),
         |choice| {
             let model = transcription_models::definition(choice.model);
-            if ui.picker.installed(model, &choice.language) {
-                model.name.into()
+            if ui.picker.installed(&model, &choice.language) {
+                model.name.to_string()
             } else {
                 format!("{} · {}", model.name, tr("Not installed"))
             }

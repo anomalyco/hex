@@ -138,7 +138,7 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 }
 
 pub(super) fn page(p: Paint, s: &Onboard) -> El {
-    let which = if s.step == Step::Accessibility {
+    let which = if s.step() == Step::Accessibility {
         Perm::Accessibility
     } else {
         Perm::Microphone
@@ -146,7 +146,7 @@ pub(super) fn page(p: Paint, s: &Onboard) -> El {
     if let Some(live) = &s.live {
         return live_page(p, live, s, which);
     }
-    let e = s.permissions_from.map_or(0.0, |from| s.now - from);
+    let e = s.permissions_from().map_or(0.0, |from| s.now - from);
     let reduced = s.reduced.get();
     let (stage, continue_at) = match which {
         Perm::Microphone => (
@@ -308,6 +308,11 @@ fn live_page(p: Paint, live: &Live, s: &Onboard, which: Perm) -> El {
         Perm::Accessibility if live.accessibility_row => {
             let ax_desc = match live.accessibility {
                 ItemStatus::Stale => tr("An older Hex entry can keep this off"),
+                // macOS 27.3's list takes no dragged tile: Hex is added with +
+                // or from the Privacy & Security notification.
+                ItemStatus::Waiting if !live.accessibility_drag_supported => {
+                    tr("Click the Privacy & Security notification, or add Hex with +")
+                }
                 ItemStatus::Waiting => tr("Switch on Hex in System Settings"),
                 ItemStatus::Restart => tr("Turns on when Hex restarts"),
                 _ => tr("Notices the shortcut and pastes your words"),
@@ -317,7 +322,10 @@ fn live_page(p: Paint, live: &Live, s: &Onboard, which: Perm) -> El {
                     p,
                     "ax-row",
                     &glyphs::CURSOR_TEXT,
-                    super::super::platform_settings::accessibility_name(live.accessibility_renamed),
+                    super::super::platform_settings::accessibility_name(
+                        live.accessibility_renamed,
+                        live.accessibility_drag_supported,
+                    ),
                     ax_desc,
                     live_pill(
                         p,

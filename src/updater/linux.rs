@@ -81,6 +81,13 @@ const SOURCE_MARKER: &str = "source-build";
 #[derive(Clone, Debug)]
 pub struct Staged(PathBuf);
 
+#[cfg(test)]
+impl Staged {
+    pub fn dummy() -> Self {
+        Self(PathBuf::new())
+    }
+}
+
 /// Only Windows explains beside Download update why it can't update itself.
 pub fn blocked() -> Option<&'static str> {
     None

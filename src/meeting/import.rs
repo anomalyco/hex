@@ -49,7 +49,7 @@ pub(crate) fn import(source: &Path) -> Result<MeetingManifest> {
     }
     let (_, selection) = crate::app_settings::transcription_selection();
     let model = crate::transcription::models::validate(&selection)?;
-    if !crate::transcription::models::is_installed(model, &selection.language) {
+    if !crate::transcription::models::is_installed(&model, &selection.language) {
         return Err(eyre!("{} is not installed", model.name));
     }
 

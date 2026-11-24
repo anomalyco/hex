@@ -55,6 +55,16 @@ internal class TypingModel private constructor(private val data: ByteBuffer, val
         for (at in start(word) until start(word + 1)) append(chars[u8(blob + at)])
     }
     fun frequencyCost(word: Int) = u8(uni + word)
+    /** -ln P(word), in nats. */
+    fun unigramCost(word: Int) = frequencyCost(word) * 0.125
+    /** -ln P(word | prev) from the stored pair, in nats, or -1 when the model has no such pair. */
+    fun pairCost(prev: Int, word: Int): Double = pair(prev, word).let { if (it >= 0) u8(bi + it) * 0.125 else -1.0 }
+    /** The word's letter codes into [out], at most its size; returns how many there are. Reads the mapping only. */
+    fun codes(word: Int, out: IntArray): Int {
+        val from = start(word); val n = minOf(start(word + 1) - from, out.size)
+        for (i in 0 until n) out[i] = u8(blob + from + i)
+        return n
+    }
     fun languageCost(prev: Int, word: Int): Double {
         val backoff = 0.92 + frequencyCost(word) * 0.125
         val pair = pair(prev, word)

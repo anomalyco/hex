@@ -16,8 +16,8 @@ use crate::history::stats::{busiest_hour, local_day};
 use crate::history::usage::Usage;
 
 /// The heatmap's cell size and gap: 53 weeks and 52 gaps fill the dialog's
-/// 424 px content width exactly.
-const CELL: f32 = 6.0;
+/// 396 pt text-rail width cleanly (395.5 pt).
+const CELL: f32 = 5.5;
 const CELL_GAP: f32 = 2.0;
 /// How many weeks the heatmap covers, the current one last.
 const WEEKS: i64 = 53;

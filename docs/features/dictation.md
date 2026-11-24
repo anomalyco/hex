@@ -499,7 +499,7 @@ Secure input turns on  // dictate.secure-input
 │   in front when it turned on (kCGSSessionSecureInputPID, as `ioreg -l` shows
 │   it), which is not necessarily the one holding secure input
 ├── Registered as Carbon hotkeys: Annotate, Annotate replay, Paste last,
-│   Paste meeting, and with Labs › Screenshots its two shortcuts
+│   and with Labs › Screenshots its two shortcuts
 │   ├── A press -> the same key down the tap would have sent (log: "shortcut
 │   │   arrived through secure input"); a release -> its key up
 │   ├── Annotate's "starts once a modifier comes up" still works: the tap
@@ -729,6 +729,57 @@ the Windows `a_second_dictation_shortcut_owns_the_capture_it_starts`
 (cross-compiled only). Proof limits: no physical shortcut or real terminal run
 on either OS.
 
+### Model Switch Shortcut (Labs, every OS)
+
+Labs › Model switch shortcut (`labs.model_switch_shortcut`, off by default)
+gives the other dictation model its own key. General shows its recorder and an
+Other model row: an installed model, then a language it supports, saved as
+`model_switch_other`. A press asks the app that owns model preparation for a
+swap; that owner plans it, starts the same installed-only preparation the
+speech-model picker, the menu bar, and `hex model use` use, and only when the
+new model loads does it save `transcription` and `model_switch_other`
+together. A failed switch keeps the active model and the saved selection.
+
+```ts
+Labs > Model switch shortcut
+├── Other model unset, the lab off, or the same selection -> nothing starts
+├── Press while idle -> the app's installed-only preparation starts
+│   ├── It loads -> both selections saved in one write; the engine reloads
+│   └── Refused, missing, or it fails -> the active model and saved choice stay
+│       Settings says why; the HUD too when Labs › Failure notices is on
+├── A newer choice during a swap -> the swap's load is canceled and the new one
+│   waits for it to exit, so two models never load at once
+├── Another preparation running (a download or Enable's check) -> refused
+│   without canceling it
+├── Press while a capture records -> swallowed with no state change
+│   └── macOS and Windows: the capture still finishes normally
+├── Press while a dictation transcribes -> ignored
+└── hex model switch -> the same owner path from a terminal; busy while
+    recording or while accepted dictation jobs are pending
+```
+
+A choice Hex can't switch to is refused before anything loads: Apple Speech or
+an unsupported language (`KeyboardModelChoice::validate`), a missing import
+that would be the way back, a current model that couldn't be saved as the
+other choice (Apple Speech), or the selection already running (a no-op, with
+no reload). The failure notice uses the interface's translations and no sound
+plays. Checks: `a_plan_moves_to_the_other_model_and_back`,
+`the_same_model_is_a_no_op`, `an_invalid_choice_and_a_lab_that_is_off_are_refused`,
+`a_current_model_that_cannot_run_refuses_the_switch`, and
+`a_current_model_that_could_not_be_the_other_choice_refuses_the_switch` in
+[transcription/other_model.rs](../../src/transcription/other_model.rs);
+`a_newer_choice_waits_for_the_swap_it_supersedes` and
+`a_switch_never_cancels_another_preparation` in
+[linux/app.rs](../../src/linux/app.rs);
+`a_model_switch_swap_saves_both_selections` in
+[app_settings/persistence/tests.rs](../../src/app_settings/persistence/tests.rs);
+`a_switch_press_never_strands_a_capture` in
+[suppression/tests.rs](../../src/suppression/tests.rs) (macOS);
+`the_model_switch_key_never_ends_a_modifier_only_capture` in
+[windows/input.rs](../../src/windows/input.rs) (cross-compiled only).
+Proof limits: no physical shortcut press on any OS, and no model switched while
+a real capture records.
+
 ### Second Dictation Shortcut (Labs, every OS)
 
 Another optional dictation shortcut, for a keyboard whose main shortcut key is
@@ -753,7 +804,7 @@ Labs > Second dictation shortcut > recorder    // dictate.second-dictation
 │   └── Own flavour -> processed and pasted exactly like dictation
 │       (modes, History kind Dictation, last dictation updated)
 ├── Clear (trash) -> unbound again; the lab off -> inactive and unregistered
-└── Paste Last and meeting paste -> only from the main shortcut
+└── Paste Last -> only from the main shortcut
 ```
 
 Checks: `second_dictation_shortcut_owns_the_capture_it_starts` (Linux reducer),
@@ -772,17 +823,27 @@ build never lists, accepts, or runs it, and `DisableLabs` holds it off. With it
 off, Paste Last pastes the newest dictation exactly as before; Windows and
 Linux are unchanged. The gate, `crate::labs::paste_last_picker()`, is where the
 work starts: the picker and its gesture, History's unified list and the rows it
-reads, and the cancel path's word writer.
+reads, and the cancel path's word writer. The listener reads it on every pass,
+so switching it on or off applies at once, without a restart; off drops the
+picker (closing one that is open) and the writer. Check:
+`toggling_the_lab_after_start_changes_what_holding_paste_last_does` in
+[recognition/paste_picker.rs](../../src/recognition/paste_picker.rs).
 
 ```ts
 Tap, Paste Last menu, or hex paste-last → newest ready, noncancelled dictation or marked annotation
-Hold 300 ms on the Mac event tap → up to eight recent items, without taking focus
+Hold 200 ms on the Mac event tap → up to eight recent items, without taking focus
+├── Rows are read from the press, so the picker fades in as the hold passes
+├── Centred on the display under the pointer; stays open once the keys come up
 ├── Initially select what tap would paste; with only Cancelled rows select nothing
 ├── Show all History → open the searchable archive, not a paste
 ├── Click a row → recheck that item and paste it once into the original field
-├── Arrow keys → move selection; Enter or release the chord modifiers → choose
-└── Escape or changed focus → close without touching the clipboard
+├── ↑/↓, Tab, or Paste Last's key again (with or without ⌥⇧) → move; its repeats do nothing
+├── Return or keypad Enter → paste the selected item into the original field
+└── Escape, a click outside the card, another key, or changed focus → close without touching the clipboard
 ```
+
+Check: `a_tap_pastes_and_a_hold_opens_a_picker_that_stays_until_escape` in
+[paste/browse.rs](../../src/paste/browse.rs). Scene: `mac-paste-picker`.
 
 With it on, the Mac History puts dictations, annotations, screenshots and
 screen recordings in one list. All types is the default. Search works inside the
@@ -1838,7 +1899,8 @@ Model advertises streaming, GPU device             // dictate.streaming
        ├── ≥ 300 ms of speech it heard > 400 ms before the text (1.2 s for a
        │   buffered Parakeet stream, which also refuses speech starting 1.5 s
        │   or more before the text once 100 ms is detected more than 400 ms
-       │   before it), outside the pre-roll and start tone
+       │   before it), outside the pre-roll, the start tone, and (macOS) audio
+       │   from before Hex's output suppression took effect (#2338)
        │   -> Transcribe the whole clip offline (source=fallback)  // lost opening
        ├── ≥ 300 ms of speech the stream heard lies > 400 ms past its text's end
        │   -> Transcribe the whole clip offline (source=fallback)   // #1101
@@ -2235,6 +2297,44 @@ timestamp lag. Checks:
 `parakeets_opening_slack_edge_is_one_frame` (synthetic tones, a fake stream).
 Not measured on a microphone or a device.
 
+**Fixed November 23, 2026 (opening after output suppression, macOS):** with
+Lower audio, Mute, or Pause media, a hotkey capture keeps no pre-roll and
+asks for output suppression only once it passes the 300 ms hold; Lower audio
+then ramps over `output_ducking::LOWER` (120 ms) on its own thread. Audio
+still coming from the speakers in that window was counted as speech the
+stream missed, so nearly every dictation with something playing fell back to
+the whole clip. The head only widens when the recording environment reports
+that suppression actually took effect, and each source reports its own
+moment: Lower audio sends when the ramp first writes its full target (a late
+Bluetooth readback no longer delays it), Mute when a write lands over a
+non-zero volume, and Pause media the latest of the player pause command being
+issued and the browser pause being sent — the browser's confirmation windows
+after the command are not part of the moment. Nothing is reported for an
+effect that changed nothing, was skipped on headphones under Labs › Only on
+speakers, or was stopped before its target was written; the report is sent
+from the environment or ramp thread, so a stop is never held up behind it.
+The audio owner maps the moment onto the recorded timeline (a report handled
+late maps back into audio already captured) and adds
+`SPEAKER_TO_MIC_MARGIN` (40 ms) for the output-to-microphone path; the head
+is whatever is later, that position or Hex's own sounds. Up to one resampler
+input buffer is still unprocessed when the report lands, so the position can
+sit slightly early; that only ever ignores less speech, and the margin covers
+it. The head is raised on the live stream with `Command::IgnoreHead`, which
+`PauseCap` applies before its finalize if it arrives before the `Finish`
+command; one that arrives after the finish is ignored. A report that lands
+during the release tail still reaches the finish. The Linux and Windows
+listeners have the same pattern but no effective report yet, so their head
+stays as it was. Checks:
+`a_reported_effect_raises_the_head_from_the_recorded_timeline`,
+`media_speech_before_output_suppression_took_effect_is_not_a_lost_opening`,
+`speech_after_the_raised_head_is_still_a_lost_opening`,
+`a_head_raised_before_the_finish_keeps_the_stream`,
+`a_head_raised_after_the_finish_cannot_save_the_stream`,
+`a_guard_reports_when_the_target_is_written_not_when_the_readback_settles`,
+`a_guard_that_changes_nothing_reports_no_moment`, and
+`muting_an_already_silent_output_changes_nothing`. Not measured on a
+microphone or a device.
+
 ### Ongoing Jobs And Output
 
 ```ts
@@ -2418,6 +2518,12 @@ Finish
   │       // synthetic ⌘V resolves on any active layout: it uses the layout's
   │       // Command layer ("Dvorak – QWERTY ⌘"), and a non-Latin layout
   │       // falls back to the ASCII-capable layout like AppKit itself
+  │       // macOS 27.3+ checks the posting grant (System & App Protection
+  │       // Override) before the clipboard is touched, on every paste path.
+  │       // a refused dictation paste (and a refused Paste last) fails with a
+  │       // HUD notice shown even with Labs › Failure notices off, instead of
+  │       // a silent no-op; the text stays for Paste last dictation and no
+  │       // History entry is written. a refused capture hand-off only logs
   └── Queue full -> Explicit rejection                // bounded admission
 
 A pending -> Start capture B                          // dictate.overlap
@@ -2712,7 +2818,7 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
         -> a known microphone cause explains itself; other failures keep their wording
      -> Labs › Failure notices: why beside the HUD for ~6 s  // dictate.failure-notice, off by default
         -> a new capture dismisses it; no old failure is replayed at launch
-     -> Classic has none: macOS Basso, Signature's error on Windows and Linux
+     -> Classic keys has none: macOS Basso, Kalimba's error on Windows and Linux
      -> A lost microphone or input -> A kept clip: no tone; a shortcut or
         `hex dictation start` capture's audio is transcribed and copied
         instead of pasted    // recovery.md#keep-an-interrupted-dictation
@@ -2810,18 +2916,20 @@ unplugged and re-plugged.
 
 ```ts
 Settings > Sounds                                           // dictate.sound-set
-├── Default / older settings -> Classic at 50%
-├── Row shows the saved set and volume ("Classic · 50%"), or Off -> Opens the Sounds sheet
+├── No saved choice -> Classic keys at 50%; an existing choice stays selected
+├── Row shows the saved set and volume ("Classic keys · 50%"), or Off -> Opens the Sounds sheet
 │   ├── Sound volume -> slider in 5% steps; the value reads as a percent
 │   │   ├── Release above 0 -> Save; play the start sound at the new level
 │   │   └── Left end -> Sounds off; the last volume is kept
-│   ├── Each set -> Check on the chosen one, name, what it sounds like, play button
+│   ├── Sets -> Classic keys, Kalimba, Click, Soft tone, Wood, Warm synth, Thock
+│   │   ├── Each set -> Check on the chosen one, name, what it sounds like, play button
 │   │   ├── Play -> Plays its dictation (start, stop, done) without choosing it; again stops it
 │   │   └── Press the set -> Save and apply live; play its dictation
 │   ├── Any playback -> Stops the one before it (20 ms fade)
 │   ├── While Off -> Previews play at 50%; ordinary cues stay silent, and OS mute still applies
 │   └── Done / Escape / scrim / leaving the pane -> Stops playback
-├── hex settings set sound_theme <signature|classic|click|soft|wood|analog|thock>
+├── hex settings set sound_theme <classic|signature|click|soft|wood|analog|thock>
+│   └── classic -> Classic keys; signature -> Kalimba (same saved values)
 ├── hex settings set sound_effect_volume <0-1> (0 turns sounds off)
 └── Every set -> Same loudness per sound at a given volume
 ```
@@ -2837,7 +2945,7 @@ and Windows show the same sheet. Checks:
 `the_sounds_sheet_names_its_slider_and_play_buttons`, and the `sound-sets`
 and `sound-sets-playing` goldens.
 
-Hex signature (2026-10-27) is one kalimba-like FM voice playing one motif,
+Kalimba (formerly Hex signature) is one kalimba-like FM voice playing one motif,
 D-B-A-D (a sixth, since "hex" is six): start D5 to B5 (116 ms), stop B5 to A5
 (230 ms), done D6 over A5 (330 ms), error D4
 then a minor D4+Bb4 (280 ms), and onboarding success, the whole motif landing
@@ -2848,9 +2956,9 @@ mechanical keyboard key, from the team's vote on the start sound (its winner,
 an ElevenLabs take kept in `scripts/sounds/thock/`): start is the press, stop
 the same key's upstroke, error two keys at once,
 twice, and success a run of keys up to a full press; it has no done sound
-because the stop already says it. Classic is the
-sounds Hex played before the signature set (start clicks, stop swish),
-restored from git; it has no done tone, errors play macOS Basso as they
+because the stop already says it. Classic keys uses Hex's original sounds
+(two clicks to start, a swish to stop), restored from git;
+it has no done tone, errors play macOS Basso as they
 did, and onboarding success plays its stop sound (the other sets have their own).
 The done sound of every set plays only when the paste lands at least
 `DONE_MIN_AFTER_STOP` (2 s) after the stop sound, as after a slow rewrite; the
@@ -2861,10 +2969,10 @@ Each set is a folder in `resources/audio/sounds/` made by
 [`scripts/sounds/synth.py`](../../scripts/sounds/synth.py)
 (`uv run scripts/sounds/synth.py` rewrites them; signature regenerates
 byte-identical). Synthesized sounds are 48 kHz mono WAVs starting on their
-first sample; Classic keeps its 44.1 kHz stereo, trimmed to start at its first
+first sample; Classic keys keeps its 44.1 kHz stereo, trimmed to start at its first
 audible sample. Every sound is normalized to one loudness per kind (start
 -25.5 LUFS max momentary, stop and done -27, error -26.5, success
--25), so a volume sounds the same in every set. Classic's start and stop come
+-25), so a volume sounds the same in every set. The original start and stop come
 up 2.5 and 3 dB (a soft limiter touches 0.1% of the start's samples). There
 is a cancel sound for Toggle's cancel shortcut. Every OS plays the
 error sound for a failed dictation or paste (`fail` in `linux/dictation.rs`
@@ -2872,7 +2980,8 @@ and `windows/dictation.rs`), including an empty transcript, which macOS
 treats as nothing pasted. Checks:
 `bundled_sounds_are_short_and_sound_immediately` (each sound under its length
 budget; every start, and every synthesized sound, audible within 1 ms),
-`every_set_but_classic_has_every_sound`, `sound_set_offers_every_set`. The
+`every_set_but_classic_has_every_sound`, `sound_set_offers_every_set`, and
+`sound_set_round_trips_by_name_and_index` (picker order, saved IDs, playback tags). The
 sounds were checked by waveform, spectrum and loudness only, never played
 aloud on a Mac.
 

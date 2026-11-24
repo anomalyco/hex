@@ -53,9 +53,8 @@ const REPLAYS: &[Replay] = &[
             (96, Cue::Started),
             (172, Cue::Move(432., 23.)),
             (228, Cue::Over("stop")),
-            (276, Cue::Over("copy-new")),
+            (276, Cue::Over("copy-prompt")),
             (312, Cue::Over("copy-all")),
-            (336, Cue::Over("copy-prompt")),
             (396, Cue::Over("stop")),
             (404, Cue::PressStop),
             (415, Cue::Move(214., 91.)),
@@ -362,7 +361,7 @@ struct Shot {
     velocity: (f32, f32),
     veil: (f32, f32),
     /// Offer, "Starting…", meter, then Stop and the three copies.
-    presence: [f32; 7],
+    presence: [f32; 6],
     pending: Option<[f32; 4]>,
     elapsed: Option<[f32; 4]>,
     glyph: Option<[f32; 4]>,
@@ -422,7 +421,7 @@ fn play(
     // The recording is dark in either appearance; the offer follows the host.
     let dark = std::env::var("HEX_HUD_THEME").as_deref() != Ok("light");
     let (mut rt, commands, _) = runtime(kind, false, dark, size);
-    let width = if matches!(rt.state.kind, Some(Kind::Offer(..))) {
+    let width = if matches!(rt.state.state, State::Offer { .. }) {
         rt.state.presentation.window().0
     } else {
         size.0
@@ -436,7 +435,7 @@ fn play(
         }
         moved
     });
-    if let Some(Kind::Recording(shown)) = &mut rt.state.kind {
+    if let State::Recording { recording: shown, .. } = &mut rt.state.state {
         match replay.name {
             "notice" | "left-notice" => {
                 shown.warning = Some(meeting::TrackWarning::DigitalSilence)
@@ -470,8 +469,8 @@ fn play(
         rt.state.waveform = Some(Box::new(waveform::Listening::new(clock)));
         rt.state.live.entries = call();
     }
-    let mut host = match rt.state.kind.as_ref() {
-        Some(Kind::Offer(id, _)) => offer::Host::Offered(*id),
+    let mut host = match &rt.state.state {
+        State::Offer { id, .. } => offer::Host::Offered(*id),
         _ => offer::Host::default(),
     };
     let mut live_since = replay.live.then_some(0usize);
@@ -507,7 +506,11 @@ fn play(
                     model.apply(&event, Instant::now());
                     let shown = model.pill(true).unwrap().clone();
                     rt.update(move |c, tx| {
-                        c.start_recording(shown, tx);
+                        let anchor = Anchor {
+                            corner: c.corner,
+                            display: c.display.clone(),
+                        };
+                        c.start_recording(shown, anchor, tx);
                         c.live.entries = call();
                     });
                     rt.state.waveform = Some(Box::new(waveform::Listening::new(at(frame))));
@@ -549,7 +552,7 @@ fn play(
                     let presentation = offer_surface::Presentation::for_kind(&kind, false);
                     // As `show_panel` does.
                     rt.update(move |c, tx| {
-                        c.show(kind, presentation, MeetingIndicatorCorner::TopRight, None, tx)
+                        c.show(kind, presentation, Anchor::default(), None, tx)
                     });
                 }
                 Cue::Retitled(title) => rt.update(move |c, _| {
@@ -582,8 +585,8 @@ fn play(
                         unreachable!()
                     };
                     // The finished meeting is as long as its recording was.
-                    m.duration_ms = Some(match c.kind {
-                        Some(Kind::Finalizing { duration_ms }) => duration_ms,
+                    m.duration_ms = Some(match c.state {
+                        State::Finalizing { duration_ms, .. } => duration_ms,
                         _ => 5_000,
                     });
                     c.published(m);
@@ -606,7 +609,7 @@ fn play(
                 _ => 0,
             } + (frame - since) as u64 * 1000 / 60;
             rt.update(move |c, _| {
-                if let Some(Kind::Recording(shown)) = &mut c.kind {
+                if let State::Recording { recording: shown, .. } = &mut c.state {
                     shown.started = Instant::now() - Duration::from_millis(run);
                 }
             });
@@ -637,18 +640,18 @@ fn play(
                     (_, "not-now") => assert!(matches!(sent, Ok(ControllerCommand::Dismiss))),
                     _ => assert!(sent.is_err(), "{key} sent a command"),
                 }
-                assert!(rt.state.kind.is_none(), "{key} is true the frame it is pressed");
+                assert!(!rt.state.is_shown(), "{key} is true the frame it is pressed");
             }
             Some(Cue::Timeout) => {
                 assert!(matches!(
                     commands.try_recv(),
                     Ok(ControllerCommand::OfferTimedOut(_))
                 ));
-                assert!(rt.state.kind.is_none());
+                assert!(!rt.state.is_shown());
             }
             Some(_) => {
                 assert!(matches!(commands.try_recv(), Ok(ControllerCommand::Stop)));
-                assert!(rt.state.stopping, "Stop is true the frame it is pressed");
+                assert!(rt.state.stopping(), "Stop is true the frame it is pressed");
             }
             None => (),
         }
@@ -657,16 +660,16 @@ fn play(
         let rect = |key: &str| rt.presented(key).map(|(rect, _)| rect);
         let shot = Shot {
             width,
-            phase: match &c.kind {
-                None if c.surface.leaving() => "leaving",
-                None => "closed",
-                Some(Kind::Offer(..)) if c.presentation.departing() => "starting",
-                Some(Kind::Offer(..)) => "offer",
-                Some(Kind::Recording(_)) if c.stopping => "stopping",
-                Some(Kind::Recording(_)) => "recording",
-                Some(Kind::Finalizing { .. }) => "transcribing",
-                Some(Kind::Ready(m)) if m.notes.is_some() => "summary",
-                Some(Kind::Ready(_)) => "published",
+            phase: match &c.state {
+                State::Empty if c.surface.leaving() => "leaving",
+                State::Empty => "closed",
+                State::Offer { .. } if c.presentation.departing() => "starting",
+                State::Offer { .. } => "offer",
+                State::Recording { stopping: true, .. } => "stopping",
+                State::Recording { .. } => "recording",
+                State::Finalizing { .. } => "transcribing",
+                State::Ready { manifest: m, .. } if m.notes.is_some() => "summary",
+                State::Ready { .. } => "published",
                 _ => "other",
             },
             pill: rect("pill"),
@@ -679,7 +682,6 @@ fn play(
                 Layer::Action(0),
                 Layer::Action(1),
                 Layer::Action(2),
-                Layer::Action(3),
             ]
             .map(|layer| c.stage.presence(layer).opacity),
             pending: rect("pending"),
@@ -743,8 +745,8 @@ fn play(
 impl Capsule {
     /// The shown finished meeting's length, for notes that arrive for it.
     fn length(&self) -> Option<u64> {
-        match &self.kind {
-            Some(Kind::Ready(m)) => m.duration_ms,
+        match &self.state {
+            State::Ready { manifest: m, .. } => m.duration_ms,
             _ => Some(5_000),
         }
     }
@@ -841,15 +843,15 @@ fn the_panel_opens_width_first_and_its_rows_follow_in_order() {
         }
         let rows = &shot.presence[3..];
         assert!(rows.windows(2).all(|p| p[0] >= p[1]), "{rows:?}");
-        ordered += usize::from(rows[0] > rows[3] && rows[3] > 0.0);
+        ordered += usize::from(rows[0] > rows[2] && rows[2] > 0.0);
         // A moving edge is soft; a resting one cuts nothing.
         assert_eq!(shot.veil.0 > 0.0, shot.velocity.0 != 0.0 || shot.veil.0 > 0.0);
     }
     assert!(led > 8 && ordered > 4, "{led} {ordered}");
-    assert!(open[1].presence[6] == 0.0, "the last row waits its turn");
+    assert!(open[1].presence[5] == 0.0, "the last row waits its turn");
     let rest = &shots[240];
     assert_eq!((rest.veil, rest.velocity), ((0., 0.), (0., 0.)));
-    assert_eq!(rest.presence[3..], [1.0; 4]);
+    assert_eq!(rest.presence[3..], [1.0; 3]);
 }
 
 /// The drafts dropped Stop's glyph in the frame of the press and moved its
@@ -999,7 +1001,7 @@ fn hud_replay_frames() {
             rune::render::write_png(&dir.join(format!("{frame:03}.png")), w, h, &pixels).unwrap();
         });
         let mut trace = String::from(
-            "frame,phase,x,y,w,h,vw,vh,veil_x,veil_y,offer,pending,meter,stop,copy_new,copy_all,copy_prompt,pending_x,elapsed_x,elapsed_y,label_x,title,field,elapsed_opacity,field_opacity,stop_opacity,pointer_x,pointer_y,surface,title_opacity,clock,light,field_x,field_w,columns,shift,first_dot_x,light_resting_columns,light_new_columns,title_x,notice_right,notice_opacity\n",
+            "frame,phase,x,y,w,h,vw,vh,veil_x,veil_y,offer,pending,meter,stop,copy_prompt,copy_all,pending_x,elapsed_x,elapsed_y,label_x,title,field,elapsed_opacity,field_opacity,stop_opacity,pointer_x,pointer_y,surface,title_opacity,clock,light,field_x,field_w,columns,shift,first_dot_x,light_resting_columns,light_new_columns,title_x,notice_right,notice_opacity\n",
         );
         for (frame, s) in shots.iter().enumerate() {
             let [x, y, pw, ph] = s.pill.unwrap_or_default();
@@ -1007,7 +1009,7 @@ fn hud_replay_frames() {
             let at = |r: Option<[f32; 4]>, i: usize| r.map_or(String::new(), |r| r[i].to_string());
             writeln!(
                 trace,
-                "{frame},{},{x},{y},{pw},{ph},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                "{frame},{},{x},{y},{pw},{ph},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
                 s.phase,
                 s.velocity.0,
                 s.velocity.1,
@@ -1019,7 +1021,6 @@ fn hud_replay_frames() {
                 p[3],
                 p[4],
                 p[5],
-                p[6],
                 at(s.pending, 0),
                 at(s.elapsed, 0),
                 at(s.elapsed, 1),

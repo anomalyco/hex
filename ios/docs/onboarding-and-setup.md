@@ -33,7 +33,7 @@ model step counts the keyboard's own model too
 (`KeyboardSpeechPreparation`): on iOS 26 the keyboard dictates with
 Apple Speech even when Hex uses Parakeet, so Hex installs that language's
 model as the keyboard would; where Apple has none on the iPhone, it marks
-`keyboardNeedsHex` so the Hex key opens Hex from the first tap. Home's
+`keyboardNeedsHex` (with `keyboardLanguageUnavailable`) so the Hex key says "<Language> isn't available on this iPhone yet" from the first tap, with only a ✕. Home's
 Ready counts it the same way. The
 model's progress pill sits in the top bar until it's ready; Skip shows on
 the demo and the practice only. It shows once: `onboarding.completed` in

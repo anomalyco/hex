@@ -11,7 +11,17 @@ Dictation itself is in [dictation.md](dictation.md).
 
 A tap, or a
 still hold of 0.35 s, starts dictation: in a warm session, else inside
-the keyboard (in-keyboard dictation, iOS 26+), else by opening Hex.
+the keyboard (in-keyboard dictation, iOS 26+), else before iOS 26 by opening Hex.
+In-keyboard dictation uses the keyboard's own speech model, so it also
+dictates while Hex's isn't ready (a first download, Continue without a
+model, a failed preparation) (`DictationRoute`). From iOS 26, where the
+keyboard can't dictate (short of memory, its speech model missing twice in a
+row, or that and Hex not set up), the Hex key, Dictate and the bar's Hex mark
+say why in one line instead ("Not enough memory to dictate here", "Download
+English in Hex to dictate", "Finish setting up Hex to dictate") with **Open
+Hex** and ✕, for 8 s, and nothing opens unless Open Hex is tapped
+(`KeyboardDictationBlock`). With a warm session the bar's Hex mark dictates as
+Dictate does; VoiceOver names it for what it does.
 In-keyboard dictation listens from touch-down, so a tap's or hold's first
 words are kept; moving
 more than 10 pt first opens the style menu, dropping that capture; releasing over a row picks it, and releasing elsewhere leaves
@@ -61,7 +71,20 @@ keeps its suggestions. On a number pad, or with only Apple's keyboards
 beside Hex, it switches to the next keyboard; elsewhere (Emoji or another
 third-party keyboard on, where that switch lands on them about half the
 time) a tap opens iOS's keyboard list, as the globe's hold does, to pick
-Apple's. It needs no Full Access, which only Paste does. When iOS prompts
+Apple's. Where Apple's keyboard is split (the Duo unfolded and upright, where the
+switch can end the app) it always opens the list. It needs no Full Access, which only Paste does.
+**Passwords** (a key, and the word) shows the same way in an empty field iOS marks as a username,
+password or new password, by the same route: iOS offers saved logins (Passwords, and password
+managers' AutoFill extensions such as Bitwarden's) only in Apple's keyboard's bar. In practice
+Hex sees only web usernames (Safari's `autocomplete="username"`, iOS 26.5 and 27.2 simulators):
+iOS brings its own keyboard, with its Passwords bar, to a native `.username` field and to every
+secure field, and comes back to Hex in the next ordinary field. Under Hex, Safari's own sign-in
+sheet (Fill Password) still covers the keyboard as it does Apple's, and the field's menu offers
+AutoFill › Passwords (on the simulator that item showed no list under either keyboard). An
+email field gets no chip: a keyboard sees only its own field's traits and can't tell a login
+form's from any other. With only Hex (or Hex and Emoji) there is nothing to switch to and no
+chip. Deciding reads only whether the field is empty, as Paste does; nothing in these fields
+is typed, read or logged beyond what Hex already skipped. When iOS prompts
 Allow Paste (read ≥ 0.3 s) or refuses a paste read, the strip shows a
 tappable two-line notice (`Paste without asking` / `Paste from Other Apps ›
 Allow` with a **Settings** chip that routes through
@@ -188,7 +211,7 @@ spaces are no less likely than the run; those can replace a run the whole-word m
 would keep. Deutsch keeps the ordinary readings: its lowercase model cannot give a
 split's nouns their capitals.
 Shortcuts, learned fixes, contractions, and words you kept still come first. Other
-layouts (Norsk, Deutsch, Italiano, Français (Canada), Français (Suisse), Português, Polski, Română, Русский, Українська, Ελληνικά) keep the dictionary
+layouts (Norsk, Deutsch, Italiano, Français (Canada), Français (Suisse), Português, Polski, Română, Nederlands, Русский, Українська, Ελληνικά) keep the dictionary
 engine in their own language, and Srpski (no iOS dictionary) none, never the English
 model, except as bilingual autocorrect's second language (below). The
 models (`HEXKeyboard/TypingModel/en.hextm` and `es.hextm`, about 3.6 MB each) are
@@ -476,8 +499,8 @@ dictation bar leaves the last reported language in place. A field gives a third-
 keyboard nothing else to go on: before this change `documentInputMode` was observed as nil
 in Messages and the plist's en-US in a field that asks for English; what it reports with
 the runtime language is unverified. **Dictation follows the keyboard:** with
-two or more languages and Dictation language on Automatic, dictation is in the language
-the space bar shows, in the iPhone's region where Apple Speech has it
+two or more languages, Dictation language on Automatic and **Switch dictation too** on,
+dictation is in the language the space bar shows, in the iPhone's region where Apple Speech has it
 (`LanguageSettings.keyboardDictationLanguage`,
 `KeyboardLanguage.dictationLanguage`; none for Srpski), in the keyboard and in Hex,
 which prepares the new language between dictations (TestFlight build 56: with the
@@ -489,12 +512,16 @@ follow the iPhone's Region (es-MX in Mexico, es-US in the United States, Puerto 
 and Latin America, es-ES elsewhere), and Spain and Equatorial Guinea stay on es-ES.
 A Spanish variant picked by hand for that language is used again
 when the space bar comes back to it: the recent pick goes ahead of the preferred
-languages, so es-US or es-MX survives the switch away and back. It doesn't where the
-iPhone's own language has no layout (Hebrew), as dictating is how that language gets
-written. **Switch dictation too** (off by default, shown with two or
-more on iOS 26+) follows there too, and puts a dictation language picked by hand back on
-Automatic at each switch (it used to write the keyboard's language as a pick, which
-stayed after Spanish was unticked or the switch turned off). **Bilingual autocorrect:**
+languages, so es-US or es-MX survives the switch away and back. **Switch dictation too**
+(off by default, shown with two or more on iOS 26+) is what turns this on: off, Automatic
+dictation stays on its own language whichever language the keyboard shows (until TestFlight
+build 150 it followed the keyboard with the switch off too, and with English and Deutsch
+ticked and the keyboard left on Deutsch, a tester's English came out as German). On, it also
+puts a dictation language picked by hand back on Automatic at each switch (it used to write
+the keyboard's language as a pick, which stayed after Spanish was unticked or the switch
+turned off). Before iOS 26, where the switch isn't offered, Automatic still follows the
+keyboard, except where the iPhone's own language has no layout (Hebrew), as dictating is
+how that language gets written. **Bilingual autocorrect:**
 the first other chosen language with Latin letters and
 an iOS dictionary (`KeyboardLanguageList.partner`: English beside French, French beside
 English; none for Русский, Українська, Ελληνικά, Srpski, or two French layouts) is checked on the same keys,
@@ -510,7 +537,7 @@ tell, both languages', in turn. In the simulator the English
 keyboard alone changed 34 of 77 common French words and the French keyboard alone 27 of
 80 English words; with both chosen, none. Any two Latin-script languages with an iOS
 dictionary pair this way (English with Français, Deutsch, Italiano, Português, Polski,
-Čeština, Norsk, Română, Español, or two of those), whatever their order; Polski's simulator
+Čeština, Norsk, Română, Nederlands, Español, or two of those), whatever their order; Polski's simulator
 dictionary takes every word, so the any-word guard (#2143) leaves it out there. The words before
 count for a language when only its dictionary knows them, or, from three letters, when
 both do but only its typing model has them among its commonest (iOS's French and German
@@ -577,8 +604,8 @@ QWERTZ, (Canada) QWERTY, AZERTY, QWERTZ, (Suisse) QWERTZ, AZERTY, QWERTY (Franç
 AZERTY is Apple's "AZERTY – French", the first layout Apple lists for France and Belgium, with
 the apostrophe key; Canada's QWERTY and Switzerland's QWERTZ are Apple's "QWERTY – French" and
 "QWERTZ – French", the first each lists, with the key ending row 2; every other French layout
-is the plain one); Italiano and Português QWERTY,
-AZERTY, QWERTZ; Polski and Română QWERTY, QWERTZ, AZERTY; Čeština "QWERTZ – Čeština" and
+is the plain one); Italiano, Português and Nederlands QWERTY,
+AZERTY, QWERTZ (Nederlands' list read from the iOS 26.5 and 27.2 runtimes' TextInput_nl); Polski and Română QWERTY, QWERTZ, AZERTY; Čeština "QWERTZ – Čeština" and
 "QWERTY – Čeština", Apple's "QWERTZ – Czech/Slovak" and "QWERTY – Czech/Slovak" (iOS 27.2
 simulator), both its own rows with the ´ and ˇ keys, Z and Y swapped on the second;
 Slovenčina "QWERTZ – Slovenčina" and "QWERTY – Slovenčina", the same two (Apple's Slovak
@@ -689,7 +716,14 @@ first accent, Hex's keeps the base first, as in every language), Magyar (the sta
 `qwertzuiop`, `asdfghjkl`, `yxcvbnm`, on the English keys' QWERTZ; its nine accented vowels
 are all held, á on A, é on E, í on I, ó ö ő on O and ú ü ű on U, the base first and then the
 neighbouring Latin accents, ő and ű the double-acute letters U+0151 and U+0171, and every
-consonant holds nothing; QWERTY is offered too) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
+consonant holds nothing; QWERTY is offered too), Nederlands (QWERTY on the English letters,
+as Apple's Dutch keyboard is; its holds are Apple's, read from the iOS 26.5 and 27.2
+runtimes' `TextInput_nl.bundle/Keyboard-nl.plist` rather than screenshots, the base first
+and then the plist's order, the rule Polish's observed holds follow against its own plist:
+A á ä â à æ ã å ā, C ç, E é ë ê è ę ė ē, I í ï ì î į ī, J j́ (j and the combining acute
+U+0301, for a stressed íj́), N ñ ń, O ó ö ô ò õ œ ø ō, U ú ü û ù ū, and every other letter
+nothing; Apple offers no ĳ ligature, so neither does Hex; its currency key is €, held for
+€ $ £ ¥ ₩ ₽ on the #+= page's € as Polish's is) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
 Serbian Latin keyboard has no keys of its own for č ć đ š ž, they are held on c, d, s
 and z), as Apple's iOS keyboards
 lay them out (`KeyboardLanguage`: letter rows, long-press accents, spelling dictionary).
@@ -718,7 +752,7 @@ S, and Hex's callout shows the options in the system's left-to-right order with 
 letter at the end under the thumb, in one row where the system wraps a long list
 (English A) into two. Autocorrect and suggestions use the layout's
 `UITextChecker` dictionary (`nb`, `es`, `de`, `it`, `fr`, `pt_BR` then
-`pt_PT`, `pl`, `cs`, `hu`, `ro`, `ru`, `uk`, `el`; Serbian would use `sr_Latn`, which iOS 27.2 doesn't have, nor a
+`pt_PT`, `pl`, `cs`, `hu`, `nl` (then `nl_NL`, `nl_BE`), `ro`, `ru`, `uk`, `el`; Serbian would use `sr_Latn`, which iOS 27.2 doesn't have, nor a
 Croatian one); where the iPhone has none
 they stay off except your own text replacements, and the English contractions
 and typo list (`i` → `I`) apply only to English. Neighbouring-key costs follow
@@ -829,7 +863,8 @@ Spatial autocorrect, next-letter touch help or Swipe typing (a drag from a digit
 swipe), and a word holding digits is never corrected. Where iOS gives less height, the
 number row shrinks with the others (`KeyboardMetrics.fitted`). The iPad keeps Apple's rows
 for now: its docked keyboards would need Apple's own number row on the 13-inch and room
-above the strip on the others.
+above the strip on the others. There the switch is hidden (Hex is an iPhone app, so the page
+reads the device's model, not its idiom), and Key flicks takes its place.
 
 ## Web search fields (full keyboard)
 
@@ -851,6 +886,44 @@ else. Holding the `.` offers `.` and `…` (the symbol pages' list); Apple's off
 (`KeyboardLayoutTests`, `FullKeyboardEngineTests`, `ShiftStateMachineTests`) and simulator
 screenshots beside Apple's in Safari; no physical iPhone run checks it.
 
+## Number pads (full keyboard, iPhone)
+
+A field that asks for `.numberPad`, `.asciiCapableNumberPad` or `.decimalPad` (in Safari,
+`inputmode="numeric"` and `"decimal"`) gets Hex's own pad (`KeyboardNumberPad`), drawn on
+Apple's (iPhone 17 Pro and SE, iOS 26.5 and 27.2 simulators, 2026-11-23): 1 2 3 / 4 5 6 /
+7 8 9 / a blank corner, 0 and delete, the phone letters under 2 to 9 (ABC … WXYZ), Apple's
+columns to the point (4.67, 126.33, 6, 126.67, 6, 126.33, 6 pt across a 402 pt iPhone; 4.5,
+117.5 pt keys with 6 pt gaps on the 375 pt SE; turned, 137.33 pt keys centred, the letters
+right of the digit), 6 pt between rows. The decimal pad's separator is the region's (`,` in
+Germany), in the corner without a keycap, as Apple's; delete has none either. A pressed
+digit greys and raises no pop-up, and nothing holds (Apple's pad offers no long presses).
+Taps type on release with rollover, delete repeats, and clicks and haptics are the letter
+keys', so the palette and themes follow. Hex keeps its strip above the pad (the Hex key,
+Paste and Code from Messages), where Apple's pad has no bar: the pad fills the letter keys'
+band, so the keyboard is the same height in a text field and a number field beside it
+(Apple's own grows: 48 pt keys on a 54 pt pitch, its panel 26 pt lower than its letters' on
+a 17 Pro). Hex's keys are 45.75 pt there (26.5: 46.75; SE 46.5). With Settings › Keyboard
+› Number row on, the pad takes that band too. On a Home-button iPhone, where iOS draws no
+globe, Hex's globe takes the blank corner (beside the separator on the decimal pad), as it does
+on the Duo. On the Duo folded the pad spans the letter keys' edges with 7 pt gaps, as Apple's
+does beside its own letters; unfolded and upright Apple's pad is its split keyboard's right
+half (101.33 pt keys, 7 pt apart, ending 80 pt from the right edge, iOS 27.2) and Hex's sits
+there too, a third of a point off on the first two columns; unfolded and turned, unmeasured,
+it takes the letter keys' edges. An iPad keeps the 123 page (not measured beside Apple's).
+
+Nothing hands a number field to the next keyboard any more: before, where iOS asked Hex for a
+globe (Home-button iPhones, the Duo), a number pad switched to Apple's keyboard by itself, and
+elsewhere it got Hex's 123 page. The way to Apple's keyboard stays the globe, and Code from
+Messages in an empty one-time-code field, by its usual route. iOS never gives a third-party
+keyboard a `.phonePad` (`inputmode="tel"`, `type="tel"`) or `.namePhonePad` field or a
+secure one (a PIN): it brings its own keyboard there, as it always did. `type="number"`
+asks for `.numbersAndPunctuation` and keeps the 123 page. The pad is a field kind of its own
+(`KeyboardFieldKind.numberPad`, `.decimalPad`) that takes no words: no suggestions,
+autocorrect, swipe, Learn how I type or Adaptive touch, and typing logs name the field as such.
+Hex's keys have no VoiceOver elements anywhere yet, the pad's included. Unit tests
+(`KeyboardLayoutTests`, `FullKeyboardEngineTests`, `ShiftStateMachineTests`) and simulator
+screenshots beside Apple's; no physical iPhone run checks it.
+
 ## Comma and period keys (full keyboard, iPhone)
 
 Settings › Experiments › Comma and
@@ -871,15 +944,26 @@ iOS targets, and no physical iPhone run checks it.
 ## Word suggestions (full keyboard)
 
 The strip above the keys shows the words the engine
-offers as you type, and after a space the finished word's emoji. Settings › Experiments ›
+offers as you type, the emoji of the word being typed, and after a space the finished
+word's emoji (Emoji below). Settings › Experiments ›
 Hide word suggestions (off by default, `experiments.hideWordSuggestions`, App Group) stops
 the suggestions: the strip keeps its height, the Hex key, Undo, status, notices and the Paste
-chip, but shows no typing or next-word suggestions, swipe readings, finished-word emoji, or
-the chip that keeps what you typed while a correction is still ahead (keep literal).
+chip, but shows no typing or next-word suggestions, swipe readings, typed or finished-word
+emoji, or the chip that keeps what you typed while a correction is still ahead (keep literal).
 Autocorrect still corrects on space, and the chip that puts back what it replaced (`.revert`)
 stays after Delete. With no words offered, tapping the left slot to keep what you typed
 mid-word and holding a word to add it to Custom vocabulary are gone. Off, the strip suggests
 exactly as it did.
+
+A word that changes rolls to the new one, but only once the keyboard is on screen
+(`KeyboardStripView.appearing`, cleared by `FullKeyboardView.keyboardDidAppear` and set again
+by `prepareForField`). iOS hands the field's traits over as it brings the keyboard in, after
+the first words were chosen without them, so on every switch to Hex "the" became "The" and
+"I'm" became "I’m" in a roll the person saw (iPhone and iPad, iOS 26.5 and 27.2 simulators);
+changes before then just show. One frame of the switch is iOS's: on iOS 26 (26.5 simulator,
+iPhone and iPad mini) it sizes every third-party keyboard's view taller for about 25 ms as it
+switches in (448 pt for a 353 pt keyboard on an iPad mini), with the same frame in a keyboard
+that is a plain grey view; iOS 27.2 doesn't.
 
 ## Background (full keyboard and dictation bar)
 
@@ -936,7 +1020,7 @@ return row 2, a shift key opens and closes row 3, after the letters Apple's two-
 (, and ! then . and ?; AZERTY , and ?, . and !, ' and :), the shifted symbol drawn over the
 one a tap types and typed with shift (`KeyboardKey.shifted`), and the bottom row the globe,
 123, the Hex key where Apple's dictation key is (whatever Settings › Hex key says: the strip
-is all suggestions), the space bar, emoji (or 123 when Emoji is off) where Apple's second
+is all suggestions), the space bar, emoji (or 123 when Emoji key is off) where Apple's second
 123 is, and the hide-keyboard key. The letter keys are as wide as the longest row allows
 with its delete or return at least 1.236 and 1.24 letters wide (English 54.5 pt, French
 53.25 pt on the mini upright), row 2 is set in 0.4 of a key pitch (0.2 where it holds as
@@ -948,7 +1032,28 @@ two-symbol keys (§ | ~ … \ < > ! ? on #+=), and row 4 as the letters' with AB
 undo or redo key there, so ABC takes the room of Apple's undo and second ABC.
 German is QWERTZ without ü, ö and ä as Apple's iPad German is, holding them on u, o and a.
 Measured against Apple's iPad mini in English, German and French (every key within a point);
-the other languages' rows follow the same rule unmeasured. Docked, a held key's accents open
+the other languages' rows follow the same rule unmeasured. **Key flicks** (Settings ›
+Keyboard › Key flicks, on by default, shown only on an iPad; `settings.keyboardKeyFlicks`,
+App Group): as on Apple's mini and 11-inch keyboards, every docked letter key carries a small
+grey character over its letter, and pulling the key down types it (`KeyboardFlicks`): 1 to 0
+over row 1, @ # $ & * ( ) ' " over row 2 and % - + = / ; : over row 3 in English and German,
+AZERTY's own (@ # & " $ ( ! ) - *, % _ + = / ;) in French, and on the 123 page the #+= page's
+character over each symbol (€ over @, § over %); the two-symbol keys and the digits keep
+none. Other languages get the digits over a ten-letter row 1, and rows 2 and 3 only with
+English's nine and seven letters (Apple's own for them unmeasured). Drawn as Apple's (iPad
+mini, iPadOS 27.2): the character about 12.5 pt high and grey, 14.5 pt below the keycap's
+top, the letter 11 pt below the middle. Once the finger has gone down more than across, the
+key keeps the touch: no slide onto the key below and no swipe (a swipe still starts any other
+way); from 8 pt down the character slides to the middle, growing and darkening as the letter
+fades, all the way by 26 pt; let go past half way (17 pt) and it goes in as a typed character
+(a mark after a word corrects it, as a slide from 123 does; a digit is just a digit), short
+of it or pulled back, the letter. A rollover commits it the same way. With Reduce Motion the
+character takes the letter's place at once, half way. Holding first opens the key's accents,
+as before, and the pull then moves through them. Apple's own switch (Settings › General ›
+Keyboard › Enable Key Flicks) can't be read by a keyboard extension, hence Hex's. Typing
+logs mark it `ui flick` and `insert` `src: flick`. On the simulator Apple's keys animate
+the pull the same way but synthetic touches never made one type its character, so where it
+commits is Hex's choice, not a measurement. Never on the floating keyboard or an iPhone. Docked, a held key's accents open
 in Apple's iPad cells (below). The sizes are Apple's iPad key sizes (`KeyboardPadSize`,
 `KeyboardPadPlacement`, `KeyboardMetrics.pad`), measured beside Apple's keyboard in the iPadOS 27.2 simulator:
 docked, Apple's key heights, row pitch, gaps and side inset for the iPad mini (under 800 pt
@@ -1036,7 +1141,21 @@ the field shares (the body font's own widths, rows wrapped at the keyboard's wid
 40 pt) and moves by the offset to the nearest position, a 👍🏽 in one step. The field shares
 only the cursor's sentence or line and a little before it, so at that text's edge the cursor
 waits for the host to show more, and past its first or last line it steps just past it in
-one move, which the host makes only if there's text there. The keys blank to keycaps 60%
+one move, which the host makes only if there's text there. A context unchanged since that
+step is the host ignoring it at the text's start or end, not the text past it: read as text,
+it was added again above the known text on every move (iPhone Duo simulator, a long note's
+first line: 3 rows grew to 245 in one gesture, and the lift moved the cursor 26,642
+characters). Safari's fields (WKWebView) answer a keyboard's moves with a context that never
+matches where the cursor went, so there the trackpad keeps to the text the field shared when
+the hold began, and past it the point waits (iOS 27.2 simulator: 20, 40 and 60 pt up all
+moved 2 lines, and coming back took up to two lines of travel). The rows are a guess: no
+context or callback shows where a field wraps (the context is the cursor's sentence in a
+UITextView and in WKWebView). Where the field is as wide as the keyboard less 40 pt, as a
+full-width text view on an iPhone, a row is a line and Hex moves as many lines as Apple's;
+where it's narrower, a row is more than a line and up and down skip lines (iOS 27.2
+simulator, 20 / 40 / 60 pt up: Apple's 1 / 2 / 3 lines, Hex's 2 / 5 / 7 in a field half the
+width; on the Duo's cover screen an app gets 382 pt of the 466 while the keyboard spans 452,
+so even a full-width field skips one going down). The keys blank to keycaps 60%
 of the way to the backdrop, as Apple's, with no haptic while it moves. Apple's second-finger
 tap to select text has no host counterpart: `UITextDocumentProxy` (iOS 27.2 SDK) can read the
 selection but not make one. Off (the default), a second finger does nothing. Settings ›
@@ -1060,9 +1179,10 @@ keyboard's usual dictation there (the warm Hex session or in-keyboard dictation)
 words are about to insert and the field still shows the range unchanged (the same field, and
 the text around it), they replace it; otherwise they insert at the cursor as any dictation
 would, with the range left alone. Cancelling or hearing nothing leaves the range untouched.
-Where dictation would open Hex instead (no Full Access, or the keyboard can't dictate here),
-tapping Dictate dismisses the actions and opens Hex (or shows the Full Access hint) with the
-text left in place. An empty range ends like a normal
+Where the keyboard can't dictate here (no Full Access, or no warm session or in-keyboard
+dictation), tapping Dictate dismisses the actions and does what the Hex key does there (the
+Full Access hint, the line that says why with Open Hex, or before iOS 26 opening Hex) with
+the text left in place. An empty range ends like a normal
 trackpad lift. Delete and Cut ask the host to delete once per Character: in a script whose
 host removes one code point per call (some Devanagari and Thai clusters), the last code
 points of a cluster can stay behind. The dictation bar's space bar is the same trackpad along the line (the same still hold or a 10 pt slide, a
@@ -1156,18 +1276,35 @@ emoji-test.txt 18.0 and CLDR 49, and no copy is checked in). Unit tests only
 (`EmojiShortcodeTests`): no CI compiles the iOS targets, and no physical iPhone run checks
 it.
 
-## Emoji (Settings › Keyboard › Emoji, for the full keyboard)
+## Emoji (Settings › Keyboard › Emoji key and Emoji suggestions, for the full keyboard)
 
-On by default (stored as
-`experiments.emoji` from when it was an experiment off by default: unset or true is on,
-false off, so testers who turned it off keep it off). An emoji key
+Two switches, both on by default. **Emoji key** (stored as `experiments.emoji` from when
+it was an experiment off by default: unset or true is on, false off, so testers who turned
+it off keep it off) is the key and its panel below, on the full keyboard and the dictation
+bar. **Emoji suggestions** (`settings.keyboardEmojiSuggestions`) is the strip's emoji for
+the word typed and the word just finished, and Emoji shortcodes' while that experiment is
+on. They were one switch until testers asked for the suggestions without the key (X,
+2026-11-24): unset, Emoji suggestions reads the emoji key's
+value, so whoever had the one switch on or off keeps both so, in the app and the keyboard
+alike, whichever runs first; the first change to Emoji key writes the suggestions' value it
+had, so turning the key off later leaves them on. With the key off there is no way into
+Hex's panel or search (Apple's emoji keyboard stays a globe press away); the suggestions
+need neither. The dictation bar has no strip, so Settings shows only Emoji key while the
+full keyboard is off. An emoji key
 right of 123 (after the globe) in text and web search fields, not web address, email or
 ASCII-only ones. It opens a panel in place of the strip and the keys: a row of
 emoji for the text before the cursor, then a grid that scrolls sideways through
 Frequently used (eight columns: your emoji, then common ones) and the eight
 categories, at the system emoji keyboard's 46 pt pitch, with ABC, the categories and
 delete below, drawn without keycaps as the system's are; a tap anywhere under the
-grid goes to the key under it, each category the full width of its slot. With
+grid goes to the key under it, each category the full width of its slot. Every point
+of the panel takes a touch, between two emoji, between rows and beside a category icon
+too, and so does every point of the search's results row: iOS hands a keyboard only the
+touches that land on something its layers draw, so both have an invisible fill
+(`UIColor.keyboardTouchFill`, 0.1% black) under their clear look. Without it a finger
+landing between emoji reached nothing, so a swipe that began there did nothing and a
+glide couldn't be stopped or flung again (TestFlight build 147: "the animation in the
+emoji section is not cancelable"; iOS 27.2 simulator). With
 Settings › Experiments › ABC under the emoji key on (off by default,
 `experiments.emojiLettersUnderEmojiKey`, App Group), ABC sits exactly where the emoji
 key that opened the panel was, its x and width, so switching back to the letters needs
@@ -1185,16 +1322,34 @@ language and English and against Hex's own chat words ("congrats", "bday"), one
 emoji per family ("woman running", "man running"); your emoji break ties and fill
 the rest (`EmojiSuggester`). Search (the magnifier) types with the letter keys into
 a field in the strip, results above it, by name first. Holding an emoji with skin
-tones offers five; the one you pick is typed and kept for that emoji. After a space,
-an empty strip offers the finished word's own emoji ("pizza " → 🍕), never in place
-of word suggestions. The App Group keeps a use count per emoji that halves every 10
+tones offers five; the one you pick is typed and kept for that emoji. While a word that
+names an emoji is typed ("smile" → 😊, "fuego" → 🔥 on the Spanish layout), the strip
+offers that one emoji: in the next empty slot, else in place of the right slot's runner-up
+word, else the centre's. A word names an emoji when it is the emoji's whole name or one of
+Hex's chat words, in the layout's language or English, plurals and endings too, never a
+prefix ("smil") or a word only part of several names ("face", "hand"). "heart" is one of
+Hex's chat words, so it offers ❤️ though 45 emoji share it. A phrase is offered at the word
+that names it ("thumbs" → 👍), not at its last word ("thumbs up"): the strip reads one word. The emoji never
+takes the place of what you typed, a revert, the word space will put in, or your own
+words, and isn't offered while space would put in another word, for a swiped word, or in a
+password, one-time code, username, email address or web address field, a secure one or
+one with autocorrect off (`FullKeyboardView.withTypedWordEmoji`). A tap types it with a
+space in the word's place ("smile" → "😊 "); Delete then takes the space and the left slot
+offers the word back, as after an autocorrection, and Learn how I type records nothing
+(`FullKeyboardEngine.acceptEmoji`). Testers describe Apple's keyboard doing this on an
+iPhone; in the iOS 26.5 and 27.2 simulators it offers no emoji for "smile", "pizza" or
+"love", before or after the space, so the slot follows Hex's strip, not a measurement.
+After a space, an empty strip offers the finished word's own emoji ("pizza " → 🍕),
+never in place of word suggestions, and a tap adds it after the word. The App Group keeps a use count per emoji that halves every 10
 days and each emoji's skin tone, no words (`EmojiUsageStore`); Clear emoji history
 empties it. The index is `HEXShared/FullKeyboard/Emoji/emoji-index-<lang>.txt`,
 built by `scripts/build-emoji-data.py` from Unicode's emoji-test.txt 18.0 and CLDR
 49 (Unicode License v3, `LICENSE-Unicode.txt` beside it, which permits commercial
-use with the notice) and `scripts/emoji-aliases-en.txt`; the keyboard maps it and
+use with the notice) and `scripts/emoji-aliases-en.txt` (its chat words apply on every
+layout); a word several emoji share counts for less, except for the emoji it is the
+whole name of; the keyboard maps it and
 binary-searches it in place (about 0.7 MB on the heap), loading it on the first
-emoji key press or finished word. Emoji newer than 15.1 are listed only where the
+emoji key press or word typed in a field that takes emoji. Emoji newer than 15.1 are listed only where the
 emoji font draws them. Nothing leaves the iPhone.
 
 ## GPU Dot Scope (`HEXShared/DotScope.swift`, `DotScopeShader.metal`)

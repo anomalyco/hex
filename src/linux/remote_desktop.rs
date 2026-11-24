@@ -5,7 +5,8 @@
 //! One keyboard-only session lives as long as its `RemoteDesktop`. The
 //! user approves it once: the portal's restore token, kept owner-only in
 //! Application Support, restores later sessions without a dialog, so the
-//! paster can close an idle session and reopen it at the next paste.
+//! paster can close an idle session and reopen it at the next paste, except
+//! on KDE, which notifies on every session start and keeps it (#2508).
 //!
 //! A chord goes out as evdev keycodes when the desktop's keymap confirms every
 //! key of it — each letter on one key across the layout groups that have it,

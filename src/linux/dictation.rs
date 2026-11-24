@@ -125,6 +125,8 @@ impl Drop for OutputWorker {
 /// dictation records, so changing one never stops listening.
 pub(crate) enum ListenerUpdate {
     Settings(Box<AppSettings>),
+    /// A model switch failed; show it beside the HUD (Labs › Failure notices).
+    Notice(String),
     /// A model the host prepared, swapped in once no transcription is pending.
     Transcriber {
         selection: crate::transcription::models::TranscriptionSelection,
@@ -311,52 +313,70 @@ pub(crate) fn run(
                     audio_ms = job.audio_ms,
                     "transcribed Linux dictation"
                 );
-                let text = transcribed.text;
-                // Labs › Stop phrase: the words that finished this capture
-                // never reach the text or its processing.
-                let text =
-                    crate::dictation::stop_phrase::strip_finished(text, job.stop_phrase.as_deref());
-                if text.is_empty() {
-                    if let Some(print) = job.print.take() {
-                        print.send(PrintedTranscript::NoSpeech);
-                    }
-                    if job.stop_phrase.is_some() {
-                        // A capture that was only the phrase: nothing to
-                        // paste, no History, and nothing failed.
+                use crate::dictation::modes::output::{
+                    EMPTY_TRANSCRIPT_ERROR, InsertPlan, InsertResult, OutputTarget,
+                    PreparedTranscript, prepare_transcript,
+                };
+                let target = OutputTarget::from_flavour(job.flavour, kind == OutputKind::Printed);
+                let text = match prepare_transcript(
+                    transcribed.text,
+                    job.stop_phrase.as_deref(),
+                    target,
+                ) {
+                    PreparedTranscript::StopPhraseOnly => {
+                        if let Some(session) = job.typing.take() {
+                            session.cancel();
+                        }
+                        if let Some(print) = job.print.take() {
+                            print.send(PrintedTranscript::NoSpeech);
+                        }
                         stop_phrase_only = true;
                         return Ok(String::new());
                     }
-                    return Err(eyre!("transcription was empty"));
-                }
-                if kind == OutputKind::Printed {
-                    return output_settings.deliver(
-                        text,
-                        job.flavour,
-                        &job.language,
-                        None,
-                        &mut last_dictation,
-                        job.audio_ms,
-                        inference_ms,
-                        started,
-                        job.recording.take(),
-                        job.typing.take(),
-                        job.context.finish(),
-                        job.by_shortcut,
-                    );
-                }
-                let paster = paster.as_mut().map_err(|error| eyre!("{error:#}"))?;
-                let mut paste = |text: &str, terminal: bool, send: bool, standalone: bool| {
-                    paster.paste_dictation(text, terminal, standalone)?;
-                    if send {
-                        paster.press_return()?;
+                    PreparedTranscript::Empty => {
+                        if let Some(session) = job.typing.take() {
+                            session.cancel();
+                        }
+                        if let Some(print) = job.print.take() {
+                            print.send(PrintedTranscript::NoSpeech);
+                        }
+                        return Err(eyre!(EMPTY_TRANSCRIPT_ERROR));
                     }
-                    Ok(())
+                    PreparedTranscript::Ready(text) => text,
+                };
+                let clipboard = paster.as_ref().ok().map(LinuxPaster::clipboard);
+                let mut insert = |text: &str, plan: InsertPlan| -> Result<InsertResult> {
+                    let paster = paster.as_mut().map_err(|error| eyre!("{error:#}"))?;
+                    match plan {
+                        InsertPlan::CopyOnly => {
+                            paster.copy(text)?;
+                            Ok(InsertResult {
+                                sent: false,
+                                copied: true,
+                            })
+                        }
+                        InsertPlan::Paste { send, standalone } => {
+                            paster.paste_dictation(
+                                text,
+                                job.flavour.terminal_paste(),
+                                standalone,
+                            )?;
+                            if send {
+                                paster.press_return()?;
+                            }
+                            Ok(InsertResult {
+                                sent: send,
+                                copied: false,
+                            })
+                        }
+                    }
                 };
                 output_settings.deliver(
                     text,
-                    job.flavour,
+                    target,
                     &job.language,
-                    Some(&mut paste),
+                    (!target.is_print()).then_some(&mut insert as output::Insert<'_>),
+                    clipboard,
                     &mut last_dictation,
                     job.audio_ms,
                     inference_ms,
@@ -400,9 +420,6 @@ pub(crate) fn run(
     let mut capture_host =
         crate::capture_host::CaptureHost::start(Some(engine.clone()), &environment);
     let capture_controls = crate::capture_host::listen_for_controls();
-    // The draw shortcut started a recording: drawing turns on once its
-    // engine takes input.
-    let mut draw_pending = false;
 
     let mut events = EventLog::create(event_path)?;
     let mut audio_ready = input.is_open();
@@ -506,6 +523,7 @@ pub(crate) fn run(
         for update in updates.try_iter() {
             match update {
                 ListenerUpdate::Settings(next) => next_settings = Some(*next),
+                ListenerUpdate::Notice(message) => indicator.failed(message),
                 ListenerUpdate::Transcriber {
                     selection,
                     transcriber,
@@ -560,11 +578,8 @@ pub(crate) fn run(
                 }
             }
             // A GPU without room for two copies: the engine swaps in place.
-            if pending == 0
-                && let Some(selection) = model.take_reload()
-                && let Err(error) = engine.reload(selection)
-            {
-                tracing::warn!(%error, "could not replace the transcription model");
+            if pending == 0 {
+                model.start_reload(|selection| engine.reload(selection));
             }
             if pending == 0
                 && let Some(next) = model.take_ready()
@@ -585,21 +600,10 @@ pub(crate) fn run(
             &environment,
             &timeline,
         );
-        if draw_pending && crate::capture_host::wants_input() {
-            draw_pending = false;
-            crate::capture_host::set_pen(true);
-        } else if draw_pending
-            && capture_host
-                .as_mut()
-                .is_none_or(|host| host.recording_since(&timeline).is_none())
-        {
-            // The recording never started.
-            draw_pending = false;
-        }
         while let Ok(control) = capture_controls.try_recv() {
             let reply = match (&mut capture_host, control) {
                 (Some(host), crate::capture_host::CaptureControl::Draw) => {
-                    draw_pending = host.draw_shortcut(&timeline);
+                    host.draw_shortcut(&timeline);
                     crate::control::ControlReply::done("drawing")
                 }
                 (Some(host), crate::capture_host::CaptureControl::Scrawl(action)) => {
@@ -921,6 +925,17 @@ pub(crate) fn run(
                             return Err(eyre!("dictation worker is unavailable"));
                         }
                     }
+                }
+                // Labs › Model switch shortcut: ask the host that owns model
+                // preparation to swap, installed only. A capture, an accepted
+                // job, or a client's dictation keeps the model it started with.
+                HotkeyEvent::ModelSwitch
+                    if !capture.is_recording()
+                        && !start_pending
+                        && finishing.is_none()
+                        && !service.is_active() =>
+                {
+                    crate::transcription::other_model::request();
                 }
                 HotkeyEvent::Cancel if capture.is_recording() => {
                     capture.cancel();
@@ -1985,18 +2000,20 @@ mod tests {
 
     #[test]
     fn a_failed_paste_keeps_the_dictation_for_paste_last() {
+        use crate::dictation::modes::output::{InsertPlan, InsertResult, OutputTarget};
         let text = "the dictation whose paste failed";
         let output = DictationOutput::from_settings(&AppSettings::default(), None);
         let mut last_dictation = Some(LastDictation::new("an older dictation".to_string(), false));
-        let mut paste = |_: &str, _: bool, _: bool, _: bool| -> Result<()> {
+        let mut paste = |_: &str, _: InsertPlan| -> Result<InsertResult> {
             Err(eyre!("clipboard changed while Hex was preserving it"))
         };
 
         let result = output.deliver(
             text.to_string(),
-            crate::dictation::DictationFlavour::Normal,
+            OutputTarget::Paste,
             "en",
             Some(&mut paste),
+            None,
             &mut last_dictation,
             2_000,
             0,

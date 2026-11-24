@@ -124,15 +124,18 @@ pub(super) fn start_stream_with_fallback(
     // Intel Smart Sound refused every stream cpal built, at any format and
     // buffer, so Hex tries its own WASAPI paths next (#988).
     #[cfg(target_os = "windows")]
-    match super::wasapi_capture::start(device, device_name) {
+    let wasapi_error = match super::wasapi_capture::start(device, device_name) {
         Ok(started) => return Ok(started),
-        Err(wasapi_error) => tracing::warn!(
-            error = format!("{wasapi_error:#}"),
-            device = %device_name,
-            cpal_thread_apartment = %super::wasapi_capture::apartment(),
-            "the microphone refused every direct wasapi path; trying the formats it lists"
-        ),
-    }
+        Err(wasapi_error) => {
+            tracing::warn!(
+                error = format!("{wasapi_error:#}"),
+                device = %device_name,
+                cpal_thread_apartment = %super::wasapi_capture::apartment(),
+                "the microphone refused every direct wasapi path; trying the formats it lists"
+            );
+            Some(wasapi_error)
+        }
+    };
     // Some drivers refuse every format with the backend's default buffer
     // (Intel Smart Sound answered E_INVALIDARG for each, #988) yet accept
     // the same format with an explicit buffer duration, so each format is
@@ -170,9 +173,18 @@ pub(super) fn start_stream_with_fallback(
             ),
         }
     }
-    Err(error
+    let error = error
         .or(configuration_error)
-        .unwrap_or_else(|| eyre!("the microphone lists no format it will open")))
+        .unwrap_or_else(|| eyre!("the microphone lists no format it will open"));
+    // The direct WASAPI attempt is the most specific path Hex tries, so name
+    // its failure in the surfaced error instead of leaving it in the log alone.
+    #[cfg(target_os = "windows")]
+    if let Some(wasapi_error) = wasapi_error {
+        return Err(error.wrap_err(format!(
+            "the microphone's direct wasapi path also refused it: {wasapi_error:#}"
+        )));
+    }
+    Err(error)
 }
 
 /// Starts a stream through Apple's voice processing on the device with

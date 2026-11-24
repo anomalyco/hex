@@ -6,6 +6,10 @@ use crate::audio::CaptureInstant;
 use crate::suppression::InputEvent;
 use std::time::Duration;
 
+/// How long Paste Last is held before it opens the picker. A quick tap of
+/// the chord comes up well inside it and pastes the newest item.
+pub(crate) const HOLD: Duration = Duration::from_millis(200);
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Effect {
     Wait,
@@ -58,7 +62,7 @@ impl Gesture {
             return Effect::Wait;
         }
         self.0 = None;
-        if at.duration_since(start) >= Duration::from_millis(300) {
+        if at.duration_since(start) >= HOLD {
             Effect::Browse
         } else {
             Effect::PasteLatest
@@ -68,7 +72,7 @@ impl Gesture {
     pub fn tick(&mut self, at: CaptureInstant) -> Effect {
         if self
             .0
-            .is_some_and(|(_, start)| at.duration_since(start) >= Duration::from_millis(300))
+            .is_some_and(|(_, start)| at.duration_since(start) >= HOLD)
         {
             self.0 = None;
             Effect::Browse
@@ -100,9 +104,10 @@ mod tests {
         };
         let mut gesture = Gesture::default();
         assert_eq!(gesture.press(binding, at(1), true), Effect::Wait);
-        assert_eq!(gesture.edge(up, at(300)), Effect::PasteLatest);
+        assert_eq!(gesture.edge(up, at(150)), Effect::PasteLatest);
         assert_eq!(gesture.press(binding, at(400), true), Effect::Wait);
-        assert_eq!(gesture.tick(at(700)), Effect::Browse);
+        assert_eq!(gesture.tick(at(599)), Effect::Wait);
+        assert_eq!(gesture.tick(at(600)), Effect::Browse);
         assert_eq!(gesture.edge(up, at(710)), Effect::Wait);
         assert_eq!(gesture.press(binding, at(800), false), Effect::PasteLatest);
         assert_eq!(gesture.tick(at(1200)), Effect::Wait);

@@ -21,7 +21,7 @@ use crate::dictation::service::{
 use crate::dictation::{DictationClip, Finish, POST_RELEASE_TAIL};
 use crate::feedback::{self, Tone};
 use crate::parakeet::{DictationWorker, TranscriptionTarget, WorkerEvent};
-use crate::suppression::{DictationHotkey, DiscardCause, HotkeyAction, InputMonitor};
+use crate::suppression::{DictationHotkey, DiscardCause, HotkeyAction, InputMonitor, TapPolicy};
 
 #[cfg(hex_capture)]
 pub(crate) mod cancelled_words;
@@ -40,7 +40,7 @@ use context_watch::ContextWatch;
 use events::handle_dictation_event;
 use guards::{
     Release, WarmRelease, caps_lock_can_press, capture_boundary, capture_owns_dictation,
-    capture_refusal, claims_escape, paste_last_refusal,
+    capture_refusal, paste_last_refusal,
 };
 use hotkeys::{Hotkeys, Shortcut};
 use output::{finish_dictation, finish_dictation_with, interrupted_dictation};
@@ -225,19 +225,16 @@ pub fn listen(
     let capture_environment = recording_environment.clone();
     let (mut microphone_revision, microphone) = crate::app_settings::microphone_selection();
     #[cfg(hex_capture)]
-    let mut paste_picker =
-        crate::paste::recent::enabled().then(|| paste_picker::Picker::new(history.clone()));
-    #[cfg(hex_capture)]
-    let cancel_history = history.clone().filter(|_| crate::paste::recent::enabled());
+    let paste_history = history.clone();
     let dictation_worker = DictationWorker::start(
         input_monitor.activity.clone(),
         transformations.clone(),
         history,
     );
+    // Labs › Paste Last picker follows its switch on every pass, so turning
+    // it on or off applies without a restart.
     #[cfg(hex_capture)]
-    let cancel_writer = cancel_history
-        .zip(dictation_worker.engine())
-        .and_then(|(history, engine)| cancelled_words::Writer::start(history, engine));
+    let mut paste_lab = paste_picker::Lab::new(paste_history, dictation_worker.engine());
     let input = DictationAudio::open(
         device_override,
         microphone_revision,
@@ -312,6 +309,8 @@ pub fn listen(
                 });
             }
         }
+        #[cfg(hex_capture)]
+        paste_lab.sync(crate::paste::recent::enabled());
         let caps_lock_on = crate::labs::caps_lock_dictation();
         caps_lock.set_enabled(caps_lock_on);
         // Turning the lab off mid-capture cancels it, as unbinding the
@@ -339,10 +338,7 @@ pub fn listen(
                             || hotkeys.suppresses_recognition()
                             || input.is_recording();
                         #[cfg(hex_capture)]
-                        let capture_active = capture_active
-                            || paste_picker
-                                .as_ref()
-                                .is_some_and(paste_picker::Picker::busy);
+                        let capture_active = capture_active || paste_lab.busy();
                         let answer = match paste_last_refusal(capture_active) {
                             Some(refusal) => refusal,
                             None => {
@@ -790,10 +786,15 @@ pub fn listen(
             let Some(action) = hotkeys.caps_lock_press() else {
                 continue;
             };
+            let (raw, print) = if action == HotkeyAction::Start {
+                (false, None)
+            } else {
+                hotkeys.resolve_action(Shortcut::CapsLock, action)
+            };
             let accepted = handle_hotkey_action(
                 action,
-                hotkeys.raw_capture,
-                None,
+                raw,
+                print,
                 at,
                 &input,
                 &dictation_worker,
@@ -827,7 +828,7 @@ pub fn listen(
                 continue;
             }
             #[cfg(hex_capture)]
-            if let Some(picker) = paste_picker.as_mut()
+            if let Some(picker) = paste_lab.picker()
                 && let Err(error) = picker.edge(input_event, capture_at, &dictation_worker)
             {
                 events.dictation(DictationPhase::Failed(error.into()), "")?;
@@ -886,12 +887,13 @@ pub fn listen(
                 continue;
             }
             for (shortcut, action) in hotkeys.process(input_event, capture_at) {
+                let (raw, print) = hotkeys.resolve_action(shortcut, action);
                 // Only a physical edge from the owner of a shortcut recording.
                 // Control requests also use CancelShortcut, but never come here.
                 #[cfg(hex_capture)]
                 if action == HotkeyAction::CancelShortcut
                     && dictation_worker.started_by_shortcut()
-                    && let Some(writer) = &cancel_writer
+                    && let Some(writer) = paste_lab.writer()
                 {
                     writer.cancel(&input, capture_at)?;
                     context.cancel();
@@ -908,7 +910,7 @@ pub fn listen(
                 }
                 #[cfg(hex_capture)]
                 if action == HotkeyAction::PasteLast
-                    && let Some(picker) = paste_picker.as_mut()
+                    && let Some(picker) = paste_lab.picker()
                     && let Some(binding) = crate::app_settings::runtime_hotkeys().paste_last
                 {
                     context.cancel();
@@ -920,13 +922,9 @@ pub fn listen(
                     emit_engine_state(&mut events, false, &dictation_worker, &input.device_name())?;
                     continue;
                 }
-                if action == HotkeyAction::Start {
-                    hotkeys.raw_capture = shortcut == Shortcut::Raw;
-                }
-                let print = hotkeys.print_for(shortcut, action);
                 let accepted = handle_hotkey_action(
                     action,
-                    hotkeys.raw_capture,
+                    raw,
                     print,
                     capture_at,
                     &input,
@@ -967,7 +965,7 @@ pub fn listen(
             hotkeys.break_chords(CaptureInstant::now());
         }
         #[cfg(hex_capture)]
-        if let Some(picker) = paste_picker.as_mut()
+        if let Some(picker) = paste_lab.picker()
             && let Err(error) = picker.tick(
                 hotkey_capture_suspended
                     || programmatic.is_some()
@@ -1031,22 +1029,16 @@ pub fn listen(
         let capture_escape = capture_host.is_some() && capture_shortcut.takes_escape();
         #[cfg(not(hex_capture))]
         let capture_escape = false;
-        // A held Hold capture takes Escape once it is past the hold threshold.
-        input_monitor.set_takes_escape(claims_escape(
+        // A held Hold capture takes Escape once it is past the hold threshold;
+        // Toggle's cancel key (and Caps Lock / extra rows' cancel keys) is
+        // Hex's only while its recording runs. During a programmatic capture
+        // the listener ignores every key, so the policy claims nothing.
+        input_monitor.set_tap_policy(TapPolicy::for_listener(
             programmatic.is_some(),
             capture_escape,
             hotkeys.takes_escape(CaptureInstant::now()),
+            hotkeys.recording_cancel(),
         ));
-        // Toggle's cancel key is Hex's only while one of its shortcuts'
-        // recordings runs; the listener ignores keys during a programmatic one.
-        // A Caps Lock capture keeps Escape in Hold mode too, and an extra
-        // shortcut its own cancel key in its own mode.
-        input_monitor.set_cancel(
-            programmatic
-                .is_none()
-                .then(|| hotkeys.recording_cancel())
-                .flatten(),
-        );
         if received_worker_event {
             emit_engine_state(
                 &mut events,
@@ -1138,10 +1130,10 @@ pub fn listen(
                         continue;
                     }
                     // A kept clip still answers a print-only recording;
-                    // `suspend_all` answers a reply whose recording is over.
-                    let print = was_recording
-                        .then(|| hotkeys.print_capture.take())
-                        .flatten();
+                    // `suspend_all` answers any reply whose recording is over.
+                    let interrupted = was_recording.then(|| hotkeys.take_capture()).flatten();
+                    let (raw, print) =
+                        interrupted.map_or((false, None), |active| (active.raw, active.print));
                     hotkeys.suspend_all();
                     if was_recording {
                         // A recording shortcut keeps what it heard, copied
@@ -1163,7 +1155,7 @@ pub fn listen(
                         interrupted_dictation(
                             salvaged,
                             print,
-                            hotkeys.raw_capture,
+                            raw,
                             &dictation_worker,
                             &input.device_name(),
                             &mut events,
@@ -1435,8 +1427,7 @@ mod tests {
             raw: None,
             extra: std::array::from_fn(|_| None),
             caps_lock: DictationHotkey::new(base, false, RuntimeHotkey::default()),
-            raw_capture: false,
-            print_capture: None,
+            active: None,
             suspended: false,
         };
         let mut press = |flags: u64, ms: u64| hotkeys.process(InputEvent::Flags(flags), at(ms));
@@ -1485,8 +1476,7 @@ mod tests {
             raw: None,
             extra: std::array::from_fn(|_| None),
             caps_lock: DictationHotkey::new(base, false, RuntimeHotkey::default()),
-            raw_capture: false,
-            print_capture: None,
+            active: None,
             suspended: false,
         };
         hotkeys.rebind_extra(bindings, base);
@@ -1746,8 +1736,7 @@ mod tests {
             raw: None,
             extra: std::array::from_fn(|_| None),
             caps_lock,
-            raw_capture: false,
-            print_capture: None,
+            active: None,
             suspended: false,
         }
     }
@@ -1894,12 +1883,12 @@ mod tests {
     fn a_capture_or_a_held_dictation_claims_escape() {
         // The capture picker would otherwise claim Escape that the listener
         // then ignores during a programmatic dictation.
-        assert!(!claims_escape(true, true, false));
-        assert!(!claims_escape(true, false, true));
-        assert!(claims_escape(false, true, false));
-        assert!(claims_escape(false, false, true));
+        assert!(!TapPolicy::for_listener(true, true, false, None).takes_escape());
+        assert!(!TapPolicy::for_listener(true, false, true, None).takes_escape());
+        assert!(TapPolicy::for_listener(false, true, false, None).takes_escape());
+        assert!(TapPolicy::for_listener(false, false, true, None).takes_escape());
         // A hands-free dictation never takes Escape from the app (#786).
-        assert!(!claims_escape(false, false, false));
+        assert!(!TapPolicy::for_listener(false, false, false, None).takes_escape());
     }
 
     #[test]
@@ -2004,6 +1993,53 @@ mod tests {
             caps_lock.pattern_for_test(),
             LedPattern::Off,
             "a silent chunk turns nothing off"
+        );
+    }
+
+    /// A refused Paste Last explains itself in the HUD, as a refused
+    /// dictation paste does; another Paste Last failure only keeps its tone.
+    #[test]
+    fn a_refused_paste_last_reaches_the_hud_notice() {
+        let caps_lock = crate::caps_lock_dictation::CapsLockDictation::for_test();
+        let (hud, notices) = crate::dictation::indicator::channel();
+        let path = std::env::temp_dir().join(format!(
+            "hex-paste-last-refusal-{}-{}.ndjson",
+            std::process::id(),
+            now_ms()
+        ));
+        let mut events = EventLog::create(&path).unwrap();
+        let refused = crate::paste::POST_EVENT_REFUSED.to_owned();
+        handle_dictation_event(
+            crate::parakeet::WorkerEvent::Pasted {
+                kind: crate::parakeet::PasteKind::LastTranscript,
+                result: Err(refused.clone()),
+            },
+            &mut events,
+            DictationSink {
+                hud: Some(&hud),
+                caps_lock: &caps_lock,
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            notices.try_recv(),
+            Ok(DictationIndicatorEvent::Failed { message: Some(message) }) if message == refused
+        ));
+        handle_dictation_event(
+            crate::parakeet::WorkerEvent::Pasted {
+                kind: crate::parakeet::PasteKind::LastTranscript,
+                result: Err("nothing to paste".into()),
+            },
+            &mut events,
+            DictationSink {
+                hud: Some(&hud),
+                caps_lock: &caps_lock,
+            },
+        )
+        .unwrap();
+        assert!(
+            notices.try_recv().is_err(),
+            "another Paste Last failure keeps the tone only"
         );
     }
 

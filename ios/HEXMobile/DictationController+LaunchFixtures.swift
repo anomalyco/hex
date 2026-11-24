@@ -11,7 +11,7 @@ extension DictationController {
             return false
         }
         let scene = args[flagIndex + 1]
-        controller.engineName = "Apple Speech"
+        controller.engine = .appleSpeech
         controller.transcriptionLanguage = "English"
         controller.transcriptionLanguageID = "en-US"
         controller.keyboardBridge.setModelInstalled(true)
@@ -19,9 +19,9 @@ extension DictationController {
 
         switch scene {
         case "setup", "setup-sheet", "setup-sheet-microphone", "setup-sheet-noaccess", "paste-setting", _ where scene.hasPrefix("onboarding-") || scene.hasPrefix("settings-") || scene.hasPrefix("model-card-"):
-            controller.phase = .ready
+            controller.applyFixturePhase(.ready)
             controller.warmDuration = .fifteenMinutes
-            controller.keyboardSessionEnabled = false
+            controller.setWarmSession(.cold)
             if scene.hasPrefix("model-card-") { KeyboardParakeetDownload.shared.applyFixture(scene) }
 
         case "language-unavailable":
@@ -33,52 +33,47 @@ extension DictationController {
                 automatic: false
             )
             controller.isModelReady = false
-            controller.engineName = "Apple Speech"
-            controller.phase = .failed(UserFacingError.message(for: unavailable, context: .model))
+            controller.engine = .appleSpeech
+            controller.applyFixturePhase(.failed(UserFacingError.message(for: unavailable, context: .model)))
             controller.languageOffer = "en-US"
 
         case "language-switched":
             // Automatic moved on from Russian to English.
             let unavailable = SpeechModelUnavailable(language: "ru-RU", reason: .notOnThisIPhone, fallback: "en-US")
-            controller.phase = .ready
+            controller.applyFixturePhase(.ready)
             controller.languageNotice = UserFacingError.message(for: unavailable, context: .model)
 
         case "ready":
-            controller.phase = .ready
+            controller.applyFixturePhase(.ready)
             controller.warmDuration = .off
-            controller.keyboardSessionEnabled = false
+            controller.setWarmSession(.cold)
             controller.transcript = "Meet at ten on Thursday and bring the updated design notes."
 
         case "warm":
-            controller.phase = .ready
+            controller.applyFixturePhase(.ready)
             controller.warmDuration = .fifteenMinutes
-            controller.keyboardSessionEnabled = true
-            controller.keyboardSessionRemaining = 14 * 60 + 42
-            controller.keyboardSessionExpiresAt = Date().timeIntervalSince1970 + 14 * 60 + 42
+            controller.applyFixtureWarmSession(remaining: 14 * 60 + 42)
             controller.transcript = "Meet at ten on Thursday and bring the updated design notes."
 
         case "recording":
-            controller.phase = .recording
+            controller.applyFixturePhase(.recording)
             controller.warmDuration = .fifteenMinutes
             controller.audioLevel = 0.74
             controller.loudnessDB = -31.0
             controller.recordingDuration = 6.4
-            controller.keyboardSessionEnabled = true
-            controller.keyboardSessionRemaining = 14 * 60 + 54
+            controller.applyFixtureWarmSession(remaining: 14 * 60 + 54)
 
         case "transcribing":
-            controller.phase = .transcribing
+            controller.applyFixturePhase(.transcribing)
             controller.warmDuration = .fifteenMinutes
-            controller.keyboardSessionEnabled = true
-            controller.keyboardSessionRemaining = 14 * 60 + 52
+            controller.applyFixtureWarmSession(remaining: 14 * 60 + 52)
 
         case "handoff-listening", "handoff-no-home-bar":
-            controller.phase = .recording
+            controller.applyFixturePhase(.recording)
             controller.audioLevel = 0.68
             controller.loudnessDB = -32.5
             controller.recordingDuration = 3.2
-            controller.keyboardSessionEnabled = true
-            controller.keyboardSessionRemaining = 14 * 60 + 57
+            controller.applyFixtureWarmSession(remaining: 14 * 60 + 57)
             Task { @MainActor in
                 let start = Date().timeIntervalSince1970 - 3.0
                 var simTime: Float = 0.0
@@ -91,12 +86,11 @@ extension DictationController {
             }
 
         case "handoff-tour":
-            controller.phase = .recording
+            controller.applyFixturePhase(.recording)
             controller.audioLevel = 0.68
             controller.loudnessDB = -32.0
             controller.recordingDuration = 0.0
-            controller.keyboardSessionEnabled = true
-            controller.keyboardSessionRemaining = 14 * 60 + 58
+            controller.applyFixtureWarmSession(remaining: 14 * 60 + 58)
             Task { @MainActor in
                 let boot = Date().timeIntervalSince1970
                 var simTime: Float = 0.0
@@ -105,7 +99,7 @@ extension DictationController {
                     if elapsed < 3.4 {
                         if controller.phase != .recording {
                             withAnimation(HexMotion.stage) {
-                                controller.phase = .recording
+                                controller.applyFixturePhase(.recording)
                             }
                         }
                         controller.loudnessDB = DotScopeSimulation.demoLoudness(at: simTime) + 4.5
@@ -114,14 +108,14 @@ extension DictationController {
                     } else if elapsed < 4.7 {
                         if controller.phase != .transcribing {
                             withAnimation(HexMotion.stage) {
-                                controller.phase = .transcribing
+                                controller.applyFixturePhase(.transcribing)
                             }
                         }
                         controller.loudnessDB = -120.0
                     } else {
                         if controller.phase != .ready {
                             withAnimation(HexMotion.stage) {
-                                controller.phase = .ready
+                                controller.applyFixturePhase(.ready)
                             }
                         }
                     }
@@ -130,11 +124,9 @@ extension DictationController {
             }
 
         case "hosted-keyboard-warm":
-            controller.phase = .ready
+            controller.applyFixturePhase(.ready)
             controller.warmDuration = .fifteenMinutes
-            controller.keyboardSessionEnabled = true
-            controller.keyboardSessionRemaining = 14 * 60 + 42
-            controller.keyboardSessionExpiresAt = Date().timeIntervalSince1970 + 14 * 60 + 42
+            controller.applyFixtureWarmSession(remaining: 14 * 60 + 42)
             Task { @MainActor in
                 while !Task.isCancelled {
                     let t = Date().timeIntervalSince1970
@@ -150,10 +142,9 @@ extension DictationController {
             }
 
         case "hosted-keyboard-recording", "hosted-keyboard-light":
-            controller.phase = .ready
+            controller.applyFixturePhase(.ready)
             controller.warmDuration = .fifteenMinutes
-            controller.keyboardSessionEnabled = true
-            controller.keyboardSessionRemaining = 14 * 60 + 55
+            controller.applyFixtureWarmSession(remaining: 14 * 60 + 55)
             let startWall = Date().timeIntervalSince1970 - 4.0
             Task { @MainActor in
                 var simTime: Float = 0.4
@@ -177,10 +168,9 @@ extension DictationController {
             }
 
         case "hosted-keyboard-tour":
-            controller.phase = .ready
+            controller.applyFixturePhase(.ready)
             controller.warmDuration = .fifteenMinutes
-            controller.keyboardSessionEnabled = true
-            controller.keyboardSessionRemaining = 14 * 60 + 58
+            controller.applyFixtureWarmSession(remaining: 14 * 60 + 58)
             Task { @MainActor in
                 let boot = Date().timeIntervalSince1970
                 let freshResultID = "hosted-tour-\(UUID().uuidString)"
@@ -239,5 +229,9 @@ extension DictationController {
             return false
         }
         return true
+    }
+
+    private func applyFixtureWarmSession(remaining: TimeInterval) {
+        setWarmSession(.warm(expiresAt: Date().timeIntervalSince1970 + remaining), remaining: remaining)
     }
 }

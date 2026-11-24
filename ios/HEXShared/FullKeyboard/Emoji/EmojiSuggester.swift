@@ -166,14 +166,21 @@ nonisolated enum EmojiSuggester {
     }
 
     /// A finished word's own emoji for the suggestion strip ("pizza " → 🍕): only strong
-    /// matches (an emoji's one-word name or one of Hex's chat words), at most `limit`, one
-    /// per family. Nothing after a stopword, a number or punctuation.
+    /// matches (an emoji's whole name in the keyboard's language or English, or one of Hex's
+    /// chat words), at most `limit`, one per family. Nothing after a stopword, a number or
+    /// punctuation.
     static func forFinishedWord(_ before: String?, library: EmojiLibrary, limit: Int = 3) -> [Int] {
         guard let before, before.hasSuffix(" ") else { return [] }
         let trimmed = before.dropLast()
         guard trimmed.last?.isLetter == true,
-              let word = EmojiText.words(in: String(trimmed.suffix(40))).last,
-              !library.stopwords.contains(word) else { return [] }
+              let word = EmojiText.words(in: String(trimmed.suffix(40))).last else { return [] }
+        return forWord(word, library: library, limit: limit)
+    }
+
+    /// A word's own emoji, as `forFinishedWord` finds them, for the word still being typed too
+    /// ("smile" → 😊): `word` folded as `EmojiText.words` folds it; none for a stopword.
+    static func forWord(_ word: String, library: EmojiLibrary, limit: Int = 3) -> [Int] {
+        guard !library.stopwords.contains(word) else { return [] }
         for (form, factor) in forms(of: word, language: library.language) {
             guard let hits = library.hits(forWord: form) else { continue }
             var picked: [Int] = []

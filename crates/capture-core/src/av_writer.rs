@@ -50,20 +50,25 @@ pub(crate) struct AvWriter {
 unsafe impl Send for AvWriter {}
 
 impl AvWriter {
+    // Callers include long-lived Rust workers without an AppKit pool. Drain
+    // AVFoundation temporaries at each operation; retained writer/input
+    // fields alone do not release autoreleased owners of encoder surfaces.
     /// A writer with one AAC input at 48 kHz stereo. `realtime` marks the input as fed live.
     pub(crate) fn audio(
         path: &Path,
         file_type: &AVFileType,
         realtime: bool,
     ) -> Result<Self, String> {
-        let writer = create(path, file_type)?;
-        let audio = add_aac_input(&writer, realtime)?;
-        Ok(Self {
-            writer,
-            audio: Some(audio),
-            screen: None,
-            #[cfg(test)]
-            video: None,
+        objc2::rc::autoreleasepool(|_| {
+            let writer = create(path, file_type)?;
+            let audio = add_aac_input(&writer, realtime)?;
+            Ok(Self {
+                writer,
+                audio: Some(audio),
+                screen: None,
+                #[cfg(test)]
+                video: None,
+            })
         })
     }
 
@@ -77,66 +82,74 @@ impl AvWriter {
         fps: u32,
         quality: f64,
     ) -> Result<Self, String> {
-        // SAFETY: An immutable framework constant.
-        let file_type = unsafe { AVFileTypeMPEG4 }.ok_or("AVFileTypeMPEG4 is unavailable")?;
-        let writer = create(path, file_type)?;
-        let input = add_hevc_input(&writer, width, height, fps, quality)?;
-        Ok(Self {
-            writer,
-            audio: None,
-            screen: Some(input),
-            #[cfg(test)]
-            video: None,
+        objc2::rc::autoreleasepool(|_| {
+            // SAFETY: An immutable framework constant.
+            let file_type = unsafe { AVFileTypeMPEG4 }.ok_or("AVFileTypeMPEG4 is unavailable")?;
+            let writer = create(path, file_type)?;
+            let input = add_hevc_input(&writer, width, height, fps, quality)?;
+            Ok(Self {
+                writer,
+                audio: None,
+                screen: Some(input),
+                #[cfg(test)]
+                video: None,
+            })
         })
     }
 
     /// Appends one screen frame. Returns `Ok(false)` when the encoder was not ready and the
     /// frame was dropped.
     pub(crate) fn append_video(&self, sample: &CMSampleBuffer) -> Result<bool, String> {
-        let input = self.screen.as_ref().ok_or("no video input")?;
-        if !self.is_writing() {
-            return Err(self.message("append video"));
-        }
-        // SAFETY: The input belongs to this writer and calls are serialized by the owner.
-        if !unsafe { input.isReadyForMoreMediaData() } {
-            return Ok(false);
-        }
-        // SAFETY: As above; the sample buffer is a live, retained screen frame.
-        if unsafe { input.appendSampleBuffer(sample) } {
-            Ok(true)
-        } else {
-            Err(self.message("append video"))
-        }
+        objc2::rc::autoreleasepool(|_| {
+            let input = self.screen.as_ref().ok_or("no video input")?;
+            if !self.is_writing() {
+                return Err(self.message("append video"));
+            }
+            // SAFETY: The input belongs to this writer and calls are serialized by the owner.
+            if !unsafe { input.isReadyForMoreMediaData() } {
+                return Ok(false);
+            }
+            // SAFETY: As above; the sample buffer is a live, retained screen frame.
+            if unsafe { input.appendSampleBuffer(sample) } {
+                Ok(true)
+            } else {
+                Err(self.message("append video"))
+            }
+        })
     }
 
     /// Starts writing with the session beginning at `at`.
     pub(crate) fn start(&self, at: CMTime) -> Result<(), String> {
-        // SAFETY: Configuration is complete and writing starts exactly once.
-        if !unsafe { self.writer.startWriting() } {
-            return Err(self.message("start writing"));
-        }
-        // SAFETY: Writing started; `at` is a numeric time.
-        unsafe { self.writer.startSessionAtSourceTime(at) };
-        Ok(())
+        objc2::rc::autoreleasepool(|_| {
+            // SAFETY: Configuration is complete and writing starts exactly once.
+            if !unsafe { self.writer.startWriting() } {
+                return Err(self.message("start writing"));
+            }
+            // SAFETY: Writing started; `at` is a numeric time.
+            unsafe { self.writer.startSessionAtSourceTime(at) };
+            Ok(())
+        })
     }
 
     /// Appends one audio sample buffer. Returns `Ok(false)` when the input was not ready and the
     /// buffer was dropped.
     pub(crate) fn append_audio(&self, sample: &CMSampleBuffer) -> Result<bool, String> {
-        let input = self.audio.as_ref().ok_or("no audio input")?;
-        if !self.is_writing() {
-            return Err(self.message("append audio"));
-        }
-        // SAFETY: The input belongs to this writer and calls are serialized by the owner.
-        if !unsafe { input.isReadyForMoreMediaData() } {
-            return Ok(false);
-        }
-        // SAFETY: As above; the sample buffer is a live, retained PCM buffer.
-        if unsafe { input.appendSampleBuffer(sample) } {
-            Ok(true)
-        } else {
-            Err(self.message("append audio"))
-        }
+        objc2::rc::autoreleasepool(|_| {
+            let input = self.audio.as_ref().ok_or("no audio input")?;
+            if !self.is_writing() {
+                return Err(self.message("append audio"));
+            }
+            // SAFETY: The input belongs to this writer and calls are serialized by the owner.
+            if !unsafe { input.isReadyForMoreMediaData() } {
+                return Ok(false);
+            }
+            // SAFETY: As above; the sample buffer is a live, retained PCM buffer.
+            if unsafe { input.appendSampleBuffer(sample) } {
+                Ok(true)
+            } else {
+                Err(self.message("append audio"))
+            }
+        })
     }
 
     pub(crate) fn is_writing(&self) -> bool {
@@ -147,60 +160,64 @@ impl AvWriter {
     /// Marks every input finished, optionally ends the session at `end`, and waits up to
     /// `timeout` for the file to close.
     pub(crate) fn finish(self, end: Option<CMTime>, timeout: Duration) -> Result<(), String> {
-        if !self.is_writing() {
-            return Err(self.message("finish writing"));
-        }
-        // SAFETY: All appends returned; inputs are finished once.
-        unsafe {
-            if let Some(audio) = &self.audio {
-                audio.markAsFinished();
+        objc2::rc::autoreleasepool(move |_| {
+            if !self.is_writing() {
+                return Err(self.message("finish writing"));
             }
-            if let Some(screen) = &self.screen {
-                screen.markAsFinished();
+            // SAFETY: All appends returned; inputs are finished once.
+            unsafe {
+                if let Some(audio) = &self.audio {
+                    audio.markAsFinished();
+                }
+                if let Some(screen) = &self.screen {
+                    screen.markAsFinished();
+                }
+                #[cfg(test)]
+                if let Some((video, _)) = &self.video {
+                    video.markAsFinished();
+                }
+                if let Some(end) = end {
+                    self.writer.endSessionAtSourceTime(end);
+                }
             }
-            #[cfg(test)]
-            if let Some((video, _)) = &self.video {
-                video.markAsFinished();
+            let completion = Arc::new((Mutex::new(false), Condvar::new()));
+            let signal = Arc::clone(&completion);
+            let callback = RcBlock::new(move || {
+                let (lock, wake) = &*signal;
+                *lock.lock().unwrap_or_else(PoisonError::into_inner) = true;
+                wake.notify_all();
+            });
+            // SAFETY: The callback owns only Send + Sync synchronization state.
+            unsafe { self.writer.finishWritingWithCompletionHandler(&callback) };
+            let (lock, wake) = &*completion;
+            let (done, _) = wake
+                .wait_timeout_while(
+                    lock.lock().unwrap_or_else(PoisonError::into_inner),
+                    timeout,
+                    |done| !*done,
+                )
+                .unwrap_or_else(PoisonError::into_inner);
+            let done = *done;
+            // SAFETY: Status is a thread-safe property.
+            match unsafe { self.writer.status() } {
+                AVAssetWriterStatus::Completed => Ok(()),
+                _ if !done => {
+                    // SAFETY: The writer is still finishing; cancelling stops it.
+                    unsafe { self.writer.cancelWriting() };
+                    Err("timed out finishing the file".into())
+                }
+                _ => Err(self.message("finish writing")),
             }
-            if let Some(end) = end {
-                self.writer.endSessionAtSourceTime(end);
-            }
-        }
-        let completion = Arc::new((Mutex::new(false), Condvar::new()));
-        let signal = Arc::clone(&completion);
-        let callback = RcBlock::new(move || {
-            let (lock, wake) = &*signal;
-            *lock.lock().unwrap_or_else(PoisonError::into_inner) = true;
-            wake.notify_all();
-        });
-        // SAFETY: The callback owns only Send + Sync synchronization state.
-        unsafe { self.writer.finishWritingWithCompletionHandler(&callback) };
-        let (lock, wake) = &*completion;
-        let (done, _) = wake
-            .wait_timeout_while(
-                lock.lock().unwrap_or_else(PoisonError::into_inner),
-                timeout,
-                |done| !*done,
-            )
-            .unwrap_or_else(PoisonError::into_inner);
-        let done = *done;
-        // SAFETY: Status is a thread-safe property.
-        match unsafe { self.writer.status() } {
-            AVAssetWriterStatus::Completed => Ok(()),
-            _ if !done => {
-                // SAFETY: The writer is still finishing; cancelling stops it.
-                unsafe { self.writer.cancelWriting() };
-                Err("timed out finishing the file".into())
-            }
-            _ => Err(self.message("finish writing")),
-        }
+        })
     }
 
     pub(crate) fn cancel(&self) {
-        if self.is_writing() {
-            // SAFETY: Calls are serialized by the owner.
-            unsafe { self.writer.cancelWriting() };
-        }
+        objc2::rc::autoreleasepool(|_| {
+            if self.is_writing() {
+                // SAFETY: Calls are serialized by the owner.
+                unsafe { self.writer.cancelWriting() };
+            }
+        })
     }
 
     fn message(&self, operation: &str) -> String {

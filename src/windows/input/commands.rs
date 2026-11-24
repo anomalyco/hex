@@ -6,7 +6,8 @@ use std::sync::Mutex;
 use windows_sys::Win32::System::SystemInformation::GetTickCount;
 
 use super::{
-    CALLBACK_STATE, CaptureState, DictationFlavour, HotkeyAction, WindowsHotkeyMonitor, send_event,
+    CALLBACK_STATE, Capture, CaptureState, DictationFlavour, HotkeyAction, WindowsHotkeyMonitor,
+    send_event,
 };
 
 /// Labs › Stop phrase: the words the finish request carries, set just before
@@ -19,14 +20,15 @@ static STOP_PHRASE: Mutex<Option<String>> = Mutex::new(None);
 impl CaptureState {
     /// A CLI/tray start is hands-free, like a completed double tap. Only
     /// ordinary dictations enter this state; SDK captures keep their owner.
+    /// If a physical shortcut hold is already down, keep its release edge
+    /// instead of orphaning it behind a lock.
     pub(super) fn start_command(&mut self, flavour: DictationFlavour) {
-        *self = Self {
-            locked: true,
-            recording: true,
-            toggle: self.toggle,
-            flavour,
-            ..Self::default()
-        };
+        match self.phase {
+            Capture::Held { .. } => {}
+            Capture::Idle { .. } | Capture::Armed { .. } | Capture::Locked { .. } => {
+                self.phase = Capture::Locked { flavour };
+            }
+        }
     }
 
     /// Labs › Stop phrase: only a locked capture (a Toggle press released, or
@@ -34,13 +36,16 @@ impl CaptureState {
     /// held press reads them as speech and records on, as does an armed first
     /// tap or an idle shortcut.
     pub(super) fn finish_hands_free(&mut self) -> bool {
-        if !self.locked || !self.recording {
-            return false;
+        match self.phase {
+            Capture::Locked { flavour } => {
+                self.phase = Capture::Idle {
+                    flavour,
+                    last_release_ms: None,
+                };
+                true
+            }
+            Capture::Idle { .. } | Capture::Armed { .. } | Capture::Held { .. } => false,
         }
-        self.locked = false;
-        self.recording = false;
-        self.last_release_ms = None;
-        true
     }
 }
 

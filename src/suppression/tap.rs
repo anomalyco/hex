@@ -82,8 +82,8 @@ fn mouse_bindable(hotkeys: RuntimeHotkeys) -> impl Iterator<Item = RuntimeHotkey
         Some(hotkeys.dictation),
         hotkeys.raw_dictation,
         hotkeys.second_dictation,
+        hotkeys.model_switch,
         hotkeys.paste_last,
-        hotkeys.paste_meeting,
     ]
     .into_iter()
     .flatten()
@@ -172,16 +172,10 @@ pub(super) fn observation_mask() -> u64 {
     OBSERVATION_MASK
 }
 
-/// The callback-visible switches that decide what the tap keeps from the app.
-pub(super) struct TapFlags {
-    pub(super) takes_escape: Arc<AtomicBool>,
-    pub(super) cancel: Arc<Mutex<Option<RuntimeHotkey>>>,
-}
-
 pub(super) fn run_event_tap(
     sender: Sender<ObservedInputEvent>,
     activity: InputActivity,
-    flags: TapFlags,
+    policy: Arc<Mutex<TapPolicy>>,
     pending: PendingInputEvents,
     run_loop: Arc<AtomicPtr<c_void>>,
     ready: SyncSender<Result<()>>,
@@ -191,8 +185,7 @@ pub(super) fn run_event_tap(
     let mut context = Box::new(EventTapContext {
         sink,
         activity,
-        takes_escape: flags.takes_escape,
-        cancel: flags.cancel,
+        policy,
         key_tap: AtomicPtr::new(ptr::null_mut()),
         observation_tap: AtomicPtr::new(ptr::null_mut()),
         physical_tap: AtomicPtr::new(ptr::null_mut()),

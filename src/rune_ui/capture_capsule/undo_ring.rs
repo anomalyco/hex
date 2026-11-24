@@ -19,7 +19,8 @@ use rune::{Color, El, LineCap, Shape, Tween, canvas, el};
 
 use super::super::controls::Paint;
 use super::flow::Pres;
-use super::surface::{CHIP_RADIUS, HINT_GAP, medium, undo_label};
+use super::surface::{HINT_GAP, medium, undo_label};
+use super::view::ICON_BUTTON_RADIUS;
 
 const STROKE: f32 = 1.5;
 /// How strongly the track shows the whole outline, under the line.
@@ -28,9 +29,6 @@ const TRACK: f32 = 0.09;
 const FADE_S: f64 = 0.18;
 /// Points along each rounded corner.
 const CORNER_STEPS: usize = 16;
-/// How much stronger the glow is on a light ground, where it takes the
-/// accent: a blurred tint shows less over white than light does over dark.
-const LIGHT_GLOW: f32 = 1.6;
 
 /// One layer of the ring: the outline from `from` to `to` past the moving
 /// end (fractions of the way round; `None` is the top centre, where the
@@ -41,9 +39,6 @@ struct Layer {
     to: Option<f32>,
     ink: Ink,
     width: f32,
-    /// Gaussian blur, in points; a blurred layer shows through its own
-    /// opacity, `amount`.
-    blur: f32,
 }
 
 impl Layer {
@@ -60,9 +55,6 @@ enum Ink {
     Line(f32),
     /// The brightest text ink, `amount` of the way from the ground.
     Bright(f32),
-    /// The glow: light on a dark ground, the accent on a light one, at
-    /// `amount` opacity.
-    Glow(f32),
 }
 
 /// The plain line: from the moving end to the top centre.
@@ -71,33 +63,22 @@ const LINE: Layer = Layer {
     to: None,
     ink: Ink::Line(1.0),
     width: STROKE,
-    blur: 0.0,
 };
 
 fn layers(reduced: bool) -> Vec<Layer> {
     if reduced {
         return vec![LINE];
     }
-    // A glow the moving end leaves behind it, over the outline it just gave
-    // up, brightest where it is; then the line and its head.
-    [(0.03, 0.2), (0.08, 0.12), (0.16, 0.07), (0.28, 0.04)]
-        .into_iter()
-        .map(|(reach, amount)| Layer {
-            from: -reach,
-            to: Some(0.0),
-            ink: Ink::Glow(amount),
-            width: 3.0,
-            blur: 1.8,
-        })
-        .chain([
-            LINE,
-            Layer {
-                to: Some(0.015),
-                ink: Ink::Bright(0.9),
-                ..LINE
-            },
-        ])
-        .collect()
+    // Keep the countdown crisp inside the button box with no blurred outer
+    // shadow bloom (which smudges on light backgrounds).
+    vec![
+        LINE,
+        Layer {
+            to: Some(0.015),
+            ink: Ink::Bright(0.9),
+            ..LINE
+        },
+    ]
 }
 
 /// The live ring for one Undo window.
@@ -157,26 +138,18 @@ pub(crate) fn sync(ring: &mut Option<Ring>, pres: &Pres, now: f64, reduced: bool
 
 /// The Undo chip `size` big on `ground` (what shows behind it), with its
 /// countdown when there is one.
-pub(crate) fn chip(p: Paint, base: El, size: [f32; 2], ground: Color, ring: Option<&Ring>) -> El {
-    let k = p.k;
+pub(crate) fn chip(p: Paint, box_el: El, size: [f32; 2], ground: Color, ring: Option<&Ring>) -> El {
     let ink = p.muted();
-    let mut chip = base
-        .radius(CHIP_RADIUS)
-        .gap(HINT_GAP)
-        .hover(k.c.hover)
-        .press(k.c.pressed);
+    let mut chip = box_el.gap(HINT_GAP);
     if let Some(ring) = ring {
         chip = chip.child(border(p, size, ground, ring));
     }
     chip.child(super::label(undo_label(), medium(), ink))
-        .role("button")
-        .label(undo_label())
-        .hit()
 }
 
-/// The faint track and the ring's layers along the chip's own outline.
+/// The faint track and the ring's layers along the button box's outline.
 /// Every stroke is opaque, mixed over `ground`, so a line never shows its
-/// own joints; only blurred layers show through an opacity.
+/// own joints.
 fn border(p: Paint, [w, h]: [f32; 2], ground: Color, ring: &Ring) -> El {
     let path = outline(w, h, STROKE * 0.5);
     let layer = |shape: Shape| canvas(shape.view_box(w, h)).absolute(0.0, 0.0).size(w, h);
@@ -187,22 +160,15 @@ fn border(p: Paint, [w, h]: [f32; 2], ground: Color, ring: &Ring) -> El {
         LineCap::Round,
         tint(ground, p.text(), TRACK),
     );
-    let light = ground.luminance() > 0.5;
     let mut lines = el().absolute(0.0, 0.0).size(w, h).live_opacity(&ring.fade);
     for (spec, span) in &ring.layers {
         let color = match spec.ink {
             Ink::Line(amount) => tint(ground, p.muted(), amount),
             Ink::Bright(amount) => tint(ground, p.text(), amount),
-            Ink::Glow(_) if light => p.accent(),
-            Ink::Glow(_) => p.text(),
         };
-        let mut line =
+        let line =
             layer(Shape::new().stroke_with(path.clone(), false, spec.width, LineCap::Round, color))
                 .live_trim(span);
-        if let Ink::Glow(amount) = spec.ink {
-            let amount = if light { amount * LIGHT_GLOW } else { amount };
-            line = line.blur(spec.blur).opacity(amount);
-        }
         lines = lines.child(line);
     }
     el().absolute(0.0, 0.0)
@@ -228,7 +194,7 @@ fn tint(ground: Color, ink: Color, amount: f32) -> Color {
 /// the chip's corners, from the top centre clockwise and back.
 fn outline(w: f32, h: f32, inset: f32) -> Vec<[f32; 2]> {
     let (x0, y0, x1, y1) = (inset, inset, w - inset, h - inset);
-    let r = (CHIP_RADIUS - inset)
+    let r = (ICON_BUTTON_RADIUS - inset)
         .min((y1 - y0) * 0.5)
         .min((x1 - x0) * 0.5)
         .max(0.01);
@@ -290,9 +256,10 @@ mod tests {
         assert!(at(0.25)[0] > 50.0);
         let bottom = at(0.5);
         assert!((bottom[0] - 30.0).abs() < 0.05 && (bottom[1] - 28.0).abs() < 0.05);
-        // The corners follow the chip's radius, within a hair.
-        let ideal =
-            2.0 * (w - 2.0 * CHIP_RADIUS) + 2.0 * (h - 2.0 * CHIP_RADIUS) + 2.0 * PI * CHIP_RADIUS;
+        // The corners follow the button box's radius, within a hair.
+        let ideal = 2.0 * (w - 2.0 * ICON_BUTTON_RADIUS)
+            + 2.0 * (h - 2.0 * ICON_BUTTON_RADIUS)
+            + 2.0 * PI * ICON_BUTTON_RADIUS;
         assert!((total - ideal).abs() < 0.05, "{total} vs {ideal}");
     }
 

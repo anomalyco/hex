@@ -96,9 +96,9 @@ fn recorder_and_modal_keep_their_keys() {
     dialog.pointer_down(x, y);
     dialog.pointer_up(x, y);
     dialog.frame(0.0);
-    assert!(dialog.state.explainer.open);
+    assert!(dialog.state.is_modal(Modal::Explainer));
     send(&mut dialog, Key::Command('k'));
-    assert!(dialog.state.explainer.open && !dialog.state.find.open);
+    assert!(dialog.state.is_modal(Modal::Explainer) && !dialog.state.find.open);
 }
 
 #[test]

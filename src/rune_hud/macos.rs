@@ -73,7 +73,7 @@ pub(crate) fn pointer_screen(
 /// `NativeDisplayId::MacOS` matches: winit reports a monitor's native id
 /// the same way (`CGDisplayGetDisplayIDFromUUID`), so a measured notch can
 /// pin the panel to the display it was read on.
-fn screen_number(screen: &NSScreen) -> Option<u32> {
+pub(crate) fn screen_number(screen: &NSScreen) -> Option<u32> {
     let description = screen.deviceDescription();
     let key = NSString::from_str("NSScreenNumber");
     let number = description.objectForKey(&key)?;
@@ -213,9 +213,7 @@ impl DictationIndicatorUi {
             return;
         }
         self.hud.overlay.update_if(|hud, _| {
-            if hud.shown.load(Ordering::Acquire) {
-                hud.show();
-            }
+            hud.sync_placement();
             false
         });
     }
@@ -342,6 +340,19 @@ impl DictationIndicatorUi {
 }
 
 impl Hud {
+    pub(super) fn placed(&self) -> Option<hud_placement::Placed> {
+        match self.presence {
+            super::HudPresence::Shown { placed } => placed,
+            super::HudPresence::Hidden => None,
+        }
+    }
+
+    pub(super) fn set_placed(&mut self, next: hud_placement::Placed) {
+        if let super::HudPresence::Shown { placed } = &mut self.presence {
+            *placed = Some(next);
+        }
+    }
+
     /// With the HUD hidden, the live text starts where its plate would sit
     /// under the menu bar.
     pub(super) fn place_live_text_without_hud(&self) {
@@ -398,14 +409,14 @@ impl Hud {
         // `placed` carries the display's absolute coordinates, so moving the
         // pointer to another display changes it (a mirrored set is one
         // NSScreen); the pinned display is re-sent with the new rect.
-        if self.placed == Some(placed) {
+        if self.placed() == Some(placed) {
             return;
         }
-        if self.placed.map(|old| old.over_menu_bar) != Some(placed.over_menu_bar) {
+        if self.placed().map(|old| old.over_menu_bar) != Some(placed.over_menu_bar) {
             // Above the menu bar and its status items, below their menus.
             overlay.set_macos_level(STATUS_LEVEL + isize::from(placed.over_menu_bar));
         }
-        self.placed = Some(placed);
+        self.set_placed(placed);
         self.layout = placed.layout;
         self.model.set_island(placed.layout.island);
         let (x, top) = placed.top_left;

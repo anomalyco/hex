@@ -176,6 +176,7 @@ class Index:
         self.words = {}  # key -> {entry: weight}
         self.phrases = {}
         self.alias_keys = set()
+        self.whole_names = set()  # (word, entry): the word is the emoji's whole name
         self.search_names = [[] for _ in range(count)]
         self.search_keywords = [[] for _ in range(count)]
 
@@ -191,6 +192,8 @@ class Index:
         content = [p for p in parts if p not in STOP and len(p) >= 2]
         # A one-word name ("pizza") is the strongest match there is.
         weight = 1.0 if len(content) <= 1 else 0.75
+        if len(content) == 1:
+            self.whole_names.add((content[0], entry))
         for part in content:
             self._add(self.words, part, entry, weight * scale)
         if 1 < len(parts) <= 4:
@@ -223,15 +226,17 @@ class Index:
             self._add(table, key, entry, max(0.9, 1.2 - 0.1 * rank))
 
     def finish(self, table):
-        """A word that names many emoji ("face", "hand") says little about any one of them."""
+        """A word that names many emoji ("face", "hand") says little about any one of them,
+        except the one it is the whole name of ("fuego" names 🔥 and is a keyword of ❤️‍🔥)."""
         out = []
         for key in sorted(table):
             hits = table[key]
             factor = 1.0
             if key not in self.alias_keys:
                 factor = 1 / (1 + 0.5 * math.log2(max(1.0, len(hits) / 2)))
-            ranked = sorted(hits.items(), key=lambda item: (-item[1] * factor, item[0]))
-            out.append((key, [(entry, weight * factor) for entry, weight in ranked]))
+            weighed = {entry: weight * (1.0 if (key, entry) in self.whole_names else factor) for entry, weight in hits.items()}
+            ranked = sorted(weighed.items(), key=lambda item: (-item[1], item[0]))
+            out.append((key, ranked))
         return out
 
 

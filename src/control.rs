@@ -12,6 +12,9 @@ pub(crate) mod dashboard;
 pub(crate) mod developer_control;
 #[cfg(not(target_os = "macos"))]
 pub(crate) mod host;
+/// `hex meetings record|stop` and `hex status`'s meeting state, as the
+/// state the app mirrors answers them.
+pub(crate) mod meetings;
 pub mod settings;
 pub(crate) mod transcript_cli;
 
@@ -101,6 +104,9 @@ pub enum ControlCommand {
     /// Labs › Transform typed text (Linux): runs the focused field's text
     /// through its Output steps and replaces it, as its shortcut does.
     TypedText,
+    /// Labs › Model switch shortcut: swaps the dictation model with the saved
+    /// other one, as its shortcut does.
+    ModelSwitch,
     /// Labs › Screenshots (macOS): the display under the pointer, or with
     /// `pick` the picker its shortcut opens.
     Screenshot {
@@ -689,7 +695,7 @@ impl From<CaptureSnapshot> for CaptureReport {
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct MeetingReport {
-    /// idle, starting, recording, or transcribing.
+    /// idle, starting, recording, stopping, or transcribing.
     pub state: String,
     pub title: Option<String>,
     pub elapsed_seconds: Option<u64>,
@@ -717,18 +723,19 @@ impl ModelReport {
     /// The saved `selection`, and the fallback Hex runs while it can't run;
     /// no preparation.
     pub fn saved(selection: &crate::transcription::models::TranscriptionSelection) -> Self {
-        use crate::transcription::{custom_models, models};
+        use crate::transcription::{custom_models, models, readiness};
         let definition = models::definition(selection.model);
+        let status = readiness::readiness(&definition, &selection.language);
         Self {
             id: selection.model.as_str().into(),
-            name: definition.name.into(),
+            name: definition.name.to_string(),
             language: selection.language.clone(),
-            installed: models::is_installed(definition, &selection.language),
+            installed: status.installed,
             fallback: custom_models::fallback_reason(selection).map(|reason| {
                 let running = custom_models::fallback();
                 FallbackReport {
                     id: running.model.as_str().into(),
-                    name: models::definition(running.model).name.into(),
+                    name: models::definition(running.model).name.to_string(),
                     language: running.language,
                     reason,
                 }
@@ -793,56 +800,27 @@ pub struct ModelInfo {
     pub source: String,
 }
 
-/// Where `model`'s file is or comes from, as `hex model list` and the local
-/// API say it: `found: owner/name@abcdef1`, `imported`, `hex`, or `download`.
-pub fn model_source(
-    model: &crate::transcription::models::ModelDefinition,
-    language: &str,
-) -> String {
-    use crate::transcription::found_models::describe;
-    use crate::transcription::models::{is_installed, model_path};
-    let installed = is_installed(model, language);
-    let here = model_path(model)
-        .ok()
-        .filter(|_| installed)
-        .and_then(|path| describe(&path));
-    match (model.id.is_custom(), here) {
-        (true, Some(origin)) => format!("found: {origin} (not tested by Hex)"),
-        (false, Some(origin)) => format!("found: {origin}"),
-        (true, None) => "imported".into(),
-        (false, None) if installed => "hex".into(),
-        (false, None) => "download".into(),
-    }
-}
-
-/// Every model `hex model` can name, with what this Mac has installed.
+/// Every model `hex model` can name, with what this computer has installed.
 pub fn model_infos(
     selection: &crate::transcription::models::TranscriptionSelection,
 ) -> Vec<ModelInfo> {
-    use crate::transcription::found_models;
     use crate::transcription::models::VocabularyUse;
+    use crate::transcription::{found_models, readiness};
     // Listing models looks for ones already on this computer: headers only.
     let found = found_models::scan();
-    let source = |model| model_source(model, &selection.language);
-    let mut infos: Vec<ModelInfo> = crate::transcription::models::all_models()
+    let mut infos: Vec<ModelInfo> = readiness::catalog_models(&selection.language)
         .into_iter()
-        .filter(|model| model.available())
         .map(|model| ModelInfo {
-            source: source(model),
             id: model.id.as_str().into(),
             name: model.name.into(),
-            languages: model.languages.iter().map(|&code| code.into()).collect(),
-            size: model.size_label(),
-            installed: crate::transcription::models::is_installed(model, &selection.language),
+            languages: model.languages.into_iter().map(Into::into).collect(),
+            size: model.size,
+            installed: model.readiness.installed,
             selected: model.id == selection.model,
             streams: model.streams,
-            vocabulary: match model.vocabulary_use() {
-                VocabularyUse::Prompt => "prompt",
-                VocabularyUse::Bias => "bias",
-                VocabularyUse::None => "none",
-            }
-            .into(),
-            supports_recognition_hints: model.vocabulary_use() == VocabularyUse::Prompt,
+            vocabulary: readiness::vocabulary_use_label(model.vocabulary).into(),
+            supports_recognition_hints: model.vocabulary == VocabularyUse::Prompt,
+            source: model.source,
         })
         .collect();
     // Compatible files that aren't catalog models and aren't in use yet:
@@ -853,6 +831,7 @@ pub fn model_infos(
         let Some(sha256) = &model.blob_sha256 else {
             continue;
         };
+        let vocabulary = readiness::vocabulary_use_for_architecture(&model.architecture);
         infos.push(ModelInfo {
             id: format!("custom-{}", &sha256[..16]),
             name: model.name.clone(),
@@ -861,18 +840,8 @@ pub fn model_infos(
             installed: true,
             selected: false,
             streams: false,
-            vocabulary: if matches!(model.architecture.as_str(), "whisper" | "qwen3_asr") {
-                "prompt"
-            } else if model.architecture == "parakeet" {
-                "bias"
-            } else {
-                "none"
-            }
-            .into(),
-            supports_recognition_hints: matches!(
-                model.architecture.as_str(),
-                "whisper" | "qwen3_asr"
-            ),
+            vocabulary: readiness::vocabulary_use_label(vocabulary).into(),
+            supports_recognition_hints: vocabulary == VocabularyUse::Prompt,
             source: format!("found: {} (not tested by Hex)", model.source()),
         });
     }
@@ -1004,12 +973,16 @@ pub fn check_quit(
         return Ok(());
     }
     if meeting.state != "idle" {
+        // A stop under way has nothing to stop, and a transcription has
+        // already begun: both finish before Hex can quit with them saved.
+        let advice = if matches!(meeting.state.as_str(), "stopping" | "transcribing") {
+            "wait for it to finish, or pass --force"
+        } else {
+            "stop it first (`hex meetings stop`) or pass --force"
+        };
         return Err(ControlError::new(
             "meeting-active",
-            format!(
-                "a meeting is {}; stop it first (`hex meetings stop`) or pass --force",
-                meeting.state
-            ),
+            format!("a meeting is {}; {advice}", meeting.state),
         ));
     }
     match capture {
@@ -1298,6 +1271,7 @@ mod tests {
             },
             ControlCommand::PasteLast,
             ControlCommand::TypedText,
+            ControlCommand::ModelSwitch,
             ControlCommand::Screenshot { pick: false },
             ControlCommand::Screenshot { pick: true },
             ControlCommand::MeetingRecord {
@@ -1601,6 +1575,17 @@ mod tests {
             check_quit(&recording, quiet(), false).unwrap_err().code,
             "meeting-active"
         );
+        // A stop under way still holds the recorder, and a transcription has
+        // nothing left to stop: both wait rather than name a stop.
+        for waiting in ["stopping", "transcribing"] {
+            let state = MeetingReport {
+                state: waiting.into(),
+                ..Default::default()
+            };
+            let refusal = check_quit(&state, quiet(), false).unwrap_err();
+            assert_eq!(refusal.code, "meeting-active");
+            assert!(refusal.message.contains("wait for it to finish"));
+        }
         assert!(check_quit(&recording, quiet(), true).is_ok());
         let busy = CaptureSnapshot {
             recording: None,

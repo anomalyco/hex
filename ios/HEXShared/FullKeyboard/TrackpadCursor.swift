@@ -183,6 +183,16 @@ nonisolated enum TrackpadCursor {
         /// The finger went up or down past the known rows meaning a line there: the cursor stays
         /// put while it steps past them (`crossing`) for the host to show that line.
         private(set) var waiting = false
+        /// The host's context as `catchUp` last read it, and as it read when the cursor stepped
+        /// past the known text: that same context afterwards is no answer (the host ignored the
+        /// step at the text's start or end), not the text just past it.
+        private var lastContext: Context?
+        private var contextAtCrossing: Context?
+
+        struct Context: Equatable {
+            var before: String
+            var after: String
+        }
 
         init(before: String, after: String, wrapWidth: CGFloat, lineHeight: CGFloat, width: (Character) -> CGFloat) {
             let head = Array(before)
@@ -191,6 +201,7 @@ nonisolated enum TrackpadCursor {
             // Nothing before the cursor: it's at the text's start.
             knowsStart = head.isEmpty
             endsLine = !(after.last?.isWhitespace ?? false)
+            lastContext = Context(before: before, after: after)
             point = .zero
             point = caret
         }
@@ -255,6 +266,7 @@ nonisolated enum TrackpadCursor {
             guard waiting, crossing == nil, hostCaughtUp else { return }
             crossing = time
             crossingUp = pastAbove
+            contextAtCrossing = lastContext
         }
 
         /// Puts the cursor at the position nearest the point, after moving it `dx` along.
@@ -341,6 +353,14 @@ nonisolated enum TrackpadCursor {
         /// anything.
         @discardableResult
         mutating func catchUp(before: String, after: String, width: (Character) -> CGFloat) -> Bool {
+            let context = Context(before: before, after: after)
+            defer { lastContext = context }
+            // The host's context unchanged since the step past the known text: it ignored the
+            // step (`expire` takes that as the text's start or end). Read as an answer, the text
+            // the cursor left was added again past the known text, over and over (Duo, a long
+            // note's first line: 3 rows grew to 245 in one gesture, and the lift moved the
+            // cursor 26,642 characters).
+            if crossing != nil, context == contextAtCrossing { return false }
             let text = layout.text
             var fresh = Array(before) + Array(after)
             let host = self.host

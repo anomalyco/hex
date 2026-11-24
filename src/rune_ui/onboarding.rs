@@ -79,7 +79,6 @@ pub(super) fn progress(ui: &Ui) -> (bool, ModelProgress) {
     (
         ready,
         ModelProgress {
-            installed: ready,
             downloading,
             failed: downloading.is_none() && transcription.is_some_and(|t| t.error.is_some()),
         },
@@ -118,11 +117,16 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
     let accessibility_stale = ui
         .platform
         .stale(crate::desktop::onboarding::PermissionKind::Accessibility);
+    let accessibility_split = ui.platform.accessibility_split;
+    let accessibility_restart_done = ui.platform.accessibility_restart_done;
     let Some(tour) = &mut ui.tour else {
         return false;
     };
     let before = tour.flow.view();
     let step = before.step;
+    tour.flow.set_post_event_split(accessibility_split);
+    tour.flow
+        .set_post_event_restart_done(accessibility_restart_done);
     let mut effect = tour.flow.on(Input::Status(status, model));
     tour.flow.set_accessibility_stale(accessibility_stale);
     if tour
@@ -176,11 +180,21 @@ fn apply(ui: &mut Ui, effect: Effect) {
                 .choice
                 .take()
                 .unwrap_or_else(|| ui.settings.transcription.clone());
-            if crate::transcription::models::validate(&selection).is_ok() {
-                ui.send(Request::ChooseModel {
+            match crate::transcription::models::validate(&selection) {
+                Ok(_) => ui.send(Request::ChooseModel {
                     model: selection.model,
                     language: selection.language,
-                });
+                }),
+                // A model this build can't run (a found file whose Labs switch
+                // is off, an import that is gone) must say so: left alone, the
+                // tour waits on a download that never starts.
+                Err(error) => {
+                    ui.found.picked = None;
+                    ui.found.error = Some(format!("{error:#}"));
+                    if let Some(tour) = &mut ui.tour {
+                        tour.flow.model_failed();
+                    }
+                }
             }
         }
         Effect::AdvanceSoon => {
@@ -351,10 +365,9 @@ mod tests {
     fn mac_stale_fixture_marks_accessibility_stale_and_dispatches_reset() {
         let mut ui = crate::rune_ui::mac_fixture();
         mac_fixture(&mut ui, MacStep::SetupStale);
-        let rows = ui.tour.as_ref().unwrap().flow.view().rows;
-        assert!(
-            rows.iter()
-                .any(|row| row.item == SetupItem::Accessibility && row.status == ItemStatus::Stale)
+        assert_eq!(
+            ui.tour.as_ref().unwrap().flow.view().accessibility,
+            ItemStatus::Stale
         );
         input(&mut ui, Input::Grant(SetupItem::Accessibility));
         assert!(

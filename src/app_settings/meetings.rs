@@ -16,6 +16,14 @@ pub enum MeetingIndicatorCorner {
 }
 
 impl MeetingIndicatorCorner {
+    #[cfg(test)]
+    pub const ALL: [Self; 4] = [
+        Self::TopRight,
+        Self::TopLeft,
+        Self::BottomRight,
+        Self::BottomLeft,
+    ];
+
     pub const fn is_right(self) -> bool {
         matches!(self, Self::TopRight | Self::BottomRight)
     }
@@ -54,6 +62,14 @@ pub struct MeetingSettings {
     pub show_recording_indicator: bool,
     /// Screen corner the floating recording indicator snaps to after dragging.
     pub recording_indicator_corner: MeetingIndicatorCorner,
+    /// The display the floating recording indicator was last dragged to,
+    /// named the way the OS names it (`\\.\DISPLAY2` on Windows, the
+    /// `CGDirectDisplayID` on macOS); `None` is the primary display.
+    /// Left out of the file while unset, so an older build reads this file
+    /// as before, and read only while Labs › Indicator on any display is
+    /// on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recording_indicator_display: Option<String>,
     /// What to do when a call from each website or app is detected. Older
     /// files only had a `never_offer` list, whose entries carry no `policy`
     /// and so read as Don't offer.
@@ -116,6 +132,9 @@ pub enum MeetingSummaries {
 }
 
 impl MeetingSummaries {
+    #[cfg(test)]
+    pub const ALL: [Self; 3] = [Self::Off, Self::Mac, Self::OpenCode];
+
     /// On this Mac on macOS, otherwise off.
     pub const fn platform_default() -> Self {
         if cfg!(target_os = "macos") {
@@ -357,6 +376,7 @@ impl Default for MeetingSettings {
             summarize_with_opencode: None,
             show_recording_indicator: DEFAULT_SHOW_RECORDING_INDICATOR,
             recording_indicator_corner: MeetingIndicatorCorner::TopRight,
+            recording_indicator_display: None,
             providers: Vec::new(),
             default_policy: MeetingPolicy::Ask,
             calendar: CalendarSettings::default(),
@@ -441,6 +461,17 @@ pub fn meeting_indicator_corner() -> MeetingIndicatorCorner {
     MeetingIndicatorCorner::decode(MEETING_INDICATOR_CORNER.load(Ordering::Acquire))
 }
 
+/// The display the recording capsule was last dragged to (Labs › Indicator
+/// on any display): the OS's own name for it, or `None` for the primary
+/// display. The capsules ignore it while that lab is off.
+pub fn saved_meeting_indicator_display() -> Option<String> {
+    MEETING_INDICATOR_DISPLAY
+        .get_or_init(Default::default)
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
 /// The user's choices for detected calls, by website or app.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn meeting_provider_choices() -> Vec<MeetingProviderChoice> {
@@ -520,9 +551,8 @@ fn audio_retention_in(settings: &serde_json::Value) -> Option<MeetingRetention> 
         .flatten()
 }
 
-/// Meetings › Settings' Stop when the call ends, as last applied (macOS;
-/// read on each pass of the meeting controller).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+/// Meetings › Settings' Stop when the call ends, as last applied (read on
+/// each pass of the meeting controller).
 pub fn meeting_stop_when_call_ends() -> bool {
     MEETING_STOP_WHEN_CALL_ENDS.load(Ordering::Acquire)
 }
@@ -592,17 +622,24 @@ pub fn save_meeting_provider(choice: MeetingProviderChoice) {
     }
 }
 
-/// Saves the corner the recording capsule was dragged to.
-pub fn save_meeting_indicator_corner(corner: MeetingIndicatorCorner) {
+/// Saves where the recording capsule was dragged to: its corner, and the
+/// display it landed on (Labs › Indicator on any display; `None` is the
+/// primary display). Off, the capsules pass the display they already read,
+/// so that field never changes.
+pub fn save_meeting_indicator_anchor(corner: MeetingIndicatorCorner, display: Option<&str>) {
     match AppSettings::load() {
         Ok(mut settings) => {
-            if settings.meetings.recording_indicator_corner == corner {
+            let display = display.map(str::to_owned);
+            if settings.meetings.recording_indicator_corner == corner
+                && settings.meetings.recording_indicator_display == display
+            {
                 return;
             }
             let base = settings.clone();
             settings.meetings.recording_indicator_corner = corner;
+            settings.meetings.recording_indicator_display = display;
             if let Err(error) = base.update(&settings) {
-                tracing::warn!(%error, "could not save the recording capsule's corner");
+                tracing::warn!(%error, "could not save where the recording capsule rests");
             }
         }
         Err(error) => tracing::warn!(%error, "could not load settings to save the capsule corner"),
@@ -689,6 +726,36 @@ mod tests {
             MeetingPolicy::AlwaysRecord
         );
         assert_eq!(meetings.providers.len(), 2);
+    }
+
+    /// An older settings file has no `recording_indicator_display`: the
+    /// capsules stay on the primary display, and the field stays out of the
+    /// file until a capsule lands on one.
+    #[test]
+    fn a_saved_file_without_the_indicator_display_stays_on_the_primary() {
+        let settings: MeetingSettings = serde_json::from_str(
+            r#"{"show_recording_indicator":true,"recording_indicator_corner":"bottom_left"}"#,
+        )
+        .unwrap();
+        assert_eq!(settings.recording_indicator_display, None);
+        assert_eq!(
+            settings.recording_indicator_corner,
+            MeetingIndicatorCorner::BottomLeft
+        );
+        let written = serde_json::to_value(&settings).unwrap();
+        assert!(written.get("recording_indicator_display").is_none());
+        // A display a capsule landed on round trips.
+        let landed = MeetingSettings {
+            recording_indicator_display: Some(r"\\.\DISPLAY2".into()),
+            ..Default::default()
+        };
+        let written = serde_json::to_value(&landed).unwrap();
+        assert_eq!(written["recording_indicator_display"], r"\\.\DISPLAY2");
+        let read: MeetingSettings = serde_json::from_value(written).unwrap();
+        assert_eq!(
+            read.recording_indicator_display,
+            landed.recording_indicator_display
+        );
     }
 
     /// A Teams page's old answer under its own host gives way to the Teams

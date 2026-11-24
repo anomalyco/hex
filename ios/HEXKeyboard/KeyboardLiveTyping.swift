@@ -16,6 +16,10 @@ final class KeyboardLiveTyping {
     private var subscription: AnyCancellable?
     /// False while the full keyboard waits to put a two-thumb Dictate's words over its range.
     var mayType: () -> Bool = { true }
+
+    /// Whether it would type a dictation starting now: not over a two-thumb Dictate's range,
+    /// and in a field `LiveFieldTyping` types in.
+    var takesTyping: Bool { mayType() && LiveFieldTyping.types(in: target) }
     /// The field changed under the keys: they read it afresh.
     var didEdit: () -> Void = {}
     /// The words that went out with a send, as heard and as typed, after the field before them.

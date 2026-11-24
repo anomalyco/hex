@@ -57,7 +57,7 @@ pub(crate) fn validate_gguf_artifact(
     selection: &TranscriptionSelection,
     supports_language_detect: bool,
 ) -> Result<Option<String>> {
-    let ModelRuntime::Gguf(artifact) = definition.runtime else {
+    let ModelRuntime::Gguf(artifact) = &definition.runtime else {
         return Err(eyre!(
             "{} is not a GGUF transcription model",
             definition.name

@@ -17,6 +17,16 @@ export const DEV_NOTES_PATH = `${BASE_PATH}/dev`
 export const DEV_NOTES_URL = "https://raw.githubusercontent.com/anomalyco/hex/dev-notes/dev-notes.json"
 // Redirects to the current release's file for a target (worker.ts).
 export const DOWNLOAD_PATH = `${BASE_PATH}/download`
+// Short link to Hex for iPhone on the App Store (worker.ts).
+export const IOS_PATH = withBase("/ios")
+// Hex for Android page, with Hex Preview's download and setup (src/iphone.ts).
+export const ANDROID_PATH = withBase("/android")
+// Redirects to the newest Hex Preview APK, Hex for Android outside Google Play (worker.ts).
+export const ANDROID_DOWNLOAD_PATH = `${DOWNLOAD_PATH}/android`
+// android/scripts/preview-release.sh publishes each Hex Preview build's
+// latest.json to this branch. The app's updater reads it, and so does the
+// Worker, so the download link never waits for a site deploy.
+export const ANDROID_PREVIEW_URL = "https://raw.githubusercontent.com/anomalyco/hex/android-preview/latest.json"
 
 // The build mode (`--mode dev`) picks the environment; every other mode builds production.
 export function hostForMode(mode: string | undefined): string {

@@ -61,33 +61,34 @@ final class KeyboardParakeetDownload {
 
     /// What holds the download back now, nil once it may start by itself.
     var hold: Hold? {
-        let wanted = DictationController.wantedLanguage()
-        return Self.hold(
-            otherEngine: TwoLanguageDictationSettings().isEnabled || MultilingualParakeetSettings().language() != nil,
-            english: SpeechLanguagePicker.isEnglish(wanted),
-            keyboardLimit: KeyboardParakeetSettings().keyboardLimit,
+        Self.hold(
+            plan: KeyboardParakeetPlan.current(),
             unmetered: isUnmetered,
             freeBytes: Self.freeBytes()
         )
     }
 
-    /// Only for a keyboard that would use it: English, the keyboard's own limit measured and
-    /// enough (`KeyboardParakeetBudget`), a connection that isn't cellular, a hotspot or Low
-    /// Data Mode, and `freeSpaceNeeded` free (unknown space doesn't hold it).
+    /// Only for a keyboard that would use it: resolved from `KeyboardParakeetPlan`, plus a
+    /// connection that isn't cellular, a hotspot or Low Data Mode, and `freeSpaceNeeded` free.
     nonisolated static func hold(
-        otherEngine: Bool,
-        english: Bool,
-        keyboardLimit: Int?,
+        plan: KeyboardParakeetPlan,
         unmetered: Bool?,
         freeBytes: Int64?
     ) -> Hold? {
-        if otherEngine { return .otherEngine }
-        guard english else { return .notEnglish }
-        guard let keyboardLimit else { return .keyboardNotMeasured }
-        guard keyboardLimit >= KeyboardParakeetBudget.requiredLimit else { return .keyboardTooSmall }
-        guard unmetered == true else { return .notOnWiFi }
-        if let freeBytes, freeBytes < freeSpaceNeeded { return .needsSpace }
-        return nil
+        switch plan {
+        case .twoLanguage, .multilingual:
+            return .otherEngine
+        case .notEnglish:
+            return .notEnglish
+        case .unmeasured:
+            return .keyboardNotMeasured
+        case .tooSmall:
+            return .keyboardTooSmall
+        case .off, .awaitingV2Download, .awaitingV2DownloadUsingUltra, .readyV2:
+            guard unmetered == true else { return .notOnWiFi }
+            if let freeBytes, freeBytes < freeSpaceNeeded { return .needsSpace }
+            return nil
+        }
     }
 
     /// Whether a connection lets the download start by itself: up, not expensive (a personal
@@ -245,6 +246,8 @@ struct KeyboardParakeetStatus: View {
     let download: KeyboardParakeetDownload
     /// In a box of its own (Settings); Home's card draws the box around it instead.
     var framed = true
+    /// About the multilingual model (Settings › Dictation › Model) rather than English's.
+    var multilingual = false
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 2)) { context in
@@ -274,7 +277,53 @@ struct KeyboardParakeetStatus: View {
     }
 
     private func line(now: Date) -> String? {
-        switch download.state {
+        let settings = KeyboardParakeetSettings()
+        guard multilingual else {
+            return Self.line(
+                state: download.state,
+                isDownloaded: download.isDownloaded,
+                hold: download.hold,
+                keyboardState: settings.keyboardState,
+                now: now
+            )
+        }
+        return Self.multilingualLine(
+            isDownloaded: ParakeetUltraModel.isDownloaded(),
+            takesLanguage: MultilingualParakeetSettings().language() != nil,
+            fitsKeyboard: settings.keyboardLimit.map { $0 >= KeyboardParakeetBudget.requiredLimit } ?? true,
+            keyboardState: settings.keyboardStateIsMultilingual ? settings.keyboardState : nil,
+            now: now
+        )
+    }
+
+    /// Under Model: Multilingual. Its download says where it stands itself
+    /// (`MultilingualModelStatus`); once it's on the iPhone, what the keyboard does with it.
+    static func multilingualLine(
+        isDownloaded: Bool,
+        takesLanguage: Bool,
+        fitsKeyboard: Bool,
+        keyboardState: (state: KeyboardParakeetSettings.KeyboardState, at: Date)?,
+        now: Date
+    ) -> String? {
+        guard isDownloaded else { return nil }
+        guard takesLanguage else {
+            return String(localized: "Not for this dictation language, so the keyboard uses Apple's speech recognition.")
+        }
+        guard fitsKeyboard else { return line(for: .keyboardTooSmall) }
+        return keyboardLine(keyboardState, now: now)
+    }
+
+    /// What the row says. The keyboard's word is about English: dictating in another language
+    /// (Hinglish, French), Apple's speech recognition takes it, so a downloaded model says
+    /// it's only for English rather than "Ready in the keyboard".
+    static func line(
+        state: KeyboardParakeetDownload.State,
+        isDownloaded: Bool,
+        hold: KeyboardParakeetDownload.Hold?,
+        keyboardState: (state: KeyboardParakeetSettings.KeyboardState, at: Date)?,
+        now: Date
+    ) -> String? {
+        switch state {
         case .downloading:
             return String(localized: "Downloading the speech model")
         case .failed(let message):
@@ -282,8 +331,16 @@ struct KeyboardParakeetStatus: View {
         case .idle:
             break
         }
-        guard download.isDownloaded else { return Self.line(for: download.hold) }
-        switch KeyboardParakeetSettings().keyboardState {
+        guard isDownloaded, hold != .notEnglish else { return line(for: hold) }
+        return keyboardLine(keyboardState, now: now)
+    }
+
+    /// What the keyboard did with a downloaded model, while its word is fresh.
+    private static func keyboardLine(
+        _ keyboardState: (state: KeyboardParakeetSettings.KeyboardState, at: Date)?,
+        now: Date
+    ) -> String {
+        switch keyboardState {
         case (.preparing, let at)? where now.timeIntervalSince(at) < 180:
             return String(localized: "Getting ready in the keyboard")
         case (.ready, _)?:

@@ -71,6 +71,9 @@ pub(crate) enum Request {
         language: String,
     },
     CancelModel,
+    /// Labs › Model switch shortcut, or `hex model switch`: swap the
+    /// dictation model with the saved other one, installed only.
+    SwapModel,
     /// The window saved `settings.json`; adopt it.
     ReloadSettings,
     /// The tray's Enable / Disable Hex.
@@ -97,6 +100,9 @@ pub(crate) enum ShortcutTarget {
     /// Labs › Second dictation shortcut: another key that dictates exactly
     /// like the dictation shortcut.
     SecondDictation,
+    /// Labs › Model switch shortcut: swaps the dictation model with the
+    /// saved other one.
+    ModelSwitch,
     /// Toggle mode's cancel shortcut.
     Cancel,
 }
@@ -435,7 +441,8 @@ fn run_runtime(
         let dictation_audio = if tray.is_some() && crate::labs::copy_dictation_audio() {
             Some(
                 host.history()
-                    .and_then(|history| history.newest_recording(crate::history::now_ms()))
+                    .as_ref()
+                    .and_then(crate::history::recordings::newest_copyable)
                     .is_some(),
             )
         } else {
@@ -602,6 +609,10 @@ impl crate::control::host::Host for WindowsControl {
             model: selection.model,
             language: selection.language,
         })
+    }
+
+    fn model_switch(&self) -> std::result::Result<(), ControlError> {
+        self.send(Request::SwapModel)
     }
 
     fn cancel_model(&self) {
@@ -945,18 +956,12 @@ fn create_tray(window: rune::AppHandle<Ui>) -> Result<rune::Tray> {
                 }
             }
             Some(TrayCommand::CopyLastDictationAudio) => {
-                if !(crate::labs::copy_dictation_audio() && crate::labs::keep_recordings()) {
+                if !crate::labs::copy_dictation_audio() {
                     return;
                 }
-                let copied = runtime()
-                    .and_then(|runtime| runtime.history())
-                    .and_then(|history| history.newest_recording(crate::history::now_ms()))
-                    .ok_or_else(|| eyre!("no dictation with kept audio is in History"))
-                    .and_then(|path| {
-                        crate::history::recordings::copy_to_clipboard(&path)
-                            .map_err(|error| eyre!("{error:#}"))
-                    });
-                if let Err(error) = copied {
+                if let Err(error) = crate::history::recordings::copy_newest(
+                    runtime().and_then(|runtime| runtime.history()).as_ref(),
+                ) {
                     tracing::warn!(%error, "could not copy the last dictation's audio");
                 }
             }

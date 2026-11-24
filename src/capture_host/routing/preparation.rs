@@ -93,19 +93,18 @@ fn rule_live(router: &Router, loaded: &ScrawlBundle, live: &look::Live) -> look:
     }
 }
 
-fn evidence(loaded: &ScrawlBundle, bundle: &Path, live: look::Live) -> smart::Evidence {
-    look::evidence_for(loaded, bundle, live)
-}
-
 impl Worker {
     pub(super) fn written(&mut self, bundle: PathBuf, look: Look) {
         let started = Instant::now();
         let pending = self.pending.take();
-        if self.current.as_ref().is_some_and(|c| c.due.is_some())
+        if self
+            .current
+            .as_ref()
+            .is_some_and(|c| c.send.is_pending_rule())
             && let Some(mut current) = self.current.take()
         {
             // The capsule now shows the new capture: the older send goes on.
-            current.resume(started);
+            current.send.resume(started);
             self.older.push((current, pending));
         }
         let Ok((_, loaded)) = scrawl_capture::handoff::load_bundle(&bundle) else {
@@ -115,10 +114,17 @@ impl Worker {
         let live = look.local.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let ruled = rule_live(&look.router, &loaded, &live);
         let app = loaded.target.app.clone();
+        let bundle_id = loaded.target.bundle_id.clone();
         let rule = policy::rule_key(
             live.url.as_deref(),
             live.terminal.as_deref(),
-            loaded.target.bundle_id.as_deref(),
+            bundle_id.as_deref(),
+        );
+        let scope = rule_match::rule_match(
+            live.url.as_deref(),
+            live.terminal.as_deref(),
+            bundle_id.as_deref(),
+            app.as_deref(),
         );
         let site = rule.as_ref().map(site_of);
         let early = look.router.run(|| {
@@ -139,6 +145,7 @@ impl Worker {
             site,
             &live.candidates,
             now_ms(),
+            look.router.config().jev_auto_send(),
         );
         if answered.send.is_none() {
             answered.answer = match ruled.clues.first().map(|c| &c.pointer) {
@@ -153,24 +160,32 @@ impl Worker {
                 _ => RouteAnswer::Looking,
             };
         }
+        let now = Instant::now();
+        let send = match answered.send {
+            Some(destination) => SendState::Scheduled {
+                destination,
+                clock: Clock::start(now),
+            },
+            None if !ruled.clues.is_empty() => SendState::ResolvingRule {
+                clock: Clock::start(now),
+            },
+            None => SendState::Idle,
+        };
         self.current = Some(Routed {
             bundle: bundle.clone(),
             router: look.router.clone(),
             url: live.url,
             app,
+            bundle_id,
             rule,
+            rule_match: scope,
             candidates: live.candidates,
-            route: CaptureRoute::of(answered.answer),
-            sent: None,
-            offered: None,
-            saved: None,
-            due: (!ruled.clues.is_empty()).then(|| Instant::now() + SEND_HOLD),
-            held: None,
-            destination: answered.send,
+            answer: answered.answer,
+            send,
         });
         self.publish();
         tracing::info!(
-            answer = answer_kind(&self.current.as_ref().expect("just set").route.answer),
+            answer = answer_kind(&self.current.as_ref().expect("just set").answer),
             elapsed_ms = started.elapsed().as_millis() as u64,
             phase = "local",
             "capture routed"
@@ -214,7 +229,7 @@ impl Worker {
                             sessions_error: live.error.clone(),
                         }
                     } else {
-                        evidence(&loaded, &bundle, live.clone())
+                        look::evidence_for(&loaded, &bundle, live.clone())
                     };
                     let policy = if look.router.config().smart_routing {
                         smart::Policy::Weigh
@@ -222,10 +237,11 @@ impl Worker {
                         smart::Policy::Ladder
                     };
                     let judgement = smart::decide(&evidence, policy);
-                    let refine = !ruled
-                        && look.router.config().jev_routing
-                        && look.router.config().smart_routing
-                        && !jev::settled(&judgement);
+                    // Jev is a hosted call with the capture's transcript and the desktop's
+                    // context: it runs only while `Auto-send with Jev` is on, whatever
+                    // flags an older settings file still holds.
+                    let refine =
+                        !ruled && look.router.config().jev_auto_send() && !jev::settled(&judgement);
                     let _ = updates.send(Update {
                         live: live.clone(),
                         judgement: judgement.clone(),
@@ -294,7 +310,7 @@ impl Worker {
             self.pending = preparing;
             self.prepared_current();
             if let (Some(current), pending) = (self.current.take(), self.pending.take())
-                && current.due.is_some()
+                && current.send.is_pending_rule()
             {
                 self.older.push((current, pending));
             }
@@ -333,43 +349,50 @@ impl Worker {
                 site,
                 &update.live.candidates,
                 now_ms(),
+                current.router.config().jev_auto_send(),
+            );
+            let live_scope = rule_match::rule_match(
+                update.live.url.as_deref(),
+                update.live.terminal.as_deref(),
+                current.bundle_id.as_deref(),
+                current.app.as_deref(),
             );
             current.candidates = update.live.candidates;
             current.url = update.live.url;
             if let Some(rule) = live_rule {
                 current.rule = Some(rule);
             }
+            if live_scope.is_some() {
+                current.rule_match = live_scope;
+            }
             // The capsule starts a rule's Undo ring when it first shows the
             // rule, so a send whose rule was still being looked up holds from
             // now: the ring and the send share one deadline.
             let shown = matches!(
-                current.route.answer,
+                current.answer,
                 RouteAnswer::Rule { .. } | RouteAnswer::ResolvingRule { .. }
             );
             // A rule already sent may gain its recent list, but never another send.
-            let send = current
-                .route
-                .delivery
-                .is_none()
-                .then_some(answered.send)
-                .flatten();
+            let undelivered = !current.send.has_delivery();
+            let send = undelivered.then_some(answered.send).flatten();
             // Once posted, an updated session list cannot change the destination shown.
-            if current.route.delivery.is_none() {
-                current.route.answer = keep_rows(&current.route.answer, answered.answer);
+            if undelivered {
+                current.answer = keep_rows(&current.answer, answered.answer);
             } else if let (
-                RouteAnswer::Rule { to, site, .. },
+                RouteAnswer::Rule { to, site, by, .. },
                 RouteAnswer::Rule {
                     suggested, recent, ..
                 },
-            ) = (&current.route.answer, answered.answer)
+            ) = (&current.answer, answered.answer)
             {
                 let next = RouteAnswer::Rule {
                     to: to.clone(),
                     suggested,
                     recent,
                     site: site.clone(),
+                    by: *by,
                 };
-                current.route.answer = keep_rows(&current.route.answer, next);
+                current.answer = keep_rows(&current.answer, next);
             }
             if let Err(error) = routing::write_record(
                 &current.bundle,
@@ -385,21 +408,13 @@ impl Worker {
             self.publish();
             if let Some(dest) = send {
                 if let Some(current) = &mut self.current {
-                    current.destination = Some(dest);
-                    if shown {
-                        current
-                            .due
-                            .get_or_insert_with(|| Instant::now() + SEND_HOLD);
-                    } else {
-                        current.due = Some(Instant::now() + SEND_HOLD);
-                    }
+                    current.send.schedule(dest, shown, Instant::now());
                 }
                 self.send_due();
             } else if let Some(current) = &mut self.current
-                && current.destination.is_none()
-                && !matches!(current.route.answer, RouteAnswer::ResolvingRule { .. })
+                && !matches!(current.answer, RouteAnswer::ResolvingRule { .. })
             {
-                current.due = None;
+                current.send.clear_resolving();
             }
         }
     }
@@ -407,25 +422,22 @@ impl Worker {
     fn send_due(&mut self) {
         let now = Instant::now();
         if let Some(current) = &mut self.current
-            && !current.holding(now)
-            && current.due.is_some_and(|due| now >= due)
-            && let Some(destination) = current.destination.take()
+            && let Some(destination) = current.send.take_due(now)
         {
-            current.due = None;
-            self.send_current(destination, None);
+            self.send_current(destination, None, None);
         }
     }
 
     fn preparation_failed(&mut self) {
         if let Some(current) = &mut self.current
-            && current.destination.is_none()
+            && !matches!(current.send, SendState::Scheduled { .. })
             && matches!(
-                current.route.answer,
+                current.answer,
                 RouteAnswer::Looking | RouteAnswer::ResolvingRule { .. }
             )
         {
-            current.due = None;
-            current.route.answer = RouteAnswer::Unreachable {
+            current.send.clear_resolving();
+            current.answer = RouteAnswer::Unreachable {
                 why: "Couldn't finish routing".into(),
             };
             self.publish();
@@ -478,7 +490,7 @@ fn keep_rows(shown: &RouteAnswer, next: RouteAnswer) -> RouteAnswer {
             .cloned(),
     );
     match next {
-        RouteAnswer::Rule { to, site, .. } => {
+        RouteAnswer::Rule { to, site, by, .. } => {
             suggested.retain(|dest| dest.session != to.session);
             recent.retain(|dest| dest.session != to.session);
             RouteAnswer::Rule {
@@ -486,6 +498,7 @@ fn keep_rows(shown: &RouteAnswer, next: RouteAnswer) -> RouteAnswer {
                 suggested,
                 recent,
                 site,
+                by,
             }
         }
         RouteAnswer::Guess { site, .. } => RouteAnswer::Guess {

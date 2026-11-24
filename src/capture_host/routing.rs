@@ -27,7 +27,12 @@ use super::{SharedOutcomes, lock};
 
 mod opencode;
 mod preparation;
+pub(crate) mod rule_match;
+mod send;
 mod session_name;
+
+pub use rule_match::{AutoSendBy, RuleMatch};
+use send::{Clock, DeliverOutcome, PickAction, SavedRule, SendState, Sent, UndoPlan};
 
 #[cfg(test)]
 use session_name::session_name_by;
@@ -60,6 +65,9 @@ pub struct CaptureRoute {
     /// capture went, as two sends agreed: `Send { to: <that session>,
     /// always: true }` saves it.
     pub offer: Option<String>,
+    /// Structured match scope for the post-send `Always…` configurator
+    /// (site subpath vs whole host, terminal folder, or non-general app).
+    pub rule_match: Option<RuleMatch>,
 }
 
 impl CaptureRoute {
@@ -68,6 +76,7 @@ impl CaptureRoute {
             answer,
             delivery: None,
             offer: None,
+            rule_match: None,
         }
     }
 
@@ -111,6 +120,7 @@ pub enum RouteAnswer {
         suggested: Vec<RouteDest>,
         recent: Vec<RouteDest>,
         site: Option<String>,
+        by: AutoSendBy,
     },
     /// Guesses, best first: everything else the router found (Jev's pick,
     /// HOME when Jev couldn't tell, a dev server's port, a page or its
@@ -201,9 +211,17 @@ fn opencode_managed() -> bool {
     crate::policy::Policy::current().locks(crate::policy::Lock::OpenCodeProcessing)
 }
 
+/// Whether Jev has an active credential available (`$OPENCODE_API_KEY` or
+/// OpenCode's credential) within `budget`. Blocks; call it off the UI thread.
+pub fn jev_available(budget: Duration) -> bool {
+    if opencode_managed() || std::env::var_os("SCRAWL_NO_OPENCODE").is_some() {
+        return false;
+    }
+    router().run(|| jev::available(budget))
+}
+
 /// Open OpenCode sessions, newest first, as Send to… lists them, read
 /// within `budget`. Blocks; call it off the UI thread.
-#[cfg(target_os = "macos")]
 pub fn recent_sessions(budget: Duration) -> anyhow::Result<Vec<RouteDest>> {
     anyhow::ensure!(!opencode_managed(), "OpenCode is turned off here");
     let read = router().run(|| {
@@ -304,6 +322,11 @@ pub(super) enum Job {
     Send {
         to: String,
         always: bool,
+    },
+    SaveRule {
+        kind: RuleKind,
+        key: String,
+        target: String,
     },
     Undo,
     /// The pointer is on the capsule (`true`) or left it: a rule's send
@@ -417,54 +440,40 @@ struct Routed {
     router: Router,
     url: Option<String>,
     app: Option<String>,
+    bundle_id: Option<String>,
     /// What an always-rule would match.
     rule: Option<(RuleKind, String)>,
+    /// Structured match scope for the post-send `Always…` configurator.
+    rule_match: Option<RuleMatch>,
     candidates: Vec<smart::Candidate>,
-    route: CaptureRoute,
-    /// How to take the send back, once OpenCode took it.
-    sent: Option<Sent>,
-    /// The rule offered after the send ([`CaptureRoute::offer`]).
-    offered: Option<scrawl_capture::OfferRule>,
-    /// The rule a Shift pick saved with this send, which Undo takes back.
-    saved: Option<SavedRule>,
-    /// The rule's cancellation window starts at publication, even before folder resolution.
-    due: Option<Instant>,
-    /// Since when the capsule holds `due` (the pointer is on it).
-    held: Option<Instant>,
-    destination: Option<Destination>,
+    answer: RouteAnswer,
+    /// The send, hold, delivery, and undo lifecycle; [`CaptureRoute::delivery`]
+    /// and [`CaptureRoute::offer`] are projected from this.
+    send: SendState,
 }
 
 impl Routed {
-    /// Ends a hold: `due` moves on by the time held, keeping what was left
-    /// (at least [`RESUME_LEFT`], never more than the whole [`SEND_HOLD`]).
-    fn resume(&mut self, now: Instant) {
-        let Some(since) = self.held.take() else {
-            return;
-        };
-        if let Some(due) = &mut self.due {
-            let left = due.saturating_duration_since(since);
-            *due = now + left.clamp(RESUME_LEFT, SEND_HOLD);
+    fn capture_route(&self) -> CaptureRoute {
+        CaptureRoute {
+            answer: self.answer.clone(),
+            delivery: self.send.delivery(),
+            offer: self.send.offer_site(),
+            rule_match: self.rule_match.clone(),
         }
     }
 
-    /// Whether the capsule still holds its send.
-    fn holding(&self, now: Instant) -> bool {
-        self.held
-            .is_some_and(|since| now.saturating_duration_since(since) < HOLD_MAX)
+    #[cfg(test)]
+    fn sent_session(&self) -> Option<&str> {
+        match &self.send {
+            SendState::Delivered { session, .. }
+            | SendState::TooLate {
+                session,
+                retry_undo: Some(_),
+                ..
+            } => Some(session.as_str()),
+            _ => None,
+        }
     }
-}
-
-/// A rule saved with a send, and what its key held before.
-struct SavedRule {
-    kind: RuleKind,
-    key: String,
-    before: Option<String>,
-    was_refused: bool,
-}
-
-struct Sent {
-    delivery_id: String,
-    session: String,
 }
 
 /// Posts a capture to an OpenCode session.
@@ -496,7 +505,10 @@ impl Worker {
             let wait = self.retry_at.saturating_duration_since(Instant::now());
             let wait = if self.pending.is_some()
                 || !self.older.is_empty()
-                || self.current.as_ref().is_some_and(|c| c.due.is_some())
+                || self
+                    .current
+                    .as_ref()
+                    .is_some_and(|c| c.send.is_pending_rule())
             {
                 wait.min(Duration::from_millis(10))
             } else {
@@ -519,6 +531,7 @@ impl Worker {
         match job {
             Job::Written { bundle, look } => self.written(bundle, look),
             Job::Send { to, always } => self.chosen(&to, always),
+            Job::SaveRule { kind, key, target } => self.save_rule(kind, key, target),
             Job::Undo => self.undo(),
             Job::Hold(on) => self.hold(on),
             Job::SendBundle {
@@ -547,7 +560,7 @@ impl Worker {
             let current = self.current.as_ref().ok_or("no capture")?;
             let to = match to {
                 Some(to) => to.to_owned(),
-                None => match &current.route.answer {
+                None => match &current.answer {
                     RouteAnswer::Rule { to, .. } => to.session.clone(),
                     RouteAnswer::Guess { suggested, .. } if !suggested.is_empty() => {
                         suggested[0].session.clone()
@@ -560,14 +573,14 @@ impl Worker {
             let Some(dest) = self.listed_as(&to) else {
                 return Err(format!("{to} isn't a session this capture lists"));
             };
-            if always && current.rule.is_none() && current.offered.is_none() {
+            if always && current.rule.is_none() && current.send.offered().is_none() {
                 return Err("no rule can be made for this capture's site or app".into());
             }
             self.choose(dest, always);
             let current = self.current.as_ref().ok_or("no capture")?;
             return Ok(current
-                .route
-                .delivery
+                .send
+                .delivery()
                 .as_ref()
                 .map_or_else(|| "Nothing sent".into(), describe));
         }
@@ -588,7 +601,8 @@ impl Worker {
         };
         let loaded = scrawl_capture::handoff::load_bundle(bundle)
             .map_err(|error| format!("couldn't read the capture: {error:#}"))?;
-        let (delivery, _, _) = deliver(&router(), bundle, &dest, loaded.1.target.app, self.forward);
+        let delivery =
+            deliver(&router(), bundle, &dest, loaded.1.target.app, self.forward).delivery();
         tracing::info!(
             bundle = %bundle_name(bundle),
             session = dest.session,
@@ -601,116 +615,6 @@ impl Worker {
         }
     }
 
-    #[cfg(test)]
-    fn written_before(&mut self, bundle: PathBuf, look: Look) {
-        let started = Instant::now();
-        let Look {
-            router,
-            seen,
-            until,
-            model,
-            ..
-        } = look;
-        let live = seen
-            .recv_timeout(until.saturating_duration_since(Instant::now()))
-            .unwrap_or_else(|error| {
-                match error {
-                    RecvTimeoutError::Timeout => {
-                        tracing::warn!("looking for a capture's route took too long");
-                    }
-                    RecvTimeoutError::Disconnected => {
-                        tracing::error!("looking for a capture's route panicked");
-                    }
-                }
-                None
-            });
-        let waited = started.elapsed();
-        let loaded = scrawl_capture::handoff::load_bundle(&bundle)
-            .map(|(_, loaded)| loaded)
-            .inspect_err(|error| tracing::warn!(error = %format!("{error:#}"), "could not read a capture to route"))
-            .ok();
-        let candidates = live
-            .as_ref()
-            .map(|live| live.candidates.clone())
-            .unwrap_or_default();
-        if let Some(live) = &live
-            && let Some(error) = &live.error
-        {
-            tracing::warn!(
-                bundle = %bundle_name(&bundle),
-                error,
-                read = live.candidates.len(),
-                "a capture's look couldn't read all of OpenCode's sessions"
-            );
-            if auth_refused(error) {
-                tracing::warn!("{AUTH_HINT}");
-            }
-        }
-        let unread = live.as_ref().and_then(sessions_unread);
-        let terminal = live.as_ref().and_then(|live| live.terminal.clone());
-        // Judged even without the sessions: a rule, page, or publisher names
-        // one outright, and the record keeps what was seen for a replay.
-        let (decision, url) = router.run(|| match (live, &loaded) {
-            (Some(live), Some(loaded)) => {
-                let (judgement, url) = routing::judge_capture_with(&bundle, loaded, live, &model);
-                (judged(judgement.decision, unread.as_deref()), url)
-            }
-            (Some(live), None) => (Decided::Failed, live.url),
-            (None, _) => (Decided::Failed, None),
-        });
-        let bundle_id = loaded
-            .as_ref()
-            .and_then(|loaded| loaded.target.bundle_id.clone());
-        let app = loaded.as_ref().and_then(|loaded| loaded.target.app.clone());
-        let rule = policy::rule_key(url.as_deref(), terminal.as_deref(), bundle_id.as_deref());
-        let site = rule.as_ref().map(|rule| match rule {
-            (RuleKind::Site, key) => key
-                .split_once("://")
-                .map_or(key.as_str(), |(_, host)| host)
-                .to_owned(),
-            (RuleKind::App, key) => app.clone().unwrap_or_else(|| key.clone()),
-            (RuleKind::Terminal, _) => site_of(rule),
-        });
-        let Answered {
-            answer,
-            send: rule_send,
-            shown,
-        } = answer_for(decision, url.as_deref(), site, &candidates, now_ms());
-        tracing::info!(
-            bundle = %bundle_name(&bundle),
-            answer = answer_kind(&answer),
-            why = shown.as_ref().map(|shown| shown.why.as_str()),
-            look_wait_ms = waited.as_millis() as u64,
-            judge_ms = started.elapsed().saturating_sub(waited).as_millis() as u64,
-            "capture routed"
-        );
-        if let Some(shown) = &shown
-            && let Err(error) = routing::record_shown(&bundle, shown)
-        {
-            tracing::warn!(error = %format!("{error:#}"), "could not record how a capture's route was shown");
-        }
-        self.current = Some(Routed {
-            bundle,
-            router,
-            url,
-            app,
-            rule,
-            candidates,
-            route: CaptureRoute::of(answer),
-            sent: None,
-            offered: None,
-            saved: None,
-            due: None,
-            held: None,
-            destination: None,
-        });
-        self.publish();
-        // A saved rule sends at once; the capsule's Undo takes it back.
-        if let Some(dest) = rule_send {
-            self.send_current(dest, None);
-        }
-    }
-
     /// The capsule's pick: sends the newest capture to `to` now, after
     /// taking back a send elsewhere. `always` also saves a rule for its
     /// site or app.
@@ -720,49 +624,58 @@ impl Worker {
         }
     }
 
+    /// Saves a rule chosen from the post-send `Always…` configurator and
+    /// attaches it to the current capture so Undo can also revert it.
+    fn save_rule(&mut self, kind: RuleKind, key: String, target: String) {
+        if let Some(saved) = persist_rule((kind, key, target))
+            && let Some(current) = self.current.as_mut()
+        {
+            current.send.attach_saved_rule(saved);
+        }
+    }
+
     fn choose(&mut self, dest: Destination, always: bool) {
         self.pending = None;
-        if let Some(current) = &mut self.current {
-            current.due = None;
-            current.destination = None;
-        }
-        let Some(current) = self.current.as_ref() else {
+        let rule_spec = if always {
+            let spec = self.rule_for(&dest.session);
+            if spec.is_none() {
+                tracing::info!("no rule can be made for this capture");
+            }
+            spec
+        } else {
+            None
+        };
+        let Some(current) = self.current.as_mut() else {
             return;
         };
-        let already = match (&current.sent, &current.route.delivery) {
-            (Some(sent), _) => Some(sent.session == dest.session),
-            (None, Some(RouteDelivery::Queued { .. })) => Some(false),
-            _ => None,
-        };
-        if always {
-            self.save_rule(&dest.session);
-        }
-        match already {
+        current.send.cancel_pending_for_pick();
+        match current.send.pick_action(&dest.session) {
             // Accepting the offered rule, or a second click.
-            Some(true) => {}
-            Some(false) => self.redirect_to(dest),
-            None => {
+            PickAction::AlreadyThere => {
+                if let Some(spec) = rule_spec
+                    && let Some(saved) = persist_rule(spec)
+                    && let Some(current) = self.current.as_mut()
+                {
+                    current.send.attach_saved_rule(saved);
+                }
+            }
+            PickAction::Redirect => self.redirect_to(dest, rule_spec),
+            PickAction::SendFresh => {
                 self.correct(jev::Action::Redirect, "chip", Some(&dest));
-                self.send_current(dest, Some("chosen"));
+                self.send_current(dest, Some("chosen"), rule_spec);
             }
         }
     }
 
-    fn redirect_to(&mut self, dest: Destination) {
+    fn redirect_to(&mut self, dest: Destination, rule_spec: Option<(RuleKind, String, String)>) {
         self.take_back();
         self.correct(jev::Action::Redirect, "reroute", Some(&dest));
-        self.send_current(dest, Some("chosen"));
+        self.send_current(dest, Some("chosen"), rule_spec);
     }
 
     fn hold(&mut self, on: bool) {
-        let Some(current) = &mut self.current else {
-            return;
-        };
-        let now = Instant::now();
-        if on {
-            current.held.get_or_insert(now);
-        } else {
-            current.resume(now);
+        if let Some(current) = &mut self.current {
+            current.send.hold(on, Instant::now());
         }
     }
 
@@ -774,23 +687,15 @@ impl Worker {
         if self
             .current
             .as_mut()
-            .is_some_and(|c| c.due.take().is_some())
-            && self
-                .current
-                .as_ref()
-                .is_some_and(|c| c.route.delivery.is_none())
+            .is_some_and(|current| current.send.cancel_scheduled())
         {
-            if let Some(current) = &mut self.current {
-                current.destination = None;
-            }
-            self.set_delivery(RouteDelivery::TakenBack);
             self.publish();
             return;
         }
         if let Some(saved) = self
             .current
             .as_mut()
-            .and_then(|current| current.saved.take())
+            .and_then(|current| current.send.take_saved_rule())
         {
             forget_rule(&saved);
         }
@@ -800,86 +705,93 @@ impl Worker {
     }
 
     /// Takes back the current capture's send, whatever state it is in;
-    /// `false` when there was none. One OpenCode wouldn't give back is too
+    /// `false` when there was none. One OpenCode wouldn't give back, or one
+    /// delivered later by a background retry without an undo handle, is too
     /// late.
     fn take_back(&mut self) -> bool {
         let Some(current) = self.current.as_mut() else {
             return false;
         };
-        let to = delivered_to(current.route.delivery.as_ref());
-        if let Some(sent) = current.sent.take() {
-            let undone = current.router.undo(&sent.delivery_id, UNDO_DEADLINE);
-            let delivery = match undone {
-                Ok(report) if report.undone != Undone::Unfinished => {
-                    tracing::info!(
-                        bundle = %bundle_name(&current.bundle),
-                        undone = report.undone.label(),
-                        "capture send taken back"
-                    );
-                    match report.undone {
-                        Undone::Withdrawn | Undone::Reverted | Undone::Disowned => {
-                            RouteDelivery::TakenBack
-                        }
-                        Undone::Gone | Undone::TooOld | Undone::Unfinished => {
-                            RouteDelivery::TooLate {
-                                to: to.unwrap_or_default(),
+        match current.send.begin_undo() {
+            UndoPlan::Handle { session, to, sent } => {
+                let undone = current.router.undo(&sent.delivery_id, UNDO_DEADLINE);
+                current.send = match undone {
+                    Ok(report) if report.undone != Undone::Unfinished => {
+                        tracing::info!(
+                            bundle = %bundle_name(&current.bundle),
+                            undone = report.undone.label(),
+                            "capture send taken back"
+                        );
+                        match report.undone {
+                            Undone::Withdrawn | Undone::Reverted | Undone::Disowned => {
+                                SendState::TakenBack
+                            }
+                            Undone::Gone | Undone::TooOld | Undone::Unfinished => {
+                                SendState::TooLate {
+                                    session,
+                                    to,
+                                    retry_undo: None,
+                                }
                             }
                         }
                     }
-                }
-                // Still where it went (or staged for removal, which
-                // another undo can finish): the capsule, already showing
-                // it taken back, hears that it's too late.
-                failed => {
-                    let error = match failed {
-                        Ok(report) => report.text(),
-                        Err(error) => format!("{error:#}"),
-                    };
-                    tracing::warn!(error = %error, "could not take a capture's send back");
-                    current.sent = Some(sent);
-                    current.route.delivery = Some(RouteDelivery::TooLate {
-                        to: to.unwrap_or_default(),
-                    });
-                    return true;
-                }
-            };
-            current.route.offer = None;
-            current.offered = None;
-            current.route.delivery = Some(delivery);
-            return true;
+                    // Still where it went (or staged for removal, which
+                    // another undo can finish): the capsule, already showing
+                    // it taken back, hears that it's too late.
+                    failed => {
+                        let error = match failed {
+                            Ok(report) => report.text(),
+                            Err(error) => format!("{error:#}"),
+                        };
+                        tracing::warn!(error = %error, "could not take a capture's send back");
+                        SendState::TooLate {
+                            session,
+                            to,
+                            retry_undo: Some(sent),
+                        }
+                    }
+                };
+                true
+            }
+            UndoPlan::RetriedNoHandle => true,
+            UndoPlan::Queued => {
+                // Its retries stop with the marker.
+                let _ = std::fs::remove_file(current.bundle.join(delivery::PENDING));
+                self.correct(jev::Action::Cancel, "dismiss", None);
+                true
+            }
+            UndoPlan::None => false,
         }
-        if matches!(current.route.delivery, Some(RouteDelivery::Queued { .. })) {
-            // Its retries stop with the marker.
-            let _ = std::fs::remove_file(current.bundle.join(delivery::PENDING));
-            self.correct(jev::Action::Cancel, "dismiss", None);
-            self.set_delivery(RouteDelivery::TakenBack);
-            return true;
-        }
-        false
     }
 
-    fn send_current(&mut self, mut dest: Destination, via: Option<&str>) {
+    fn send_current(
+        &mut self,
+        mut dest: Destination,
+        via: Option<&str>,
+        rule_spec: Option<(RuleKind, String, String)>,
+    ) {
         let started = Instant::now();
         if let Some(via) = via {
             via.clone_into(&mut dest.via);
         }
-        if let Some(current) = self.current.as_ref() {
+        if let Some(current) = self.current.as_mut() {
             dest.title = session_name(&dest.session, &dest.title, &current.candidates);
+            current.send = SendState::Sending {
+                to: dest.title.clone(),
+            };
         }
-        self.set_delivery(RouteDelivery::Sending {
-            to: dest.title.clone(),
-        });
         self.publish();
         let Some(current) = self.current.as_mut() else {
             return;
         };
-        let (delivery, sent, offered) = deliver(
+        let outcome = deliver(
             &current.router,
             &current.bundle,
             &dest,
             current.app.clone(),
             self.forward,
         );
+        let delivery = outcome.delivery();
         tracing::info!(
             bundle = %bundle_name(&current.bundle),
             session = dest.session,
@@ -887,45 +799,13 @@ impl Worker {
             elapsed_ms = started.elapsed().as_millis() as u64,
             "capture sent"
         );
-        current.sent = sent;
-        current.route.offer = offered
-            .as_ref()
-            .map(|offer| site_of(&(offer.kind, offer.key.clone())));
-        current.offered = offered;
-        current.route.delivery = Some(delivery);
-        self.publish();
-    }
-
-    /// Saves an always-rule from the current capture's site or app to
-    /// `session`'s project (or the session itself), on top of what
-    /// `settings.json` holds now.
-    fn save_rule(&mut self, session: &str) {
-        let Some((kind, key, target)) = self.rule_for(session) else {
-            tracing::info!("no rule can be made for this capture");
-            return;
+        let saved = if outcome.succeeded_or_queued() {
+            rule_spec.and_then(persist_rule)
+        } else {
+            None
         };
-        let mut saved = None;
-        let result = edit_routing(|config| {
-            let key = key.trim();
-            saved = Some(SavedRule {
-                kind,
-                key: key.to_owned(),
-                before: rules_of(config, kind).get(key).cloned(),
-                was_refused: config.refused_rules.iter().any(|k| k == key),
-            });
-            config
-                .with_rule(kind, key, &target)
-                .map_err(|error| color_eyre::eyre::eyre!("{error:#}"))
-        });
-        match result {
-            Ok(()) => {
-                tracing::info!("saved a capture routing rule");
-                if let Some(current) = self.current.as_mut() {
-                    current.saved = saved;
-                }
-            }
-            Err(error) => tracing::warn!(%error, "could not save a capture routing rule"),
-        }
+        current.send = outcome.into_state(saved);
+        self.publish();
     }
 
     /// The always-rule sending the current capture's site or app to
@@ -936,7 +816,7 @@ impl Worker {
     fn rule_for(&self, session: &str) -> Option<(RuleKind, String, String)> {
         let current = self.current.as_ref()?;
         let (kind, key) = current.rule.clone().or_else(|| {
-            let offer = current.offered.as_ref()?;
+            let offer = current.send.offered()?;
             Some((offer.kind, offer.key.clone()))
         })?;
         Some((kind, key, session.to_owned()))
@@ -972,7 +852,7 @@ impl Worker {
     fn listed_as(&self, to: &str) -> Option<Destination> {
         let current = self.current.as_ref()?;
         let to = to.trim();
-        let listed = listed(&current.route.answer);
+        let listed = listed(&current.answer);
         let found = listed.iter().find(|dest| dest.session == to).or_else(|| {
             listed
                 .iter()
@@ -1021,15 +901,23 @@ impl Worker {
             .is_some_and(|current| current.bundle == bundle)
     }
 
-    fn set_delivery(&mut self, delivery: RouteDelivery) {
-        if let Some(current) = self.current.as_mut() {
-            current.route.delivery = Some(delivery);
+    fn publish(&self) {
+        if let Some(current) = &self.current {
+            lock(&self.outcomes).routed(&current.bundle, current.capture_route());
         }
     }
 
-    fn publish(&self) {
-        if let Some(current) = &self.current {
-            lock(&self.outcomes).routed(&current.bundle, current.route.clone());
+    /// Applies the bundles a background retry pass just delivered: moves a
+    /// matching queued current capture into [`SendState::Delivered`] (with
+    /// `undo: None`) while keeping its session ID and any saved rule.
+    fn apply_retried(&mut self, sent_bundles: &[PathBuf]) {
+        let matched = self
+            .current
+            .as_mut()
+            .filter(|current| sent_bundles.contains(&current.bundle))
+            .is_some_and(|current| current.send.mark_retried());
+        if matched {
+            self.publish();
         }
     }
 
@@ -1060,17 +948,8 @@ impl Worker {
                 "retried sends went"
             );
         }
-        let sent_now = self
-            .current
-            .as_ref()
-            .is_some_and(|current| report.sent.iter().any(|(dir, _)| *dir == current.bundle));
-        if sent_now
-            && let Some(current) = self.current.as_mut()
-            && let Some(RouteDelivery::Queued { to, .. }) = current.route.delivery.take()
-        {
-            current.route.delivery = Some(RouteDelivery::Sent { to });
-            self.publish();
-        }
+        let sent_bundles: Vec<PathBuf> = report.sent.into_iter().map(|(dir, _)| dir).collect();
+        self.apply_retried(&sent_bundles);
     }
 }
 
@@ -1079,8 +958,6 @@ enum Decided {
     Judged(smart::Decision),
     /// OpenCode's sessions couldn't be read: why, in a few words.
     Unreachable(String),
-    #[cfg(test)]
-    Failed,
 }
 
 /// Why a look read no sessions at all, when its read failed.
@@ -1218,6 +1095,34 @@ fn edit_routing(
     Ok(())
 }
 
+/// Saves an always-rule into `settings.json`, returning the undo record when
+/// it wrote cleanly.
+fn persist_rule((kind, key, target): (RuleKind, String, String)) -> Option<SavedRule> {
+    let mut saved = None;
+    let result = edit_routing(|config| {
+        let key = key.trim();
+        saved = Some(SavedRule {
+            kind,
+            key: key.to_owned(),
+            before: rules_of(config, kind).get(key).cloned(),
+            was_refused: config.refused_rules.iter().any(|k| k == key),
+        });
+        config
+            .with_rule(kind, key, &target)
+            .map_err(|error| color_eyre::eyre::eyre!("{error:#}"))
+    });
+    match result {
+        Ok(()) => {
+            tracing::info!("saved a capture routing rule");
+            saved
+        }
+        Err(error) => {
+            tracing::warn!(%error, "could not save a capture routing rule");
+            None
+        }
+    }
+}
+
 /// Undo of a Shift pick: the rule it saved goes, and what its key held
 /// before comes back.
 fn forget_rule(saved: &SavedRule) {
@@ -1250,6 +1155,7 @@ fn answer_for(
     site: Option<String>,
     candidates: &[smart::Candidate],
     now_ms: u64,
+    jev_auto_send: bool,
 ) -> Answered {
     let scored = |scored: &smart::Scored| {
         let dest = smart::destination_of(scored, url);
@@ -1274,17 +1180,18 @@ fn answer_for(
             shown: Some(Shown::guess(why)),
         }
     };
+    let auto_by = |to: &smart::Scored| match to.lead().map(|r| r.basis) {
+        Some(smart::Basis::Clue(
+            smart::Source::Rule | smart::Source::AppRule | smart::Source::TerminalRule,
+        )) => Some(AutoSendBy::Rule),
+        Some(smart::Basis::Jev) if jev_auto_send => Some(AutoSendBy::Jev),
+        _ => None,
+    };
     let mut answered = match decided {
-        // The router also trusts a page naming its session. In Hex, only the
-        // user's saved site, terminal or app rule authorizes an automatic send.
-        Decided::Judged(smart::Decision::Send { to, instead })
-            if matches!(
-                to.lead().map(|r| r.basis),
-                Some(smart::Basis::Clue(
-                    smart::Source::Rule | smart::Source::AppRule | smart::Source::TerminalRule
-                ))
-            ) =>
-        {
+        // Saved site, terminal, or app rules always auto-send; confident Jev
+        // picks auto-send only when `Auto-send with Jev` is enabled.
+        Decided::Judged(smart::Decision::Send { to, instead }) if auto_by(&to).is_some() => {
+            let by = auto_by(&to).expect("checked");
             let dest = smart::destination_of(&to, url);
             let shown = Shown::rule(lead_why(&to));
             let to = scored(&to);
@@ -1298,6 +1205,7 @@ fn answer_for(
                     suggested,
                     recent,
                     site,
+                    by,
                 },
                 send: Some(dest),
                 shown: Some(shown),
@@ -1316,10 +1224,6 @@ fn answer_for(
             recent: recent(&[]),
         }),
         Decided::Unreachable(why) => Answered::of(RouteAnswer::Unreachable { why }),
-        #[cfg(test)]
-        Decided::Failed => Answered::of(RouteAnswer::NoAnswer {
-            recent: recent(&[]),
-        }),
     };
     // The early local read, a saved rule, or a list read without a title can
     // leave a `ses…` id where a name goes; the capsule and the bundle say the
@@ -1369,10 +1273,7 @@ fn recent(candidates: &[smart::Candidate], shown: &[&str], now_ms: u64) -> Vec<R
         .map(|candidate| RouteDest {
             session: candidate.id.clone(),
             name: candidate.label().to_owned(),
-            why: format!(
-                "{} ago",
-                smart::ago_text(now_ms.saturating_sub(candidate.updated_ms))
-            ),
+            why: crate::desktop::i18n::event_age_at(candidate.updated_ms, now_ms),
             directory: candidate.directory.clone(),
         })
         .collect()
@@ -1441,17 +1342,6 @@ fn describe(delivery: &RouteDelivery) -> String {
     }
 }
 
-fn delivered_to(delivery: Option<&RouteDelivery>) -> Option<String> {
-    match delivery? {
-        RouteDelivery::Sending { to }
-        | RouteDelivery::Sent { to }
-        | RouteDelivery::Queued { to, .. }
-        | RouteDelivery::TooLate { to }
-        | RouteDelivery::Failed { to, .. } => Some(to.clone()),
-        RouteDelivery::TakenBack => None,
-    }
-}
-
 /// Records where the capture went in its bundle, sends it, and remembers
 /// the send for an undo. A send OpenCode didn't take is queued for
 /// [`Worker::retry`].
@@ -1461,20 +1351,12 @@ fn deliver(
     dest: &Destination,
     app: Option<String>,
     forward: Forward,
-) -> (
-    RouteDelivery,
-    Option<Sent>,
-    Option<scrawl_capture::OfferRule>,
-) {
+) -> DeliverOutcome {
     if opencode_managed() {
-        return (
-            RouteDelivery::Failed {
-                to: dest.title.clone(),
-                why: crate::policy::Lock::OpenCodeProcessing.refusal().into(),
-            },
-            None,
-            None,
-        );
+        return DeliverOutcome::Failed {
+            to: dest.title.clone(),
+            why: crate::policy::Lock::OpenCodeProcessing.refusal().into(),
+        };
     }
     router.run(|| {
         // The bundle and its summary name the session too, so they say its
@@ -1499,7 +1381,7 @@ fn deliver(
             None,
             forward,
         );
-        let sent = posted.map(|posted| {
+        let undo = posted.map(|posted| {
             let sent = undo::remember(
                 &dest.session,
                 Some(&dest.title),
@@ -1513,16 +1395,16 @@ fn deliver(
             );
             Sent {
                 delivery_id: sent.delivery_id,
-                session: dest.session.clone(),
             }
         });
         let to = dest.title.clone();
         match delivery {
-            Delivery::Sent { .. } => (
-                RouteDelivery::Sent { to },
-                sent,
-                routing::learn_capture(bundle, &dest.session),
-            ),
+            Delivery::Sent { .. } => DeliverOutcome::Delivered {
+                session: dest.session.clone(),
+                to,
+                undo,
+                offer: routing::learn_capture(bundle, &dest.session),
+            },
             Delivery::Queued { error, .. } => {
                 let agent_host = router.config().agent_host().is_some();
                 let why = send_why(&error, agent_host);
@@ -1540,16 +1422,16 @@ fn deliver(
                         "a capture's send didn't go; retrying"
                     );
                 }
-                (RouteDelivery::Queued { to, why }, None, None)
-            }
-            Delivery::Saved => (
-                RouteDelivery::Failed {
+                DeliverOutcome::Queued {
+                    session: dest.session.clone(),
                     to,
-                    why: "nothing was sent".into(),
-                },
-                None,
-                None,
-            ),
+                    why,
+                }
+            }
+            Delivery::Saved => DeliverOutcome::Failed {
+                to,
+                why: "nothing was sent".into(),
+            },
         }
     })
 }
@@ -1638,6 +1520,10 @@ mod tests {
     }
 
     fn sent_by(basis: smart::Basis, why: &str) -> Answered {
+        sent_by_with_jev(basis, why, false)
+    }
+
+    fn sent_by_with_jev(basis: smart::Basis, why: &str, jev_auto_send: bool) -> Answered {
         answer_for(
             Decided::Judged(smart::Decision::Send {
                 to: scored_by("ses_a", "Alpha", basis, why),
@@ -1650,6 +1536,7 @@ mod tests {
                 candidate("ses_c", "Gamma", 0),
             ],
             0,
+            jev_auto_send,
         )
     }
 
@@ -1710,6 +1597,7 @@ mod tests {
                 None,
                 &[candidate("ses_seer", "SEER", 0)],
                 0,
+                false,
             )
         };
         for answered in [rule(""), rule("ses_seer")] {
@@ -1733,6 +1621,7 @@ mod tests {
             None,
             &[],
             0,
+            false,
         );
         let RouteAnswer::Guess { suggested, .. } = &answered.answer else {
             panic!("not a guess: {:?}", answered.answer);
@@ -1806,11 +1695,30 @@ mod tests {
                 Some("ses_a".into()),
                 "{why}: sent at once"
             );
-            assert!(
-                matches!(answered.answer, RouteAnswer::Rule { ref to, .. } if to.why == "rule")
-            );
+            assert!(matches!(
+                answered.answer,
+                RouteAnswer::Rule {
+                    ref to,
+                    by: AutoSendBy::Rule,
+                    ..
+                } if to.why == "rule"
+            ));
             assert_eq!(answered.shown, Some(Shown::rule(why)));
         }
+        // With Auto-send with Jev on, Jev's confident pick auto-sends with
+        // Jev provenance; JevHome fallback and non-rule clues still suggest.
+        let jev_send = sent_by_with_jev(Basis::Jev, "Jev gave it 0.96", true);
+        assert!(jev_send.send.is_some());
+        assert!(matches!(
+            jev_send.answer,
+            RouteAnswer::Rule {
+                by: AutoSendBy::Jev,
+                ..
+            }
+        ));
+        let jev_home = sent_by_with_jev(Basis::JevHome, "Jev couldn't tell, so HOME", true);
+        assert!(jev_home.send.is_none());
+        assert!(matches!(jev_home.answer, RouteAnswer::Guess { .. }));
     }
 
     #[test]
@@ -1834,6 +1742,7 @@ mod tests {
             None,
             &candidates,
             63_000,
+            false,
         );
         assert_eq!(send.map(|dest| dest.session), Some("ses_a".into()));
         let RouteAnswer::Rule {
@@ -1853,7 +1762,7 @@ mod tests {
             vec![RouteDest {
                 session: "ses_b".into(),
                 name: "Beta".into(),
-                why: "1 min ago".into(),
+                why: "1m ago".into(),
                 directory: Some("/tmp/ses_b".into()),
             }]
         );
@@ -1870,6 +1779,7 @@ mod tests {
             Some("example.com".into()),
             &candidates,
             0,
+            false,
         );
         assert!(send.is_none());
         assert!(matches!(
@@ -1877,9 +1787,6 @@ mod tests {
             RouteAnswer::Guess { ref suggested, ref recent, site: Some(ref site) }
                 if suggested.len() == 1 && recent.is_empty() && site == "example.com"
         ));
-        let Answered { answer, send, .. } = answer_for(Decided::Failed, None, None, &candidates, 0);
-        assert!(send.is_none());
-        assert!(matches!(answer, RouteAnswer::NoAnswer { ref recent } if recent.len() == 1));
     }
 
     /// The Air's first sends: Studio's OpenCode couldn't read the contact
@@ -1977,6 +1884,7 @@ mod tests {
             None,
             &[],
             0,
+            false,
         );
         assert!(send.is_none());
         assert_eq!(
@@ -2181,17 +2089,21 @@ mod tests {
             let deadline = Instant::now() + Duration::from_secs(20);
             while worker.pending.is_some()
                 || !worker.older.is_empty()
-                || worker.current.as_ref().is_some_and(|c| c.due.is_some())
+                || worker
+                    .current
+                    .as_ref()
+                    .is_some_and(|c| c.send.is_pending_rule())
             {
                 assert!(Instant::now() < deadline, "routing did not finish");
                 if advance {
+                    let now = Instant::now();
                     for current in worker
                         .current
                         .iter_mut()
                         .chain(worker.older.iter_mut().map(|(c, _)| c))
                     {
-                        if let Some(due) = &mut current.due {
-                            *due = Instant::now();
+                        if let Some(clock) = current.send.clock_mut() {
+                            clock.expire_at(now);
                         }
                     }
                 }
@@ -2229,20 +2141,20 @@ mod tests {
                 worker.written(bundle, look);
                 assert!(started.elapsed() < Duration::from_millis(200));
                 let current = worker.current.as_ref().unwrap();
-                assert!(current.sent.is_none());
-                assert!(current.due.unwrap() >= started + SEND_HOLD);
+                assert!(current.sent_session().is_none());
+                assert!(current.send.clock().unwrap().due().unwrap() >= started + SEND_HOLD);
                 assert!(matches!(
-                    current.route.answer,
+                    current.answer,
                     RouteAnswer::Rule { .. } | RouteAnswer::ResolvingRule { .. }
                 ));
                 worker.undo();
                 assert_eq!(
-                    worker.current.as_ref().unwrap().route.delivery,
+                    worker.current.as_ref().unwrap().send.delivery(),
                     Some(RouteDelivery::TakenBack)
                 );
                 drop(found);
                 settle(&mut worker);
-                assert!(worker.current.as_ref().unwrap().sent.is_none());
+                assert!(worker.current.as_ref().unwrap().sent_session().is_none());
             }
         }
 
@@ -2292,7 +2204,7 @@ mod tests {
                         let bundle = written("com.example.browser");
                         lock(&outcomes).fail(bundle.clone(), "test".into());
                         worker.written(bundle.clone(), look);
-                        assert!(worker.current.as_ref().unwrap().sent.is_none());
+                        assert!(worker.current.as_ref().unwrap().sent_session().is_none());
                         worker.hold(true);
                         // The local tab matched a rule. A later partial read
                         // can return the page clue without repeating the URL.
@@ -2312,19 +2224,21 @@ mod tests {
                         settle(&mut worker); // Advance any send deadline and drain finalization.
                         let current = worker.current.unwrap();
                         if saved {
-                            assert_eq!(current.sent.unwrap().session, "ses_ruled");
+                            assert_eq!(current.sent_session(), Some("ses_ruled"));
                             assert!(
-                                matches!(current.route.answer, RouteAnswer::Rule { to, .. } if to.session == "ses_ruled")
+                                matches!(current.answer, RouteAnswer::Rule { to, .. } if to.session == "ses_ruled")
                             );
                             assert_eq!(std::mem::take(&mut *POSTS.lock().unwrap()), ["ses_ruled"]);
                         } else {
                             assert!(POSTS.lock().unwrap().is_empty(), "no automatic post");
-                            assert!(current.route.delivery.is_none());
-                            assert!(current.sent.is_none() && current.due.is_none());
+                            assert!(current.send.delivery().is_none());
                             assert!(
-                                matches!(&current.route.answer, RouteAnswer::Guess { suggested, .. } if suggested[0].session == "ses_signer"),
+                                current.sent_session().is_none() && !current.send.is_pending_rule()
+                            );
+                            assert!(
+                                matches!(&current.answer, RouteAnswer::Guess { suggested, .. } if suggested[0].session == "ses_signer"),
                                 "{:?}",
-                                current.route.answer
+                                current.answer
                             );
                         }
                         std::fs::remove_dir_all(bundle.parent().unwrap()).unwrap();
@@ -2349,17 +2263,24 @@ mod tests {
             lock(&outcomes).fail(bundle.clone(), "test".into());
             worker.written(bundle.clone(), look);
             // The local read saw nothing, so the rule's send is due at once.
-            worker.current.as_mut().unwrap().due = Some(Instant::now());
+            worker
+                .current
+                .as_mut()
+                .unwrap()
+                .send
+                .clock_mut()
+                .unwrap()
+                .expire_at(Instant::now());
             worker.prepared();
             let current = worker.current.as_ref().unwrap();
             assert!(
-                matches!(&current.route.answer, RouteAnswer::Rule { to, .. }
+                matches!(&current.answer, RouteAnswer::Rule { to, .. }
                     if to.session == "ses_board" && to.name == "session"),
                 "{:?}",
-                current.route.answer
+                current.answer
             );
             assert_eq!(
-                current.route.delivery,
+                current.send.delivery(),
                 Some(RouteDelivery::Sent {
                     to: "session".into()
                 }),
@@ -2395,13 +2316,16 @@ mod tests {
             // As if the local read found no rule yet, and its hold ran out
             // while the capsule still said nothing.
             let current = worker.current.as_mut().unwrap();
-            current.route.answer = RouteAnswer::Looking;
-            current.destination = None;
-            current.due = Some(Instant::now());
+            current.answer = RouteAnswer::Looking;
+            current.send = SendState::ResolvingRule {
+                clock: Clock::Counting {
+                    due: Instant::now(),
+                },
+            };
             drop(found);
             let deadline = Instant::now() + Duration::from_secs(20);
             while matches!(
-                worker.current.as_ref().unwrap().route.answer,
+                worker.current.as_ref().unwrap().answer,
                 RouteAnswer::Looking
             ) {
                 assert!(Instant::now() < deadline, "the rule never came");
@@ -2410,10 +2334,16 @@ mod tests {
             }
             let answered = Instant::now();
             let current = worker.current.as_ref().unwrap();
-            assert!(current.sent.is_none(), "not before its ring runs out");
-            assert!(current.due.unwrap() + Duration::from_millis(100) >= answered + SEND_HOLD);
+            assert!(
+                current.sent_session().is_none(),
+                "not before its ring runs out"
+            );
+            assert!(
+                current.send.clock().unwrap().due().unwrap() + Duration::from_millis(100)
+                    >= answered + SEND_HOLD
+            );
             settle(&mut worker);
-            assert!(worker.current.as_ref().unwrap().sent.is_some());
+            assert!(worker.current.as_ref().unwrap().sent_session().is_some());
             std::fs::remove_dir_all(bundle.parent().unwrap()).ok();
         }
 
@@ -2437,19 +2367,30 @@ mod tests {
             worker.written(bundle.clone(), look);
             worker.hold(true);
             // Its window ran out while the pointer was on the capsule.
-            worker.current.as_mut().unwrap().due = Some(Instant::now());
+            worker
+                .current
+                .as_mut()
+                .unwrap()
+                .send
+                .clock_mut()
+                .unwrap()
+                .set_paused(Instant::now(), Duration::ZERO);
             worker.prepared();
             assert_eq!(POSTS.load(Ordering::Relaxed), 0, "held, it waits");
             // Held 10 s with 2 s left: it goes 2 s after the pointer leaves.
             let current = worker.current.as_mut().unwrap();
             let since = Instant::now() - Duration::from_secs(10);
-            current.held = Some(since);
-            current.due = Some(since + Duration::from_secs(2));
+            current
+                .send
+                .clock_mut()
+                .unwrap()
+                .set_paused(since, Duration::from_secs(2));
             worker.hold(false);
             let current = worker.current.as_ref().unwrap();
-            assert!(current.held.is_none());
-            let left = current
-                .due
+            let clock = current.send.clock().unwrap();
+            assert!(!clock.is_paused());
+            let left = clock
+                .due()
                 .unwrap()
                 .saturating_duration_since(Instant::now());
             assert!(left > Duration::from_millis(1900) && left <= Duration::from_secs(2));
@@ -2498,7 +2439,7 @@ mod tests {
             settle(&mut worker);
             assert_eq!(POSTS.load(Ordering::Relaxed), 1);
             assert_eq!(worker.current.as_ref().unwrap().bundle, second);
-            assert!(worker.current.as_ref().unwrap().sent.is_none());
+            assert!(worker.current.as_ref().unwrap().sent_session().is_none());
             std::fs::remove_dir_all(first.parent().unwrap()).unwrap();
             std::fs::remove_dir_all(second.parent().unwrap()).unwrap();
         }
@@ -2519,7 +2460,7 @@ mod tests {
             worker.pending = Some(pending);
             drop(found);
             let rows = |worker: &Worker| -> Vec<String> {
-                listed(&worker.current.as_ref().unwrap().route.answer)
+                listed(&worker.current.as_ref().unwrap().answer)
                     .iter()
                     .map(|dest| dest.session.clone())
                     .collect()
@@ -2574,7 +2515,7 @@ mod tests {
                 rows(&worker),
                 ["ses_board", "ses_home", "ses_hex", "ses_new"]
             );
-            let answer = &worker.current.as_ref().unwrap().route.answer;
+            let answer = &worker.current.as_ref().unwrap().answer;
             assert!(matches!(answer, RouteAnswer::Guess { .. }), "{answer:?}");
             worker.pending = None;
             std::fs::remove_dir_all(bundle.parent().unwrap()).ok();
@@ -2595,126 +2536,11 @@ mod tests {
             let _ = found.send(Some(look::Live::default()));
             settle(&mut worker);
             assert_eq!(
-                worker
-                    .current
-                    .as_ref()
-                    .unwrap()
-                    .sent
-                    .as_ref()
-                    .unwrap()
-                    .session,
-                "ses_home"
+                worker.current.as_ref().unwrap().sent_session(),
+                Some("ses_home")
             );
-            assert!(worker.current.as_ref().unwrap().due.is_none());
+            assert!(!worker.current.as_ref().unwrap().send.is_pending_rule());
             std::fs::remove_dir_all(bundle.parent().unwrap()).unwrap();
-        }
-
-        #[test]
-        #[ignore = "paired wall-clock benchmark; fake 60 ms remote and 2.5 s routing model"]
-        fn paired_written_to_route_and_send() {
-            fn remote(path: &str, budget: Duration) -> anyhow::Result<Vec<u8>> {
-                std::thread::sleep(Duration::from_millis(60));
-                sessions(path, budget)
-            }
-            fn old_send(path: &Path, id: &str) -> anyhow::Result<scrawl_capture::handoff::Posted> {
-                // Light copy, idle check, post: three serialized round trips.
-                std::thread::sleep(Duration::from_millis(180));
-                posted(path, id)
-            }
-            fn new_send(path: &Path, id: &str) -> anyhow::Result<scrawl_capture::handoff::Posted> {
-                // Idle check and post; copying is no longer on this path.
-                std::thread::sleep(Duration::from_millis(120));
-                posted(path, id)
-            }
-            fn model(_: &[u8], _: Duration) -> anyhow::Result<Vec<u8>> {
-                std::thread::sleep(Duration::from_millis(2500));
-                Ok(serde_json::to_vec(&serde_json::json!({
-                    "model": "fixture", "answers": {
-                        "target": {"type":"choice", "choice":"targets.t1", "confidence":0.95, "probabilities":{"targets.t1":0.95,"targets.t2":0.05}},
-                        "any_fits": {"type":"noul", "noul":0.95}
-                    }
-                }))?)
-            }
-            for (name, target) in [
-                ("session", Some("ses_board")),
-                ("folder", Some("/p/board")),
-                ("guess", None),
-            ] {
-                for after in [false, true] {
-                    let mut shown = Vec::new();
-                    let mut sent = Vec::new();
-                    for sample in 0..8 {
-                        let router = router_with(|c| {
-                            c.smart_routing = true;
-                            c.jev_routing = target.is_none();
-                            if let Some(target) = target {
-                                c.apps.insert("com.example.board".into(), target.into());
-                            }
-                        });
-                        let mut senses = senses(no_tab);
-                        senses.hooks.api = remote;
-                        let context = RouteContext {
-                            front_bundle_id: None,
-                            captured_bundle_id: Some("com.example.board".into()),
-                            app_pid: None,
-                        };
-                        let mut look = look_with(context, router, senses).unwrap();
-                        if after {
-                            // Preparation completes during the recording, before Written.
-                            let live = look.seen.recv_timeout(Duration::from_secs(5)).unwrap();
-                            let (tx, rx) = mpsc::sync_channel(1);
-                            tx.send(live).unwrap();
-                            look.seen = rx;
-                        }
-                        look.model.ask = model;
-                        let bundle = written("com.example.board");
-                        let outcomes = SharedOutcomes::default();
-                        lock(&outcomes).fail(bundle.clone(), "test".into());
-                        let mut worker = worker(outcomes.clone());
-                        worker.forward = if after { new_send } else { old_send };
-                        let started = Instant::now();
-                        let observer = std::thread::spawn(move || {
-                            loop {
-                                if lock(&outcomes)
-                                    .last
-                                    .as_ref()
-                                    .and_then(|c| c.route.as_ref())
-                                    .is_some_and(|r| r.answer != RouteAnswer::Looking)
-                                {
-                                    return started.elapsed();
-                                }
-                                assert!(started.elapsed() < Duration::from_secs(10));
-                                std::thread::park_timeout(Duration::from_millis(1));
-                            }
-                        });
-                        if after {
-                            worker.written(bundle.clone(), look);
-                        } else {
-                            worker.written_before(bundle.clone(), look);
-                        }
-                        settle_with_clock(&mut worker, false);
-                        let elapsed = started.elapsed();
-                        let first = observer.join().unwrap();
-                        if sample > 0 {
-                            shown.push(first.as_millis());
-                            if target.is_some() {
-                                sent.push(elapsed.saturating_sub(first).as_millis());
-                            }
-                        }
-                        let _ = std::fs::remove_dir_all(bundle.parent().unwrap());
-                    }
-                    shown.sort();
-                    sent.sort();
-                    eprintln!(
-                        "METRIC {name}_{}_written_to_shown_ms={} range={}-{} routed_to_sent_ms={:?}",
-                        if after { "after" } else { "before" },
-                        shown[3],
-                        shown[0],
-                        shown[6],
-                        sent.get(3)
-                    );
-                }
-            }
         }
 
         /// What the worker answers for a capture of `bundle_id` looked at
@@ -2734,8 +2560,8 @@ mod tests {
             worker.written(written(bundle_id), look);
             settle(&mut worker);
             let current = worker.current.unwrap();
-            let sent = current.sent.map(|sent| sent.session);
-            (current.route.answer, sent)
+            let sent = current.sent_session().map(str::to_owned);
+            (current.answer, sent)
         }
 
         #[test]
@@ -2896,7 +2722,7 @@ mod tests {
             let mut worker = worker(SharedOutcomes::default());
             worker.written(written(GHOSTTY), look);
             settle(&mut worker);
-            let answer = &worker.current.as_ref().unwrap().route.answer;
+            let answer = &worker.current.as_ref().unwrap().answer;
             assert!(
                 matches!(answer, RouteAnswer::Guess { site: Some(site), .. } if site == "seer terminal"),
                 "{answer:?}"
@@ -3052,15 +2878,19 @@ mod tests {
             worker.written(written("com.brave.Browser"), look);
             settle(&mut worker);
             let current = worker.current.as_mut().unwrap();
-            current.sent = Some(Sent {
-                delivery_id: "dlv_1".into(),
+            current.send = SendState::Delivered {
                 session: "ses_board".into(),
-            });
-            current.offered = Some(scrawl_capture::OfferRule {
-                kind: RuleKind::Site,
-                key: "https://board.example.com".into(),
-                target: "ses_board".into(),
-            });
+                to: "BOARD".into(),
+                undo: Some(Sent {
+                    delivery_id: "dlv_1".into(),
+                }),
+                offer: Some(scrawl_capture::OfferRule {
+                    kind: RuleKind::Site,
+                    key: "https://board.example.com".into(),
+                    target: "ses_board".into(),
+                }),
+                saved: None,
+            };
             let site = |session: &str| {
                 Some((
                     RuleKind::Site,
@@ -3119,11 +2949,15 @@ mod tests {
             settle(&mut worker);
             let current = worker.current.as_mut().unwrap();
             // Not a delivery id, so the router's undo fails.
-            current.sent = Some(Sent {
-                delivery_id: "not a delivery".into(),
+            current.send = SendState::Delivered {
                 session: "ses_board".into(),
-            });
-            current.route.delivery = Some(RouteDelivery::Sent { to: "BOARD".into() });
+                to: "BOARD".into(),
+                undo: Some(Sent {
+                    delivery_id: "not a delivery".into(),
+                }),
+                offer: None,
+                saved: None,
+            };
             worker.undo();
             let published = lock(&outcomes)
                 .last
@@ -3134,7 +2968,10 @@ mod tests {
                 published,
                 Some(RouteDelivery::TooLate { to: "BOARD".into() })
             );
-            assert!(worker.current.unwrap().sent.is_some(), "it's still sent");
+            assert!(
+                worker.current.unwrap().send.has_undo_handle(),
+                "it's still sent"
+            );
         }
 
         #[test]
@@ -3171,6 +3008,47 @@ mod tests {
             }
         }
 
+        /// The hosted Jev lookup runs only while `Auto-send with Jev` is on, so a
+        /// settings file left with `jevRouting` on and `autoSend` back at
+        /// `rules` never reaches Jev.
+        #[test]
+        fn only_an_on_auto_send_with_jev_asks_jev() {
+            static ASKED: AtomicU64 = AtomicU64::new(0);
+            fn ask(_: &[u8], _: Duration) -> anyhow::Result<Vec<u8>> {
+                ASKED.fetch_add(1, Ordering::Relaxed);
+                anyhow::bail!("test Jev")
+            }
+            for (auto_send, asks) in [
+                (policy::AutoSend::Rules, 0),
+                (policy::AutoSend::Confident, 1),
+            ] {
+                ASKED.store(0, Ordering::Relaxed);
+                let router = router_with(|c| {
+                    c.smart_routing = true;
+                    c.jev_routing = true;
+                    c.auto_send = auto_send;
+                });
+                let live = look::Live {
+                    candidates: vec![
+                        candidate("ses_board", "BOARD", 30),
+                        candidate("ses_home", "HOME", 20),
+                    ],
+                    ..look::Live::default()
+                };
+                let (mut look, found) = held_look(router, live.clone());
+                look.model.ask = ask;
+                let outcomes = SharedOutcomes::default();
+                let mut worker = worker(outcomes.clone());
+                let bundle = written("com.example.board");
+                lock(&outcomes).fail(bundle.clone(), "test".into());
+                worker.written(bundle.clone(), look);
+                found.send(Some(live)).unwrap();
+                settle(&mut worker);
+                assert_eq!(ASKED.load(Ordering::Relaxed), asks, "{auto_send:?}");
+                std::fs::remove_dir_all(bundle.parent().unwrap()).unwrap();
+            }
+        }
+
         #[test]
         fn a_look_past_its_deadline_is_routed_without() {
             let (_looking, seen) = mpsc::sync_channel(1);
@@ -3187,9 +3065,109 @@ mod tests {
             settle(&mut worker);
             assert!(started.elapsed() < Duration::from_secs(1));
             assert!(matches!(
-                worker.current.unwrap().route.answer,
+                worker.current.unwrap().answer,
                 RouteAnswer::Unreachable { .. }
             ));
+        }
+
+        #[test]
+        fn retried_queued_send_reports_too_late_on_undo() {
+            fn offline(_: &Path, _: &str) -> anyhow::Result<scrawl_capture::handoff::Posted> {
+                anyhow::bail!("Could not reach server")
+            }
+            let context = RouteContext {
+                front_bundle_id: Some("com.brave.Browser".into()),
+                captured_bundle_id: Some("com.brave.Browser".into()),
+                app_pid: None,
+            };
+            let outcomes = SharedOutcomes::default();
+            let mut worker = worker(outcomes.clone());
+            worker.forward = offline;
+            let bundle = written("com.brave.Browser");
+            lock(&outcomes).fail(bundle.clone(), "test".into());
+            let look = look_with(context, router_with(|_| {}), senses(dev_tab)).unwrap();
+            worker.written(bundle.clone(), look);
+            settle(&mut worker);
+
+            // Pick BOARD while OpenCode is down -> Queued.
+            worker.chosen("ses_board", false);
+            assert!(matches!(
+                worker.current.as_ref().unwrap().send.delivery(),
+                Some(RouteDelivery::Queued { ref to, .. }) if to == "BOARD"
+            ));
+
+            // Background retry delivers the bundle -> Sent with no undo handle.
+            worker.apply_retried(std::slice::from_ref(&bundle));
+            let published = || {
+                lock(&outcomes)
+                    .last
+                    .as_ref()
+                    .and_then(|last| last.route.clone())
+                    .and_then(|route| route.delivery)
+            };
+            assert_eq!(
+                published(),
+                Some(RouteDelivery::Sent { to: "BOARD".into() })
+            );
+
+            // Undo must report TooLate instead of silently doing nothing.
+            worker.undo();
+            assert_eq!(
+                published(),
+                Some(RouteDelivery::TooLate { to: "BOARD".into() })
+            );
+            std::fs::remove_dir_all(bundle.parent().unwrap()).ok();
+        }
+
+        #[test]
+        fn retried_queued_send_never_double_sends_on_repick_and_redirects_elsewhere() {
+            static POSTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+            fn offline(_: &Path, _: &str) -> anyhow::Result<scrawl_capture::handoff::Posted> {
+                anyhow::bail!("Could not reach server")
+            }
+            fn record_post(
+                path: &Path,
+                id: &str,
+            ) -> anyhow::Result<scrawl_capture::handoff::Posted> {
+                POSTS.lock().unwrap().push(id.into());
+                posted(path, id)
+            }
+            POSTS.lock().unwrap().clear();
+
+            let context = RouteContext {
+                front_bundle_id: Some("com.brave.Browser".into()),
+                captured_bundle_id: Some("com.brave.Browser".into()),
+                app_pid: None,
+            };
+            let outcomes = SharedOutcomes::default();
+            let mut worker = worker(outcomes.clone());
+            worker.forward = offline;
+            let bundle = written("com.brave.Browser");
+            lock(&outcomes).fail(bundle.clone(), "test".into());
+            let look = look_with(context, router_with(|_| {}), senses(dev_tab)).unwrap();
+            worker.written(bundle.clone(), look);
+            settle(&mut worker);
+
+            // Initial pick queues; background retry delivers to ses_board.
+            worker.chosen("ses_board", false);
+            worker.apply_retried(std::slice::from_ref(&bundle));
+            worker.forward = record_post;
+
+            // Re-picking the same session must not send a second time.
+            worker.chosen("ses_board", false);
+            assert!(
+                POSTS.lock().unwrap().is_empty(),
+                "picking the already-retried session must not double-send"
+            );
+
+            // Picking a different session redirects and sends once there.
+            worker.chosen("ses_home", false);
+            assert_eq!(std::mem::take(&mut *POSTS.lock().unwrap()), ["ses_home"]);
+            assert_eq!(
+                worker.current.as_ref().unwrap().sent_session(),
+                Some("ses_home")
+            );
+            std::fs::remove_dir_all(bundle.parent().unwrap()).ok();
         }
     }
 }

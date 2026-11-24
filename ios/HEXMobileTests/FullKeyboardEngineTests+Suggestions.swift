@@ -191,6 +191,38 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(target.text, "see teh ok", "space keeps it, with no second space")
     }
 
+    /// X and TestFlight: "when you type the word of an emoji it suggests and replaces that word
+    /// (smile → 😊), similar to iOS". The strip's emoji tapped while the word is typed takes the
+    /// word's place, with a space as any suggestion; after the space it goes after the word, as
+    /// before. Delete then takes the space and the strip offers the word back, as after an
+    /// autocorrection. Learn how I type learns nothing from it.
+    func testAnEmojiTappedForTheWordBeingTypedTakesItsPlaceAndDeleteOffersTheWordBack() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let settings = TypingJournalSettings(defaults: defaults)
+        settings.isEnabled = true
+        let journal = TypingJournal(directory: directory, settings: settings)
+        engine.journal = journal
+        let smile = KeyboardSuggestion(displayText: "😊", replacement: "😊", kind: .emoji)
+        let pizza = KeyboardSuggestion(displayText: "🍕", replacement: "🍕", kind: .emoji)
+
+        type("we smile")
+        engine.acceptSuggestion(smile)
+        XCTAssertEqual(target.text, "we 😊 ", "in the word's place, with its space")
+        XCTAssertNotEqual(engine.suggestions.first?.kind, .revert, "not before delete, as after an autocorrection")
+        tap(.delete)
+        XCTAssertEqual(target.text, "we 😊", "delete takes the space")
+        XCTAssertEqual(engine.suggestions.first, suggestion("smile", .revert), "and the strip offers the word back")
+        engine.acceptSuggestion(engine.suggestions[0])
+        XCTAssertEqual(target.text, "we smile")
+
+        type(" pizza ")
+        engine.acceptSuggestion(pizza)
+        XCTAssertEqual(target.text, "we smile pizza 🍕 ", "after the space, after the word")
+        XCTAssertTrue(journal.current.corrections.isEmpty, "no typing fix: \(journal.current.corrections)")
+    }
+
     func testAPickedSuggestionMidSentenceTypesNoSecondSpace() {
         typeOverBrown()
         type("blac")
@@ -305,6 +337,30 @@ extension FullKeyboardEngineTests {
                 XCTAssertLessThan(well.frame.maxX, cancel.frame.minX)
             }
         }
+    }
+
+    /// iOS hands the field's traits to the keyboard as it brings it on screen, after its first
+    /// words were chosen without them, so they change then ("the" to "The" once the field says it
+    /// capitalizes, "I'm" to "I’m"). Until the keyboard has appeared those changes just show;
+    /// once it is on screen they roll, and the next appearance (another field) holds still again.
+    func testTheStripsWordsJustShowUntilTheKeyboardIsOnScreen() throws {
+        let window = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.windows.first }.first)
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: target)
+        view.frame = CGRect(x: 0, y: 0, width: 393, height: 254)
+        window.addSubview(view)
+        defer { view.removeFromSuperview() }
+        view.layoutIfNeeded()
+        let strip = view.stripView
+        func show(_ words: [String]) -> Double? {
+            strip.update(suggestions: words.map { KeyboardSuggestion(displayText: $0, replacement: $0, kind: .nextWord) }, showsUndo: false, statusText: nil)
+            return strip.debugMotionSample()["slot1"]
+        }
+        XCTAssertEqual(show(["I", "the", "I'm"]), 1)
+        XCTAssertEqual(show(["I", "The", "I’m"]), 1, "appearing: the recased word is just there")
+        view.keyboardDidAppear()
+        XCTAssertEqual(show(["I", "They", "I’m"]), 0, "on screen: a change rolls")
+        view.prepareForField()
+        XCTAssertEqual(show(["I", "There", "I’m"]), 1, "appearing again, for another field")
     }
 
     /// The Hex key's menu opens toward the screen's middle, and the Full Access hint's Open Hex

@@ -2,27 +2,32 @@
 //! chord ends the capture, unless the hold is long enough for Labs › Hold
 //! through other keys.
 
-use super::{CaptureState, HotkeyAction};
+use std::time::Duration;
 
-/// How long a modifier-only shortcut is held before a key or button joining
-/// it is meant for the app in front; the macOS shortcut machine holds the
-/// same second (`HOLD_THROUGH_KEYS_AFTER`).
-const HOLD_THROUGH_KEYS_AFTER_MS: u32 = 1_000;
+use super::{Capture, CaptureState, HotkeyAction};
 
 impl CaptureState {
     /// Another key joined a held modifier-only shortcut: it was a chord
     /// meant for another application. Only a recording capture reports
     /// it, since a bare cancel also cancels the newest unfinished job.
     pub(super) fn interrupt(&mut self) -> Option<HotkeyAction> {
-        if !self.active {
-            return None;
+        match self.phase {
+            Capture::Idle { .. } | Capture::Locked { .. } => None,
+            Capture::Armed { flavour } => {
+                self.phase = Capture::Idle {
+                    flavour,
+                    last_release_ms: None,
+                };
+                None
+            }
+            Capture::Held { flavour, .. } => {
+                self.phase = Capture::Idle {
+                    flavour,
+                    last_release_ms: None,
+                };
+                Some(HotkeyAction::Cancel)
+            }
         }
-        let recording = self.recording;
-        self.active = false;
-        self.second_tap = false;
-        self.recording = false;
-        self.last_release_ms = None;
-        recording.then_some(HotkeyAction::Cancel)
     }
 
     /// Whether a key or button going down now joins a hold that keeps
@@ -36,12 +41,14 @@ impl CaptureState {
         hold_through_keys: bool,
         timestamp_ms: u32,
     ) -> bool {
-        hold_through_keys
-            && self.recording
-            && !self.toggle
-            && self.pressed_at_ms.is_some_and(|pressed| {
-                timestamp_ms.wrapping_sub(pressed) >= HOLD_THROUGH_KEYS_AFTER_MS
-            })
+        match self.phase {
+            Capture::Held { pressed_at_ms, .. } => crate::dictation::holds_through_joining_keys(
+                hold_through_keys,
+                self.toggle,
+                Duration::from_millis(u64::from(timestamp_ms.wrapping_sub(pressed_at_ms))),
+            ),
+            Capture::Idle { .. } | Capture::Armed { .. } | Capture::Locked { .. } => false,
+        }
     }
 }
 
@@ -76,10 +83,7 @@ mod tests {
     #[test]
     fn toggle_and_a_wrapping_tick_count_keep_the_second() {
         // Toggle's held press locks on release, so the lab leaves it alone.
-        let mut toggle = CaptureState {
-            toggle: true,
-            ..CaptureState::default()
-        };
+        let mut toggle = CaptureState::new(true);
         assert_eq!(toggle.press(true, false, 100), Some(HotkeyAction::Start));
         assert!(!toggle.holds_through_joining_keys(true, 9_000));
 

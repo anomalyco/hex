@@ -74,10 +74,7 @@ pub(super) fn meter_update(hud: &mut Hud, event: HudEvent) -> bool {
 /// reads changed, so the frame needs no new commit.
 #[cfg(any(target_os = "windows", test))]
 pub(super) fn poll(hud: &mut Hud, _now: f64, tx: &mut Tx) -> bool {
-    let wants = wants_frame(
-        hud.animating.load(Ordering::Acquire),
-        hud.shown.load(Ordering::Acquire),
-    );
+    let wants = wants_frame(hud.animating.load(Ordering::Acquire), hud.is_shown());
     let now = Instant::now();
     hud.armed = should_arm(wants, hud.last_drawn, hud.polled_at, now);
     hud.polled_at = Some(now);

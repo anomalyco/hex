@@ -41,6 +41,8 @@ internal class PersonalWords(private val model: TypingModel, words: Collection<S
     }
 
     val isEmpty get() = codes.isEmpty() && shortcuts.isEmpty()
+    /** Your words, spelled your way. */
+    val words: List<String> get() = texts.asList()
     override val size get() = codes.size
     override fun length(word: Int) = codes[word].size
     private fun byte(word: Int, depth: Int) = if (depth < codes[word].size) codes[word][depth].toInt() and 255 else -1

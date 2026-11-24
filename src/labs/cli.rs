@@ -14,7 +14,7 @@ impl Feature {
     /// reader has already enforced any managed lock, and it is checked here
     /// as `encode` does.
     pub fn saved_on(self, settings: &AppSettings) -> bool {
-        self.on(settings) && self.shipped() && self.managed().is_none()
+        self.enabled_under(settings, crate::policy::Policy::current())
     }
 }
 

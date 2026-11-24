@@ -87,8 +87,8 @@ let
       hash = "sha256-MJJiug3LfbKsuHcL2+LJk95+j5kk/MWzb5ihdBlHLmE=";
     };
     "rune-0.0.1" = {
-      rev = "c853811c8e0e60a632eaa2e72992f871225737ef";
-      hash = "sha256-0yJb+UFu47T2pgDIi9B9IAxbCWNu0/OMVG5uGNF6lyI=";
+      rev = "9d4b4636f1f7e6d172053a0b6469a334c0bfc227";
+      hash = "sha256-h7g5m6MAQ+7SjmZjLfXbKaTvbCyBLcEGwop3oFzL4qg=";
     };
     "transcribe-cpp-sys-0.4.1" = {
       rev = "60bed89dab84f7c1fddc3a17ad7fa8a27ddfba19";
@@ -126,6 +126,10 @@ rustPlatform.buildRustPackage (finalAttrs: {
       # The Labs registry's published copy: a Rust test compares it to the registry.
       ../site/src/labs.json
       ../macos/HexMicrophoneDriver/Info.plist
+      # The updater's and driver install's code-signature requirements, read at
+      # compile time by src/updater/macos.rs and src/audio/hex_microphone.rs.
+      ../app/driver-requirement.txt
+      ../app/update-requirement.txt
       # Built in: a 2.3.1 install moves itself into this installer's layout.
       ../.github/release/install-linux.sh
     ];

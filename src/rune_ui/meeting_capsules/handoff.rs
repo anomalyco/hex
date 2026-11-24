@@ -3,43 +3,66 @@ use super::*;
 
 impl Capsule {
     pub(super) fn request_stop(&mut self) {
-        if !self.stopping
-            && matches!(self.kind, Some(Kind::Recording(_)))
-            && self.send(ControllerCommand::Stop)
+        if matches!(
+            self.state,
+            State::Recording {
+                stopping: false,
+                ..
+            }
+        ) && self.send(ControllerCommand::Stop)
         {
             self.mark_stopping();
         }
     }
 
     pub(super) fn mark_stopping(&mut self) {
-        if matches!(self.kind, Some(Kind::Recording(_))) {
-            self.stopping = true;
+        if let State::Recording { stopping, .. } = &mut self.state {
+            *stopping = true;
             #[cfg(target_os = "windows")]
             self.fit_recording_window();
         }
     }
 
     pub(super) fn capture_stopped(&mut self) {
-        if let Some(Kind::Recording(r)) = &self.kind {
-            self.kind = Some(Kind::Finalizing {
-                duration_ms: r.started.elapsed().as_millis() as u64,
-            });
+        if let State::Recording {
+            recording, hovered, ..
+        } = &self.state
+        {
+            let duration_ms = recording.started.elapsed().as_millis() as u64;
+            let hovered = *hovered;
+            self.state = State::Finalizing {
+                duration_ms,
+                hovered,
+            };
+            // Windows: the finished panel is shorter than an open one, so
+            // its window shrinks only once the surface has landed on it.
             #[cfg(target_os = "windows")]
-            if let Some(resize) = &self.resize {
-                resize(panel::finalizing_window_size());
-            }
+            self.fit_recording_window();
         }
     }
 
     /// The controller accepted the recording: the offer's handoff ends and
-    /// the recording takes the surface it left.
-    pub(super) fn start_recording(&mut self, recording: Recording, tx: &mut Tx) {
-        self.kind = Some(Kind::Recording(recording));
+    /// the recording takes the surface it left, in the corner and on the
+    /// display the caller read from that surface.
+    pub(super) fn start_recording(
+        &mut self,
+        recording: Recording,
+        anchor: screen::Anchor,
+        tx: &mut Tx,
+    ) {
+        // Windows: the window this recording starts in was sized by the show
+        // that brought it (or is its offer's), not by the last recording.
+        #[cfg(target_os = "windows")]
+        self.recording_window.reset();
+        self.state = State::Recording {
+            recording,
+            hovered: false,
+            stopping: false,
+        };
+        self.corner = anchor.corner;
+        self.display = anchor.display;
         self.waveform = Some(Box::new(waveform::Listening::new(Instant::now())));
         self.live = Live::default();
-        self.hovered = false;
-        self.stopping = false;
-        self.expired = false;
         self.throw.stop();
         // Nothing here mounts with an entrance of its own: the surface
         // carries the change.
@@ -49,11 +72,28 @@ impl Capsule {
 
     pub(super) fn published(&mut self, manifest: Box<MeetingManifest>) {
         self.live = Live::default();
-        self.kind = Some(Kind::Ready(manifest));
+        let hover = if self.hovered() {
+            ReadyHover::Hovered
+        } else {
+            ReadyHover::Idle
+        };
+        self.state = State::Ready { manifest, hover };
+        // The ready panel is taller than the finalizing one, so this grows
+        // it here; a shrink would wait for the surface.
+        #[cfg(target_os = "windows")]
+        self.fit_recording_window();
     }
 }
 
 impl MeetingCapsules {
+    pub(super) fn clear_finishing(&mut self) {
+        if matches!(self.host, offer::Host::Finishing(_)) {
+            self.host = offer::Host::Panel;
+            self.generation.fetch_add(1, Ordering::SeqCst);
+            self.pill.handle.update(|c, tx| c.dismiss(tx));
+        }
+    }
+
     pub(super) fn advance_handoff(&mut self, event: &ControllerEvent, inherit: bool) {
         // A new panel supersedes an old summary, and failure yields to the
         // host's failure UI. Notes never take ownership or show a window.
@@ -63,14 +103,13 @@ impl MeetingCapsules {
                 | ControllerEvent::RecordingStarted { .. }
                 | ControllerEvent::Reminder { .. }
                 | ControllerEvent::Offer(..)
+                | ControllerEvent::Discarded(_)
                 | ControllerEvent::Failed { .. }
-        ) && self.finishing.take().is_some()
-        {
-            self.generation.fetch_add(1, Ordering::SeqCst);
-            self.pill.handle.update(|c, tx| c.dismiss(tx));
+        ) {
+            self.clear_finishing();
         }
         if let Some(id) = self.pill.apply(event, inherit) {
-            self.finishing = Some(id);
+            self.host = offer::Host::Finishing(id);
             if matches!(event, ControllerEvent::Transcribing) {
                 self.pill.handle.update(|c, tx| {
                     c.capture_stopped();
@@ -83,7 +122,7 @@ impl MeetingCapsules {
     /// The capsule a finished meeting still owns: the recording's own
     /// window while it is finishing there, else the panel.
     pub(super) fn handle_for(&self, id: &str) -> &OverlayHandle<Capsule> {
-        if self.finishing.as_deref() == Some(id) {
+        if self.host.finishing_id() == Some(id) {
             &self.pill.handle
         } else {
             &self.panel
@@ -94,23 +133,22 @@ impl MeetingCapsules {
         let handle = self.handle_for(id);
         let id = id.to_owned();
         handle.update_if(move |c, _| {
-            let Some(Kind::Ready(m)) = &c.kind else {
+            if !matches!(&c.state, State::Ready { manifest: m, .. } if m.id == id) {
                 return false;
-            };
-            #[cfg(target_os = "windows")]
-            if m.id == id
-                && let Some(resize) = &c.resize
-            {
-                resize(ready_window_size(m));
             }
-            m.id == id
+            // A summary arriving grows the panel here; a window only ever
+            // shrinks once the surface has landed.
+            #[cfg(target_os = "windows")]
+            c.fit_recording_window();
+            true
         });
     }
 
-    pub(super) fn finish_meeting(&mut self, manifest: &MeetingManifest) -> OverlayHandle<Capsule> {
-        if self.finishing.as_ref() != Some(&manifest.id) {
+    pub(super) fn finish_meeting(&mut self, manifest: &MeetingManifest) {
+        if self.host.finishing_id() != Some(manifest.id.as_str()) {
+            self.clear_finishing();
             self.show_panel(Kind::Ready(Box::new(manifest.clone())), Some(READY_TIMEOUT));
-            return self.panel.clone();
+            return;
         }
         let handle = self.pill.handle.clone();
         let finished = Box::new(manifest.clone());
@@ -121,8 +159,7 @@ impl MeetingCapsules {
             c.stir(tx);
         });
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
-        self.timeout(handle.clone(), generation, READY_TIMEOUT);
-        handle
+        self.timeout(handle, generation, READY_TIMEOUT);
     }
 }
 
@@ -135,6 +172,10 @@ impl Pill {
             ControllerEvent::Transcribing => model.shown.take(),
             ControllerEvent::Finished(m) if model.shown.as_ref() == Some(&m.id) => {
                 model.shown.take()
+            }
+            ControllerEvent::Discarded(id) if model.shown.as_ref() == Some(id) => {
+                model.shown.take();
+                None
             }
             _ => None,
         };

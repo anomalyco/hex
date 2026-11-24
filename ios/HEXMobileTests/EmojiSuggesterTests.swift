@@ -135,6 +135,80 @@ final class EmojiSuggesterTests: XCTestCase {
         XCTAssertEqual(strip("at 7 "), [])
         // A word several emoji only describe offers none.
         XCTAssertEqual(strip("face "), [])
+        // Hex's chat words, best first; an emoji only part of the word's names (🚒 "fire
+        // engine", ❤️‍🔥 "heart on fire") never joins them.
+        XCTAssertEqual(strip("heart "), ["❤️", "💕", "💖"])
+        XCTAssertEqual(strip("fire "), ["🔥"])
+        XCTAssertEqual(strip("smile "), ["😊", "😄"])
+    }
+
+    func testTheWordBeingTypedHasTheFinishedWordsEmoji() throws {
+        func word(_ text: String, _ language: String = "en") throws -> [String] {
+            let library = try self.library(language)
+            return EmojiSuggester.forWord(text, library: library, limit: 1).map { library.entries[$0].emoji }
+        }
+        XCTAssertEqual(try word("pizza"), ["🍕"])
+        XCTAssertEqual(try word("pizzas"), ["🍕"], "a plural is the word")
+        XCTAssertEqual(try word("piz"), [], "a prefix is not")
+        XCTAssertEqual(try word("the"), [], "nor a stopword")
+        XCTAssertEqual(try word("face"), [], "nor a word several emoji only describe")
+        XCTAssertEqual(try word("fuego", "es"), ["🔥"], "an emoji's whole name in the keyboard's language, though other emoji share it")
+        XCTAssertEqual(try word("katze", "de"), ["🐈"])
+        XCTAssertEqual(try word("sun"), ["☀️"])
+        XCTAssertEqual(try word("heart"), ["❤️"], "a chat word, though 45 emoji share it")
+        XCTAssertEqual(try word("heart", "de"), ["❤️"], "English chat words on every layout")
+    }
+
+    /// X and TestFlight: Apple's keyboard offers the emoji as you type its name; Hex offered it
+    /// only after the space. The strip now offers it while the word is typed: in the next
+    /// empty slot or the right slot's place, never in place of what you typed, the word space
+    /// puts in or your own words, never while space would put in another word, and only in a
+    /// field that takes emoji.
+    func testTheStripOffersTheEmojiOfTheWordBeingTyped() throws {
+        let suite = "anomaly.hex.tests.emoji-typed"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        func view(_ text: String, emoji: Bool = true, field: (FixtureTextTarget) -> Void = { _ in }) -> FullKeyboardView {
+            let target = FixtureTextTarget(text: text)
+            target.autocapitalizationType = UITextAutocapitalizationType.none
+            field(target)
+            let view = FullKeyboardView(model: KeyboardViewModel(), target: target)
+            view.emojiOverride = emoji
+            view.makeEmojiUsage = { EmojiUsageStore(defaults: defaults) }
+            view.refreshEmojiKey()
+            view.engine.configureForField()
+            return view
+        }
+        let literal = KeyboardSuggestion(displayText: "“smile”", replacement: "smile", kind: .keepLiteral)
+        let smiles = KeyboardSuggestion(displayText: "smiles", replacement: "smiles", kind: .primary(autoReplace: false))
+        let smiled = KeyboardSuggestion(displayText: "smiled", replacement: "smiled", kind: .secondary)
+        let chip = KeyboardSuggestion(displayText: "😊", replacement: "😊", kind: .emoji)
+
+        let typing = view("we smile")
+        XCTAssertTrue(typing.withTypedWordEmoji(typing.engine.suggestions)?.contains(chip) == true, "\(typing.engine.suggestions)")
+        XCTAssertEqual(typing.withTypedWordEmoji([literal, smiles, smiled]), [literal, smiles, chip], "the right slot's word goes")
+        XCTAssertEqual(typing.withTypedWordEmoji([literal]), [literal, chip], "an empty slot first")
+        let fix = KeyboardSuggestion(displayText: "smiled", replacement: "smiled", kind: .primary(autoReplace: true))
+        XCTAssertNil(typing.withTypedWordEmoji([literal, fix, smiles]), "never while space puts in another word")
+        let same = KeyboardSuggestion(displayText: "smile", replacement: "smile", kind: .primary(autoReplace: true))
+        XCTAssertEqual(typing.withTypedWordEmoji([literal, same, smiled]), [literal, same, chip])
+        typing.engine.autocorrect.setVocabulary(["Smiley"])
+        let yours = KeyboardSuggestion(displayText: "Smiley", replacement: "Smiley", kind: .secondary)
+        XCTAssertEqual(typing.withTypedWordEmoji([literal, smiles, yours]), [literal, chip, yours], "your own word stays")
+
+        XCTAssertNil(view("we smil").withTypedWordEmoji([literal, smiles, smiled]), "a prefix")
+        XCTAssertNil(view("we smile", emoji: false).withTypedWordEmoji([literal]), "Settings › Keyboard › Emoji off")
+        for refuse in [
+            { (t: FixtureTextTarget) in t.textContentType = .password },
+            { (t: FixtureTextTarget) in t.textContentType = .oneTimeCode },
+            { (t: FixtureTextTarget) in t.textContentType = .emailAddress },
+            { (t: FixtureTextTarget) in t.keyboardType = .URL },
+            { (t: FixtureTextTarget) in t.isSecureTextEntry = true },
+            { (t: FixtureTextTarget) in t.autocorrectionType = .no },
+        ] {
+            XCTAssertNil(view("we smile", field: refuse).withTypedWordEmoji([literal]), "a field that refuses emoji")
+        }
     }
 
     func testSearchMatchesNamesBeforeKeywords() throws {

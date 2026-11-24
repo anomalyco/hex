@@ -1,8 +1,6 @@
 //! The area each Labs feature belongs to: Settings › Labs lists them under
 //! one collapsible header per group.
 
-use super::Feature;
-
 /// One area of Settings › Labs. Every feature picks one (`Feature::group`).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Group {
@@ -60,99 +58,9 @@ impl Group {
     }
 }
 
-impl Feature {
-    /// The group Labs lists it under. Every feature picks one.
-    pub const fn group(self) -> Group {
-        match self {
-            Self::LiveText
-            | Self::FasterLiveText
-            | Self::FailureNotices
-            | Self::LiveTyping
-            | Self::NotchIndicator
-            | Self::ScreenVocabulary
-            | Self::LearnFromCorrections
-            | Self::PauseBrowser
-            | Self::KeepMicrophoneOpen
-            | Self::SkipPauses
-            | Self::VoiceFilter
-            | Self::HideMenuBarIcon
-            | Self::Appearance
-            | Self::SpeakersOnly
-            | Self::Playground
-            | Self::StopPhrase
-            | Self::VocabularyFiles
-            | Self::HudHeight
-            | Self::VoiceIsolation => Group::Dictation,
-            Self::SmartSpacing
-            | Self::SpokenFormatting
-            | Self::SpokenSymbols
-            | Self::FillerWords
-            | Self::CleanUpWithAppleIntelligence
-            | Self::NeutralVoice
-            | Self::KeepOnClipboard
-            | Self::CopyOnly
-            | Self::ReturnToApp
-            | Self::GnomeClipboardRestore
-            | Self::TypedText
-            | Self::TerminalPaste
-            | Self::OutputFixes
-            | Self::OpenCodeInWsl
-            | Self::ApiProcessing
-            | Self::ApiTimestamps
-            | Self::YoloMode
-            | Self::CursorContext
-            | Self::VoicePrompt
-            | Self::ModesEditor
-            | Self::Signature
-            | Self::DictationStyle => Group::Output,
-            Self::KeepRecordings
-            | Self::HistoryStats
-            | Self::RecentDictations
-            | Self::CopyDictationAudio
-            | Self::PasteLastPicker => Group::History,
-            Self::Meetings
-            | Self::LiveChapters
-            | Self::GnomeMeetingCapsules
-            | Self::MeetingImport
-            | Self::CalendarMenu
-            | Self::CalendarSelectAll => Group::Meetings,
-            Self::Screenshots
-            | Self::AnnotateReplay
-            | Self::GnomeAnnotate
-            | Self::AnnotatePointerScreen
-            | Self::CopyCaptureZip
-            | Self::AnnotateAgentTools
-            | Self::AnnotateAgentInstall
-            | Self::DictateWhileAnnotating => Group::Annotate,
-            Self::MouseShortcuts
-            | Self::SecondDictationShortcut
-            | Self::MoreDictationShortcuts
-            | Self::TerminalPasteShortcut
-            | Self::SidedChords
-            | Self::TapOrHold
-            | Self::DoubleTapModifiers
-            | Self::StandaloneSpecialKeys
-            | Self::SectionKeyAlone
-            | Self::MicrophoneKeyAlone
-            | Self::ShareShortcut
-            | Self::CapsLockDictation
-            | Self::PauseMenu
-            | Self::HoldThroughKeys => Group::Shortcuts,
-            Self::KeyboardModelSwitching
-            | Self::UnloadIdle
-            | Self::PickerSortFilter
-            | Self::BenchmarkDetails
-            | Self::ModelInPlace
-            | Self::KQuantModels
-            | Self::PickerDownloaded
-            | Self::ParakeetUltra
-            | Self::DropTranscribe => Group::Models,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::Feature;
     use super::*;
 
     #[test]

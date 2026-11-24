@@ -359,7 +359,7 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | History retention, list, detail, search, copy, delete, and clear | Implemented |
 | Text replacements | Implemented in the Windows Modes pane using the shared phrase-boundary replacement engine |
 | Application picker in Modes | Implemented; lists Start menu shortcuts, App Paths, and apps with an open window, with each executable's icon; "Choose a file…" opens the native dialog through `rune::FileDialogs` |
-| Interface language | Implemented on every OS; English, Polish, Chinese, Japanese, German, Spanish, and Ukrainian |
+| Interface language | Implemented on every OS; English, Polish, Simplified and Traditional Chinese, Japanese, German, Spanish, Ukrainian, Portuguese (Brazil), French, Russian, and Hungarian |
 | Resident tray and Launch at login | Implemented; the tray menu (shared with Linux) has Paste last dictation, the speech-model picker, and the recording state |
 | Application modes with per-mode corrections, OpenCode rewriting, and transformations | Implemented on the shared ordered processing policy; global and contextual profiles persist their own corrections, model, reasoning variant, deadline, and ordered built-in/TypeScript transformations, while modes match by application name — physical end-to-end paste/UI validation remains |
 | Vocabulary as Whisper and Qwen3-ASR's context prompt | Implemented |
@@ -371,7 +371,7 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | Managed installer with Start Menu integration and clean uninstall | Implemented as `.github/release/install-windows.ps1`; it creates the self-updating versions layout, and updates retarget the managed shortcut, Desktop shortcuts and taskbar pins pointed at an old `versions\<version>\hex.exe` (and an icon from that version), and the Launch-at-login entry |
 | First-run onboarding | Implemented; a fresh install picks a dictation language, downloads its recommended model with live progress, and starts listening only once setup is recorded — the shared first-run story, with a Microphone page only while the privacy switch is off and the practice game on the real shortcut |
 | Activity pane with the live session and recent dictations | Implemented in developer builds; the shared read-only pane (phases and timing; the event log keeps no dictated text) |
-| Developer Meetings, live drafts, and meeting paste | Missing |
+| Developer Meetings and live drafts | Missing |
 | Local transcription API and public TypeScript SDK host lifecycle on Windows | Missing; see Local Transcription Service |
 | Streaming finish with whole-clip fallback | Implemented on GPU devices with Parakeet Unified English |
 

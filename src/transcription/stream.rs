@@ -337,20 +337,73 @@ pub(crate) enum PushError {
     BacklogFull,
 }
 
+enum Phase {
+    /// Accepting audio; expires if no push or heartbeat arrives before `lease_deadline`.
+    Live {
+        lease: Duration,
+        lease_deadline: Instant,
+    },
+    /// No more audio accepted; draining buffered audio into `End::Final`.
+    Finishing,
+    /// Cancel requested; the worker will exit with `End::Cancelled`.
+    Cancelling,
+    /// Terminal; the worker has exited and released the engine.
+    Ended(End),
+}
+
+impl Phase {
+    fn ended(&self) -> Option<&End> {
+        match self {
+            Self::Ended(end) => Some(end),
+            _ => None,
+        }
+    }
+
+    fn is_ended(&self) -> bool {
+        matches!(self, Self::Ended(_))
+    }
+
+    fn is_finishing(&self) -> bool {
+        matches!(self, Self::Finishing)
+    }
+
+    fn is_cancelling(&self) -> bool {
+        matches!(self, Self::Cancelling)
+    }
+
+    fn lease_expired(&self, now: Instant) -> bool {
+        matches!(self, Self::Live { lease_deadline, .. } if now >= *lease_deadline)
+    }
+
+    fn should_abort_work(&self, now: Instant) -> bool {
+        self.is_cancelling() || self.lease_expired(now)
+    }
+
+    fn renew_lease(&mut self, now: Instant) -> bool {
+        match self {
+            Self::Live {
+                lease,
+                lease_deadline,
+            } => {
+                *lease_deadline = now + *lease;
+                true
+            }
+            Self::Finishing | Self::Cancelling => true,
+            Self::Ended(_) => false,
+        }
+    }
+}
+
 struct State {
+    phase: Phase,
     /// Audio received that the worker has not taken yet.
     pending: VecDeque<f32>,
     /// Audio received and not yet transcribed (pending plus the worker's).
     backlog: usize,
     received: usize,
-    finishing: bool,
-    cancelled: bool,
-    lease: Duration,
-    lease_deadline: Instant,
     segments: Vec<Segment>,
     /// The latest partial and its sequence number.
     partial: Option<(u64, usize, Partial)>,
-    end: Option<End>,
     /// Bumped by each events subscriber; an older one stops.
     subscriber: u64,
 }
@@ -382,40 +435,45 @@ impl Stream {
     }
 
     fn ended(&self) -> bool {
-        self.shared.lock().end.is_some()
+        self.shared.lock().phase.is_ended()
     }
 
     /// Queues audio for transcription and renews the lease.
     pub(crate) fn push(&self, samples: &[f32]) -> Result<(), PushError> {
         let mut state = self.shared.lock();
-        if state.end.is_some() {
-            return Err(PushError::Ended);
+        let state = &mut *state;
+        match &mut state.phase {
+            Phase::Ended(_) | Phase::Cancelling => return Err(PushError::Ended),
+            Phase::Finishing => return Err(PushError::Finishing),
+            Phase::Live {
+                lease,
+                lease_deadline,
+            } => {
+                if state.backlog + samples.len() > MAX_BACKLOG_SAMPLES {
+                    return Err(PushError::BacklogFull);
+                }
+                *lease_deadline = Instant::now() + *lease;
+                state.pending.extend(samples);
+                state.backlog += samples.len();
+                state.received += samples.len();
+            }
         }
-        if state.finishing {
-            return Err(PushError::Finishing);
-        }
-        if state.backlog + samples.len() > MAX_BACKLOG_SAMPLES {
-            return Err(PushError::BacklogFull);
-        }
-        state.pending.extend(samples);
-        state.backlog += samples.len();
-        state.received += samples.len();
-        state.lease_deadline = Instant::now() + state.lease;
-        drop(state);
         self.shared.changed.notify_all();
         Ok(())
     }
 
     /// Renews the lease; `false` once the stream has ended.
     pub(crate) fn heartbeat(&self) -> bool {
-        let mut state = self.shared.lock();
-        state.lease_deadline = Instant::now() + state.lease;
-        state.end.is_none()
+        self.shared.lock().phase.renew_lease(Instant::now())
     }
 
     pub(crate) fn cancel(&self) {
-        self.shared.lock().cancelled = true;
-        self.shared.changed.notify_all();
+        let mut state = self.shared.lock();
+        if !state.phase.is_ended() {
+            state.phase = Phase::Cancelling;
+            drop(state);
+            self.shared.changed.notify_all();
+        }
     }
 
     /// Transcribes the rest and waits up to `timeout` for the end, which is
@@ -423,12 +481,12 @@ impl Stream {
     pub(crate) fn finish(&self, timeout: Duration, stop: &dyn Fn() -> bool) -> Option<End> {
         let deadline = Instant::now() + timeout;
         let mut state = self.shared.lock();
-        if state.end.is_none() {
-            state.finishing = true;
+        if matches!(state.phase, Phase::Live { .. }) {
+            state.phase = Phase::Finishing;
             self.shared.changed.notify_all();
         }
         loop {
-            if let Some(end) = &state.end {
+            if let Some(end) = state.phase.ended() {
                 return Some(end.clone());
             }
             let now = Instant::now();
@@ -482,7 +540,7 @@ impl Stream {
                     tentative: partial.tentative.clone(),
                 });
             }
-            let end = state.end.as_ref().map(Event::from);
+            let end = state.phase.ended().map(Event::from);
             drop(state);
             for event in events.iter().chain(&end) {
                 if !send(event) {
@@ -505,7 +563,7 @@ impl Stream {
                     .partial
                     .as_ref()
                     .is_none_or(|(seq, ..)| *seq <= sent_partial)
-                && state.end.is_none()
+                && !state.phase.is_ended()
                 && state.subscriber == me;
             if nothing_new {
                 state = self
@@ -569,16 +627,15 @@ impl Streams {
         let partials = engine.streams();
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
+                phase: Phase::Live {
+                    lease: self.lease,
+                    lease_deadline: Instant::now() + self.lease,
+                },
                 pending: VecDeque::new(),
                 backlog: 0,
                 received: 0,
-                finishing: false,
-                cancelled: false,
-                lease: self.lease,
-                lease_deadline: Instant::now() + self.lease,
                 segments: Vec::new(),
                 partial: None,
-                end: None,
                 subscriber: 0,
             }),
             changed: Condvar::new(),
@@ -654,7 +711,7 @@ impl<E: Engine> Worker<E> {
         let end = self.transcribe();
         self.window.live = None;
         let mut state = self.shared.lock();
-        state.end = Some(end);
+        state.phase = Phase::Ended(end);
         state.pending.clear();
         state.partial = None;
         drop(state);
@@ -666,25 +723,26 @@ impl<E: Engine> Worker<E> {
             let busy = self.engine.dictation_busy();
             let (audio, finishing) = {
                 let mut state = self.shared.lock();
-                if state.cancelled {
+                if state.phase.is_cancelling() {
                     return End::Cancelled;
                 }
                 if self.engine.quitting() {
                     return failed("hex-quitting", "Hex is quitting");
                 }
-                if !state.finishing && Instant::now() >= state.lease_deadline {
+                if state.phase.lease_expired(Instant::now()) {
                     return failed("lease-expired", "no audio or heartbeat within the lease");
                 }
+                let finishing = state.phase.is_finishing();
                 if busy {
                     // Dictation goes first; audio waits in the backlog.
                     (Vec::new(), false)
                 } else {
-                    let whole = if state.finishing {
+                    let whole = if finishing {
                         state.pending.len()
                     } else {
                         state.pending.len() / FRAME_SAMPLES * FRAME_SAMPLES
                     };
-                    (state.pending.drain(..whole).collect(), state.finishing)
+                    (state.pending.drain(..whole).collect(), finishing)
                 }
             };
             if busy {
@@ -724,8 +782,8 @@ impl<E: Engine> Worker<E> {
     /// one poll whatever arrives.
     fn wait(&self, busy: bool) {
         let state = self.shared.lock();
-        let ready = state.pending.len() >= FRAME_SAMPLES || state.finishing;
-        if !state.cancelled && (busy || !ready) {
+        let ready = state.pending.len() >= FRAME_SAMPLES || state.phase.is_finishing();
+        if !state.phase.is_cancelling() && (busy || !ready) {
             let _ = self.shared.changed.wait_timeout(state, POLL);
         }
     }
@@ -802,7 +860,7 @@ impl<E: Engine> Worker<E> {
             if !live.open()
                 || self.engine.dictation_busy()
                 || self.engine.quitting()
-                || self.shared.lock().cancelled
+                || self.shared.lock().phase.should_abort_work(Instant::now())
             {
                 return None;
             }
@@ -836,19 +894,44 @@ impl<E: Engine> Worker<E> {
         let text = match self.stream_window(&mut window) {
             Some(text) => text,
             None => {
-                let shared = self.shared.clone();
-                let engine_quitting = || self.engine.quitting();
-                let stop = || shared.lock().cancelled || engine_quitting();
-                match self.engine.transcribe(window.audio.clone(), &stop) {
-                    Ok(text) => text,
-                    Err(_) if self.shared.lock().cancelled => return Err(End::Cancelled),
-                    Err(message) if message == MODEL_CHANGED => {
+                {
+                    let state = self.shared.lock();
+                    if state.phase.is_cancelling() {
+                        return Err(End::Cancelled);
+                    }
+                    if state.phase.lease_expired(Instant::now()) {
                         return Err(failed(
-                            MODEL_CHANGED,
-                            "Hex's dictation model changed during the stream",
+                            "lease-expired",
+                            "no audio or heartbeat within the lease",
                         ));
                     }
-                    Err(message) => return Err(failed("transcription-failed", &message)),
+                }
+                let shared = self.shared.clone();
+                let engine_quitting = || self.engine.quitting();
+                let stop =
+                    || shared.lock().phase.should_abort_work(Instant::now()) || engine_quitting();
+                match self.engine.transcribe(window.audio.clone(), &stop) {
+                    Ok(text) => text,
+                    Err(message) => {
+                        let state = self.shared.lock();
+                        if state.phase.is_cancelling() {
+                            return Err(End::Cancelled);
+                        }
+                        if state.phase.lease_expired(Instant::now()) {
+                            return Err(failed(
+                                "lease-expired",
+                                "no audio or heartbeat within the lease",
+                            ));
+                        }
+                        drop(state);
+                        if message == MODEL_CHANGED {
+                            return Err(failed(
+                                MODEL_CHANGED,
+                                "Hex's dictation model changed during the stream",
+                            ));
+                        }
+                        return Err(failed("transcription-failed", &message));
+                    }
                 }
             }
         };

@@ -15,13 +15,14 @@ appcast built with the site, the dev notes from the Release workflow's
 host.
 
 The download section (`src/Download.tsx`) is one install switcher and nothing
-else: macOS, Windows, and Linux tabs of equal width with a sliding pill, each
-with every way to install there in at most three rows (Mac: DMG, Homebrew;
-Windows: installer, PowerShell script; Linux: script, package, binary), a small
-switch inside a row where it has variants (x64/ARM64 for the Windows installer
-and the Linux binary, which the Linux packages follow too; Debian, Fedora, Nix,
-and AUR for the Linux package), and the download button or copyable command.
-All three stacks share one grid cell, so switching tabs never moves the page.
+else: macOS, Windows, Linux, and Mobile tabs of equal width with a sliding pill,
+each with every way to install there in at most three rows (Mac: DMG, Homebrew;
+Windows: installer, PowerShell script; Linux: script, package, binary; Mobile:
+iOS App Store and Android Hex Preview), a small switch inside a row where it has
+variants (x64/ARM64 for the Windows installer and the Linux binary, which the
+Linux packages follow too; Debian, Fedora, Nix, and AUR for the Linux package),
+and the download, open, or copy button. All four stacks share one grid cell, so
+switching tabs never moves the page.
 An Intel Mac sees that Hex requires Apple silicon instead of a download. It
 selects the visitor's OS and architecture on first paint and refines them with
 UA client hints. Versions, URLs, and commands live in `src/release.ts`; file
@@ -33,6 +34,14 @@ package appears from the first build after a stable release, which pushes
 to see each default. The hero's key and its "Hold …" line follow the selected
 tab, so clicking Windows reads Alt and clicking Linux reads Alt+Space; until a
 tab is clicked they follow the detected platform.
+
+Scripting off: the tabs and the switches inside a row are buttons, so the page
+shows every platform and variant at once instead. `index.html`'s `<noscript>`
+stylesheet hides the switcher, the demo key, and the detected-platform line, and
+shows `src/Download.tsx`'s `.install__plain` list (each OS, architecture, and
+package under its own label, with the commands wrapping instead of truncating)
+and `src/App.tsx`'s neutral line naming Mac, Windows, and Linux. `src/styles.css`
+keeps both hidden while scripts run, so the page is unchanged there.
 
 The hero is a show (`src/shout/`, plain JS): Kit's notifications pile up around a
 floating head that answers them out loud, dictates prompts into an OpenCode window

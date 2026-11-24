@@ -1,0 +1,193 @@
+import Foundation
+
+/// What the keyboard's capture page last said of its audio context and microphone track
+/// (`KeyboardLocalDictation`), with the page's own time.
+nonisolated struct KeyboardCapturePageState: Equatable, Sendable {
+    /// What made the page say it: a track's `mute`, `unmute` or `ended`, the context's
+    /// `statechange`, a change seen on its 250 ms check, or opening the microphone again.
+    var cause: String
+    /// The `AudioContext`'s state: `running`, `suspended`, `interrupted` or `closed`.
+    var context: String
+    var muted: Bool
+    var ended: Bool
+    var at: TimeInterval
+
+    /// No audio is coming from the microphone: iOS gave the audio session to another sound (a
+    /// notification, an alarm, a call), and WebKit suspends or interrupts the context and mutes
+    /// or ends the track.
+    var isInterrupted: Bool { context != "running" || muted || ended }
+
+    var summary: String {
+        "context \(context), track \(ended ? "ended" : muted ? "muted" : "live")"
+    }
+}
+
+/// One recording's watchdog clock (`KeyboardJobWatchdog`): when its audio last came, and since
+/// when its page has said the capture is interrupted. The same dictation keeps it across an
+/// interruption: its quiet is counted again only from when the page says it's back.
+nonisolated struct KeyboardCaptureWatch: Equatable, Sendable {
+    enum Change: Equatable, Sendable {
+        case interrupted
+        case resumed(after: TimeInterval)
+    }
+
+    private(set) var lastAudio: TimeInterval
+    private(set) var interruptedSince: TimeInterval?
+
+    init(startedAt: TimeInterval) {
+        lastAudio = startedAt
+    }
+
+    mutating func heardAudio(at time: TimeInterval) {
+        lastAudio = max(lastAudio, time)
+    }
+
+    mutating func page(_ state: KeyboardCapturePageState, at time: TimeInterval) -> Change? {
+        if state.isInterrupted {
+            guard interruptedSince == nil else { return nil }
+            interruptedSince = time
+            return .interrupted
+        }
+        guard let since = interruptedSince else { return nil }
+        interruptedSince = nil
+        lastAudio = max(lastAudio, time)
+        return .resumed(after: time - since)
+    }
+
+    func isStalled(now: TimeInterval) -> Bool {
+        KeyboardJobWatchdog.isStalled(.recording, lastProgress: lastAudio, interruptedSince: interruptedSince, now: now)
+    }
+}
+
+/// The completed transcript payload of one keyboard dictation, shared by the containing app
+/// (`DictationController`) and in-keyboard dictation (`KeyboardLocalDictation`) so all six
+/// fields are created and cleared together.
+nonisolated struct KeyboardResult: Equatable, Sendable {
+    let id: String
+    let transcript: String
+    let heard: String?
+    let stages: DictationStages?
+    let translationFailure: TranslationFailure?
+    let expiresAt: TimeInterval?
+
+    init(
+        id: String,
+        transcript: String,
+        heard: String? = nil,
+        stages: DictationStages? = nil,
+        translationFailure: TranslationFailure? = nil,
+        expiresAt: TimeInterval? = nil
+    ) {
+        self.id = id
+        self.transcript = transcript
+        self.heard = heard
+        self.stages = stages
+        self.translationFailure = translationFailure
+        self.expiresAt = expiresAt
+    }
+
+    func isOfferExpired(at now: TimeInterval) -> Bool {
+        guard let expiresAt else { return false }
+        return expiresAt + KeyboardSnapshot.resultOfferWindow <= now
+    }
+}
+
+/// Read-only projection of the keyboard's local dictation session (`KeyboardLocalDictation`)
+/// into observable stages and `KeyboardSnapshot` payloads: separates microphone startup
+/// (`starting`, before the first real PCM audio buffer has arrived) from live capture
+/// (`recording`), so the UI never claims to be listening before audio flows.
+nonisolated enum KeyboardLocalCapturePhase: Equatable, Sendable {
+    enum VisibleStage: Equatable, Sendable {
+        case idle
+        case starting
+        case recording
+        case transcribing
+        case finished
+        case failed
+    }
+
+    case idle
+    /// The Hex key's touch-down, before the touch is a tap, a hold or a slide: capturing,
+    /// unseen (no snapshot), until kept or dropped.
+    case armed(jobID: String, failed: Bool = false)
+    /// Dictation started, waiting for the audio session and WebKit capture to deliver the first
+    /// real PCM buffer.
+    case starting(jobID: String)
+    /// At least one real PCM audio buffer has arrived: the microphone is live.
+    case recording(jobID: String, startedAt: TimeInterval)
+    case transcribing(jobID: String)
+    case finished(jobID: String, result: KeyboardResult)
+    case failed(message: String, until: TimeInterval)
+
+    var isActive: Bool {
+        switch self {
+        case .armed, .starting, .recording, .transcribing: true
+        case .idle, .finished, .failed: false
+        }
+    }
+
+    var visibleStage: VisibleStage {
+        switch self {
+        case .idle, .armed: .idle
+        case .starting: .starting
+        case .recording: .recording
+        case .transcribing: .transcribing
+        case .finished: .finished
+        case .failed: .failed
+        }
+    }
+
+    /// True while `jobID` is actively capturing: armed (and not failed), starting, or recording.
+    func isCapturing(_ jobID: String) -> Bool {
+        switch self {
+        case .armed(let current, let failed):
+            !failed && current == jobID
+        case .starting(let current), .recording(let current, _):
+            current == jobID
+        case .idle, .transcribing, .finished, .failed:
+            false
+        }
+    }
+
+    func snapshot(now: TimeInterval, loudnessDB: Float) -> KeyboardSnapshot? {
+        switch self {
+        case .idle, .armed:
+            return nil
+        case .starting(let jobID):
+            return KeyboardSnapshot(
+                state: .starting,
+                heartbeat: now,
+                expiresAt: now + 60,
+                jobID: jobID
+            )
+        case .recording(let jobID, let startedAt):
+            return KeyboardSnapshot(
+                state: .recording,
+                heartbeat: now,
+                expiresAt: now + 60,
+                recordingStartedAt: startedAt,
+                loudnessDB: loudnessDB,
+                jobID: jobID
+            )
+        case .transcribing(let jobID):
+            return KeyboardSnapshot(state: .transcribing, heartbeat: now, expiresAt: now + 60, jobID: jobID)
+        case .finished(let jobID, let result):
+            return KeyboardSnapshot(
+                state: .ready,
+                heartbeat: now,
+                expiresAt: now + 1,
+                jobID: jobID,
+                resultID: result.id,
+                transcript: result.transcript,
+                heard: result.heard,
+                stages: result.stages,
+                translationFailure: result.translationFailure
+            )
+        case .failed(let message, let until):
+            guard until > now else { return nil }
+            // A local failure is not a warm Hex session: heartbeat/expiresAt stay 0 so
+            // `isWarmAvailable` stays false while `statusSlot` still shows the message.
+            return KeyboardSnapshot(state: .failed, heartbeat: 0, expiresAt: 0, message: message, messageAt: now)
+        }
+    }
+}

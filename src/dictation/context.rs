@@ -624,6 +624,7 @@ macro_rules! browsers {
 
 #[cfg(any(target_os = "macos", test))]
 const SCRIPTABLE_BROWSERS: &[ScriptableBrowser] = browsers![
+    ("at.studio.AsideBrowser", "Aside", Chromium),
     ("com.apple.Safari", "Safari", Safari),
     (
         "com.apple.SafariTechnologyPreview",
@@ -1080,6 +1081,10 @@ mod tests {
 
     #[test]
     fn scriptable_browsers_are_found_by_bundle_id() {
+        assert_eq!(
+            ScriptableBrowser::from_bundle_id("at.studio.AsideBrowser").map(|browser| browser.name),
+            Some("Aside")
+        );
         assert_eq!(
             ScriptableBrowser::from_bundle_id("com.google.Chrome").map(|browser| browser.name),
             Some("Google Chrome")

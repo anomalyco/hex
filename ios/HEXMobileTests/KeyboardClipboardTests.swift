@@ -110,9 +110,10 @@ final class KeyboardClipboardTests: XCTestCase {
         )
     }
 
-    /// Where Apple's keyboard is split (the Duo unfolded and upright) Code from Messages isn't
-    /// offered: its switch to the next keyboard can end the host app there (TestFlight build 121).
-    func testNoCodeFromMessagesWhereApplesKeyboardSplits() {
+    /// Where Apple's keyboard is split (the Duo unfolded and upright) Code from Messages opens
+    /// iOS's keyboard list instead of switching: the switch to the next keyboard can end the host
+    /// app there (TestFlight build 121), and the list's pick doesn't.
+    func testCodeFromMessagesOpensTheListWhereApplesKeyboardSplits() {
         let pasteboard = UIPasteboard.withUniqueName()
         defer { UIPasteboard.remove(withName: pasteboard.name) }
         let tracker = KeyboardClipboardTracker(defaults: defaults)
@@ -123,10 +124,10 @@ final class KeyboardClipboardTests: XCTestCase {
             )
         }
         XCTAssertEqual(offer(canSwitch: true), .code(canPaste: false))
-        XCTAssertNil(offer(canSwitch: false))
+        XCTAssertEqual(offer(canSwitch: false), .code(canPaste: false, opensList: true))
         pasteboard.string = "482913"
         XCTAssertEqual(offer(canSwitch: true), .code(canPaste: true))
-        XCTAssertEqual(offer(canSwitch: false), .paste, "a copied code still pastes")
+        XCTAssertEqual(offer(canSwitch: false), .code(canPaste: true, opensList: true), "a copied code still pastes")
         XCTAssertEqual(FullKeyboardView(model: KeyboardViewModel(), target: FixtureTextTarget()).currentPosture, .phone, "an iPhone knows at once")
     }
 
@@ -154,6 +155,45 @@ final class KeyboardClipboardTests: XCTestCase {
         XCTAssertEqual(offer(.default, .default), .paste)
         XCTAssertNil(offer(.default, .default, empty: false), "after a word the strip suggests")
         XCTAssertEqual(offer(.numberPad, .default), .code(canPaste: true))
+    }
+
+    /// TestFlight build 147: a username field kept Hex, where nothing offers a saved login (iOS
+    /// offers them only in Apple's keyboard's bar). An empty username or password field shows
+    /// Passwords, which reaches Apple's keyboard by Code from Messages' route; never with only
+    /// Hex and Emoji, never once something is typed, and never in an email field, which a
+    /// keyboard can't tell from one outside a login form. Deciding reads only whether the field
+    /// is empty, as Paste always did.
+    func testPasswordsChipLeadsLoginFieldsToApplesKeyboard() {
+        let pasteboard = UIPasteboard.withUniqueName()
+        defer { UIPasteboard.remove(withName: pasteboard.name) }
+        let tracker = KeyboardClipboardTracker(defaults: defaults)
+        func offer(
+            _ type: UITextContentType?, empty: Bool = true, route: KeyboardInputModes.Route? = .next, canSwitch: Bool = true
+        ) -> KeyboardClipboardOffer? {
+            tracker.offer(
+                textContentType: type, keyboardType: .default, autocorrectionType: .no, fieldIsEmpty: empty,
+                hasFullAccess: true, canSwitchKeyboard: canSwitch,
+                appleKeyboardRoute: { numberPad in XCTAssertFalse(numberPad); return route }, pasteboard: pasteboard
+            )
+        }
+        XCTAssertEqual(offer(.username), .passwords(canPaste: false))
+        XCTAssertEqual(offer(.password), .passwords(canPaste: false))
+        XCTAssertEqual(offer(.newPassword), .passwords(canPaste: false))
+        XCTAssertEqual(offer(.username, route: .list), .passwords(canPaste: false, opensList: true), "Emoji or another keyboard on")
+        XCTAssertEqual(offer(.username, canSwitch: false), .passwords(canPaste: false, opensList: true), "the Duo split")
+        XCTAssertNil(offer(.username, route: nil), "only Hex: nothing to switch to")
+        XCTAssertNil(offer(.username, empty: false))
+        XCTAssertNil(offer(.emailAddress))
+        XCTAssertNil(offer(nil))
+        pasteboard.string = "ryan@example.com"
+        XCTAssertEqual(offer(.username), .passwords(canPaste: true))
+        XCTAssertEqual(offer(.username, route: nil), .paste)
+
+        let strip = KeyboardStripView()
+        strip.update(suggestions: [], showsUndo: false, statusText: nil, clipboard: .passwords(canPaste: false))
+        let chip = strip.subviews.compactMap { $0 as? UIButton }.first { $0.configuration?.title == "Passwords" }
+        XCTAssertEqual(chip?.isHidden, false)
+        XCTAssertEqual(chip?.accessibilityHint, "Switches to the next keyboard, where iOS offers your saved passwords")
     }
 
     func testApplesKeyboardIsNotEmojiOrAnExtension() {

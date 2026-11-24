@@ -31,7 +31,7 @@ pub(crate) fn model_menu_entries(
         .filter(|model| model.available())
         .filter_map(|model| {
             let selection = settings.transcription_for_model(model.id);
-            installed(model, &selection.language).then(|| ModelMenuEntry {
+            installed(&model, &selection.language).then(|| ModelMenuEntry {
                 model: model.id,
                 title: format!("{} · {}", model.name, language_name(&selection.language)),
                 selected: model.id == settings.transcription.model,
@@ -95,6 +95,9 @@ mod tray {
         Idle,
         Starting,
         Recording,
+        /// Stop was requested; the recorder finishes this meeting before it
+        /// takes another, so Record stays disabled.
+        Stopping,
         Transcribing,
     }
 
@@ -103,7 +106,7 @@ mod tray {
     pub(crate) struct TrayView {
         pub(crate) listening: bool,
         pub(crate) state: Option<VoiceState>,
-        pub(crate) update: Option<String>,
+        pub(crate) update: Option<crate::updater::UpdateOffer>,
         pub(crate) models: Vec<ModelMenuEntry>,
         /// `None` while Meetings is off.
         pub(crate) meetings: Option<MeetingTray>,
@@ -122,7 +125,7 @@ mod tray {
             Self {
                 listening,
                 state: state.filter(|_| listening),
-                update: update_label(update),
+                update: crate::updater::offer(update),
                 models,
                 meetings: None,
                 dictation_audio: None,
@@ -188,6 +191,9 @@ mod tray {
                     MeetingTray::Recording => {
                         TrayItem::action("meeting-stop", tr("Stop & transcribe"))
                     }
+                    MeetingTray::Stopping => {
+                        TrayItem::action("meeting-stopping", tr("Stopping…")).enabled(false)
+                    }
                     MeetingTray::Transcribing => {
                         TrayItem::action("meeting-transcribing", tr("Transcribing…")).enabled(false)
                     }
@@ -210,28 +216,24 @@ mod tray {
                 }));
             }
             menu.push(TrayItem::Separator);
-            menu.extend(
-                self.update
-                    .as_ref()
-                    .map(|label| TrayItem::action("update", label.clone())),
+            // A stop under way still holds Restart to update: the recorder
+            // is finishing that meeting.
+            let meeting_recording = matches!(
+                self.meetings,
+                Some(MeetingTray::Recording | MeetingTray::Stopping)
             );
+            menu.extend(self.update.as_ref().map(|offer| {
+                // Distinct id while disabled so tray hosts like GNOME's
+                // AppIndicators don't keep it stuck disabled (#1287).
+                if offer.is_held(meeting_recording) {
+                    TrayItem::action("update-held", offer.label.clone()).enabled(false)
+                } else {
+                    TrayItem::action("update", offer.label.clone())
+                }
+            }));
             menu.push(TrayItem::action("toggle", tr("Enable / Disable Hex")));
             menu.push(TrayItem::action("quit", tr("Quit Hex")));
             menu
-        }
-    }
-
-    /// The update the window's sidebar offers: Restart to update once a
-    /// managed install has staged it, Download update for an install that
-    /// cannot apply it itself, or the channel switch.
-    fn update_label(status: &DesktopUpdateStatus) -> Option<String> {
-        match status {
-            DesktopUpdateStatus::ReadyToRestart => Some(tr("Restart to update").to_owned()),
-            DesktopUpdateStatus::Available => Some(tr("Download update").to_owned()),
-            DesktopUpdateStatus::SwitchAvailable { channel, version } => {
-                Some(crate::updater::switch_label(channel, version))
-            }
-            _ => None,
         }
     }
 
@@ -239,13 +241,7 @@ mod tray {
     pub(crate) fn update_action(
         status: &DesktopUpdateStatus,
     ) -> Option<crate::desktop::host::DesktopAction> {
-        use crate::desktop::host::DesktopAction;
-        match status {
-            DesktopUpdateStatus::ReadyToRestart => Some(DesktopAction::RestartIntoUpdate),
-            DesktopUpdateStatus::Available => Some(DesktopAction::OpenUpdate),
-            DesktopUpdateStatus::SwitchAvailable { .. } => Some(DesktopAction::ConfirmUpdateSwitch),
-            _ => None,
-        }
+        crate::updater::offer(status).map(|offer| offer.action)
     }
 }
 
@@ -400,9 +396,43 @@ mod tests {
             meeting_id(MeetingTray::Idle),
             meeting_id(MeetingTray::Recording),
         ];
-        for disabled in [MeetingTray::Starting, MeetingTray::Transcribing] {
+        for disabled in [
+            MeetingTray::Starting,
+            MeetingTray::Stopping,
+            MeetingTray::Transcribing,
+        ] {
             assert!(!enabled.contains(&meeting_id(disabled)));
         }
+        // Restart to update is dimmed under its own id while a meeting
+        // records or stops; Download update stays enabled.
+        for held in [MeetingTray::Recording, MeetingTray::Stopping] {
+            let held_view = TrayView {
+                meetings: Some(held),
+                ..view.clone()
+            };
+            assert!(
+                matches!(
+                    held_view.menu().into_iter().find(|item| matches!(
+                        item,
+                        rune::TrayItem::Action { id, .. } if id == "update-held"
+                    )),
+                    Some(rune::TrayItem::Action { enabled: false, .. })
+                ),
+                "{held:?} holds Restart to update"
+            );
+        }
+        assert_eq!(TrayCommand::from_id("update-held"), None);
+        let download_in_meeting = TrayView {
+            meetings: Some(MeetingTray::Recording),
+            ..TrayView::new(true, None, &DesktopUpdateStatus::Available, Vec::new())
+        };
+        assert!(matches!(
+            download_in_meeting.menu().into_iter().find(|item| matches!(
+                item,
+                rune::TrayItem::Action { id, .. } if id == "update"
+            )),
+            Some(rune::TrayItem::Action { enabled: true, .. })
+        ));
         let stopped = TrayView::new(
             false,
             Some(VoiceState::Dictating),

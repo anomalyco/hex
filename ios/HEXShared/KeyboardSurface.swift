@@ -536,7 +536,7 @@ struct KeyboardSurfaceView: View {
     }
 
     private var isStageActive: Bool {
-        model.stagePhase == .recording || model.stagePhase == .transcribing
+        model.stagePhase == .starting || model.stagePhase == .recording || model.stagePhase == .transcribing
     }
 
     var body: some View {
@@ -594,11 +594,16 @@ struct KeyboardSurfaceView: View {
         HStack(spacing: 8) {
             Button {
                 model.onKeyFeedback?()
-                if model.hasFullAccess, !model.isWarmAvailable, let local = model.onLocalDictateTap {
-                    local()
-                } else {
-                    let target = model.hasFullAccess ? model.coldStartURL : KeyboardLaunchRequest.setup.url
-                    model.onOpenURL?(target)
+                switch model.route {
+                case .setUp:
+                    model.onOpenURL?(KeyboardLaunchRequest.setup.url)
+                case .warm:
+                    // As Dictate, which shows only while nothing records.
+                    if !isStageActive { model.onDictateTap?() }
+                case .inKeyboard:
+                    model.onLocalDictateTap?()
+                case .needsModel, .opensHex:
+                    model.dictateWhereUnavailable()
                 }
             } label: {
                 HexMarkView(
@@ -610,7 +615,7 @@ struct KeyboardSurfaceView: View {
                 .topBarHitTarget(alignment: .leading)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Open Hex")
+            .accessibilityLabel(hexMarkLabel)
 
             // The mark's tap area reaches past its pill into this group's slot: the
             // outdent keeps the badge and the status where they were.
@@ -630,21 +635,96 @@ struct KeyboardSurfaceView: View {
                 Spacer(minLength: 4)
             }
 
-            // The translation note takes the bar's width for its few seconds.
-            if model.showsLanguageSwitch || model.showsTranslationSwitch, model.translationNote == nil {
+            // A note (the translation's, or why a dictation tap can't dictate here) takes the
+            // bar's width with Open Hex and ✕ for its few seconds.
+            if let note = barNote {
+                noteActions(note, palette: p)
+            } else if model.showsLanguageSwitch || model.showsTranslationSwitch {
                 languageTrigger(palette: p)
             }
 
-            styleTrigger(palette: p)
-                .hexTrayReveal(model.hasFullAccess && model.translationNote == nil, reduceMotion: reduceMotion, offsetY: 0)
+            if barNote == nil {
+                styleTrigger(palette: p)
+                    .hexTrayReveal(model.hasFullAccess, reduceMotion: reduceMotion, offsetY: 0)
+            }
         }
         .frame(height: TopBarMetrics.height)
+    }
+
+    /// What the Hex mark does, for VoiceOver: dictate as Dictate does, set up, or (before iOS 26
+    /// where the keyboard can't dictate) open Hex to dictate.
+    private var hexMarkLabel: String {
+        if model.route == .setUp { return String(localized: "Set up Hex") }
+        return model.dictationTapOpensHex ? String(localized: "Open Hex") : String(localized: "Dictate")
+    }
+
+    private enum BarNote {
+        case translation
+        case dictationBlock
+    }
+
+    private var barNote: BarNote? {
+        switch model.statusSlot {
+        case .translationNote: .translation
+        case .dictationBlock: .dictationBlock
+        default: nil
+        }
+    }
+
+    /// The note's only controls: Open Hex, the one part that opens Hex (where Hex can help),
+    /// and ✕, which puts the note away. A tap on the words does nothing.
+    private func noteActions(_ note: BarNote, palette p: KeyboardChromePalette) -> some View {
+        HStack(spacing: 6) {
+            if note == .translation || model.dictationBlock?.opensHex == true {
+                openHexChip(note, palette: p)
+            }
+
+            Button {
+                model.onKeyFeedback?()
+                switch note {
+                case .translation: model.onDismissTranslationNote?()
+                case .dictationBlock: model.dismissDictationBlock()
+                }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(p.textMuted)
+                    .frame(width: 26, height: 26)
+                    .background(p.chipIdleFill, in: Circle())
+                    .padding(.trailing, TopBarMetrics.sideInset)
+                    .topBarHitTarget(alignment: .trailing)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss")
+        }
+        .layoutPriority(1)
+    }
+
+    private func openHexChip(_ note: BarNote, palette p: KeyboardChromePalette) -> some View {
+        Button {
+            model.onKeyFeedback?()
+            switch note {
+            case .translation: model.onOpenURL?(KeyboardLaunchRequest.translationSettings.url)
+            case .dictationBlock: model.openHexForDictationBlock()
+            }
+        } label: {
+            Text("Open Hex")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(p.textBase)
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.horizontal, 11)
+                .frame(height: 26)
+                .background(p.chipActiveFill, in: Capsule())
+        }
+        .buttonStyle(TopBarChipButtonStyle())
+        .accessibilityHint(note == .translation ? Text("Opens Hex's Settings") : Text("Opens Hex to dictate there"))
     }
 
     /// A dictation that didn't go in by itself, as the full keyboard's strip offers it: the
     /// bar is the only keyboard on an iPad, and without this a late one was out of reach.
     private var showsPasteDictation: Bool {
-        model.hasFullAccess && model.offeredDictation != nil && !isStageActive && model.translationNote == nil
+        model.hasFullAccess && model.offeredDictation != nil && !isStageActive && barNote == nil
     }
 
     private func pasteDictationChip(palette p: KeyboardChromePalette) -> some View {
@@ -693,17 +773,22 @@ struct KeyboardSurfaceView: View {
     }
 
     private func leadingAccessory(palette p: KeyboardChromePalette) -> some View {
-        let showNoAccess = !model.hasFullAccess
-        let showRecordingClock = model.hasFullAccess && model.stagePhase == .recording
-        let showTranslationNote = model.hasFullAccess
-            && model.translationNote != nil
-            && model.stagePhase != .recording
-            && model.stagePhase != .transcribing
-        let showWarmStatus = model.hasFullAccess
-            && model.isWarmAvailable
-            && model.stagePhase != .recording
-            && model.stagePhase != .transcribing
-            && !showTranslationNote
+        let slot = model.statusSlot
+        let messageSlot: (text: String, isFailure: Bool)? = if case .message(let text, let isFailure) = slot {
+            (text, isFailure)
+        } else {
+            nil
+        }
+        let noteSlot: TranslationFailure? = if case .translationNote(let note) = slot {
+            note
+        } else {
+            nil
+        }
+        let blockSlot: KeyboardDictationBlock? = if case .dictationBlock(let block) = slot {
+            block
+        } else {
+            nil
+        }
 
         return ZStack(alignment: .leading) {
             HStack(spacing: 6) {
@@ -716,66 +801,78 @@ struct KeyboardSurfaceView: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Full Access is off. \(KeyboardSetupCopy.fullAccessPath)")
-            .hexTrayReveal(showNoAccess, reduceMotion: reduceMotion, offsetY: 2)
+            .hexTrayReveal(slot == .noAccess, reduceMotion: reduceMotion, offsetY: 2)
+
+            Text("Starting…")
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(p.textMuted)
+                .lineLimit(1)
+                .hexTrayReveal(slot == .starting, reduceMotion: reduceMotion, offsetY: 2)
 
             HStack(spacing: 6) {
                 HexStatusDot(color: HexTheme.danger, size: 6.5)
                 KeyboardRecordingClockText(clock: model.clock, color: p.textBase)
             }
-            .hexTrayReveal(showRecordingClock, reduceMotion: reduceMotion, offsetY: 2)
+            .hexTrayReveal(slot == .recording, reduceMotion: reduceMotion, offsetY: 2)
 
             Group {
-                if let message = model.statusMessage {
+                if let messageSlot {
                     HStack(spacing: 6) {
-                        if model.stagePhase == .failed {
+                        if messageSlot.isFailure {
                             HexStatusDot(color: HexTheme.danger, size: 6)
                         }
                         // A failure gets two smaller lines: it has to be read in full.
-                        let failed = model.stagePhase == .failed
-                        Text(message)
-                            .font(.system(size: failed ? 11 : 13, weight: .regular))
+                        Text(messageSlot.text)
+                            .font(.system(size: messageSlot.isFailure ? 11 : 13, weight: .regular))
                             .foregroundStyle(p.textMuted)
-                            .lineLimit(failed ? 2 : 1)
+                            .lineLimit(messageSlot.isFailure ? 2 : 1)
                             .minimumScaleFactor(0.85)
                     }
-                } else {
-                    HStack(spacing: 5) {
-                        HexStatusDot(color: HexTheme.warmMic, size: 6)
-                        KeyboardWarmRemainingText(clock: model.clock, color: p.textMuted)
-                    }
                 }
             }
-            .hexTrayReveal(showWarmStatus, reduceMotion: reduceMotion, offsetY: 2)
+            .hexTrayReveal(messageSlot != nil, reduceMotion: reduceMotion, offsetY: 2)
+
+            HStack(spacing: 5) {
+                HexStatusDot(color: HexTheme.warmMic, size: 6)
+                KeyboardWarmRemainingText(clock: model.clock, color: p.textMuted)
+            }
+            .hexTrayReveal(slot == .warm, reduceMotion: reduceMotion, offsetY: 2)
 
             Group {
-                if let note = model.translationNote {
-                    translationNote(note, palette: p)
+                if let noteSlot {
+                    translationNote(noteSlot, palette: p)
                 }
             }
-            .hexTrayReveal(showTranslationNote, reduceMotion: reduceMotion, offsetY: 2)
+            .hexTrayReveal(noteSlot != nil, reduceMotion: reduceMotion, offsetY: 2)
+
+            // Why a dictation tap can't dictate here; Open Hex and ✕ sit at the bar's end.
+            Group {
+                if let blockSlot {
+                    Text(blockSlot.line)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(p.textBase)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.8)
+                }
+            }
+            .hexTrayReveal(blockSlot != nil, reduceMotion: reduceMotion, offsetY: 2)
         }
     }
 
-    /// "Couldn't translate, pasted as spoken" over its fix; a tap opens Hex's Settings › Dictation.
+    /// "Couldn't translate, pasted as spoken" over its fix. Only Open Hex at the bar's end opens
+    /// Hex's Settings › Dictation; a tap on these words does nothing.
     private func translationNote(_ note: TranslationFailure, palette p: KeyboardChromePalette) -> some View {
-        Button {
-            model.onOpenURL?(KeyboardLaunchRequest.translationSettings.url)
-        } label: {
-            VStack(alignment: .leading, spacing: 0) {
-                Text(TranslationFailure.note)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(p.textBase)
-                Text(note.fix)
-                    .font(.system(size: 11))
-                    .foregroundStyle(p.textMuted)
-            }
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            .contentShape(Rectangle())
+        VStack(alignment: .leading, spacing: 0) {
+            Text(TranslationFailure.note)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(p.textBase)
+            Text(note.fix)
+                .font(.system(size: 11))
+                .foregroundStyle(p.textMuted)
         }
-        .buttonStyle(.plain)
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
         .accessibilityElement(children: .combine)
-        .accessibilityHint("Opens Hex's Settings")
     }
 
     private func styleTrigger(palette p: KeyboardChromePalette) -> some View {
@@ -1061,25 +1158,28 @@ struct KeyboardSurfaceView: View {
     // MARK: - Unified 44 pt Recessed Stage Well (all controls permanently mounted)
 
     private var idleTriggerSpec: (icon: String, title: String, width: CGFloat) {
-        if !model.hasFullAccess {
-            return ("arrow.up.forward.app.fill", "Set up Hex", 112)
+        switch model.route {
+        case .setUp:
+            return ("arrow.up.forward.app.fill", String(localized: "Set up Hex"), 112)
+        case .needsModel:
+            return ("mic.fill", String(localized: "Set up"), 88)
+        case .warm, .inKeyboard, .opensHex:
+            return ("mic.fill", String(localized: "Dictate"), 94)
         }
-        if !model.isModelInstalled {
-            return ("mic.fill", "Set up", 88)
-        }
-        return ("mic.fill", "Dictate", 94)
     }
 
     private var primaryStage: some View {
         let p = palette
+        let showStarting = model.stagePhase == .starting
         let showRecordingControls = model.stagePhase == .recording
+        let showCancelControl = showStarting || showRecordingControls
         let showIdleTrigger = model.stagePhase == .idle || model.stagePhase == .failed
         let spec = idleTriggerSpec
 
-        let leadInset: Float = showRecordingControls
+        let leadInset: Float = showCancelControl
             ? Float(Self.wellInset + Self.cancelWidth + 6)
             : 0.0
-        let trailInset: Float = if showRecordingControls {
+        let trailInset: Float = if showCancelControl {
             Float(Self.wellInset + Self.doneWidth + 6)
         } else if showIdleTrigger {
             Float(Self.wellInset + spec.width + 6)
@@ -1109,7 +1209,7 @@ struct KeyboardSurfaceView: View {
                 .allowsHitTesting(false)
             }
 
-            // Recording peer controls (`✕` and `Done`), always mounted so enter/exit springs stay continuous.
+            // Recording peer controls (`✕`, starting spinner, and `Done`), always mounted so enter/exit springs stay continuous.
             HStack(spacing: 8) {
                 Button {
                     model.onKeyFeedback?()
@@ -1126,7 +1226,7 @@ struct KeyboardSurfaceView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Cancel dictation")
                 .hexControlReveal(
-                    showRecordingControls,
+                    showCancelControl,
                     reduceMotion: reduceMotion,
                     scale: 0.90,
                     blur: 2.5,
@@ -1135,26 +1235,42 @@ struct KeyboardSurfaceView: View {
 
                 Spacer(minLength: 0)
 
-                Button {
-                    model.onKeyFeedback?()
-                    model.onStopTap?()
-                } label: {
-                    Text("Done")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(p.textBase)
+                ZStack(alignment: .trailing) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(p.textMuted)
                         .frame(width: Self.doneWidth, height: Self.controlHeight)
-                        .background(p.controlProminentFill, in: Capsule())
-                        .frame(minHeight: Self.wellHeight, alignment: .trailing)
-                        .contentShape(Rectangle())
+                        .background(p.controlSubtleFill, in: Capsule())
+                        .accessibilityLabel("Starting microphone")
+                        .hexControlReveal(
+                            showStarting,
+                            reduceMotion: reduceMotion,
+                            scale: 0.90,
+                            blur: 2.5,
+                            anchor: .trailing
+                        )
+
+                    Button {
+                        model.onKeyFeedback?()
+                        model.onStopTap?()
+                    } label: {
+                        Text("Done")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(p.textBase)
+                            .frame(width: Self.doneWidth, height: Self.controlHeight)
+                            .background(p.controlProminentFill, in: Capsule())
+                            .frame(minHeight: Self.wellHeight, alignment: .trailing)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .hexControlReveal(
+                        showRecordingControls,
+                        reduceMotion: reduceMotion,
+                        scale: 0.90,
+                        blur: 2.5,
+                        anchor: .trailing
+                    )
                 }
-                .buttonStyle(.plain)
-                .hexControlReveal(
-                    showRecordingControls,
-                    reduceMotion: reduceMotion,
-                    scale: 0.90,
-                    blur: 2.5,
-                    anchor: .trailing
-                )
             }
             .padding(.horizontal, Self.wellInset)
 
@@ -1211,8 +1327,7 @@ struct KeyboardSurfaceView: View {
     /// The well dictates in the keyboard (a warm session or in-keyboard dictation), so a
     /// hold there can be push to talk; opening Hex or setup stays a tap.
     private var canHoldToTalk: Bool {
-        guard model.hasFullAccess, model.stagePhase == .idle || model.stagePhase == .failed else { return false }
-        return (model.isWarmAvailable && model.stagePhase != .failed) || model.onLocalDictateTap != nil
+        model.canPushToTalk
     }
 
     /// Hold still on Dictate for `HexKeyGesture.holdDuration`: dictation starts with a light
@@ -1254,16 +1369,15 @@ struct KeyboardSurfaceView: View {
     }
 
     private func handleIdleStageTap() {
-        if !model.hasFullAccess {
+        switch model.route {
+        case .setUp:
             model.onOpenURL?(KeyboardLaunchRequest.setup.url)
-        } else if !model.isWarmAvailable || model.stagePhase == .failed {
-            if let local = model.onLocalDictateTap {
-                local()
-            } else {
-                model.onOpenURL?(model.coldStartURL)
-            }
-        } else {
+        case .warm:
             model.onDictateTap?()
+        case .inKeyboard:
+            model.onLocalDictateTap?()
+        case .needsModel, .opensHex:
+            model.dictateWhereUnavailable()
         }
     }
 

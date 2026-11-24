@@ -72,7 +72,7 @@ impl HistoryPane {
 /// while. A missing file or a refused clipboard says so under the row, as a
 /// failed Play does; nothing is copied without a recording.
 pub(super) fn copy_audio(ui: &mut Ui, id: u64) {
-    if !(ui.settings.labs.copy_dictation_audio && ui.settings.labs.keep_recordings) {
+    if !crate::labs::copy_dictation_audio_enabled(&ui.settings) {
         return;
     }
     if ui.history.audio_copy_pending() {

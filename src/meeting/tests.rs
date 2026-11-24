@@ -1,4 +1,5 @@
 use super::delete::{delete_in, delete_meeting};
+use super::finish::discard_if_empty_in;
 use super::retention::{
     audio_expired_meetings, expired_meetings, trash_audio_tracks, trash_expired,
 };
@@ -568,6 +569,123 @@ fn an_old_twelve_hour_default_title_stays_the_default_in_another_language() {
     assert_eq!(manifest.title_source(), TitleSource::Default);
     crate::desktop::i18n::apply(Some("en"));
     assert_eq!(manifest.title, default_title(None, manifest.created_at_ms));
+    fs::remove_dir_all(base).unwrap();
+}
+
+/// Writes the pair of final transcript files a completed pass publishes, so
+/// discard decisions read a real transcript.ndjson.
+fn write_final_transcript(directory: &Path, entries: &[TranscriptEntry]) {
+    let mut ndjson = String::new();
+    for entry in entries {
+        ndjson.push_str(&serde_json::to_string(entry).unwrap());
+        ndjson.push('\n');
+    }
+    fs::write(directory.join("transcript.ndjson"), ndjson).unwrap();
+    fs::write(directory.join("transcript.md"), "# Meeting\n").unwrap();
+}
+
+#[test]
+fn an_empty_finished_meeting_is_moved_to_the_trash() {
+    let (base, directory) = finished_meeting("discard-empty", "Design sync");
+    write_final_transcript(&directory, &[]);
+    let manifest = read_manifest(&directory).unwrap();
+    let export = manifest.export_path.clone().unwrap();
+    let mut trashed = Vec::new();
+    let discarded = discard_if_empty_in(&base, &manifest, |path| {
+        trashed.push(path.to_path_buf());
+        Ok(())
+    })
+    .unwrap();
+    assert!(discarded);
+    assert_eq!(trashed, [export, directory.clone()]);
+    fs::remove_dir_all(base).unwrap();
+}
+
+/// Asserts a meeting is kept: false, and nothing handed to the Trash.
+fn assert_kept(base: &Path, manifest: &MeetingManifest) {
+    let mut trashed = Vec::new();
+    let discarded = discard_if_empty_in(base, manifest, |path| {
+        trashed.push(path.to_path_buf());
+        Ok(())
+    });
+    assert!(!discarded.unwrap());
+    assert!(trashed.is_empty());
+}
+
+#[test]
+fn a_meeting_with_speech_or_a_failure_is_never_discarded() {
+    // One finished entry is enough to keep the meeting.
+    let (base, directory) = finished_meeting("discard-spoken", "Design sync");
+    write_final_transcript(
+        &directory,
+        &[TranscriptEntry {
+            source: MeetingSource::Microphone,
+            start_ms: 1_000,
+            end_ms: 2_000,
+            text: "Hi.".into(),
+        }],
+    );
+    let manifest = read_manifest(&directory).unwrap();
+    assert_kept(&base, &manifest);
+    fs::remove_dir_all(base).unwrap();
+
+    // A transcription failure is not an empty success.
+    let (base, directory) = finished_meeting("discard-failed", "Design sync");
+    write_final_transcript(&directory, &[]);
+    let mut manifest = read_manifest(&directory).unwrap();
+    manifest.status = MeetingStatus::Failed;
+    manifest.error = Some("the model failed".into());
+    write_manifest(&directory, &manifest).unwrap();
+    assert_kept(&base, &manifest);
+    fs::remove_dir_all(base).unwrap();
+
+    // An Interrupted meeting, and a Complete one that carries an error, wait
+    // for a person instead of being swept.
+    let (base, directory) = finished_meeting("discard-interrupted", "Design sync");
+    write_final_transcript(&directory, &[]);
+    let mut manifest = read_manifest(&directory).unwrap();
+    manifest.status = MeetingStatus::Interrupted;
+    write_manifest(&directory, &manifest).unwrap();
+    assert_kept(&base, &manifest);
+    fs::remove_dir_all(base).unwrap();
+
+    let (base, directory) = finished_meeting("discard-error", "Design sync");
+    write_final_transcript(&directory, &[]);
+    let mut manifest = read_manifest(&directory).unwrap();
+    manifest.error = Some("a stale failure".into());
+    write_manifest(&directory, &manifest).unwrap();
+    assert_kept(&base, &manifest);
+    fs::remove_dir_all(base).unwrap();
+
+    // Complete without the published transcript pair is not a finished pass.
+    let (base, directory) = finished_meeting("discard-unpublished", "Design sync");
+    let manifest = read_manifest(&directory).unwrap();
+    assert_kept(&base, &manifest);
+    fs::remove_dir_all(base).unwrap();
+
+    // A final pass still pending keeps the meeting: deletion would race it.
+    let (base, directory) = finished_meeting("discard-pending", "Design sync");
+    write_final_transcript(&directory, &[]);
+    let manifest = read_manifest(&directory).unwrap();
+    fs::write(directory.join(FINAL_PENDING_FILE), b"").unwrap();
+    let mut trashed = Vec::new();
+    let refused = discard_if_empty_in(&base, &manifest, |path| {
+        trashed.push(path.to_path_buf());
+        Ok(())
+    });
+    assert!(refused.is_err());
+    assert!(trashed.is_empty());
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn a_meeting_that_dropped_echo_is_kept_even_with_no_entries() {
+    let (base, directory) = finished_meeting("discard-echo", "Design sync");
+    write_final_transcript(&directory, &[]);
+    let mut manifest = read_manifest(&directory).unwrap();
+    manifest.echo_suppressed_utterances = 2;
+    write_manifest(&directory, &manifest).unwrap();
+    assert_kept(&base, &manifest);
     fs::remove_dir_all(base).unwrap();
 }
 
@@ -1208,176 +1326,6 @@ fn hex_rewriting_its_markdown_keeps_it_hexs_and_a_user_edit_does_not() {
         file_sha256(&export)
     );
     fs::remove_dir_all(base).unwrap();
-}
-
-#[test]
-fn paste_cursor_counts_coalesced_turns_and_advances_only_on_success() {
-    let entry = |source, start_ms, end_ms, text: &str| TranscriptEntry {
-        source,
-        start_ms,
-        end_ms,
-        text: text.into(),
-    };
-    let initial = vec![
-        entry(MeetingSource::Microphone, 0, 1_000, "First."),
-        entry(MeetingSource::Microphone, 1_200, 2_000, "Still me."),
-        entry(MeetingSource::System, 2_500, 3_500, "Got it."),
-    ];
-    let mut cursor = MeetingPasteCursor::default();
-    assert_eq!(
-        cursor.pending("meeting-a", &initial),
-        PendingDelta {
-            turns: 2,
-            span_ms: 3_500
-        }
-    );
-
-    // A failed paste or clipboard write must not advance the cursor.
-    let failed = cursor.consume_entries("meeting-a", &initial, |_| {
-        Err(eyre!("clipboard unavailable"))
-    });
-    assert!(failed.is_err());
-    assert_eq!(cursor.pending("meeting-a", &initial).turns, 2);
-
-    // A successful copy/paste commits the entries and drops the count to 0.
-    let mut copied = String::new();
-    let text = cursor
-        .consume_entries("meeting-a", &initial, |delta| {
-            copied = delta.to_string();
-            Ok(())
-        })
-        .unwrap();
-    assert_eq!(text, "You: First. Still me.\n\nThem: Got it.");
-    assert_eq!(copied, text);
-    assert_eq!(
-        cursor.pending("meeting-a", &initial),
-        PendingDelta::default()
-    );
-    assert!(
-        cursor
-            .consume_entries("meeting-a", &initial, |_| Ok(()))
-            .is_err()
-    );
-
-    // Appending a new turn makes only that turn pending for the next Copy new / Option-Control-V.
-    let mut extended = initial.clone();
-    extended.push(entry(
-        MeetingSource::Microphone,
-        6_000,
-        7_000,
-        "Next point.",
-    ));
-    // Its span is at least a second, so a short turn still reads "1 sec new".
-    assert_eq!(
-        cursor.pending("meeting-a", &extended),
-        PendingDelta {
-            turns: 1,
-            span_ms: 1_000
-        }
-    );
-    let delta = cursor
-        .consume_entries("meeting-a", &extended, |_| Ok(()))
-        .unwrap();
-    assert_eq!(delta, "You: Next point.");
-    assert_eq!(cursor.pending("meeting-a", &extended).turns, 0);
-
-    // Switching to a new meeting starts from the beginning.
-    assert_eq!(cursor.pending("meeting-b", &initial).turns, 2);
-}
-
-#[test]
-fn paste_cursor_neither_repeats_nor_drops_text_when_the_transcript_is_rewritten() {
-    let entry = |source, start_ms, end_ms, text: &str| TranscriptEntry {
-        source,
-        start_ms,
-        end_ms,
-        text: text.into(),
-    };
-    let mut cursor = MeetingPasteCursor::default();
-    let mut pasted = Vec::new();
-    let mut paste = |cursor: &mut MeetingPasteCursor, entries: &[TranscriptEntry]| {
-        if let Ok(text) = cursor.consume_entries("meeting", entries, |_| Ok(())) {
-            pasted.push(text);
-        }
-    };
-    let rolling = vec![
-        entry(MeetingSource::System, 0, 4_000, "Kickoff is at two."),
-        entry(MeetingSource::System, 4_200, 6_000, "Sound good?"),
-    ];
-    paste(&mut cursor, &rolling);
-
-    // The microphone entry before the copied remote speech is published once
-    // the remote side is transcribed past it, and a re-judged echo line
-    // disappears; neither repeats what was copied.
-    let later = vec![
-        entry(MeetingSource::System, 0, 4_000, "Kickoff is at two."),
-        entry(MeetingSource::Microphone, 3_000, 4_000, "Two works."),
-        entry(MeetingSource::System, 4_200, 6_000, "Sound good?"),
-        entry(MeetingSource::System, 6_100, 9_000, "Then let's ship it."),
-    ];
-    paste(&mut cursor, &later);
-
-    // After Stop, the final transcript rebuilt a track with different
-    // segmentation; only text mostly after what was copied is new.
-    let published = vec![
-        entry(
-            MeetingSource::System,
-            0,
-            6_000,
-            "Kickoff is at two. Sounds good?",
-        ),
-        entry(MeetingSource::Microphone, 3_000, 4_000, "Two works."),
-        entry(MeetingSource::System, 6_100, 9_000, "Then let's ship it."),
-        entry(MeetingSource::System, 8_800, 11_000, "And the tail."),
-        entry(MeetingSource::Microphone, 10_000, 11_000, "Bye."),
-    ];
-    paste(&mut cursor, &published);
-    assert!(
-        cursor
-            .consume_entries("meeting", &published, |_| Ok(()))
-            .is_err()
-    );
-    assert_eq!(
-        pasted,
-        [
-            "Them: Kickoff is at two. Sound good?",
-            "You: Two works.\n\nThem: Then let's ship it.",
-            "Them: And the tail.\n\nYou: Bye.",
-        ]
-    );
-}
-
-#[test]
-fn paste_cursor_pastes_text_the_final_pass_recovers_for_skipped_audio() {
-    let entry = |start_ms, end_ms, text: &str| TranscriptEntry {
-        source: MeetingSource::System,
-        start_ms,
-        end_ms,
-        text: text.into(),
-    };
-    let mut cursor = MeetingPasteCursor::default();
-    let mut paste = |entries: &[TranscriptEntry]| {
-        cursor
-            .consume_entries("meeting", entries, |_| Ok(()))
-            .unwrap_or_default()
-    };
-    // The in-call transcript fell behind and skipped 10–40 s of audio.
-    assert_eq!(
-        paste(&[
-            entry(0, 9_000, "Before the backlog."),
-            entry(41_000, 45_000, "After the backlog."),
-        ]),
-        "Them: Before the backlog.\n\nThem: After the backlog."
-    );
-    // The final pass rebuilt the skipped audio; only that text is new.
-    assert_eq!(
-        paste(&[
-            entry(0, 9_000, "Before the backlog."),
-            entry(12_000, 30_000, "Recovered middle."),
-            entry(41_000, 45_000, "After the backlog."),
-        ]),
-        "Them: Recovered middle."
-    );
 }
 
 fn packet_at(source: MeetingSource, arrival_ms: u64, samples: usize) -> AudioPacket {

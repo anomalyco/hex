@@ -29,6 +29,7 @@ wedding	💒 💍 👰 🤵 🥂
 married	💍 💒 👰 🤵
 engaged	💍 💕 🥂
 love	❤️ 😍 🥰 😘
+heart	❤️ 💕 💖
 luv	❤️ 🥰
 xoxo	😘 💋 ❤️
 kiss	😘 💋 😚
@@ -55,6 +56,7 @@ apologies	🙏 😔
 sad	😢 😔 😞
 crying	😭 😢
 cry	😭 😢
+sob	😭
 upset	😞 😢 😤
 angry	😡 😠 🤬
 mad	😡 😠 😤

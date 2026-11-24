@@ -3,11 +3,12 @@
 // 2.3.1 feeds and artifacts in the read-only files bucket), and
 // /hex/download/dev, the latest dev channel Mac download, /hex/dev, the dev
 // builds' changelog, and
-// /hex/download/<target>, the release every download button names, and /hex/ios,
+// /hex/download/<target>, the release every download button names,
+// /hex/download/android, the newest Hex Preview APK, and /hex/ios,
 // Hex for iPhone on the App Store. Other hosts and
 // plain HTTP redirect to the canonical host. `cf dev` with ANY_HOST set turns
 // the redirect off for local testing.
-import { BASE_PATH, DEV_DOWNLOAD_PATH, DEV_NOTES_PATH, DEV_NOTES_URL, DOWNLOAD_PATH, FILES_PATH, RELEASE_SERVICE, stripBase, withBase } from "./src/base"
+import { ANDROID_DOWNLOAD_PATH, ANDROID_PREVIEW_URL, BASE_PATH, DEV_DOWNLOAD_PATH, DEV_NOTES_PATH, DEV_NOTES_URL, DOWNLOAD_PATH, FILES_PATH, IOS_PATH, RELEASE_SERVICE, stripBase, withBase } from "./src/base"
 import { parseDevNotes, renderDevNotes } from "./src/dev-notes"
 
 type Env = {
@@ -33,6 +34,7 @@ export default {
     if (url.pathname === IOS_PATH || url.pathname === `${IOS_PATH}/`) return Response.redirect(APP_STORE_URL, 302)
     if (url.pathname.startsWith(`${FILES_PATH}/`)) return file(request, env, decodeURIComponent(url.pathname.slice(FILES_PATH.length + 1)))
     if (url.pathname === DEV_DOWNLOAD_PATH) return devDownload(request)
+    if (url.pathname === ANDROID_DOWNLOAD_PATH) return androidDownload(request)
     if (url.pathname === DEV_NOTES_PATH || url.pathname === `${DEV_NOTES_PATH}/`) return devNotes(request, env)
     if (url.pathname.startsWith(`${DOWNLOAD_PATH}/`)) return download(request, url.pathname.slice(DOWNLOAD_PATH.length + 1))
 
@@ -64,7 +66,6 @@ export default {
 }
 
 // /hex/ios, the short link to Hex for iPhone on the App Store.
-const IOS_PATH = withBase("/ios")
 const APP_STORE_URL = "https://apps.apple.com/us/app/hex-voice-dictation-keyboard/id6836837368"
 
 const DOCS = new Map([
@@ -166,6 +167,38 @@ async function devDownload(request: Request): Promise<Response> {
     return text("Hex's dev release manifest points the Mac download outside the release service.", 502)
   }
   const headers = new Headers({ Location: location.toString(), "Cache-Control": "no-store" })
+  secure(headers)
+  return new Response(null, { status: 302, headers })
+}
+
+// Redirects to the newest Hex Preview APK, the one latest.json on the
+// android-preview branch names, so the Android page's button follows each
+// build without a site deploy. Only ever to this repository's own Hex Preview
+// release files.
+const ANDROID_RELEASE_FILES = "https://github.com/anomalyco/hex/releases/download/android-preview-"
+
+async function androidDownload(request: Request): Promise<Response> {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } })
+  }
+  const text = (body: string, status: number) => {
+    const headers = new Headers({ "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" })
+    secure(headers)
+    return new Response(`${body}\n`, { status, headers })
+  }
+  let apk: unknown
+  try {
+    const response = await fetch(ANDROID_PREVIEW_URL, { headers: { "User-Agent": "hex-site" }, cf: { cacheTtl: 60, cacheEverything: true } })
+    if (response.status === 404) return text("No Hex Preview build has been published yet.", 404)
+    if (!response.ok) return text(`GitHub answered ${response.status}. Try again in a minute.`, 502)
+    apk = ((await response.json()) as { apk?: { url?: unknown } }).apk?.url
+  } catch {
+    return text("Hex Preview's latest build could not be read. Try again in a minute.", 502)
+  }
+  if (typeof apk !== "string" || !apk.startsWith(ANDROID_RELEASE_FILES) || !apk.endsWith(".apk")) {
+    return text("Hex Preview's latest build names no download.", 502)
+  }
+  const headers = new Headers({ Location: apk, "Cache-Control": "no-store" })
   secure(headers)
   return new Response(null, { status: 302, headers })
 }

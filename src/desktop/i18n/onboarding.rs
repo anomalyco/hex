@@ -6,6 +6,8 @@
 pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Hex starts listening once the speech model has downloaded.", ["Hex zacznie słuchać, gdy model mowy się pobierze.", "语音模型下载完成后，Hex 就会开始聆听。", "音声モデルのダウンロードが終わると、Hex が聞き取りを始めます。", "Hex hört zu, sobald das Sprachmodell geladen ist.", "Hex empezará a escuchar cuando termine de descargarse el modelo de voz.", "Hex почне слухати після завантаження моделі розпізнавання мовлення."]),
     ("Device Control and Data Access", ["Sterowanie urządzeniem i dostęp do danych", "设备控制与数据访问", "デバイス制御とデータアクセス", "Gerätesteuerung und Datenzugriff", "Control del dispositivo y acceso a datos", "Керування пристроями й доступ до даних"]),
+    ("System & App Protection Override", ["Nadpisanie ochrony systemu i aplikacji", "系统与应用保护覆盖", "システムと App の保護のオーバーライド", "Überschreibung des System- und App-Schutzes", "Anulación de la protección del sistema y las apps", "Перевизначення захисту системи та програм"]),
+    ("Click the Privacy & Security notification, or add Hex with +", ["Kliknij powiadomienie „Prywatność i bezpieczeństwo” lub dodaj Hex przez +", "点按“隐私与安全性”通知，或用 + 添加 Hex", "「プライバシーとセキュリティ」の通知をクリックするか、+ で Hex を追加", "Klicke die Mitteilung „Datenschutz & Sicherheit“ an oder füge Hex mit + hinzu", "Haz clic en la notificación de Privacidad y seguridad o añade Hex con +", "Натисніть сповіщення «Конфіденційність і безпека» або додайте Hex через +"]),
     ("Allowed", ["Dozwolone", "已允许", "許可済み", "Erlaubt", "Permitido", "Дозволено"]),
     ("Back", ["Wstecz", "返回", "戻る", "Zurück", "Atrás", "Назад"]),
     ("Continue", ["Dalej", "继续", "続ける", "Weiter", "Continuar", "Продовжити"]),

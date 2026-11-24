@@ -612,8 +612,11 @@ fn newest_in(candidates: &[Candidate], folder: &Folder) -> Option<Candidate> {
         .cloned()
 }
 
+/// The home folder or a filesystem root: `/` on macOS and Linux, or `/` or a
+/// drive's root (`C:\`) on Windows. A root is a path with no parent.
 pub(crate) fn is_home_or_root(path: &Path) -> bool {
-    path == Path::new("/") || crate::user_dirs::home_dir().is_some_and(|home| path == home)
+    (path.has_root() && path.parent().is_none())
+        || crate::user_dirs::home_dir().is_some_and(|home| path == home)
 }
 
 fn in_project(candidate: &Candidate, folder: &Folder) -> bool {

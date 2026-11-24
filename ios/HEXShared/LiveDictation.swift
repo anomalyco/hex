@@ -95,6 +95,8 @@ final class LiveDictationText: ObservableObject {
     private(set) var typesIntoField = false
     /// Counts dictations, so what follows the words can tell a new one from the last.
     private(set) var dictation = 0
+    /// Whether Type as I speak could type in the field the keyboard is in now (`KeyboardLiveTyping`).
+    var fieldTakesTyping: () -> Bool = { true }
 
     /// A source started: the preview shows, empty until the first words.
     func begin(showsPreview: Bool, typesIntoField: Bool) {
@@ -140,6 +142,16 @@ nonisolated struct LiveDictationSettings {
 
     /// Either switch needs live words while recording.
     var wantsLiveWords: Bool { showsPreview || typesIntoField }
+
+    /// What one dictation does with its live words: typed into the field where Type as I speak
+    /// is on and can type this dictation, and shown over the keys where Show what I say is on,
+    /// or where Type as I speak is on but can't (Translate what I say on, or a field
+    /// `LiveFieldTyping` never types in), so the words still show, as they did while the two
+    /// were separate switches (TestFlight build 147).
+    func liveWords(translating: Bool, fieldTakesTyping: Bool) -> (showsPreview: Bool, typesIntoField: Bool) {
+        let types = typesIntoField && !translating && fieldTakesTyping
+        return (showsPreview || (typesIntoField && !types), types)
+    }
 
     /// The words Type as I speak typed in a field whose keyboard hid before the dictation went
     /// in (an app gone to the background takes no edits), and when: the held text replaces them

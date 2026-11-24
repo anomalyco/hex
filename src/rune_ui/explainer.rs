@@ -11,21 +11,18 @@
 use std::cell::Cell;
 use std::time::Duration;
 
-use rune::{Color, Cx, El, LineCap, Shape, SpringPair, Transition, Tx, canvas, col, el, row, text};
+use rune::{Color, Cx, El, LineCap, Shape, Tx, canvas, col, el, row, text};
 
-use super::Ui;
 use super::controls::{
-    ButtonKind, DESCRIPTION, KEY_GAP, KeySize, Paint, TRAY_PADDING, button, key_tray, keycap,
+    ButtonKind, KEY_GAP, KeySize, METRICS, MODAL, ModalWidth, Paint, TRAY_PADDING, button,
+    key_tray, keycap, modal_panel, modal_sheet,
 };
 use super::shortcut_mode::{Trigger, pick};
+use super::{Modal, Ui};
 use crate::desktop::i18n::tr;
 
-const MODAL_WIDTH: f32 = 600.0;
-const PADDING: f32 = 18.0;
-const OPTION_PADDING: f32 = 12.0;
+const OPTION_PY: f32 = 12.0;
 const OPTION_GAP: f32 = 8.0;
-/// The name and caption beside each option's keys and lanes.
-const COPY_WIDTH: f32 = 280.0;
 const COPY_GAP: f32 = 16.0;
 /// An option this shortcut can't use dims its keys and lanes.
 const UNAVAILABLE_OPACITY: f32 = 0.4;
@@ -42,8 +39,6 @@ pub(super) const VISUAL_GAP: f32 = 10.0;
 /// The lanes beside an option's keycaps are never narrower than this: a
 /// long chord widens the panel instead.
 const MIN_LANES: f32 = 64.0;
-/// How far a widened panel stays inside the window.
-const WINDOW_MARGIN: f32 = 24.0;
 /// The pen overhangs the lanes by 4 points above and below.
 const LANES_HEIGHT: f32 = 25.0;
 const LANE: f32 = 6.0;
@@ -114,7 +109,6 @@ pub(super) const DOUBLE_TAP: Script = Script {
 
 #[derive(Default)]
 pub(super) struct Explainer {
-    pub(super) open: bool,
     /// The poll clock when the tape started.
     start: Option<f64>,
     /// Since the tape started, so takes before it never show.
@@ -148,20 +142,14 @@ impl Explainer {
 /// Opens the modal over General, alone: it ends a shortcut recording and
 /// closes the model picker and any menu.
 pub(super) fn open(ui: &mut Ui) {
-    super::settings::cancel_capture(ui);
-    super::picker::close(ui);
-    super::sound_sets::close(ui);
-    super::vocabulary::close(ui);
-    super::calls::close(ui);
-    ui.open = None;
-    ui.explainer.open = true;
+    ui.open_modal(Modal::Explainer);
     ui.explainer.start = None;
     ui.explainer.elapsed_ms = 0.0;
     ui.explainer.next_frame = 0.0;
 }
 
 pub(super) fn close(ui: &mut Ui) {
-    ui.explainer.open = false;
+    ui.close_modal_if(Modal::Explainer);
 }
 
 /// Opens the modal, held at `held_ms` or looping when `None`.
@@ -172,8 +160,11 @@ pub(super) fn fixture(ui: &mut Ui, held_ms: Option<f32>) {
 
 /// Advances the loop while the modal shows. True when it moved.
 pub(super) fn poll(ui: &mut Ui, clock: f64, visible: bool, tx: &mut Tx) -> bool {
+    if !ui.is_modal(Modal::Explainer) {
+        return false;
+    }
     let explainer = &mut ui.explainer;
-    if !explainer.open || !visible || explainer.held_ms.is_some() || explainer.reduced.get() {
+    if !visible || explainer.held_ms.is_some() || explainer.reduced.get() {
         return false;
     }
     let start = *explainer.start.get_or_insert(clock);
@@ -188,19 +179,18 @@ pub(super) fn poll(ui: &mut Ui, clock: f64, visible: bool, tx: &mut Tx) -> bool 
 /// Rune reads Reduce Motion again when the window gains focus, after that
 /// frame's poll, so a stopped tape wakes once for the next poll to see it.
 pub(super) fn window_focused(ui: &mut Ui, focused: bool, tx: &mut Tx) {
-    let explainer = &mut ui.explainer;
-    if focused && explainer.open && explainer.reduced.get() {
-        explainer.next_frame = 0.0;
+    if focused && ui.is_modal(Modal::Explainer) && ui.explainer.reduced.get() {
+        ui.explainer.next_frame = 0.0;
         tx.wake_after(FRAME);
     }
 }
 
-pub(super) fn modal(ui: &Ui, cx: &Cx<Ui>, p: Paint) -> Option<[El; 2]> {
-    // Kept while closed too, so the poll after opening already knows.
+/// Kept while closed too, so the poll after opening already knows.
+pub(super) fn sync_reduced_motion(ui: &Ui, cx: &Cx<Ui>) {
     ui.explainer.reduced.set(cx.system_reduced_motion());
-    if !ui.explainer.open {
-        return None;
-    }
+}
+
+pub(super) fn modal(ui: &Ui, cx: &Cx<Ui>, p: Paint) -> [El; 2] {
     let t = ui.explainer.now();
     // A still tape needs no edge to slide out under.
     let fade = if ui.explainer.reduced.get() {
@@ -208,7 +198,6 @@ pub(super) fn modal(ui: &Ui, cx: &Cx<Ui>, p: Paint) -> Option<[El; 2]> {
     } else {
         TAPE_FADE
     };
-    let c = &p.k.c;
     let colors = Colors::new(p);
     let keys = ui.settings.dictation_hotkey.keycaps();
     let current = Trigger::of(&ui.settings);
@@ -219,10 +208,11 @@ pub(super) fn modal(ui: &Ui, cx: &Cx<Ui>, p: Paint) -> Option<[El; 2]> {
         .map_or_else(|| keys_estimate(&keys), |[width, _]| width);
     let width = panel_width(keys_width, window.map(|[width, _]| width));
     // The lanes draw at the width they lay out at, whatever the keycaps take.
+    let card_edge = METRICS.gutter - METRICS.row_px;
     let estimate = width
-        - 2.0 * PADDING
-        - 2.0 * OPTION_PADDING
-        - COPY_WIDTH
+        - 2.0 * card_edge
+        - 2.0 * METRICS.row_px
+        - METRICS.copy_w
         - COPY_GAP
         - keys_width
         - VISUAL_GAP;
@@ -241,61 +231,25 @@ pub(super) fn modal(ui: &Ui, cx: &Cx<Ui>, p: Paint) -> Option<[El; 2]> {
                 visual(p, &colors, &keys, trigger.script(), lanes, t, fade),
             )
         }));
-    let mut panel = col()
-        .key("shortcut-mode-modal")
-        .role("dialog")
-        .label(tr("Shortcut mode"))
-        .w(width)
-        .pt(PADDING)
-        .px(PADDING)
-        .pb(14.0)
-        .gap(14.0)
-        .radius(p.k.radius.xl)
-        .fill(c.bg_base)
-        .border(p.hair, c.border_weak)
-        // Presses inside the panel stay inside.
-        .on_press(|_: &mut Ui| {})
-        .child(
-            text(tr("Shortcut mode"))
-                .key("title")
-                .font(p.k.ty.body_medium)
-                .color(p.text()),
-        )
-        .child(options)
-        .child(
-            row().key("footer").justify_end().child(
-                button(
-                    p,
-                    "shortcut-mode-done",
-                    tr("Done"),
-                    ButtonKind::Secondary,
-                    |ui: &mut Ui, _| close(ui),
-                )
-                .default_button(),
-            ),
-        );
-    for shadow in &p.k.elevation.overlay {
-        panel = panel.box_shadow(*shadow);
-    }
-    let layer = |key: &str| {
-        el().key(key)
-            .role("none")
-            .absolute(0.0, 0.0)
-            .w_full()
-            .h_full()
-    };
-    Some([
-        layer("explainer-scrim")
-            .fill(c.scrim)
-            .on_press(close)
-            .transition(Transition::opacity().springs(overlay_springs(p))),
-        layer("explainer-layer")
-            .center()
-            .transition(panel_transition(p))
-            // Keys stay inside, Escape or a press outside closes, and focus
-            // returns to the row that opened it.
-            .child(panel.modal(true, close)),
-    ])
+    let panel = modal_panel(
+        p,
+        "shortcut-mode-modal",
+        tr("Shortcut mode"),
+        ModalWidth::Wide,
+        vec![options],
+        vec![
+            button(
+                p,
+                "shortcut-mode-done",
+                tr("Done"),
+                ButtonKind::Secondary,
+                |ui: &mut Ui, _| close(ui),
+            )
+            .default_button(),
+        ],
+    )
+    .w(width);
+    modal_sheet(p, "explainer", panel, close)
 }
 
 /// The key tray's width until layout measures it: a one-glyph legend is
@@ -314,19 +268,11 @@ pub(super) fn keys_estimate(keys: &[String]) -> f32 {
 /// The panel is wide enough for each option's lanes to keep `MIN_LANES`
 /// beside `keys` points of keycaps, as far as the window allows.
 fn panel_width(keys: f32, window: Option<f32>) -> f32 {
-    let option = 2.0 * OPTION_PADDING + COPY_WIDTH + COPY_GAP + keys + VISUAL_GAP + MIN_LANES;
-    let wanted = option + 2.0 * PADDING;
-    let room = window.map_or(f32::INFINITY, |window| window - 2.0 * WINDOW_MARGIN);
-    wanted.min(room).max(MODAL_WIDTH)
-}
-
-/// How the panel enters and leaves: the same as the picker's.
-fn panel_transition(p: Paint) -> Transition {
-    super::controls::modal_transition(p)
-}
-
-fn overlay_springs(p: Paint) -> SpringPair {
-    SpringPair::new(p.k.motion.overlay, p.k.motion.overlay)
+    let card_edge = METRICS.gutter - METRICS.row_px;
+    let option = 2.0 * METRICS.row_px + METRICS.copy_w + COPY_GAP + keys + VISUAL_GAP + MIN_LANES;
+    let wanted = option + 2.0 * card_edge;
+    let room = window.map_or(f32::INFINITY, |window| window - 2.0 * MODAL.margin);
+    wanted.min(room).max(ModalWidth::Wide.px())
 }
 
 /// One trigger: its name and what it does beside its keys and lanes.
@@ -345,7 +291,8 @@ fn option(ui: &Ui, p: Paint, trigger: Trigger, selected: bool, visual: El) -> El
         .description(caption.clone())
         .checked(selected)
         .disabled(unavailable.is_some())
-        .padding(OPTION_PADDING)
+        .px(METRICS.row_px)
+        .py(OPTION_PY)
         .gap(COPY_GAP)
         .center_y()
         .radius(p.k.radius.lg)
@@ -360,22 +307,19 @@ fn option(ui: &Ui, p: Paint, trigger: Trigger, selected: bool, visual: El) -> El
         .child(
             col()
                 .key("copy")
-                .w(COPY_WIDTH)
+                .w(METRICS.copy_w)
                 .gap(2.0)
-                .child(
-                    text(trigger.name())
-                        .key("name")
-                        .font(p.k.ty.ui_medium)
-                        .color(if unavailable.is_some() {
-                            p.faint()
-                        } else {
-                            p.text()
-                        }),
-                )
+                .child(text(trigger.name()).key("name").font(p.strong()).color(
+                    if unavailable.is_some() {
+                        p.faint()
+                    } else {
+                        p.text()
+                    },
+                ))
                 .child(
                     text(caption)
                         .key("caption")
-                        .font(DESCRIPTION)
+                        .font(p.description())
                         .color(p.muted())
                         .wrap(),
                 ),

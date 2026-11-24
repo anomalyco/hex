@@ -630,12 +630,42 @@
         }
       }
     },
-    "Emoji key and suggestions" : {
+    "Emoji key" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "表情符号键和建议"
+            "value" : "表情符号键"
+          }
+        }
+      }
+    },
+    "Emoji suggestions" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "表情符号建议"
+          }
+        }
+      }
+    },
+    "Opens all emoji from the keyboard" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从键盘打开全部表情符号"
+          }
+        }
+      }
+    },
+    "Suggests 😭 as you type cry" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入 cry 时推荐 😭"
           }
         }
       }
@@ -1681,6 +1711,26 @@
         }
       }
     },
+    "Key flicks" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按键轻扫"
+          }
+        }
+      }
+    },
+    "Pull a key down to type the character above its letter" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "向下拉按键即可输入其字母上方的字符"
+          }
+        }
+      }
+    },
     "Key pop-ups" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1797,6 +1847,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "小写"
+          }
+        }
+      }
+    },
+    "Casual starts sentences lowercase anyway. Pick Polished for capitals." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“随意”本来就让句首小写。要大写请选“精修”。"
           }
         }
       }
@@ -2143,16 +2203,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在 Hex 中通过 Wi-Fi 下载"
-          }
-        }
-      }
-    },
-    "Open Hex to download %@." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开 Hex 下载%@语音。"
           }
         }
       }
@@ -2557,12 +2607,22 @@
         }
       }
     },
-    "Ready. Works offline." : {
+    "%@ to %@ is ready. Works offline." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已就绪，可离线使用。"
+            "value" : "从%1$@翻译成%2$@已就绪，可离线使用。"
+          }
+        }
+      }
+    },
+    "Dictate once with the Hex keyboard, then check back here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先用 Hex 键盘听写一次，再回来这里查看。"
           }
         }
       }
@@ -2857,6 +2917,26 @@
         }
       }
     },
+    "Starting microphone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在启动麦克风"
+          }
+        }
+      }
+    },
+    "Starting…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在启动…"
+          }
+        }
+      }
+    },
     "Starts or finishes on-device dictation and copies the text." : {
       "localizations" : {
         "zh-Hans" : {
@@ -3066,6 +3146,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "太长"
+          }
+        }
+      }
+    },
+    "Transcribing" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在转录"
           }
         }
       }
@@ -3853,16 +3943,6 @@
         }
       }
     },
-    "Multilingual model (Parakeet)" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "多语言模型（Parakeet）"
-          }
-        }
-      }
-    },
     "Needs an iPhone with 6 GB of memory or more" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4243,6 +4323,16 @@
         }
       }
     },
+    "Passwords" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "密码"
+          }
+        }
+      }
+    },
     "The multilingual model's download stopped. Trying again in %lld s." : {
       "localizations" : {
         "zh-Hans" : {
@@ -4269,26 +4359,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在准备多语言模型"
-          }
-        }
-      }
-    },
-    "Turn off" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "关闭"
-          }
-        }
-      }
-    },
-    "25 languages, even mixed in one sentence. %@ download. Once ready, keyboard dictation opens Hex." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "支持 25 种语言，一句话里混着说也行。需下载 %@。就绪后，键盘听写会打开 Hex。"
           }
         }
       }
@@ -4571,16 +4641,6 @@
         }
       }
     },
-    "For English. Uses about %@, downloaded on Wi-Fi. Until then, the keyboard uses Apple's speech recognition." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "适用于英语。约占用 %@，通过 Wi-Fi 下载。在此之前，键盘使用 Apple 的语音识别。"
-          }
-        }
-      }
-    },
     "Only for English dictation." : {
       "localizations" : {
         "zh-Hans" : {
@@ -4637,6 +4697,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已可在键盘中使用"
+          }
+        }
+      }
+    },
+    "Shows your keyboards: pick Apple's, where iOS offers your saved passwords" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示你的键盘：选择 Apple 的键盘，iOS 会在那里提供你存储的密码"
+          }
+        }
+      }
+    },
+    "Switches to the next keyboard, where iOS offers your saved passwords" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换到下一个键盘，iOS 会在那里提供你存储的密码"
           }
         }
       }
@@ -4707,6 +4787,486 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "停下前文字可能会变"
+          }
+        }
+      }
+    },
+    "Send feedback" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发送反馈"
+          }
+        }
+      }
+    },
+    "Problem" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "问题"
+          }
+        }
+      }
+    },
+    "Idea" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "建议"
+          }
+        }
+      }
+    },
+    "Question" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提问"
+          }
+        }
+      }
+    },
+    "Other" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其他"
+          }
+        }
+      }
+    },
+    "Thanks for your feedback" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "感谢你的反馈"
+          }
+        }
+      }
+    },
+    "It's with the Hex team. If they reply, you'll get an email at %@, and you'll need to confirm your address once from that email. Nothing has been emailed yet." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "反馈已送达 Hex 团队。如果团队回复，你会在 %@ 收到邮件，并需要通过那封邮件确认一次你的地址。目前还没有发送任何邮件。"
+          }
+        }
+      }
+    },
+    "It's with the Hex team. It was sent anonymously, so it can't be answered." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "反馈已送达 Hex 团队。这是匿名发送的，因此无法回复。"
+          }
+        }
+      }
+    },
+    "It's with the Hex team." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "反馈已送达 Hex 团队。"
+          }
+        }
+      }
+    },
+    "Pictures" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "图片"
+          }
+        }
+      }
+    },
+    "Subject (optional)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主题（可选）"
+          }
+        }
+      }
+    },
+    "%@ of %@ characters" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ / %2$@ 个字符"
+          }
+        }
+      }
+    },
+    "What happened, or what would you like?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发生了什么，或者你希望怎样？"
+          }
+        }
+      }
+    },
+    "Email for a reply (optional)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用于回复的邮箱（可选）"
+          }
+        }
+      }
+    },
+    "The message is too long. Keep it under 20,000 characters." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "留言太长了，请控制在 20,000 个字符以内。"
+          }
+        }
+      }
+    },
+    "The pictures are too large together. Remove one and try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "图片加起来太大了。请移除一张后再试。"
+          }
+        }
+      }
+    },
+    "Sending… trying again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在发送… 正在重试"
+          }
+        }
+      }
+    },
+    "Sending…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在发送…"
+          }
+        }
+      }
+    },
+    "Add a picture" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加图片"
+          }
+        }
+      }
+    },
+    "Add" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加"
+          }
+        }
+      }
+    },
+    "Remove picture %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除图片 %lld"
+          }
+        }
+      }
+    },
+    "Couldn't send: your iPhone seems to be offline. Your message is still here; try again when you're connected." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法发送：你的 iPhone 似乎没有联网。留言仍保留在这里，联网后再试一次。"
+          }
+        }
+      }
+    },
+    "That's too large to send. Remove a picture, or add a smaller one, and try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "内容太大，无法发送。请移除一张图片或换一张更小的，然后再试。"
+          }
+        }
+      }
+    },
+    "One of the pictures couldn't be read. Remove it and try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有一张图片无法读取。请移除它后再试。"
+          }
+        }
+      }
+    },
+    "Too many reports right now. Try again in a little while." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前反馈过多，请稍后再试。"
+          }
+        }
+      }
+    },
+    "Feedback is unavailable in this version of Hex." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此版本的 Hex 暂时无法发送反馈。"
+          }
+        }
+      }
+    },
+    "Couldn't send your feedback. Try again in a little while." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法发送你的反馈，请稍后再试。"
+          }
+        }
+      }
+    },
+    "When you tap Send, Hex sends your message, the pictures above, your email, Hex's version and the language and speech model it dictates with, your iPhone's model, iOS version and language, the screen you opened this from, and a random install id that keeps your reports together, to Anomaly's feedback inbox. Nothing you dictate or type elsewhere is sent." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点“发送”后，Hex 会把你的留言、上面的图片、你的邮箱、Hex 的版本及其听写所用的语言和语音模型、你的 iPhone 型号、iOS 版本和语言、打开此页面的位置，以及一个把你的反馈归在一起的随机安装 ID 发送到 Anomaly 的反馈收件箱。你在别处听写或输入的内容都不会发送。"
+          }
+        }
+      }
+    },
+    "Hex sends nothing unless you tap Send in Send feedback. Then it sends your message and the pictures you kept, your email if you add one, and details about Hex and this iPhone to Anomaly's feedback inbox. Your dictations, what you type, and what Hex learned are never included." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "除非你在“发送反馈”中轻点“发送”，否则 Hex 不会发送任何内容。轻点后，它会把你的留言和保留的图片、你填写的邮箱（如有），以及 Hex 和这台 iPhone 的相关信息发送到 Anomaly 的反馈收件箱。你的听写、输入的内容以及 Hex 学到的内容都不会包含在内。"
+          }
+        }
+      }
+    },
+    "With an email, the team can reply. Without one, your feedback is anonymous." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "填写邮箱后，团队可以回复你。不填写，反馈就是匿名的。"
+          }
+        }
+      }
+    },
+    "When you tap Send, Hex sends your message, the pictures above, Hex's version and the language and speech model it dictates with, your iPhone's model, iOS version and language, and the screen you opened this from to Anomaly's feedback inbox. Nothing you dictate or type elsewhere is sent." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点“发送”后，Hex 会把你的留言、上面的图片、Hex 的版本及其听写所用的语言和语音模型、你的 iPhone 型号、iOS 版本和语言，以及打开此页面的位置发送到 Anomaly 的反馈收件箱。你在别处听写或输入的内容都不会发送。"
+          }
+        }
+      }
+    },
+    "That isn't an email address. Fix it, or clear it to send without one." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这不是有效的邮箱地址。请修正，或清空后不带邮箱发送。"
+          }
+        }
+      }
+    },
+    "Stopped at %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 %@ 处停止"
+          }
+        }
+      }
+    },
+    "The screen locked or you left the app" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕已锁定，或你离开了该应用"
+          }
+        }
+      }
+    },
+    "Download %@ in Hex to dictate" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Hex 中下载%@语音后即可听写"
+          }
+        }
+      }
+    },
+    "Not enough memory to dictate here" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "内存不足，无法在这里听写"
+          }
+        }
+      }
+    },
+    "Finish setting up Hex to dictate" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完成 Hex 设置后即可听写"
+          }
+        }
+      }
+    },
+    "Opens Hex to dictate there" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 Hex，在那里听写"
+          }
+        }
+      }
+    },
+    "%@ isn't available on this iPhone yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPhone 暂不支持%@"
+          }
+        }
+      }
+    },
+    "English" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "英语"
+          }
+        }
+      }
+    },
+    "Multilingual" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "多语言"
+          }
+        }
+      }
+    },
+    "Model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型"
+          }
+        }
+      }
+    },
+    "Use English" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "改用英语"
+          }
+        }
+      }
+    },
+    "The keyboard dictates with the model below. Until it's ready, it uses Apple's speech recognition." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "键盘使用下方选择的模型听写。准备好之前，使用 Apple 的语音识别。"
+          }
+        }
+      }
+    },
+    "Not for this dictation language, so the keyboard uses Apple's speech recognition." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不适用于当前听写语言，因此键盘使用 Apple 的语音识别。"
+          }
+        }
+      }
+    },
+    "Other languages use Apple's speech recognition. Only the picked model stays on this iPhone: switching downloads the new one, and the old one goes once the new one is ready." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其他语言使用 Apple 的语音识别。这台 iPhone 上只保留所选的模型：切换时会下载新模型，等新模型准备好后再删除旧的。"
+          }
+        }
+      }
+    },
+    "For English. A %@ download on Wi-Fi." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用于英语。通过 Wi-Fi 下载 %@。"
+          }
+        }
+      }
+    },
+    "25 languages, even mixed in one sentence: %@. A %@ download as soon as you pick it. Hex dictates them with it too." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "支持 25 种语言，一句话里混着说也行：%1$@。选择后立即下载 %2$@。Hex 自己听写这些语言时也会使用它。"
           }
         }
       }

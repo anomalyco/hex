@@ -515,7 +515,7 @@ fn entry_kind_label(entry: &Listed) -> &'static str {
     }
 }
 
-pub(super) fn view(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (Vec<El>, El) {
+pub(super) fn view(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
     // With no captures to mix in, the filter would list one kind.
     let mut actions = Vec::new();
     if ui.settings.capture.enabled || ui.settings.labs.screenshots {
@@ -542,6 +542,7 @@ pub(super) fn view(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (
                         title: e.title(),
                         meta: captures::meta(e),
                         meta_ink: None,
+                        note: None,
                         time: event_age(e.at_ms()),
                         hover: vec![captures::copy_action(ui, p, id, true)],
                         selected: picked,
@@ -573,6 +574,7 @@ pub(super) fn view(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (
                         // A cancelled dictation is History-only; its kind
                         // line says so, faint, under the words it kept.
                         meta_ink: e.cancelled.then(|| p.faint()),
+                        note: None,
                         time: event_age(e.timestamp_ms),
                         hover: vec![copy_action(ui, p, id, true)],
                         selected: ui.history.is_selected(id),
@@ -626,9 +628,6 @@ pub(super) fn view(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (
     } else {
         ld::body(p, "history-body", column, detail)
     };
-    if let Some(modal) = super::stats::modal(ui, p, cx) {
-        layer.extend(modal);
-    }
     let mut pane = col().key("history-pane").grow(1.).shrink();
     if let Some(error) = &ui.history.error {
         pane = pane.child(error_panel(
@@ -639,5 +638,8 @@ pub(super) fn view(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (
             Tone::Danger,
         ));
     }
-    (actions, pane.child(body))
+    (
+        actions,
+        pane.children(super::stats::strip(ui, p)).child(body),
+    )
 }

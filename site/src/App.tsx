@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react"
-import Download, { OS_KEY_LEGENDS, OS_NAMES, OS_SHORTCUTS, PLATFORM_NAMES, SHORTCUTS, osOf, type Os } from "./Download"
+import Download, { OS_KEY_LEGENDS, OS_NAMES, OS_SHORTCUTS, osOf, type Os } from "./Download"
 import { guessPlatform, refinePlatform, type Platform } from "./platform"
 import { OptionKey, SoundToggle, useShout } from "./Shout"
 import signature from "./footer-signature.svg"
@@ -42,8 +42,6 @@ export default function App() {
   // the hero to that OS, until then it follows the detected platform.
   const [chosenOs, setChosenOs] = useState<Os>()
   const os = chosenOs ?? osOf(platform)
-  const shortcut = chosenOs ? OS_SHORTCUTS[chosenOs] : SHORTCUTS[platform]
-  const osName = chosenOs ? OS_NAMES[chosenOs] : PLATFORM_NAMES[platform]
 
   const root = useRef<HTMLElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
@@ -94,9 +92,16 @@ export default function App() {
                 appears.
               </span>
             </h1>
-            <p>
-              Local voice dictation for {osName}. Hold {shortcut}, say what you mean, and
-              Hex pastes it where you are.
+            <p className="hero__device">
+              {os === "mobile"
+                ? "Local voice dictation for iOS and Android. Dictate right inside the keyboard, in any app, on your phone."
+                : `Local voice dictation for ${OS_NAMES[os]}. Hold ${OS_SHORTCUTS[os]}, say what you mean, and Hex pastes it where you are.`}
+            </p>
+            {/* Scripts off: the line above is only the page's first guess, so name
+                every platform; index.html's <noscript> stylesheet swaps them. */}
+            <p className="hero__any">
+              Local voice dictation for Mac, Windows, Linux, iOS, and Android. Hold your
+              shortcut or dictate from your phone&apos;s keyboard, and Hex types what you said.
             </p>
           </div>
 

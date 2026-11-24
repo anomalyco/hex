@@ -96,8 +96,20 @@ pub(super) const SCENES: &[Scene] = &[
         ui.history = history::HistoryPane::fixture();
         ui.history.stats = Some(history::HistoryPane::fixture_stats());
         ui.history.usage = Some(history::HistoryPane::fixture_usage());
-        ui.history.stats_open = true;
+        ui.open_modal(Modal::HistoryStats);
         ui.settings.labs.history_stats = true;
+        crate::labs::apply(&ui.settings.labs);
+        ui.pane = Pane::History;
+    }),
+    // Labs › Stats on History: the dialog's six headline numbers as one
+    // compact strip above History's list.
+    ("history-stats-strip", |ui| {
+        *ui = portal_fixture();
+        ui.history = history::HistoryPane::fixture();
+        ui.history.stats = Some(history::HistoryPane::fixture_stats());
+        ui.history.usage = Some(history::HistoryPane::fixture_usage());
+        ui.settings.labs.history_stats = true;
+        ui.settings.labs.history_stats_strip = true;
         crate::labs::apply(&ui.settings.labs);
         ui.pane = Pane::History;
     }),
@@ -159,6 +171,15 @@ pub(super) const SCENES: &[Scene] = &[
         ui.history.unified.picked = Some(std::path::PathBuf::from(
             "/Users/alex/Library/Application Support/Scrawl/captures/1.scrawl",
         ));
+    }),
+    // The Paste Last picker a held Paste Last opens, centred over the
+    // window as it is over the display: a capture, a cancelled dictation,
+    // and the newest dictation selected.
+    #[cfg(all(target_os = "macos", hex_capture))]
+    ("mac-paste-picker", |ui| {
+        *ui = mac_fixture();
+        ui.settings.labs.paste_last_picker = true;
+        ui.paste_preview = true;
     }),
     #[cfg(all(target_os = "macos", hex_capture))]
     ("mac-history-empty", |ui| {
@@ -574,10 +595,13 @@ pub(super) const SCENES: &[Scene] = &[
         *ui = mac_fixture();
         ui.settings.updates.channel = Some(crate::app_settings::UpdateChannel::Dev);
     }),
-    // A local build: the badge, the quiet status line, no channel row.
+    // Pin both parts of an actual local build, independent of the render host.
     ("mac-local-build", |ui| {
         *ui = mac_fixture();
-        ui.build_preview = Some(BuildKind::Local);
+        ui.build_preview = Some(BuildKind::Local {
+            version: "3.4.0",
+            commit: Some("fc837db2a56858eeef61411c97737d2435e60a88"),
+        });
         if let Some(view) = &mut ui.view {
             view.update_status = DesktopUpdateStatus::SourceBuild;
         }
@@ -702,6 +726,43 @@ pub(super) const SCENES: &[Scene] = &[
         ui.meetings.delete_armed = Some("preview-notes".into());
         ui.pane = Pane::Meetings;
     }),
+    // Labs › Delete transcript lines: two saved turns checked, the bar
+    // asking, then its one confirmation.
+    ("meetings-select", |ui| {
+        *ui = mac_fixture();
+        ui.settings.labs.transcript_edits = true;
+        ui.meetings.selection.select_lines(&[
+            crate::meeting::TranscriptEntryKey {
+                source: crate::meeting::MeetingSource::System,
+                start_ms: 1_000,
+                end_ms: 2_000,
+            },
+            crate::meeting::TranscriptEntryKey {
+                source: crate::meeting::MeetingSource::Microphone,
+                start_ms: 9_000,
+                end_ms: 10_000,
+            },
+        ]);
+        ui.pane = Pane::Meetings;
+    }),
+    ("meetings-select-confirm", |ui| {
+        *ui = mac_fixture();
+        ui.settings.labs.transcript_edits = true;
+        ui.meetings.selection.select_lines(&[
+            crate::meeting::TranscriptEntryKey {
+                source: crate::meeting::MeetingSource::System,
+                start_ms: 1_000,
+                end_ms: 2_000,
+            },
+            crate::meeting::TranscriptEntryKey {
+                source: crate::meeting::MeetingSource::Microphone,
+                start_ms: 9_000,
+                end_ms: 10_000,
+            },
+        ]);
+        ui.meetings.selection.delete_armed = true;
+        ui.pane = Pane::Meetings;
+    }),
     ("meetings-rename", |ui| {
         *ui = mac_fixture();
         ui.meetings.renaming = Some("preview-notes".into());
@@ -727,6 +788,22 @@ pub(super) const SCENES: &[Scene] = &[
     ("mac-scrawl-off", |ui| scrawl_fixture(ui, false, |_| {})),
     #[cfg(hex_capture)]
     ("mac-scrawl", |ui| scrawl_fixture(ui, true, |_| {})),
+    #[cfg(hex_capture)]
+    ("mac-routing-rules", |ui| {
+        scrawl_fixture(ui, true, |_| {});
+        scrawl::routing_rules::fixture(ui, true, false);
+    }),
+    #[cfg(hex_capture)]
+    ("mac-routing-add", |ui| {
+        scrawl_fixture(ui, true, |_| {});
+        scrawl::routing_rules::fixture(ui, true, true);
+    }),
+    #[cfg(hex_capture)]
+    ("mac-scrawl-open", |ui| {
+        scrawl_fixture(ui, true, |view| view.how_it_works = true);
+        ui.advanced.push(Pane::Annotate);
+        ui.settings.labs.annotate_replay = true;
+    }),
     #[cfg(hex_capture)]
     ("mac-scrawl-running", |ui| {
         scrawl_fixture(ui, true, |view| view.scrawl_running = true)

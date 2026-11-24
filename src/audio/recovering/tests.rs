@@ -10,7 +10,7 @@ use crate::audio::open::OpenRequest;
 use crate::audio::recovery::{MICROPHONE_RETRY_INITIAL, MicrophoneRecovery};
 use crate::audio::routes::notify_audio_service_restarted;
 use crate::audio::stream::StreamError;
-use crate::audio::stream::{AudioInput, Opened, STREAM_PROVEN_UPTIME, Selection};
+use crate::audio::stream::{AudioInput, Opened, STREAM_PROVEN_UPTIME, Selection, VoicePath};
 
 use super::*;
 
@@ -23,11 +23,11 @@ fn a_microphone_that_cannot_open_is_reported_once_per_outage() {
     assert!(failure.contains("Gone microphone"), "{failure}");
     assert_eq!(input.take_failure(), None);
     // Retries within the same outage stay quiet.
-    input.outage.get_or_insert(Some("still gone".into()));
+    input.outage.record("still gone".into());
     assert_eq!(input.take_failure(), None);
     // Closing ends the outage; the next one is reported again.
     input.close();
-    input.outage.get_or_insert(Some("gone again".into()));
+    input.outage.record("gone again".into());
     assert_eq!(input.take_failure().as_deref(), Some("gone again"));
 }
 
@@ -141,19 +141,18 @@ fn a_voice_isolation_change_reopens_only_while_capture_is_idle() {
                 });
             }
             let mut opened = named_input("USB Mic");
-            opened.voice_isolation = request.voice_processing;
-            opened.voice_processing_active = request.voice_processing;
+            opened.voice_path = VoicePath::from_request(request.voice_processing, false);
             Ok(Opened::Input(Box::new(opened)))
         });
     input.finish_initial_open(Ok(named_input("USB Mic")), Instant::now());
-    assert!(!input.voice_isolation);
+    assert!(!input.voice_isolation.enabled());
 
     // A flip while a capture runs changes no stream and opens nothing.
     input.request_voice_isolation(true, false);
-    assert!(input.voice_isolation);
+    assert!(input.voice_isolation.enabled());
     assert!(!input.is_opening());
     assert!(opens.lock().unwrap().is_empty());
-    assert!(!input.input.as_ref().unwrap().voice_isolation);
+    assert_eq!(input.input.as_ref().unwrap().voice_path, VoicePath::Raw);
 
     // Idle, the same device reopens through voice processing rather than
     // being kept as unchanged.
@@ -166,8 +165,7 @@ fn a_voice_isolation_change_reopens_only_while_capture_is_idle() {
     assert_eq!(*opens.lock().unwrap(), vec![true]);
     assert_eq!(*keeps.lock().unwrap(), vec![None]);
     let opened = input.input.as_ref().unwrap();
-    assert!(opened.voice_isolation);
-    assert!(opened.voice_processing_active);
+    assert_eq!(opened.voice_path, VoicePath::VoiceProcessing);
 
     // Asking for the path already open changes nothing.
     input.request_voice_isolation(true, true);
@@ -180,8 +178,7 @@ fn a_voice_isolation_change_reopens_only_while_capture_is_idle() {
         RecoveringAudioInputEvent::Reopened
     ));
     assert_eq!(*opens.lock().unwrap(), vec![true, false]);
-    assert!(!input.input.as_ref().unwrap().voice_isolation);
-    assert!(!input.input.as_ref().unwrap().voice_processing_active);
+    assert_eq!(input.input.as_ref().unwrap().voice_path, VoicePath::Raw);
 }
 
 #[test]
@@ -195,10 +192,9 @@ fn a_failed_voice_processing_open_stays_raw_until_the_lab_is_toggled() {
                 .unwrap()
                 .push((request.voice_processing, request.voice_processing_fallback));
             let mut opened = named_input("USB Mic");
-            opened.voice_isolation = request.voice_processing;
             // Voice processing is broken for this microphone: the open falls
             // back to the raw stream every time it is tried.
-            opened.voice_processing_active = false;
+            opened.voice_path = VoicePath::from_request(request.voice_processing, true);
             Ok(Opened::Input(Box::new(opened)))
         });
 
@@ -209,8 +205,11 @@ fn a_failed_voice_processing_open_stays_raw_until_the_lab_is_toggled() {
         RecoveringAudioInputEvent::Reopened
     ));
     assert_eq!(*opens.lock().unwrap(), vec![(true, false)]);
-    assert!(input.voice_isolation_fallback);
-    assert!(!input.input.as_ref().unwrap().voice_processing_active);
+    assert!(input.voice_isolation.is_fallback());
+    assert_eq!(
+        input.input.as_ref().unwrap().voice_path,
+        VoicePath::VoiceProcessingFallback
+    );
 
     // The remembered failure keeps dictation on the raw stream without
     // reopening it on every pass.
@@ -236,7 +235,7 @@ fn a_failed_voice_processing_open_stays_raw_until_the_lab_is_toggled() {
         *opens.lock().unwrap(),
         vec![(true, false), (false, false), (true, false)]
     );
-    assert!(input.voice_isolation_fallback);
+    assert!(input.voice_isolation.is_fallback());
 }
 
 #[test]
@@ -244,15 +243,15 @@ fn a_configuration_change_reopens_with_voice_processing_again() {
     let mut input =
         RecoveringAudioInput::with_opener_for_test(None, config_route_generation, |request| {
             let mut opened = named_input("USB Mic");
-            opened.voice_isolation = request.voice_processing;
-            opened.voice_processing_active =
-                request.voice_processing && !request.voice_processing_fallback;
+            opened.voice_path = VoicePath::from_request(
+                request.voice_processing,
+                request.voice_processing_fallback,
+            );
             Ok(Opened::Input(Box::new(opened)))
         });
     input.request_voice_isolation(true, true);
     let mut initial = named_input("USB Mic");
-    initial.voice_isolation = true;
-    initial.voice_processing_active = true;
+    initial.voice_path = VoicePath::VoiceProcessing;
     input.finish_initial_open(Ok(initial), Instant::now());
 
     let errors = input.input.as_mut().unwrap().stream_errors_for_test();
@@ -267,10 +266,9 @@ fn a_configuration_change_reopens_with_voice_processing_again() {
         settle(&mut input, true),
         RecoveringAudioInputEvent::Reopened
     ));
-    assert!(!input.voice_isolation_fallback);
+    assert!(!input.voice_isolation.is_fallback());
     let reopened = input.input.as_ref().unwrap();
-    assert!(reopened.voice_isolation);
-    assert!(reopened.voice_processing_active);
+    assert_eq!(reopened.voice_path, VoicePath::VoiceProcessing);
 }
 
 #[test]
@@ -278,15 +276,15 @@ fn repeated_configuration_changes_fall_back_to_the_raw_stream() {
     let mut input =
         RecoveringAudioInput::with_opener_for_test(None, config_route_generation, |request| {
             let mut opened = named_input("USB Mic");
-            opened.voice_isolation = request.voice_processing;
-            opened.voice_processing_active =
-                request.voice_processing && !request.voice_processing_fallback;
+            opened.voice_path = VoicePath::from_request(
+                request.voice_processing,
+                request.voice_processing_fallback,
+            );
             Ok(Opened::Input(Box::new(opened)))
         });
     input.request_voice_isolation(true, true);
     let mut initial = named_input("USB Mic");
-    initial.voice_isolation = true;
-    initial.voice_processing_active = true;
+    initial.voice_path = VoicePath::VoiceProcessing;
     input.finish_initial_open(Ok(initial), Instant::now());
 
     for reopen in 1..=VOICE_PROCESSING_RECONFIGURE_LIMIT {
@@ -303,10 +301,13 @@ fn repeated_configuration_changes_fall_back_to_the_raw_stream() {
             RecoveringAudioInputEvent::Reopened
         ));
         assert!(
-            !input.voice_isolation_fallback,
+            !input.voice_isolation.is_fallback(),
             "reconfigure {reopen} is not a failure"
         );
-        assert!(input.input.as_ref().unwrap().voice_processing_active);
+        assert_eq!(
+            input.input.as_ref().unwrap().voice_path,
+            VoicePath::VoiceProcessing
+        );
     }
 
     // The next one inside the window turns the loop into a remembered
@@ -319,14 +320,13 @@ fn repeated_configuration_changes_fall_back_to_the_raw_stream() {
         settle(&mut input, true),
         RecoveringAudioInputEvent::Interrupted
     ));
-    assert!(input.voice_isolation_fallback);
+    assert!(input.voice_isolation.is_fallback());
     assert!(matches!(
         settle(&mut input, true),
         RecoveringAudioInputEvent::Reopened
     ));
     let fallback = input.input.as_ref().unwrap();
-    assert!(fallback.voice_isolation);
-    assert!(!fallback.voice_processing_active);
+    assert_eq!(fallback.voice_path, VoicePath::VoiceProcessingFallback);
 }
 
 #[test]
@@ -346,11 +346,12 @@ fn a_resolved_device_change_forgets_a_voice_processing_failure() {
                 request.voice_processing_fallback,
             ));
             let mut opened = named_input(&name);
-            opened.voice_isolation = request.voice_processing;
             // The first microphone can't start voice processing; the
             // microphone a later route resolves can.
-            opened.voice_processing_active =
-                request.voice_processing && !request.voice_processing_fallback && name != "USB Mic";
+            opened.voice_path = VoicePath::from_request(
+                request.voice_processing,
+                request.voice_processing_fallback || name == "USB Mic",
+            );
             Ok(Opened::Input(Box::new(opened)))
         },
     );
@@ -360,7 +361,7 @@ fn a_resolved_device_change_forgets_a_voice_processing_failure() {
         settle(&mut input, true),
         RecoveringAudioInputEvent::Reopened
     ));
-    assert!(input.voice_isolation_fallback);
+    assert!(input.voice_isolation.is_fallback());
 
     // The OS default changes; the new open is still raw because of the
     // remembered failure, but the resolved device is different, so the
@@ -371,7 +372,7 @@ fn a_resolved_device_change_forgets_a_voice_processing_failure() {
         settle(&mut input, true),
         RecoveringAudioInputEvent::Reopened
     ));
-    assert!(!input.voice_isolation_fallback);
+    assert!(!input.voice_isolation.is_fallback());
     input.request_voice_isolation(true, true);
     assert!(matches!(
         settle(&mut input, true),
@@ -379,7 +380,7 @@ fn a_resolved_device_change_forgets_a_voice_processing_failure() {
     ));
     let reopened = input.input.as_ref().unwrap();
     assert_eq!(reopened.device_name, "MacBook Pro Microphone");
-    assert!(reopened.voice_processing_active);
+    assert_eq!(reopened.voice_path, VoicePath::VoiceProcessing);
     assert_eq!(
         *opens.lock().unwrap(),
         vec![
@@ -516,7 +517,10 @@ fn failed_startup_retry_keeps_backoff_without_an_open_stream() {
             .should_attempt(started + Duration::from_millis(250))
     );
     let (sender, receiver) = mpsc::channel();
-    input.replacement = Some(receiver);
+    input.replacement = Some(PendingReplacement {
+        receiver,
+        voice_isolation_skipped: false,
+    });
     sender.send((3, Err("device unavailable".into()))).unwrap();
 
     let before = Instant::now();
@@ -560,7 +564,10 @@ fn only_the_listeners_current_input_feeds_hex_microphone() {
     assert!(!meeting.hex_microphone.is_on());
 
     let (sender, receiver) = mpsc::channel();
-    input.replacement = Some(receiver);
+    input.replacement = Some(PendingReplacement {
+        receiver,
+        voice_isolation_skipped: false,
+    });
     sender
         .send((3, Ok(Opened::Input(Box::new(replacement)))))
         .unwrap();
@@ -580,7 +587,10 @@ fn startup_retry_recovers_metadata_and_audio_without_restarting() {
     let mut input = RecoveringAudioInput::closed(None, 3, Some("Test microphone"));
     input.finish_initial_open(Err(eyre!("device unavailable")), Instant::now());
     let (sender, receiver) = mpsc::channel();
-    input.replacement = Some(receiver);
+    input.replacement = Some(PendingReplacement {
+        receiver,
+        voice_isolation_skipped: false,
+    });
     let (opened, samples) = AudioInput::channel_for_test();
     sender
         .send((3, Ok(Opened::Input(Box::new(opened)))))
@@ -633,7 +643,10 @@ fn startup_recovery_opens_even_when_a_capture_is_pending() {
 fn failed_on_demand_open_does_not_retry_while_idle() {
     let mut input = RecoveringAudioInput::closed(None, 3, None);
     let (sender, receiver) = mpsc::channel();
-    input.replacement = Some(receiver);
+    input.replacement = Some(PendingReplacement {
+        receiver,
+        voice_isolation_skipped: false,
+    });
     sender.send((3, Err("device unavailable".into()))).unwrap();
 
     assert!(matches!(
@@ -695,7 +708,10 @@ fn audio_service_restart_interrupts_stream_and_recovers() {
     assert!(input.is_recovering());
 
     let (sender, receiver) = mpsc::channel();
-    input.replacement = Some(receiver);
+    input.replacement = Some(PendingReplacement {
+        receiver,
+        voice_isolation_skipped: false,
+    });
     let (reopened, samples_after) = AudioInput::channel_for_test();
     sender
         .send((1, Ok(Opened::Input(Box::new(reopened)))))
@@ -1008,7 +1024,9 @@ fn a_stream_that_delivers_steadily_reopens_at_once_and_forgets_the_backoff() {
     assert_eq!(input.recovery.delay, Duration::from_secs(1));
 
     // Delivering across the proof window forgets that wait.
-    input.first_delivery = Some(Instant::now() - STREAM_PROVEN_UPTIME);
+    input.delivery = StreamDelivery::Observing {
+        since: Instant::now() - STREAM_PROVEN_UPTIME,
+    };
     let at = CaptureInstant::from_nanos(30_000_000_000);
     sender
         .lock()
@@ -1068,7 +1086,7 @@ fn a_stream_that_stops_before_proving_itself_backs_off() {
         input.recv_timeout(Duration::ZERO, true),
         RecoveringAudioInputEvent::Chunk { .. }
     ));
-    assert!(!input.proven);
+    assert!(!input.delivery.is_proven());
     let failed_at = Instant::now();
     drop(sender.lock().unwrap().take());
     assert!(matches!(
@@ -1144,7 +1162,7 @@ fn a_press_waiting_for_a_stalled_stream_reopens_it_anyway() {
     input.finish_initial_open(Ok(stalling_input()), Instant::now());
     // A stream that delivered steadily keeps its device until its
     // replacement opens, so the failed stream is still installed.
-    input.proven = true;
+    input.delivery = StreamDelivery::Proven;
     assert!(matches!(
         input.recv_timeout(Duration::ZERO, true),
         RecoveringAudioInputEvent::Interrupted

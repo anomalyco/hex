@@ -2,7 +2,7 @@ import FluidAudio
 import Foundation
 import os
 
-/// Experiments › Multilingual model (Parakeet): Parakeet Ultra (`ParakeetUltraModel`) through
+/// Settings › Dictation › Model: Multilingual: Parakeet Ultra (`ParakeetUltraModel`) through
 /// FluidAudio's v3 decoder, in Hex's own process. It hears its 25 languages without being told
 /// which, mixed within a sentence, so `languageIdentifier` only names the dictation language
 /// for the steps after it (formatting, lists, cleanup).
@@ -28,7 +28,7 @@ actor ParakeetUltraTranscriber: LocalTranscribing {
         }
     }
 
-    static let name = "Parakeet Ultra"
+    static let name = DictationEngine.parakeetUltra.displayName
     /// After a load that ended Hex (`ParakeetLoadGuard`), beside Try again.
     nonisolated static var setAsideMessage: String {
         String(localized: "Hex closed while getting the multilingual model ready, likely short of memory.")
@@ -48,7 +48,7 @@ actor ParakeetUltraTranscriber: LocalTranscribing {
         available == 0 || available >= loadMemory
     }
 
-    nonisolated let displayName = ParakeetUltraTranscriber.name
+    nonisolated let engine: DictationEngine = .parakeetUltra
     let languageIdentifier: String
     private var manager: AsrManager?
 

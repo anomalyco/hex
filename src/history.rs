@@ -88,6 +88,18 @@ impl HistoryRetention {
     }
 }
 
+/// How a retained history entry may be reused by Paste Last or Copy Recent Dictations.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PasteReuse {
+    /// Reusable as Paste Last, Copy Recent Dictation, and in the Paste Last picker.
+    Paste,
+    /// Cancelled dictation whose local words were kept: excluded from Paste Last
+    /// and Copy Recent Dictation, but shown flagged and pickable in the picker.
+    CancelledRecovery,
+    /// Not reusable (retention off, expired, Printed/VoiceAction, or blank).
+    None,
+}
+
 /// Which successful output produced an entry.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -485,7 +497,7 @@ impl HistoryStore {
         if self
             .entries
             .last()
-            .is_some_and(|e| e.id == id && !e.cancelled && self.pasteable(e, now_ms))
+            .is_some_and(|e| e.id == id && self.paste_reuse(e, now_ms) == PasteReuse::Paste)
         {
             self.recovery = None;
         }
@@ -729,18 +741,35 @@ impl HistoryStore {
             .collect()
     }
 
+    /// Single source of truth for whether `entry` is reusable for Paste Last
+    /// or Copy Recent Dictations at `now_ms`.
+    pub(crate) fn paste_reuse(&self, entry: &HistoryEntry, now_ms: u64) -> PasteReuse {
+        if self.retention.is_off()
+            || !self
+                .retention
+                .cutoff(now_ms)
+                .is_none_or(|cutoff| entry.timestamp_ms >= cutoff)
+            || !matches!(
+                entry.kind,
+                HistoryKind::Dictation | HistoryKind::Raw | HistoryKind::Send
+            )
+            || entry.final_text.trim().is_empty()
+        {
+            return PasteReuse::None;
+        }
+        if entry.cancelled {
+            PasteReuse::CancelledRecovery
+        } else {
+            PasteReuse::Paste
+        }
+    }
+
     /// The newest `count` entries within retention that a paste could
-    /// reuse: never a printed one or one with no text, as Paste Last.
+    /// reuse: never a printed, voice-action, cancelled, or blank one.
     /// Nothing while retention is Off.
     pub fn recent(&self, count: usize, now_ms: u64) -> Vec<&HistoryEntry> {
-        if self.retention.is_off() {
-            return Vec::new();
-        }
-        let cutoff = self.retention.cutoff(now_ms);
         self.entries()
-            .filter(|entry| cutoff.is_none_or(|cutoff| entry.timestamp_ms >= cutoff))
-            .filter(|entry| !entry.cancelled && entry.kind != HistoryKind::Printed)
-            .filter(|entry| !entry.final_text.trim().is_empty())
+            .filter(|entry| self.paste_reuse(entry, now_ms) == PasteReuse::Paste)
             .take(count)
             .collect()
     }
@@ -982,12 +1011,14 @@ impl History {
             .collect()
     }
 
-    /// The text entry `id` inserted, if it is still retained.
+    /// The text entry `id` inserted, if it is still reusable under retention.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub fn final_text(&self, id: u64) -> Option<String> {
-        self.synced()
+        let now = now_ms();
+        let store = self.synced();
+        store
             .entries()
-            .find(|entry| entry.id == id)
+            .find(|entry| entry.id == id && store.paste_reuse(entry, now) == PasteReuse::Paste)
             .map(|entry| entry.final_text.clone())
     }
 
@@ -1693,6 +1724,121 @@ mod tests {
             .set_retention(HistoryRetention::Off, day_ms + 1_001)
             .unwrap();
         assert!(texts(&store, 5).is_empty(), "Off lists nothing");
+    }
+
+    #[test]
+    fn paste_reuse_unifies_recent_final_text_and_paste_source_rules() {
+        let path = temp_path("paste-reuse");
+        let now = now_ms();
+        let mut store = HistoryStore::open(path, HistoryRetention::Day, now);
+        let dict_id = store.record(draft("dictated"), now).unwrap().unwrap();
+        let raw_id = store
+            .record(
+                HistoryDraft {
+                    kind: HistoryKind::Raw,
+                    ..draft("raw")
+                },
+                now + 1,
+            )
+            .unwrap()
+            .unwrap();
+        let send_id = store
+            .record(
+                HistoryDraft {
+                    kind: HistoryKind::Send,
+                    ..draft("sent")
+                },
+                now + 2,
+            )
+            .unwrap()
+            .unwrap();
+        let voice_action_id = store
+            .record(
+                HistoryDraft {
+                    kind: HistoryKind::VoiceAction,
+                    ..draft("action")
+                },
+                now + 3,
+            )
+            .unwrap()
+            .unwrap();
+        let printed_id = store
+            .record(
+                HistoryDraft {
+                    kind: HistoryKind::Printed,
+                    ..draft("printed")
+                },
+                now + 4,
+            )
+            .unwrap()
+            .unwrap();
+        let cancelled_id = store
+            .record_result(draft("cancelled words"), now + 5, true)
+            .unwrap()
+            .unwrap();
+
+        let check = now + 6;
+        assert_eq!(
+            store.paste_reuse(store.entry(dict_id).unwrap(), check),
+            PasteReuse::Paste
+        );
+        assert_eq!(
+            store.paste_reuse(store.entry(raw_id).unwrap(), check),
+            PasteReuse::Paste
+        );
+        assert_eq!(
+            store.paste_reuse(store.entry(send_id).unwrap(), check),
+            PasteReuse::Paste
+        );
+        assert_eq!(
+            store.paste_reuse(store.entry(voice_action_id).unwrap(), check),
+            PasteReuse::None
+        );
+        assert_eq!(
+            store.paste_reuse(store.entry(printed_id).unwrap(), check),
+            PasteReuse::None
+        );
+        assert_eq!(
+            store.paste_reuse(store.entry(cancelled_id).unwrap(), check),
+            PasteReuse::CancelledRecovery
+        );
+
+        let recent_ids: Vec<_> = store.recent(10, check).into_iter().map(|e| e.id).collect();
+        assert_eq!(recent_ids, [send_id, raw_id, dict_id]);
+
+        #[cfg(target_os = "macos")]
+        {
+            let picker_ids: Vec<_> = store
+                .paste_rows(10, check)
+                .into_iter()
+                .map(|row| (row.id, row.cancelled))
+                .collect();
+            assert_eq!(
+                picker_ids,
+                [
+                    (paste_source::Id::Retained(cancelled_id), true),
+                    (paste_source::Id::Retained(send_id), false),
+                    (paste_source::Id::Retained(raw_id), false),
+                    (paste_source::Id::Retained(dict_id), false),
+                ]
+            );
+            assert_eq!(
+                store.resolve_paste(paste_source::Id::Retained(voice_action_id), check),
+                None
+            );
+            assert_eq!(
+                store.resolve_paste(paste_source::Id::Retained(cancelled_id), check),
+                Some("cancelled words")
+            );
+        }
+
+        let history = History::new(store);
+        assert_eq!(history.final_text(dict_id).as_deref(), Some("dictated"));
+        assert_eq!(history.final_text(voice_action_id), None);
+        assert_eq!(history.final_text(printed_id), None);
+        assert_eq!(history.final_text(cancelled_id), None);
+        history.set_retention(HistoryRetention::Off).unwrap();
+        assert_eq!(history.final_text(dict_id), None);
     }
 
     #[cfg(target_os = "macos")]

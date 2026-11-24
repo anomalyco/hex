@@ -108,6 +108,8 @@ pub(super) struct Item {
     pub(super) meta: String,
     /// The meta line's colour when it reports a state (Recording, Failed).
     pub(super) meta_ink: Option<rune::Color>,
+    /// An optional one-line muted note under `meta` (a failed meeting's reason).
+    pub(super) note: Option<String>,
     pub(super) time: String,
     pub(super) hover: Vec<El>,
     pub(super) selected: bool,
@@ -141,15 +143,20 @@ pub(super) fn item_with_press(p: Paint, item: Item, press: impl Fn(El) -> El) ->
 }
 
 /// One row's box, words, and selected fill, before any press handling.
-fn item_body(p: Paint, item: Item, leading: Option<&'static Icon>) -> El {
+pub(super) fn item_body(p: Paint, item: Item, leading: Option<&'static Icon>) -> El {
     let c = &p.k.c;
     // A row of the list: its title names it and its meta and time describe
     // it, so their texts stay out of the tree.
-    let described = [item.meta.as_str(), item.time.as_str()]
-        .into_iter()
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join(" · ");
+    let described = [
+        Some(item.meta.as_str()),
+        item.note.as_deref(),
+        Some(item.time.as_str()),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|part| !part.is_empty())
+    .collect::<Vec<_>>()
+    .join(" · ");
     let time = text(item.time)
         .key("time")
         .font(p.k.ty.small)
@@ -211,7 +218,15 @@ fn item_body(p: Paint, item: Item, leading: Option<&'static Icon>) -> El {
                 .color(item.meta_ink.unwrap_or(p.muted()))
                 .truncate()
                 .a11y_hidden(),
-        );
+        )
+        .children(item.note.map(|note| {
+            text(note)
+                .key("note")
+                .font(p.k.ty.small)
+                .color(p.muted())
+                .truncate()
+                .a11y_hidden()
+        }));
     if item.selected {
         row_el = row_el.fill(c.layer_02);
     }
@@ -426,7 +441,7 @@ pub(super) fn ghost_icon(
     rune_kit::IconButton::new(glyph)
         .variant(rune_kit::IconButtonVariant::Ghost)
         .control_size(rune_kit::ControlSize::Small)
-        .label(label)
+        .help(label)
         .on_press_tx(press)
         .build(p.k)
         .key(key)

@@ -277,6 +277,66 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "opt-in native memory probe; requires HEX_MEMORY_OUT"]
+    fn headless_encoder_memory() {
+        let out = PathBuf::from(std::env::var("HEX_MEMORY_OUT").unwrap());
+        let pooled = std::env::var("HEX_MEMORY_POOL").as_deref() == Ok("1");
+        std::fs::create_dir_all(&out).unwrap();
+        for cycle in 0..=50 {
+            let encode = || {
+                let dir = crate::test_dir::tempdir().unwrap();
+                let writer = AvWriter::hevc(
+                    &dir.path().join("recording.mp4"),
+                    640,
+                    360,
+                    60,
+                    crate::HEVC_QUALITY,
+                )
+                .unwrap();
+                // SAFETY: Exact positive-timescale media times.
+                writer
+                    .start(unsafe { objc2_core_media::CMTime::new(0, 60_000) })
+                    .unwrap();
+                for index in 0..30 {
+                    let sample = frame(index);
+                    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+                    while !writer.append_video(&sample).unwrap() {
+                        assert!(std::time::Instant::now() < deadline);
+                        thread::sleep(Duration::from_millis(2));
+                    }
+                }
+                // SAFETY: Exact positive-timescale media time.
+                writer
+                    .finish(
+                        Some(unsafe { objc2_core_media::CMTime::new(30_000, 60_000) }),
+                        FINISH_TIMEOUT,
+                    )
+                    .unwrap();
+            };
+            if pooled {
+                objc2::rc::autoreleasepool(|_| encode());
+            } else {
+                encode();
+            }
+            if cycle % 10 == 0 {
+                for (tool, flag) in [("footprint", "-p"), ("vmmap", "-summary")] {
+                    let result = std::process::Command::new(tool)
+                        .args([flag, &std::process::id().to_string()])
+                        .output()
+                        .unwrap();
+                    assert!(result.status.success());
+                    std::fs::write(
+                        out.join(format!("encoder-{cycle:03}-{tool}.txt")),
+                        result.stdout,
+                    )
+                    .unwrap();
+                }
+                println!("encoder cycle={cycle} pooled={pooled}");
+            }
+        }
+    }
+
+    #[test]
     fn writes_a_tagged_hevc_movie_from_frames() {
         let dir = crate::test_dir::tempdir().unwrap();
         let path = dir.path().join("recording.mp4");

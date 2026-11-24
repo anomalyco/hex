@@ -790,10 +790,10 @@ fn plays(s: &Onboard) -> bool {
 /// field instead.
 pub(super) fn step(s: &mut Onboard, now: f64) -> bool {
     if !plays(s) {
-        s.game = None;
+        s.set_game(None);
         return false;
     }
-    let mut session = s.game.take().unwrap_or_else(|| Session::new(s, now));
+    let mut session = s.take_game().unwrap_or_else(|| Session::new(s, now));
     let reduced = s.reduced.get();
     if let Some(script) = session.script.as_mut() {
         if let Some(take) = script.run(&mut session.play, now) {
@@ -809,7 +809,7 @@ pub(super) fn step(s: &mut Onboard, now: f64) -> bool {
                 .play
                 .share
                 .is_some_and(|at| now >= at + SHARE_HOLD + 1.2);
-        s.game = Some(session);
+        s.set_game(Some(session));
         if leave {
             s.leave_game_keeping_sound(now);
         }
@@ -819,9 +819,9 @@ pub(super) fn step(s: &mut Onboard, now: f64) -> bool {
     // follows the physical shortcut and sounds them itself.
     let real = s.live.as_ref().map(|live| live.listening);
     let held = real.unwrap_or_else(|| physical_shortcut_held(&s.caps));
-    match (s.live_hold_from, held) {
+    match (s.live_hold_from(), held) {
         (None, true) => {
-            s.live_hold_from = Some(now);
+            s.set_live_hold_from(Some(now));
             // Hex pastes where the focus is when the dictation ends.
             s.practice.focused = true;
             if real.is_none() {
@@ -829,7 +829,7 @@ pub(super) fn step(s: &mut Onboard, now: f64) -> bool {
             }
         }
         (Some(_), false) => {
-            s.live_hold_from = None;
+            s.set_live_hold_from(None);
             if real.is_none() {
                 s.sfx.on_live_shortcut_up(now);
             }
@@ -857,28 +857,28 @@ pub(super) fn step(s: &mut Onboard, now: f64) -> bool {
     session.hud.step(&session.play, now, held, peak, reduced);
     session.keep_best();
     session.sound(&mut s.sfx);
-    s.game = Some(session);
+    s.set_game(Some(session));
     true
 }
 
 /// The answer field changed: a paste answers the lit card, typing shows
 /// as live words until Return. False without the game.
 pub(super) fn changed(s: &mut Onboard) -> bool {
-    let Some(session) = s.game.as_mut() else {
+    let Some(scripted) = s.game().map(|session| session.script.is_some()) else {
         return false;
     };
     // A story's script is the player; keys meant for the story don't count.
-    if session.script.is_some() {
+    if scripted {
         s.practice = TextEdit::default();
         s.practice.focused = true;
         return true;
     }
     let count = s.practice.text.chars().count();
-    let before = session.typed.chars().count();
+    let before = s.game().map_or(0, |session| session.typed.chars().count());
     // A paste lands all at once; typing one key at a time.
     if count > before + 1 {
         answer(s);
-    } else {
+    } else if let Some(session) = s.beat.practice_mut().and_then(|p| p.game.as_mut()) {
         session.play.keys += count.saturating_sub(before);
         session.typed.clone_from(&s.practice.text);
     }
@@ -888,24 +888,28 @@ pub(super) fn changed(s: &mut Onboard) -> bool {
 /// Return in the answer field sends what's typed.
 pub(super) fn answer(s: &mut Onboard) {
     let now = s.now;
-    let Some(session) = s.game.as_mut() else {
+    if s.game().is_none() {
         return;
-    };
+    }
     let text = std::mem::take(&mut s.practice.text);
-    session.typed.clear();
+    if let Some(session) = s.game_mut() {
+        session.typed.clear();
+    }
     s.practice = TextEdit::default();
     s.practice.focused = true;
     if text.trim().is_empty() {
         return;
     }
-    session.play.paste(&text, now);
+    if let Some(session) = s.game_mut() {
+        session.play.paste(&text, now);
+    }
     s.sfx.on_live_dictation_landed(now);
 }
 
 /// Done: the score card first, if anything was destroyed.
 fn finish(s: &mut Onboard) {
     let now = s.now;
-    let scored = s.game.as_mut().is_some_and(|session| {
+    let scored = s.game_mut().is_some_and(|session| {
         let scored = session.play.finish(now);
         session.keep_best();
         scored
@@ -923,7 +927,7 @@ fn offers_toggle(s: &Onboard) -> bool {
 
 fn keep(s: &mut Onboard) {
     let now = s.now;
-    if let Some(session) = s.game.as_mut() {
+    if let Some(session) = s.game_mut() {
         session.play.keep(now);
     }
     s.practice.focused = true;
@@ -937,7 +941,7 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
     }
     // The game starts on the step's first poll; until then, as it will.
     let fresh;
-    let session = match &s.game {
+    let session = match s.game() {
         Some(session) => session,
         None => {
             fresh = Session::preview(s, s.now);
@@ -2176,7 +2180,7 @@ fn ease_in_out(x: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::super::stories::{Flow, Rehearsal, Step};
+    use super::super::stories::{Flow, Rehearsal};
     use super::*;
 
     /// The script plays the game to `until`.
@@ -2272,23 +2276,23 @@ mod tests {
     fn typing_shows_live_and_a_paste_or_return_sends_it() {
         let mut s = Onboard::new(Flow::FirstRun);
         s.rehearsal = Some(Rehearsal::new(true));
-        s.step = Step::Try;
+        s.enter_try(0.0);
         s.now = 1.5;
         assert!(step(&mut s, 1.5));
-        s.game.as_mut().unwrap().script = None;
+        s.game_mut().unwrap().script = None;
         for typed in ["o", "ok"] {
             s.practice.text = typed.into();
             assert!(changed(&mut s));
         }
-        let session = s.game.as_ref().unwrap();
+        let session = s.game().unwrap();
         assert_eq!((session.typed.as_str(), session.play.keys), ("ok", 2));
         answer(&mut s);
-        let session = s.game.as_ref().unwrap();
+        let session = s.game().unwrap();
         assert!(session.play.rounds[0].answered && s.practice.text.is_empty());
         s.now = 4.0;
         s.practice.text = "Not today.".into();
         assert!(changed(&mut s), "a paste lands all at once");
-        let session = s.game.as_ref().unwrap();
+        let session = s.game().unwrap();
         assert_eq!(session.play.rounds[1].text, "Not today.");
         assert!(session.play.rounds[1].answered);
     }
@@ -2297,11 +2301,11 @@ mod tests {
     fn a_scripted_game_ignores_the_storys_keys() {
         let mut s = Onboard::new(Flow::FirstRun);
         s.rehearsal = Some(Rehearsal::new(true));
-        s.step = Step::Try;
+        s.enter_try(0.0);
         assert!(step(&mut s, 1.0));
         s.practice.text = "t".into();
         assert!(changed(&mut s) && s.practice.text.is_empty());
-        assert_eq!(s.game.as_ref().unwrap().play.keys, 0);
+        assert_eq!(s.game().unwrap().play.keys, 0);
     }
 
     #[test]
@@ -2309,8 +2313,8 @@ mod tests {
         let mut s = Onboard::new(Flow::FirstRun);
         s.rehearsal = Some(Rehearsal::new(true));
         s.practice_field = true;
-        s.step = Step::Try;
-        assert!(!step(&mut s, 1.0) && s.game.is_none());
+        s.enter_try(0.0);
+        assert!(!step(&mut s, 1.0) && s.game().is_none());
         assert!(page(paint(), &s).is_none());
     }
 

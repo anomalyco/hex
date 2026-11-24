@@ -112,10 +112,11 @@ fn capture(key: CapturedMicrophoneKey) {
 /// listener's own suppression does.
 fn is_hexs_press(context: &EventTapContext, code: u16, flags: u64) -> bool {
     let mut hotkeys = crate::app_settings::runtime_hotkeys();
-    hotkeys.cancel = *context
-        .cancel
+    hotkeys.cancel = context
+        .policy
         .lock()
-        .unwrap_or_else(|error| error.into_inner());
+        .unwrap_or_else(|error| error.into_inner())
+        .cancel();
     hotkeys
         .all()
         .iter()

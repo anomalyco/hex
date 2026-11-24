@@ -391,8 +391,8 @@ fn heal_stale_chord(now_ms: u32, quiet_ms: u32) {
 /// whether it released the capture, so the caller can log outside the lock.
 pub(super) fn heal(state: &mut CallbackState, now_ms: u32, key_held: impl Fn(u16) -> bool) -> bool {
     if super::CAPTURE_INHIBIT.load(Ordering::Relaxed)
-        || !state.capture.active
-        || !state.capture.flavour.normal()
+        || !state.capture.is_down()
+        || !state.capture.flavour().normal()
         || state.binding.key.is_some()
     {
         return false;

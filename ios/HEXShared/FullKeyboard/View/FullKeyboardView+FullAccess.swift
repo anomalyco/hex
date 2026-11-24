@@ -124,7 +124,7 @@ extension FullKeyboardView {
     /// When the keyboard appears: only with Full Access (the App Group, where the model and the
     /// counts are, and opening Hex need it), never in a password or one-time-code field, never
     /// while dictating, and as often as `KeyboardParakeetNotice` allows.
-    func offerModelNotice(now: Date = Date(), awaitsDownload: Bool = KeyboardParakeetNotice.modelAwaitsDownload()) {
+    func offerModelNotice(now: Date = Date(), awaitsDownload: Bool = KeyboardParakeetPlan.current().awaitsV2Download) {
         let notice = KeyboardParakeetNotice()
         guard !showsModelNotice, model.hasFullAccess, !isDictating,
               engine.target.isSecureTextEntry != true, engine.target.textContentType != .oneTimeCode,
@@ -135,7 +135,9 @@ extension FullKeyboardView {
         refreshStrip()
     }
 
-    private var isDictating: Bool { model.stagePhase == .recording || model.stagePhase == .transcribing }
+    private var isDictating: Bool {
+        model.stagePhase == .starting || model.stagePhase == .recording || model.stagePhase == .transcribing
+    }
 
     func openHexForModel() {
         KeyboardParakeetNotice().recordOpened()

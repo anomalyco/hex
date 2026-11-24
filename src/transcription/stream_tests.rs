@@ -399,12 +399,185 @@ fn a_changed_model_ends_the_stream() {
     ));
 }
 
+#[test]
+fn a_dropped_yielding_stream_never_wedges_stream_window_or_streams_slot() {
+    use crate::transcription::engine::Command as EngineCommand;
+
+    struct YieldingDropEngine {
+        engine: Arc<TranscriptionEngine>,
+        offline: Arc<Mutex<Vec<usize>>>,
+    }
+
+    impl Engine for YieldingDropEngine {
+        fn dictation_busy(&self) -> bool {
+            false
+        }
+
+        fn streams(&self) -> bool {
+            true
+        }
+
+        fn holds_model(&self) -> bool {
+            true
+        }
+
+        fn begin(&self) -> Option<Box<dyn Live>> {
+            Some(Box::new(self.engine.begin_yielding()?))
+        }
+
+        fn transcribe(&self, window: Vec<f32>, _stop: &dyn Fn() -> bool) -> Result<String, String> {
+            self.offline.lock().unwrap().push(window.len());
+            Ok(format!("offline {}", window.len()))
+        }
+
+        fn quitting(&self) -> bool {
+            false
+        }
+    }
+
+    let (engine, commands) = TranscriptionEngine::for_test();
+    let engine = Arc::new(engine);
+    let offline = Arc::new(Mutex::new(Vec::new()));
+    let worker = thread::spawn(move || {
+        let mut active_yielding = None;
+        while let Ok(command) = commands.recv() {
+            match command {
+                EngineCommand::BeginYielding { yielding, .. } => {
+                    active_yielding = Some(yielding);
+                }
+                EngineCommand::Feed { .. } => {
+                    // Simulate a native feed error or engine teardown dropping
+                    // the yielding handle without advancing `consumed`.
+                    active_yielding.take();
+                }
+                _ => {}
+            }
+        }
+    });
+
+    let streams = Streams::default();
+    let first = streams
+        .create(
+            YieldingDropEngine {
+                engine: engine.clone(),
+                offline: offline.clone(),
+            },
+            SampleFormat::F32le,
+            selection(),
+            "owner".into(),
+        )
+        .unwrap();
+    // More than MAX_IN_FLIGHT_SAMPLES so stream_window fills the in-flight
+    // window and would spin at 5 ms forever if dropping Yielding left open=true.
+    let samples = MAX_IN_FLIGHT_SAMPLES * 3;
+    first.push(&vec![0.0; samples]).unwrap();
+    let end = first
+        .finish(Duration::from_secs(5), &|| false)
+        .expect("stream_window must exit once Yielding drops");
+    assert_eq!(texts(&end), [format!("offline {samples}")]);
+    assert_eq!(*offline.lock().unwrap(), [samples]);
+
+    // And the single /streams slot is free for the next stream.
+    let second = streams
+        .create(
+            YieldingDropEngine {
+                engine: engine.clone(),
+                offline,
+            },
+            SampleFormat::F32le,
+            selection(),
+            "owner".into(),
+        )
+        .unwrap();
+    second.cancel();
+    assert_eq!(finish(&second), End::Cancelled);
+    drop(engine);
+    worker.join().unwrap();
+}
+
+#[test]
+fn lease_expires_even_while_close_window_waits_for_busy_dictation() {
+    struct BlockingOfflineEngine {
+        entered_transcribe: Arc<AtomicBool>,
+    }
+
+    impl Engine for BlockingOfflineEngine {
+        fn dictation_busy(&self) -> bool {
+            false
+        }
+
+        fn streams(&self) -> bool {
+            false
+        }
+
+        fn holds_model(&self) -> bool {
+            true
+        }
+
+        fn begin(&self) -> Option<Box<dyn Live>> {
+            None
+        }
+
+        fn transcribe(&self, _window: Vec<f32>, stop: &dyn Fn() -> bool) -> Result<String, String> {
+            self.entered_transcribe.store(true, Ordering::SeqCst);
+            while !stop() {
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err("stopped".into())
+        }
+
+        fn quitting(&self) -> bool {
+            false
+        }
+    }
+
+    let entered = Arc::new(AtomicBool::new(false));
+    let streams = Streams::with_lease(Duration::from_millis(200));
+    let stream = streams
+        .create(
+            BlockingOfflineEngine {
+                entered_transcribe: entered.clone(),
+            },
+            SampleFormat::F32le,
+            selection(),
+            "owner".into(),
+        )
+        .unwrap();
+    // Push a full window so the worker enters close_window -> engine.transcribe
+    // while the stream is still Live (not Finishing).
+    for _ in 0..(MAX_WINDOW_SAMPLES / SAMPLE_RATE) {
+        stream.push(&[0.0; SAMPLE_RATE]).unwrap();
+    }
+    eventually(|| entered.load(Ordering::SeqCst));
+    let end = stream.finish_after_lease_for_test();
+    assert!(matches!(
+        end,
+        End::Failed {
+            code: "lease-expired",
+            ..
+        }
+    ));
+}
+
+#[test]
+fn cancel_after_terminal_end_does_not_overwrite_final_state() {
+    let engine = FakeEngine::default();
+    let streams = Streams::default();
+    let stream = create(&streams, &engine);
+    stream.push(&[0.0; 160]).unwrap();
+    let end = finish(&stream);
+    assert!(matches!(end, End::Final { .. }));
+    stream.cancel();
+    assert_eq!(finish(&stream), end);
+    assert!(!stream.heartbeat());
+}
+
 impl Stream {
     /// Waits for the end without finishing, so the lease can lapse.
     fn finish_after_lease_for_test(&self) -> End {
         let mut state = self.shared.lock();
         loop {
-            if let Some(end) = &state.end {
+            if let Some(end) = state.phase.ended() {
                 return end.clone();
             }
             state = self.shared.changed.wait_timeout(state, POLL).unwrap().0;

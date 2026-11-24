@@ -63,6 +63,25 @@ fn floating(desktops: &str) -> bool {
     })
 }
 
+/// Whether Hex closes a restorable RemoteDesktop paste session once it has
+/// been idle. KDE notifies on every session start (#2508), so it keeps the
+/// session for the paster's lifetime; GNOME's indicator while one is open is
+/// why the close exists (#718).
+pub(crate) fn closes_idle_remote_desktop() -> bool {
+    std::env::var("XDG_CURRENT_DESKTOP")
+        .ok()
+        .as_deref()
+        .is_none_or(closes_idle_remote_desktop_on)
+}
+
+/// [`closes_idle_remote_desktop`] over one `XDG_CURRENT_DESKTOP` value, so a
+/// test needn't change the process environment.
+fn closes_idle_remote_desktop_on(desktops: &str) -> bool {
+    !desktops
+        .split(':')
+        .any(|desktop| desktop.eq_ignore_ascii_case("KDE"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -74,6 +93,16 @@ mod tests {
         assert!(floating("X-Cinnamon"));
         for tiling in ["niri", "sway", "Hyprland", "i3", ""] {
             assert!(!floating(tiling), "{tiling}");
+        }
+    }
+
+    #[test]
+    fn kde_keeps_its_remote_desktop_session() {
+        for desktops in ["KDE", "kde", "KDE:GNOME"] {
+            assert!(!closes_idle_remote_desktop_on(desktops), "{desktops}");
+        }
+        for desktops in ["GNOME", "ubuntu:GNOME", "sway", "Hyprland", "XFCE", ""] {
+            assert!(closes_idle_remote_desktop_on(desktops), "{desktops}");
         }
     }
 

@@ -35,6 +35,9 @@ impl Feature {
             Self::HoldThroughKeys => {
                 "If a shortcut is made only of Option, Command, Shift, Control, or Globe, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish"
             }
+            Self::StopAnyCallRecording => {
+                "Also stop an offered or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off; on macOS a calendar reminder's recording stops the same way"
+            }
             _ => self.summary(),
         }
     }

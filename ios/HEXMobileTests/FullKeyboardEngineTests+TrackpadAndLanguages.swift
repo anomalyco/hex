@@ -60,6 +60,22 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(first.move(by: CGVector(dx: 10, dy: 0), at: 0.7), 1, "and coming back moves it at once")
     }
 
+    /// TestFlight build 147 (iPhone Duo): "Moving up seems to routinely skip a line". At a long
+    /// note's first line the host ignores the step past the text's start, and its context stays
+    /// as it was. Taken as the text above, it was added again before the known text, over and
+    /// over (3 rows grew to 245 in one gesture, iOS 27.2 Duo simulator, and the lift moved the
+    /// cursor 26,642 characters).
+    func testTheTrackpadTakesAnUnchangedContextAsTheTextsStart() {
+        let width: (Character) -> CGFloat = { _ in 10 }
+        var state = TrackpadCursor.State(before: "Abc.", after: " ", wrapWidth: 300, lineHeight: 20, width: width)
+        XCTAssertEqual(state.move(by: CGVector(dx: 0, dy: -25), at: 0), -5, "just past the known text's start")
+        XCTAssertFalse(state.catchUp(before: "Abc.", after: " ", width: width), "the same context: the host ignored the step")
+        XCTAssertEqual(String(state.layout.text), "Abc. ", "and nothing was added")
+        XCTAssertEqual(state.settle(at: 0.5), 0, "unanswered: the text's start")
+        XCTAssertEqual(state.move(by: CGVector(dx: 0, dy: -40), at: 0.6), 0, "the first line keeps it")
+        XCTAssertEqual(state.move(by: CGVector(dx: -10, dy: 0), at: 0.7), -1, "and moving along moves it at once")
+    }
+
     /// Apple's took 80 pt of finger 1.05 times as far slowly, 1.4 times at 400 pt/s, twice at
     /// 1,000 and 2.6 times at 2,000 (iOS 27.2), from the finger's speed in whatever direction.
     func testTheTrackpadGoesFurtherTheFasterTheFinger() {
@@ -649,11 +665,81 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(view.engine.layout.key(.character("y"))?.row, 0, "English is QWERTY again")
     }
 
+    /// Settings › Keyboard › Languages with English and Dutch: the space bar says "Nederlands",
+    /// the keys are the English letters (Apple's Dutch keyboard is QWERTY), its accents are on
+    /// held keys as Apple's are (ë on E, ï on I, é on E, and j́ on J for a stressed íj́, its
+    /// combining acute kept on the j), English is its bilingual partner, and Switch dictation
+    /// too dictates nl-NL.
+    func testDutchTypesAndSwitches() {
+        let settings = LanguageSettings(defaults: defaults)
+        settings.keyboardLanguages = [.english, .dutch]
+        settings.dictationFollowsKeyboard = true
+        settings.supportedDictationLanguages = ["en-US", "nl-NL"]
+        let model = KeyboardViewModel()
+        let field = FixtureTextTarget()
+        field.autocapitalizationType = UITextAutocapitalizationType.none
+        let view = FullKeyboardView(model: model, target: field)
+        view.languageSettings = settings
+        view.frame = CGRect(x: 0, y: 0, width: 402, height: 262)
+        view.layoutIfNeeded()
+        view.engine.autocorrect.isEnabled = false
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .dutch)
+        XCTAssertEqual(view.plane.spaceLabel, "Nederlands")
+        XCTAssertNil(view.engine.autocorrect.decoder, "no Dutch typing model: the dictionary engine")
+        XCTAssertEqual(settings.keyboardDictationLanguage(), "nl-NL")
+        XCTAssertEqual(view.engine.layout.key(.character("y"))?.row, 0, "QWERTY")
+        var id = 900
+        func tap(_ kind: KeyKind) {
+            let key = view.engine.layout.key(kind)!
+            let centre = CGPoint(x: key.frame.midX, y: key.frame.midY)
+            id += 1
+            view.engine.touchBegan(id: id, at: centre)
+            view.engine.touchEnded(id: id, at: centre)
+        }
+        func type(_ keys: String) {
+            for character in keys { tap(character == " " ? .space : .character(String(character))) }
+        }
+        func hold(_ character: String, pick: String) {
+            let key = view.engine.layout.key(.character(character))!
+            id += 1
+            view.engine.touchBegan(id: id, at: CGPoint(x: key.frame.midX, y: key.frame.midY))
+            XCTAssertTrue(view.engine.openAccentMenuIfEligible(forTouch: id), character)
+            guard let menu = view.engine.activeAccentMenu, let index = menu.options.firstIndex(of: pick) else {
+                return XCTFail("\(character): no \(pick)")
+            }
+            // As Hungarian's: slide from the highlighted base cell to the picked one.
+            let base = menu.cellFrames[menu.selectedIndex]
+            view.engine.touchMoved(id: id, to: CGPoint(x: base.midX, y: base.midY))
+            let cell = menu.cellFrames[index]
+            view.engine.touchMoved(id: id, to: CGPoint(x: cell.midX, y: cell.midY))
+            view.engine.touchEnded(id: id, at: CGPoint(x: cell.midX, y: cell.midY))
+        }
+        type("idee")
+        hold("e", pick: "ë")
+        type("n zijn ge")
+        hold("i", pick: "ï")
+        type("nteresseerd in ")
+        tap(.shift)
+        type("belgi")
+        hold("e", pick: "ë")
+        XCTAssertEqual(field.text, "ideeën zijn geïnteresseerd in België")
+        type(" v")
+        hold("i", pick: "í")
+        hold("j", pick: "j\u{0301}")
+        type("f")
+        XCTAssertEqual(field.text, "ideeën zijn geïnteresseerd in België víj́f")
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .english)
+        XCTAssertEqual(view.plane.spaceLabel, "English")
+        XCTAssertNil(AccentCatalog.options(for: "j", uppercase: false, language: view.engine.language), "English holds nothing on J")
+    }
+
     /// Settings › Keyboard › Languages with English, French and Russian: the space bar names
     /// the keyboard's language, switching changes the letters (AZERTY, ЙЦУКЕН), the accents and
     /// autocorrect (French with English beside it, Russian alone), and the keyboard comes back
-    /// in the language it was left in. Dictation follows on Automatic; Switch dictation too
-    /// puts a language picked by hand back on Automatic.
+    /// in the language it was left in. Dictation follows on Automatic only with Switch dictation
+    /// too on, which also puts a language picked by hand back on Automatic.
     func testTheSpaceBarSwitchesBetweenTheChosenLanguages() {
         let settings = LanguageSettings(defaults: defaults)
         settings.keyboardLanguages = [.english, .french, .russian]
@@ -680,7 +766,10 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(settings.currentKeyboardLanguage, .french)
 
         settings.supportedDictationLanguages = ["en-US", "fr-FR", "ru-RU"]
-        XCTAssertEqual(settings.keyboardDictationLanguage(), "fr-FR", "Automatic follows the keyboard")
+        XCTAssertNil(settings.keyboardDictationLanguage(osMajorVersion: 27), "Switch dictation too off: Automatic stays")
+        settings.dictationFollowsKeyboard = true
+        XCTAssertEqual(settings.keyboardDictationLanguage(), "fr-FR", "on: Automatic follows the keyboard")
+        settings.dictationFollowsKeyboard = false
         settings.dictationLanguage = "de-DE"
         var picked: [String?] = []
         model.onLanguageSelected = { picked.append($0) }
@@ -714,10 +803,12 @@ extension FullKeyboardEngineTests {
     /// English and Spanish chosen together type on the first one's keys, as Apple's bilingual
     /// English & Spanish keyboard does: English first, QWERTY without the ñ key (ñ on a held n)
     /// in both, the space bar still switching the language it names, autocorrects and
-    /// dictates in; Spanish first, its ñ key in both; Spanish alone, its own.
+    /// dictates in (with Switch dictation too on); Spanish first, its ñ key in both; Spanish
+    /// alone, its own.
     func testEnglishAndSpanishShareTheFirstLanguagesKeys() {
         let settings = LanguageSettings(defaults: defaults)
         settings.keyboardLanguages = [.english, .spanish]
+        settings.dictationFollowsKeyboard = true
         settings.supportedDictationLanguages = ["en-US", "es-ES"]
         let view = FullKeyboardView(model: KeyboardViewModel(), target: target)
         view.languageSettings = settings

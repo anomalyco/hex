@@ -603,7 +603,7 @@ final class LiveDictationTests: XCTestCase {
             words.touchUp(at: CGPoint(x: at.x + 30, y: at.y), time: shown + 1.1)
             XCTAssertEqual(stops, 0, "a thumb sliding across the words")
             words.touchDown(at: at, time: shown + 2)
-            words.touchUp(at: at, time: shown + 2 + FullKeyboardEngine.accentHoldDelay)
+            words.touchUp(at: at, time: shown + 2 + FullKeyboardEngine.accentHoldDelay + 0.01)
             XCTAssertEqual(stops, 0, "a thumb resting on the words")
             try XCTUnwrap(control(in: view, labelled: "Cancel dictation")).sendActions(for: .touchUpInside)
             XCTAssertEqual(cancels, 1, "✕ still throws the dictation away")
@@ -651,7 +651,9 @@ final class LiveDictationTests: XCTestCase {
         XCTAssertFalse(finishes(down: 1, up: 1.08, lift: CGPoint(x: 0, y: slop + 1)), "nor one that lifts further away")
         XCTAssertFalse(finishes(down: 1, up: 1.6, path: (1 ... 32).map { CGPoint(x: CGFloat($0) * 10, y: 0) }), "nor a thumb sliding across the words")
         XCTAssertTrue(finishes(down: 1, up: 1 + hold - 0.01), "lifted just inside a key's hold")
-        XCTAssertFalse(finishes(down: 1, up: 1 + hold), "held as long as a key takes to open its accents")
+        // Just past the hold, as the tap above is just inside it: these times are added to the
+        // system's uptime, where a hold of exactly 0.36 s rounds to either side of it.
+        XCTAssertFalse(finishes(down: 1, up: 1 + hold + 0.01), "held as long as a key takes to open its accents")
         XCTAssertFalse(finishes(down: 0, up: 0.06), "the end of the tap that started the dictation")
         XCTAssertFalse(finishes(down: settle - 0.01, up: settle + 0.07), "landing just inside the window, even lifting after it")
         XCTAssertTrue(finishes(down: settle + 0.01, up: settle + 0.09), "landing just after it")
@@ -849,5 +851,45 @@ final class LiveDictationTests: XCTestCase {
         XCTAssertFalse(LiveFieldTyping.mayType(secure: nil, content: .oneTimeCode, selected: nil))
         XCTAssertFalse(LiveFieldTyping.mayType(secure: nil, content: nil, selected: "late"))
         XCTAssertTrue(LiveFieldTyping.mayType(secure: false, content: .emailAddress, selected: ""))
+    }
+
+    /// Settings › Dictation › Live words, Into field: where it can't type this dictation (Translate
+    /// what I say on, or a field `LiveFieldTyping` never types in), the words show over the keys
+    /// instead, as build 147's two switches did, and nothing stored changes. In bar, Off and the
+    /// two switches 1.0.4 could turn on together keep what they did.
+    func testIntoFieldShowsTheWordsOverTheKeysWhereItCantType() throws {
+        let suite = "LiveWordsFallbackTests"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = LiveDictationSettings(defaults: defaults)
+        func words(preview: Bool, typing: Bool, translating: Bool = false, field: Bool = true) -> [Bool] {
+            settings.showsPreview = preview
+            settings.typesIntoField = typing
+            let words = settings.liveWords(translating: translating, fieldTakesTyping: field)
+            return [words.showsPreview, words.typesIntoField]
+        }
+        XCTAssertEqual(words(preview: false, typing: true), [false, true], "Into field types, the keys stay")
+        XCTAssertEqual(words(preview: false, typing: true, translating: true), [true, false], "translating: over the keys")
+        XCTAssertEqual(words(preview: false, typing: true, field: false), [true, false], "a field it never types in: over the keys")
+        XCTAssertEqual([settings.showsPreview, settings.typesIntoField], [false, true], "what is stored stays Into field")
+        XCTAssertEqual(words(preview: true, typing: false, translating: true), [true, false], "In bar")
+        XCTAssertEqual(words(preview: false, typing: false, translating: true, field: false), [false, false], "Off")
+        XCTAssertEqual(words(preview: true, typing: true), [true, true], "both of 1.0.4's switches")
+        XCTAssertEqual(words(preview: true, typing: true, translating: true), [true, false])
+
+        XCTAssertTrue(LiveFieldTyping.types(in: FixtureTextTarget(text: "Running late")))
+        let password = FixtureTextTarget(text: "")
+        password.isSecureTextEntry = true
+        XCTAssertFalse(LiveFieldTyping.types(in: password))
+        let code = FixtureTextTarget(text: "")
+        code.textContentType = .oneTimeCode
+        XCTAssertFalse(LiveFieldTyping.types(in: code))
+        let selection = FixtureTextTarget(text: "Running late")
+        selection.selectedText = "late"
+        XCTAssertFalse(LiveFieldTyping.types(in: selection))
+        let silent = LaggingField(text: "Hello")
+        silent.lag = .nothing
+        XCTAssertFalse(LiveFieldTyping.types(in: silent), "a host that reports no text")
     }
 }

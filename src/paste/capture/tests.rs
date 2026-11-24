@@ -100,7 +100,7 @@ fn a_capture_after_dictation_restores_the_pre_dictation_clipboard() {
     let original = board.save().unwrap();
     let before = board.generation();
     board.copy("dictation");
-    pending.register(original, before, board.generation());
+    pending.register(Some(original), before, board.generation());
     let mut posts = vec![];
     transaction(
         &board,

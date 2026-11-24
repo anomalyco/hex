@@ -187,6 +187,10 @@ fn web(c: &MeetingCandidate) -> bool {
 }
 
 pub(super) fn native_icon(id: &str) -> Option<rune::Pixels> {
+    native_icon_sized(id, ICON)
+}
+
+pub(super) fn native_icon_sized(id: &str, size: f32) -> Option<rune::Pixels> {
     static CACHE: std::sync::OnceLock<rune::ImageCache> = std::sync::OnceLock::new();
     let apps = crate::application_catalog::discover();
     let entry = crate::application_catalog::find(&apps, id)?;
@@ -195,7 +199,7 @@ pub(super) fn native_icon(id: &str) -> Option<rune::Pixels> {
     }
     let image = CACHE
         .get_or_init(|| rune::ImageCache::new(Arc::new(|| {})))
-        .app_icon(&entry.path, ICON);
+        .app_icon(&entry.path, size);
     image.wait().ok()?;
     Some(image.pixels().clone())
 }
@@ -238,7 +242,12 @@ pub(super) fn fallback_name(c: &MeetingCandidate) -> &'static str {
 
 pub(super) fn load_icon(panel: OverlayHandle<Capsule>, id: OfferId) {
     panel.clone().update(move |c, _| {
-        let Some(Kind::Offer(current, found)) = &c.kind else {
+        let State::Offer {
+            id: current,
+            candidate: found,
+            ..
+        } = &c.state
+        else {
             return;
         };
         if *current != id || web(found) {
@@ -250,7 +259,7 @@ pub(super) fn load_icon(panel: OverlayHandle<Capsule>, id: OfferId) {
         std::thread::spawn(move || {
             if let Some(icon) = native_icon(&bundle) {
                 panel.update(move |c, _| {
-                    if matches!(c.kind,Some(Kind::Offer(shown,_)) if shown==id) {
+                    if matches!(c.state, State::Offer { id: shown, .. } if shown == id) {
                         c.presentation.icon = Some(icon)
                     }
                 });
@@ -282,7 +291,10 @@ pub(super) fn view(p: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCandid
 
 pub(super) fn transition(c: &Capsule, p: Paint, dark: Paint) -> Option<El> {
     let departure = c.presentation.departure.as_ref()?;
-    if !matches!(c.drawn(), Some(Kind::Offer(..) | Kind::Recording(_))) {
+    if !matches!(
+        c.drawn(),
+        Some(State::Offer { .. } | State::Recording { .. })
+    ) {
         return None;
     }
     Some(draw(p, dark, c, departure.id, &departure.candidate))
@@ -325,7 +337,7 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
             if top_corner { 0.0 } else { h - height },
         )
     };
-    let (_, title, sub, actions) = offer::actions(p, id, candidate, rules);
+    let (title, sub, actions) = offer::actions(p, id, candidate, rules);
     let lines = col()
         .w(a.lines[i])
         .items_start()
@@ -369,13 +381,13 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
         .opacity(alpha * offer.opacity)
         .scale(offer.scale)
         .blur(offer.blur);
-    let page = if a.inherits_offer_window() || rules != c.more_open || alpha < 0.2 {
+    let page = if a.inherits_offer_window() || rules != c.more_open() || alpha < 0.2 {
         page.inert().a11y_hidden()
     } else {
         page
     };
     let label = match c.drawn() {
-        Some(Kind::Recording(r)) => format!("{} · {}", tr("Recording"), r.title),
+        Some(State::Recording { recording: r, .. }) => format!("{} · {}", tr("Recording"), r.title),
         _ if a.inherits_offer_window() => tr("Starting…").to_owned(),
         _ => title,
     };
@@ -404,7 +416,7 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
         );
     }
     if live.shows()
-        && let Some(Kind::Recording(r)) = c.drawn()
+        && let Some(State::Recording { recording: r, .. }) = c.drawn()
     {
         // The recording's own header, on the path it will draw it at, so
         // the meter is one node from its first frame to the finished meeting.

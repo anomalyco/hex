@@ -133,6 +133,8 @@ pub enum DictationPhase {
     // Retained so activity readers can decode records written by older releases.
     Logged,
     Repasted,
+    // Retained, like `Logged`, for records from before Option-Control-V
+    // was removed.
     MeetingPasted,
     Failed(String),
 }

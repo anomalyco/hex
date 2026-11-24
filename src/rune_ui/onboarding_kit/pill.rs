@@ -34,8 +34,8 @@ pub(crate) fn up(s: &Onboard) -> bool {
     s.flow == Flow::FirstRun
         && !s.had_model
         && s.download.is_some()
-        && s.step != Step::Ready
-        && !(matches!(s.step, Step::Pick | Step::Started | Step::Waiting)
+        && s.step() != Step::Ready
+        && !(matches!(s.step(), Step::Pick | Step::Started | Step::Waiting)
             && !super::sketches::playing(s))
 }
 

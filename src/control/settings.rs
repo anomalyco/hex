@@ -10,6 +10,8 @@ use crate::app_settings::{
     AppSettings, HotkeyBinding, HotkeyKey, HotkeySlot, MAX_EXTRA_DICTATION_SHORTCUTS,
 };
 
+#[cfg(test)]
+mod choice_tests;
 mod hotkeys;
 mod registry;
 
@@ -332,40 +334,11 @@ pub fn apply(
                 ));
             }
         }
-        "labs.double_tap_modifiers" => candidate.normalize_double_tap_settings(),
-        "dictation_hotkey"
-        | "paste_last_hotkey"
-        | "raw_dictation_hotkey"
-        | "typed_text_hotkey"
-        | "second_dictation_hotkey"
-        | "terminal_paste_hotkey"
-        | "cancel_hotkey"
-        | "screenshots.hotkey"
-        | "screenshots.record_hotkey"
-        | "capture.hotkey"
-        | "capture.replay_hotkey" => {
+        _ if matches!(key.kind, Kind::Shortcut(_)) => {
             let Kind::Shortcut(slot) = key.kind else {
                 unreachable!("shortcut keys have the shortcut kind");
             };
-            let binding = match slot {
-                HotkeySlot::Dictation => Some(&candidate.dictation_hotkey),
-                HotkeySlot::PasteLast => candidate.paste_last_hotkey.as_ref(),
-                HotkeySlot::RawDictation => candidate.raw_dictation_hotkey.as_ref(),
-                HotkeySlot::TypedText => candidate.typed_text_hotkey.as_ref(),
-                HotkeySlot::SecondDictation => candidate.second_dictation_hotkey.as_ref(),
-                // Each row of `extra_dictation_hotkeys` is validated from
-                // its own JSON list, not a shortcut key.
-                HotkeySlot::ExtraDictation(_) => None,
-                HotkeySlot::TerminalPaste => candidate.terminal_paste_hotkey.as_ref(),
-                HotkeySlot::Cancel => Some(&candidate.cancel_hotkey),
-                HotkeySlot::Screenshot => Some(&candidate.screenshots.hotkey),
-                HotkeySlot::ScreenshotRecord => candidate.screenshots.record_hotkey.as_ref(),
-                #[cfg(hex_capture)]
-                HotkeySlot::Capture => Some(&candidate.capture.hotkey),
-                #[cfg(hex_capture)]
-                HotkeySlot::CaptureReplay => candidate.capture.replay_hotkey.as_ref(),
-            };
-            if let Some(binding) = binding {
+            if let Some(binding) = slot.get(&candidate) {
                 check_shortcut(settings, &candidate, name, slot, binding, shortcuts)?;
             }
             if candidate.dictation_hotkey.key.is_none() && !candidate.double_tap_modifiers_allowed()
@@ -408,6 +381,13 @@ pub fn apply(
                     .map_err(|error| invalid(name, &error.to_string()))?;
             }
         }
+        "model_switch_other" => {
+            if let Some(choice) = &candidate.model_switch_other {
+                choice
+                    .validate()
+                    .map_err(|error| invalid(name, &error.to_string()))?;
+            }
+        }
         "dictation_processing.default_mode" => {
             candidate.dictation_processing.default_mode.name = "Global".into();
             validate_mode_speech(name, &candidate.dictation_processing.default_mode)?;
@@ -444,13 +424,6 @@ pub fn apply(
                  shortcut first",
             ));
         }
-        #[cfg(hex_capture)]
-        "labs.screenshots" if candidate.labs.screenshots => {
-            candidate.clear_record_shortcut_sharing_capture();
-        }
-        "labs.standalone_special_keys" => candidate.repair_special_keys(),
-        "labs.section_key_alone" => candidate.repair_section_key(),
-        "labs.microphone_key" => candidate.repair_microphone_key(),
         "labs.parakeet_ultra" if !candidate.labs.parakeet_ultra => {
             if let Some(why) = crate::labs::Feature::ParakeetUltra.off_refusal(settings) {
                 return Err(invalid(name, why));
@@ -459,6 +432,11 @@ pub fn apply(
         "show_dock_icon" => effects.push(Effect::DockIcon),
         "updates.channel" => effects.push(Effect::CheckForUpdates),
         _ => {}
+    }
+    if let Some(feature) = crate::labs::Feature::for_settings_key(key.key)
+        && feature.settings_key() == key.key
+    {
+        feature.apply_side_effects(&mut candidate);
     }
     Ok(Change {
         settings: candidate,
@@ -680,6 +658,15 @@ mod tests {
         } else {
             assert_eq!(refused, Some("unsupported"));
         }
+        // Stop every call recording ships on all three OSes.
+        assert!(
+            unavailable_under(
+                "labs.stop_any_call_recording",
+                crate::policy::Policy::default()
+            )
+            .is_none(),
+            "the lab is refused on this OS"
+        );
     }
 
     /// A saved record shortcut and Annotate's shortcut can't share a chord
@@ -813,6 +800,7 @@ mod tests {
                 retention: Some(crate::app_settings::MeetingRetention::Day),
                 audio_retention: Some(crate::app_settings::MeetingRetention::Day),
                 opencode_model: Some("anthropic/claude-haiku".into()),
+                recording_indicator_display: Some(r"\\.\DISPLAY2".into()),
                 ..Default::default()
             },
             ..Default::default()
@@ -842,6 +830,87 @@ mod tests {
         names.sort_unstable();
         names.dedup();
         assert_eq!(names.len(), keys().count(), "a key is listed twice");
+    }
+
+    /// Fails when a Labs feature's `settings_key()` is missing from `keys()`,
+    /// is not a boolean key, or points to a different `AppSettings` field than
+    /// `Feature::on` / `Feature::set`.
+    #[test]
+    fn every_labs_feature_has_a_matching_bool_cli_key() {
+        for feature in crate::labs::Feature::ALL {
+            let name = feature.settings_key();
+            let key = keys().find(|key| key.key == name).unwrap_or_else(|| {
+                panic!(
+                    "Labs feature `{}` names no `hex settings` key `{name}`",
+                    feature.name()
+                )
+            });
+            assert!(
+                matches!(key.kind, Kind::Bool),
+                "Labs feature `{}` key `{name}` is {:?}, expected Bool",
+                feature.name(),
+                key.kind
+            );
+
+            let default = AppSettings::default();
+            assert!(!feature.on(&default), "{} defaults on", feature.name());
+            assert_eq!(
+                get(&default, name).unwrap()[0].value,
+                Value::Bool(false),
+                "`{name}` did not read false for default {}",
+                feature.name()
+            );
+
+            let mut via_feature = default.clone();
+            feature.set(&mut via_feature, true);
+            assert!(feature.on(&via_feature), "{}", feature.name());
+            assert_eq!(
+                get(&via_feature, name).unwrap()[0].value,
+                Value::Bool(true),
+                "`{name}` does not read the bool `Feature::set` wrote for {}",
+                feature.name()
+            );
+
+            let via_cli = apply(&default, name, "true", &rules()).unwrap().settings;
+            assert!(
+                feature.on(&via_cli),
+                "applying `{name} true` did not turn on `Feature::on` for {}",
+                feature.name()
+            );
+            assert_eq!(
+                via_cli,
+                via_feature,
+                "applying `{name} true` diverged from `Feature::set(true)` for {}",
+                feature.name()
+            );
+
+            let mut off_via_feature = via_feature.clone();
+            feature.set(&mut off_via_feature, false);
+            let off_via_cli = apply(&via_feature, name, "false", &rules())
+                .unwrap()
+                .settings;
+            assert!(!feature.on(&off_via_cli), "{}", feature.name());
+            assert_eq!(
+                off_via_cli,
+                off_via_feature,
+                "applying `{name} false` diverged from `Feature::set(false)` for {}",
+                feature.name()
+            );
+
+            for extra in feature.extra_settings_keys() {
+                assert!(
+                    keys().any(|key| key.key == *extra),
+                    "Labs feature `{}` companion key `{extra}` is missing from `keys()`",
+                    feature.name()
+                );
+                assert_eq!(
+                    crate::labs::Feature::for_settings_key(extra),
+                    Some(feature),
+                    "companion key `{extra}` did not map back to `{}`",
+                    feature.name()
+                );
+            }
+        }
     }
 
     #[test]
@@ -963,6 +1032,52 @@ mod tests {
         }
         assert_eq!(
             change.settings.labs.voice_prompt_phrase, "say it better",
+            "a refused draft leaves the saved phrase"
+        );
+    }
+
+    #[test]
+    fn a_clipboard_phrase_needs_two_words_and_six_letters() {
+        let change = apply(
+            &AppSettings::default(),
+            "labs.clipboard_phrase",
+            "on",
+            &rules(),
+        )
+        .unwrap();
+        assert!(change.settings.labs.clipboard_phrase);
+        assert_eq!(
+            change.settings.labs.clipboard_phrase_text,
+            crate::dictation::clipboard_phrase::DEFAULT_PHRASE
+        );
+        let change = apply(
+            &change.settings,
+            "labs.clipboard_phrase_text",
+            "  what I copied ",
+            &rules(),
+        )
+        .unwrap();
+        assert_eq!(
+            change.settings.labs.clipboard_phrase_text, "what I copied",
+            "a saved phrase is trimmed"
+        );
+        for (raw, reason) in [
+            ("clipboard", "two words"),
+            ("a clip", "six letters"),
+            ("", "two words"),
+        ] {
+            let error = apply(
+                &change.settings,
+                "labs.clipboard_phrase_text",
+                raw,
+                &rules(),
+            )
+            .unwrap_err();
+            assert_eq!(error.code, "invalid-value", "{raw}");
+            assert!(error.message.contains(reason), "{raw}: {}", error.message);
+        }
+        assert_eq!(
+            change.settings.labs.clipboard_phrase_text, "what I copied",
             "a refused draft leaves the saved phrase"
         );
     }

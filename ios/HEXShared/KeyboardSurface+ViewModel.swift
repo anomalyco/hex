@@ -2,6 +2,110 @@ import Combine
 import SwiftUI
 import UIKit
 
+/// Which dictation starts when a finger lands on Dictate or the Hex key.
+/// Every surface (dictation bar, full keyboard, selection dictation, auto-start, touch-down
+/// arming) switches on this single resolution.
+nonisolated enum DictationRoute: Equatable, Sendable {
+    /// Full Access is off: open Hex's setup sheet or show the Full Access hint.
+    case setUp
+    /// Full Access is on, but Hex's speech model isn't installed yet and the keyboard can't
+    /// dictate by itself: from iOS 26 the keyboard says to finish setting up Hex, with Open
+    /// Hex (`KeyboardDictationBlock`); before, Dictate opens Hex to finish setup.
+    case needsModel
+    /// Hex's warm session takes the dictation (including warm retry after a failure).
+    case warm
+    /// In-keyboard dictation (iOS 26+) runs in the keyboard's own process.
+    case inKeyboard
+    /// In-keyboard dictation can't take it. The reason says why (`memory`, `speechModel`), or
+    /// is nil where in-keyboard dictation isn't supported. From iOS 26 the keyboard says why
+    /// with Open Hex (`KeyboardDictationBlock`); before, Dictate opens Hex to record there.
+    case opensHex(KeyboardSelfDictation.Reason?)
+
+    static func resolve(
+        hasFullAccess: Bool,
+        isModelInstalled: Bool,
+        isWarmAvailable: Bool,
+        localAvailable: Bool,
+        opensHexReason: KeyboardSelfDictation.Reason?
+    ) -> DictationRoute {
+        guard hasFullAccess else { return .setUp }
+        // In-keyboard dictation uses the keyboard's own speech model, not Hex's, so it still
+        // dictates while Hex's isn't installed (a first download, Continue without a model, a
+        // failed preparation), as 1.0.4 did. A warm session needs Hex's model.
+        guard isModelInstalled else { return localAvailable ? .inKeyboard : .needsModel }
+        if isWarmAvailable { return .warm }
+        if localAvailable { return .inKeyboard }
+        return .opensHex(opensHexReason)
+    }
+
+    /// Whether dictation starts without leaving the host app (warm session or in-keyboard).
+    var dictatesInPlace: Bool {
+        self == .warm || self == .inKeyboard
+    }
+}
+
+/// Why a dictation tap can't dictate where you are, from iOS 26: both keyboards say so in one
+/// line with Open Hex and ✕, and nothing opens unless Open Hex is tapped. Before iOS 26 a
+/// dictation tap there still opens Hex to record, as it always has (`resolve` is nil).
+nonisolated enum KeyboardDictationBlock: Equatable, Sendable {
+    /// The keyboard couldn't get this language's speech model (BCP 47) twice in a row; Hex
+    /// downloads it (`LanguageSettings.keyboardNeedsHex`).
+    case speechModel(language: String)
+    /// Hex found Apple has no speech model for this language on this iPhone: downloading in
+    /// Hex can't help, so the line has no Open Hex (`LanguageSettings.keyboardLanguageUnavailable`).
+    case languageUnavailable(language: String)
+    /// Less memory left than a dictation needs to start (`KeyboardLocalDictation.hasMemoryToStart`).
+    /// Dictate works again by itself once there is.
+    case memory
+    /// Hex's own speech model isn't set up, and the keyboard can't dictate by itself.
+    case setUp
+
+    var line: String {
+        switch self {
+        case .speechModel(let language):
+            String(localized: "Download \(SpeechModelUnavailable.interfaceName(language)) in Hex to dictate")
+        case .languageUnavailable(let language):
+            String(localized: "\(SpeechModelUnavailable.interfaceName(language)) isn't available on this iPhone yet")
+        case .memory:
+            String(localized: "Not enough memory to dictate here")
+        case .setUp:
+            String(localized: "Finish setting up Hex to dictate")
+        }
+    }
+
+    /// Whether the line offers Open Hex: where Hex can do what it says.
+    var opensHex: Bool {
+        if case .languageUnavailable = self { return false }
+        return true
+    }
+
+    /// What a dictation tap on `route` says instead of dictating, or nil where it dictates (or
+    /// asks for Full Access), and before iOS 26, where it opens Hex. `language` is the one
+    /// dictation uses, for the speech model's line.
+    static func resolve(
+        route: DictationRoute,
+        language: String?,
+        osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+    ) -> KeyboardDictationBlock? {
+        guard osMajorVersion >= KeyboardSelfDictation.firstVersion else { return nil }
+        switch route {
+        case .setUp, .warm, .inKeyboard:
+            return nil
+        case .needsModel:
+            return .setUp
+        case .opensHex(.speechModel):
+            return .speechModel(language: language ?? "en-US")
+        case .opensHex(.languageUnavailable):
+            return .languageUnavailable(language: language ?? "en-US")
+        case .opensHex(.memory):
+            return .memory
+        case .opensHex(.openedHex), .opensHex(nil):
+            // Only before iOS 26 (`KeyboardSelfDictation.handoffReason`).
+            return nil
+        }
+    }
+}
+
 /// The dictation bar's state: its phase, the style and language trays, the message and
 /// transcript, and the clock the surface reads. Kept beside the surface view.
 @MainActor
@@ -16,9 +120,24 @@ final class KeyboardViewModel: ObservableObject {
 
     enum StagePhase: Equatable {
         case idle
+        case starting
         case recording
         case transcribing
         case failed
+    }
+
+    /// Mutually exclusive status shown in the dictation bar's leading slot and read by the full
+    /// keyboard's strip for failures.
+    enum StatusSlot: Equatable {
+        case none
+        case noAccess
+        case starting
+        case recording
+        case message(String, isFailure: Bool)
+        case translationNote(TranslationFailure)
+        /// A dictation tap couldn't dictate here: why, with Open Hex and ✕.
+        case dictationBlock(KeyboardDictationBlock)
+        case warm
     }
 
     struct PendingCommand: Equatable {
@@ -42,11 +161,136 @@ final class KeyboardViewModel: ObservableObject {
     @Published private(set) var isWarmAvailable = false
     @Published private(set) var stagePhase: StagePhase = .idle
     @Published private(set) var statusMessage: String?
-    /// A tap on Dictate or the Hex key records through Hex's warm session. Not while the last
-    /// dictation shows as failed: the keyboard's own failure keeps its snapshot live for a few
-    /// seconds, which isn't a session, and the bar already dictates in the keyboard then.
+    /// Why Dictate opens Hex when in-keyboard dictation can't take it, fed by `KeyboardViewController`.
+    var opensHexReason: KeyboardSelfDictation.Reason?
+
+    /// The single precedence table for what happens when a finger lands to dictate.
+    var route: DictationRoute {
+        DictationRoute.resolve(
+            hasFullAccess: hasFullAccess,
+            isModelInstalled: isModelInstalled,
+            isWarmAvailable: isWarmAvailable,
+            localAvailable: onLocalDictateTap != nil,
+            opensHexReason: opensHexReason
+        )
+    }
+
+    /// A tap on Dictate or the Hex key records through Hex's warm session (including retrying
+    /// after a warm-session failure).
     var dictatesThroughHex: Bool {
-        hasFullAccess && isWarmAvailable && stagePhase != .failed
+        route == .warm
+    }
+
+    /// Push-to-talk is available when idle or after a failure and dictation stays in-place.
+    var canPushToTalk: Bool {
+        route.dictatesInPlace && (stagePhase == .idle || stagePhase == .failed)
+    }
+
+    /// Single mutually exclusive status for the leading bar slot and full-keyboard failure strip.
+    var statusSlot: StatusSlot {
+        guard hasFullAccess else { return .noAccess }
+        switch stagePhase {
+        case .starting:
+            return .starting
+        case .recording:
+            return .recording
+        case .transcribing:
+            return .none
+        case .failed:
+            if let dictationBlock { return .dictationBlock(dictationBlock) }
+            if let statusMessage { return .message(statusMessage, isFailure: true) }
+            if let translationNote { return .translationNote(translationNote) }
+            return isWarmAvailable ? .warm : .none
+        case .idle:
+            if let dictationBlock { return .dictationBlock(dictationBlock) }
+            if let translationNote { return .translationNote(translationNote) }
+            if let statusMessage { return .message(statusMessage, isFailure: false) }
+            if let stoppedNote { return .message("\(stoppedNote.title). \(stoppedNote.detail)", isFailure: false) }
+            return isWarmAvailable ? .warm : .none
+        }
+    }
+
+    /// What both keyboards say beside Paste dictation while `offeredDictationStoppedAfter` shows.
+    var stoppedNote: (title: String, detail: String)? {
+        guard hasFullAccess, offeredDictation != nil, let offeredDictationStoppedAfter else { return nil }
+        return KeyboardInterruptedRecording.note(stoppedAfter: offeredDictationStoppedAfter)
+    }
+
+    /// What the last dictation tap said instead of dictating (`KeyboardDictationBlock`), for
+    /// `dictationBlockDuration` or until its ✕, its Open Hex, or a route that dictates here.
+    @Published private(set) var dictationBlock: KeyboardDictationBlock?
+    private var dictationBlockWork: Task<Void, Never>?
+    static let dictationBlockDuration: Duration = .seconds(8)
+
+    /// The line a dictation tap shows on this route instead of dictating (from iOS 26).
+    var routeDictationBlock: KeyboardDictationBlock? {
+        KeyboardDictationBlock.resolve(route: route, language: effectiveLanguage)
+    }
+
+    /// A dictation tap opens Hex: only before iOS 26, where the keyboard can't dictate itself.
+    var dictationTapOpensHex: Bool {
+        switch route {
+        case .needsModel, .opensHex: routeDictationBlock == nil
+        case .setUp, .warm, .inKeyboard: false
+        }
+    }
+
+    /// Dictate, the Hex key or the bar's Hex mark where the route can't dictate in place: from
+    /// iOS 26 the line that says why, with Open Hex; before, Hex opens to record, as always.
+    func dictateWhereUnavailable() {
+        if let block = routeDictationBlock {
+            showDictationBlock(block)
+        } else {
+            onOpenURL?(coldStartURL)
+        }
+    }
+
+    func showDictationBlock(_ block: KeyboardDictationBlock) {
+        dictationBlockWork?.cancel()
+        dictationBlock = block
+        UIAccessibility.post(notification: .announcement, argument: block.line)
+        dictationBlockWork = Task { [weak self] in
+            try? await Task.sleep(for: Self.dictationBlockDuration)
+            guard !Task.isCancelled else { return }
+            self?.dictationBlock = nil
+        }
+    }
+
+    func dismissDictationBlock() {
+        dictationBlockWork?.cancel()
+        dictationBlockWork = nil
+        if dictationBlock != nil { dictationBlock = nil }
+    }
+
+    /// In-keyboard dictation came or went: dictating here again puts the line away, and losing
+    /// the speech model at a dictation (the second time in a row) says so as a tap would.
+    func localDictationChanged(available: Bool, was: Bool?, reason: KeyboardSelfDictation.Reason?) {
+        if available { return dismissDictationBlock() }
+        if was == true, reason == .speechModel, let block = routeDictationBlock { showDictationBlock(block) }
+    }
+
+    /// The line's Open Hex: the one way a dictation the keyboard can't take goes to Hex.
+    func openHexForDictationBlock() {
+        guard dictationBlock?.opensHex != false else { return }
+        dismissDictationBlock()
+        onOpenURL?(coldStartURL)
+    }
+
+    func showStoppedNote(_ stoppedAfter: TimeInterval?) {
+        stoppedNoteWork?.cancel()
+        offeredDictationStoppedAfter = stoppedAfter
+        guard stoppedAfter != nil else { return }
+        stoppedNoteWork = Task { [weak self] in
+            try? await Task.sleep(for: Self.stoppedNoteDuration)
+            guard !Task.isCancelled else { return }
+            self?.offeredDictationStoppedAfter = nil
+        }
+    }
+
+    /// Failure message shown consistently by both the dictation bar and the full keyboard.
+    var failureMessage: String? {
+        if case .message(let text, isFailure: true) = statusSlot { return text }
+        return nil
     }
     @Published var style: DictationStyle = .polished
     @Published var activeTray: PickerTray = .none
@@ -75,6 +319,11 @@ final class KeyboardViewModel: ObservableObject {
     /// the keyboard came back in another field): the full keyboard's strip and the dictation
     /// bar's top row offer Paste dictation, which calls `onPasteDictation`.
     @Published var offeredDictation: String?
+    /// Where an offered dictation stopped when the keyboard closed during it, said beside
+    /// Paste dictation for a few seconds (`showStoppedNote`).
+    @Published private(set) var offeredDictationStoppedAfter: TimeInterval?
+    private var stoppedNoteWork: Task<Void, Never>?
+    static let stoppedNoteDuration: Duration = .seconds(8)
 
     // Non-published live telemetry read directly by `DotScopeHostView` / button tap handlers
     // so 25–30 Hz polling never invalidates SwiftUI views mid-spring.
@@ -114,6 +363,8 @@ final class KeyboardViewModel: ObservableObject {
     var onDelete: (() -> Void)?
     var onReturn: (() -> Void)?
     var onOpenURL: ((URL) -> Void)?
+    /// The translation note's ✕.
+    var onDismissTranslationNote: (() -> Void)?
     var onPasteDictation: (() -> Void)?
     /// The dictation bar's light haptic for each press; the keyboard allows it with Full
     /// Access and Experiments › Haptics, as the full keyboard's keys.
@@ -169,6 +420,8 @@ final class KeyboardViewModel: ObservableObject {
         switch stagePhase {
         case .idle:
             return .idle
+        case .starting:
+            return .starting
         case .recording:
             return .recording
         case .transcribing:
@@ -221,9 +474,9 @@ final class KeyboardViewModel: ObservableObject {
             pendingCommand = nil
         } else if let pending = pendingCommand {
             let expired = now - pending.sentAt >= Self.commandAckTimeout
-            let acknowledged = (pending.kind == .start && newSnapshot.state == .recording)
-                || (pending.kind == .stop && newSnapshot.state != .recording)
-                || (pending.kind == .cancel && newSnapshot.state != .recording)
+            let acknowledged = (pending.kind == .start && (newSnapshot.state == .starting || newSnapshot.state == .recording))
+                || (pending.kind == .stop && newSnapshot.state != .starting && newSnapshot.state != .recording)
+                || (pending.kind == .cancel && newSnapshot.state != .starting && newSnapshot.state != .recording)
             if expired || acknowledged {
                 pendingCommand = nil
             }
@@ -231,8 +484,6 @@ final class KeyboardViewModel: ObservableObject {
 
         let recordingElapsed: TimeInterval? = if newSnapshot.state == .recording {
             newSnapshot.recordingElapsed(at: now)
-        } else if let pending = pendingCommand, pending.kind == .start {
-            max(0, now - pending.sentAt)
         } else {
             nil
         }
@@ -325,14 +576,18 @@ final class KeyboardViewModel: ObservableObject {
                 return .idle
             case .stop where snap.state == .recording:
                 return .transcribing
+            case .stop where snap.state == .starting:
+                return .idle
             case .start where snap.state != .recording:
-                return .recording
+                return .starting
             default:
                 break
             }
         }
 
         switch snap.state {
+        case .starting:
+            return .starting
         case .recording:
             return .recording
         case .transcribing:

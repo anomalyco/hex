@@ -46,7 +46,7 @@ final class KeyboardSpeechPreparation {
     @ObservationIgnored var checkLimit: Duration = .seconds(30)
 
     /// Checks, and downloads if needed. Runs once unless "retry" (after a failure).
-    func start(retry: Bool = false, recheck: Bool = false, appEngine: @escaping @MainActor () -> String) {
+    func start(retry: Bool = false, recheck: Bool = false, appEngine: @escaping @MainActor () -> DictationEngine) {
         guard !OnboardingFixture.isSnapshot else { return }
         if task != nil, !retry, !recheck { return }
         if retry, !recheck, isReady { return }
@@ -71,7 +71,7 @@ final class KeyboardSpeechPreparation {
     /// Back in front while the keyboard hands its dictations to Hex: when the keyboard's
     /// language has Apple's model here after all, its handoff ends (`SpeechModelInstall`
     /// clears it) and the keyboard dictates itself again, rather than for the rest of the day.
-    func recheckKeyboardHandoff(appEngine: @escaping @MainActor () -> String) {
+    func recheckKeyboardHandoff(appEngine: @escaping @MainActor () -> DictationEngine) {
         guard !OnboardingFixture.isSnapshot, LanguageSettings().keyboardNeedsHex() else { return }
         switch state {
         case .checking, .downloading: return
@@ -82,7 +82,7 @@ final class KeyboardSpeechPreparation {
 
     /// Back in front after Hex was actually in the background: a check that never answered
     /// starts over, and one that failed tries again. A download already moving is left alone.
-    func resumeOnForeground(appEngine: @escaping @MainActor () -> String) {
+    func resumeOnForeground(appEngine: @escaping @MainActor () -> DictationEngine) {
         switch state {
         case .checking, .failed:
             start(retry: true, appEngine: appEngine)
@@ -91,21 +91,21 @@ final class KeyboardSpeechPreparation {
         }
     }
 
-    private func run(appEngine: @MainActor () -> String, generation: Int) async {
+    private func run(appEngine: @MainActor () -> DictationEngine, generation: Int) async {
         guard #available(iOS 26.0, *) else {
             publish(.followsApp, generation: generation)
             return
         }
         // Launch decides Hex's engine in a task of its own; give it a moment to answer.
-        for _ in 0..<30 where appEngine() == "Local speech" {
+        for _ in 0..<30 where appEngine() == .undecided {
             try? await Task.sleep(for: .milliseconds(100))
         }
         guard !Task.isCancelled else { return }
-        // Parakeet Ultra (Experiments › Multilingual model): the Hex key hands its dictations to Hex.
-        // Apple Speech in Hex is the keyboard's model too, unless the keyboard is handing its
-        // dictations to Hex: then it checks, so a model in place ends that.
+        // Apple Speech in Hex is the keyboard's model too, unless the keyboard couldn't get it:
+        // then it checks, so a model in place ends that. With Parakeet in Hex (English, or the
+        // multilingual model) the keyboard needs Apple's model of its own all the same.
         let needsHex = LanguageSettings().keyboardNeedsHex()
-        if appEngine() == ParakeetUltraTranscriber.name || (appEngine() == "Apple Speech" && !needsHex) {
+        if appEngine().keyboardSpeechFollowsApp(keyboardNeedsHex: needsHex) {
             publish(.followsApp, generation: generation)
             return
         }
@@ -165,11 +165,12 @@ final class KeyboardSpeechPreparation {
         state = next
     }
 
-    /// The Hex key opens Hex, which dictates with its own model (KeyboardViewController reads
-    /// keyboardNeedsHex); marked again at each launch, as the mark lasts a day.
+    /// Apple has no speech model for the language here: a dictation tap in the keyboard says so
+    /// (`KeyboardDictationBlock.languageUnavailable`, from `keyboardNeedsHex`); marked again at
+    /// each launch, as the mark lasts a day.
     private func handOffToHex(_ settings: LanguageSettings, generation: Int) {
         guard !Task.isCancelled, generation == self.generation else { return }
-        settings.markKeyboardNeedsHex()
+        settings.markKeyboardNeedsHex(unavailable: true)
         state = .followsApp
         // A download that ended in the handoff isn't part of onboarding's progress either.
         downloads = false

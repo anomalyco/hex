@@ -12,10 +12,9 @@
 //! Both tracks are fed in 10 ms packets at real time, on the recording's
 //! timeline, into the production writer and rolling worker; a dictation of
 //! 4 s of remote speech runs through a live stream every 30 s. Every 500 ms it reads what the
-//! Meetings pane and the copy paths would show, and every 60 s it consumes
-//! "Copy new" through the shared paste cursor. After Stop it publishes the
-//! final transcript and consumes once more. The reference for word error
-//! rates is the recording's own `transcript.ndjson`.
+//! Meetings pane and Copy all would show. After Stop it publishes the final
+//! transcript. The reference for word error rates is the recording's own
+//! `transcript.ndjson`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -32,7 +31,6 @@ const PACKET_MS: u64 = 10;
 const DICTATION_EVERY: Duration = Duration::from_secs(30);
 const DICTATION_SECONDS: usize = 4;
 const POLL: Duration = Duration::from_millis(500);
-const COPY_NEW_EVERY: Duration = Duration::from_secs(60);
 
 fn env(name: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| panic!("{name} is required"))
@@ -324,9 +322,7 @@ fn meeting_live_replay() {
 
     let mut first_seen_view: HashMap<(MeetingSource, u64, String), f64> = HashMap::new();
     let mut first_seen_rolling: HashMap<(MeetingSource, u64, String), f64> = HashMap::new();
-    let mut pasted = String::new();
     let mut next_poll = Duration::ZERO;
-    let mut next_copy = COPY_NEW_EVERY;
     let mut mid_copy = None;
     let mid = Duration::from_secs(seconds / 2);
     let mut reader = TranscriptReader::default();
@@ -381,18 +377,9 @@ fn meeting_live_replay() {
                         .or_insert(at - entry.end_ms as f64);
                 }
             }
-            if elapsed >= next_copy {
-                next_copy += COPY_NEW_EVERY;
-                let _ = consume_delta_for_id(&id, |text| {
-                    pasted.push_str(text);
-                    pasted.push_str("\n\n");
-                    Ok(())
-                });
-            }
             if mid_copy.is_none() && elapsed >= mid {
                 let all = TranscriptReader::default().read(&id).unwrap_or_default();
-                let new = TranscriptReader::default().read(&id).unwrap_or_default();
-                mid_copy = Some((elapsed, all, new));
+                mid_copy = Some((elapsed, all));
             }
         }
         thread::sleep(Duration::from_millis(PACKET_MS / 2));
@@ -422,42 +409,17 @@ fn meeting_live_replay() {
     // Readers treat the transcript as published once both files exist.
     fs::write(
         directory.join("transcript.md"),
-        transcript_markdown(&final_entries),
+        live_transcript_markdown(&final_entries),
     )
     .unwrap();
-    let _ = consume_delta_for_id(&id, |text| {
-        pasted.push_str(text);
-        Ok(())
-    });
-
     let through = seconds * 1_000;
-    let pasted_entries = pasted
-        .split("\n\n")
-        .filter_map(|turn| turn.split_once(": "))
-        .flat_map(|(label, text)| {
-            let source = if label == "You" {
-                MeetingSource::Microphone
-            } else {
-                MeetingSource::System
-            };
-            words(text).into_iter().map(move |word| (source, word))
-        })
-        .collect::<Vec<_>>();
-    let pasted_words = |source| {
-        pasted_entries
-            .iter()
-            .filter(|(entry_source, _)| *entry_source == source)
-            .map(|(_, word)| word.clone())
-            .collect::<Vec<_>>()
-    };
-    let final_words = |source| track_words(&final_entries, source, u64::MAX);
-    let (mid_at, mid_all, mid_new) = mid_copy.unwrap();
+    let (mid_at, mid_all) = mid_copy.unwrap();
     let mut view_lags = first_seen_view.values().copied().collect::<Vec<_>>();
     let mut rolling_lags = first_seen_rolling.values().copied().collect::<Vec<_>>();
     let mut latencies = latencies;
     let peak = footprints.iter().copied().fold(0.0, f64::max);
     let mean = footprints.iter().sum::<f64>() / footprints.len().max(1) as f64;
-    let mut lines = vec![
+    let lines = [
         format!(
             "replayed {seconds} s; CPU {:.1}% of a core",
             cpu * 100.0 / wall
@@ -490,11 +452,6 @@ fn meeting_live_replay() {
             compare(&reference, &mid_all)
         ),
         format!(
-            "mid-call Copy new source at {:.0} s: {}",
-            mid_at.as_secs_f64(),
-            compare(&reference, &mid_new)
-        ),
-        format!(
             "Copy all just before Stop: {}",
             compare(&reference, &late_all)
         ),
@@ -503,32 +460,22 @@ fn meeting_live_replay() {
             compare(&reference, &final_entries)
         ),
     ];
-    for source in [MeetingSource::System, MeetingSource::Microphone] {
-        let reference_words = track_words(&reference, source, through);
-        let (wrong, count) = word_errors(&final_words(source), &pasted_words(source));
-        let (reference_wrong, _) = word_errors(&reference_words, &pasted_words(source));
-        lines.push(format!(
-            "Copy new every 60 s + after Stop, {}: {} words pasted, final has {}; vs final {:.1}%, vs reference {:.1}%",
-            source.label(),
-            pasted_words(source).len(),
-            count,
-            wrong as f64 * 100.0 / count.max(1) as f64,
-            reference_wrong as f64 * 100.0 / reference_words.len().max(1) as f64,
-        ));
-    }
     let summary = lines.join("\n");
     println!("{summary}");
     fs::write(report.join("summary.txt"), &summary).unwrap();
-    fs::write(report.join("pasted.txt"), &pasted).unwrap();
     fs::write(
         report.join("mid-copy-all.md"),
-        transcript_markdown(&mid_all),
+        live_transcript_markdown(&mid_all),
     )
     .unwrap();
-    fs::write(report.join("final.md"), transcript_markdown(&final_entries)).unwrap();
+    fs::write(
+        report.join("final.md"),
+        live_transcript_markdown(&final_entries),
+    )
+    .unwrap();
     fs::write(
         report.join("reference.md"),
-        transcript_markdown(
+        live_transcript_markdown(
             &reference
                 .iter()
                 .filter(|entry| entry.end_ms <= through)

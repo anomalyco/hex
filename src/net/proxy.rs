@@ -3,7 +3,8 @@
 //! (Windows: WinINet's per-user settings, a PAC file or WPAD, then WinHTTP's
 //! machine proxy; macOS: the network's proxy settings). Linux has only the
 //! environment variables. Answers are kept for a minute per scheme and host,
-//! since WPAD can take seconds.
+//! since WPAD can take seconds. Old answers are evicted, and at most 256
+//! hosts are kept even when transformations contact new hosts continuously.
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
@@ -15,6 +16,7 @@ mod macos;
 mod windows;
 
 const KEEP: Duration = Duration::from_secs(60);
+const MAX_ANSWERS: usize = 256;
 
 /// Each scheme and host's proxy, and when it was looked up.
 type Answers = HashMap<String, (Instant, Option<String>)>;
@@ -39,10 +41,12 @@ pub fn proxy_for(url: &str) -> Option<ureq::Proxy> {
             if let Some(proxy) = &proxy {
                 tracing::info!(host, proxy = %redact(proxy), "using a proxy");
             }
-            ANSWERS
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .insert(key, (Instant::now(), proxy.clone()));
+            remember(
+                &mut ANSWERS.lock().unwrap_or_else(|error| error.into_inner()),
+                key,
+                proxy.clone(),
+                Instant::now(),
+            );
             proxy
         }
     };
@@ -54,6 +58,20 @@ pub fn proxy_for(url: &str) -> Option<ureq::Proxy> {
             None
         }
     }
+}
+
+fn remember(answers: &mut Answers, key: String, proxy: Option<String>, now: Instant) {
+    answers.retain(|_, (at, _)| now.saturating_duration_since(*at) < KEEP);
+    if answers.len() >= MAX_ANSWERS && !answers.contains_key(&key) {
+        let oldest = answers
+            .iter()
+            .min_by_key(|(_, (at, _))| *at)
+            .map(|(key, _)| key.clone());
+        if let Some(oldest) = oldest {
+            answers.remove(&oldest);
+        }
+    }
+    answers.insert(key, (now, proxy));
 }
 
 fn resolve(url: &url::Url, host: &str) -> Option<String> {
@@ -227,6 +245,68 @@ pub(crate) fn pick_from_list(list: &str, scheme: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn proxy_answers_stay_bounded_across_new_hosts() {
+        let mut answers = Answers::new();
+        let now = Instant::now();
+        for cycle in 0..10_000 {
+            remember(
+                &mut answers,
+                format!("https://{cycle}.example.com"),
+                None,
+                now,
+            );
+        }
+        eprintln!(
+            "retained proxy answers after 10000 new hosts: {}",
+            answers.len()
+        );
+        assert!(answers.len() <= 256);
+    }
+
+    #[test]
+    fn proxy_answers_remove_expired_hosts_when_another_host_is_used() {
+        let mut answers = Answers::new();
+        let now = Instant::now();
+        remember(&mut answers, "https://old.example.com".into(), None, now);
+        remember(
+            &mut answers,
+            "https://new.example.com".into(),
+            None,
+            now + KEEP,
+        );
+        assert_eq!(answers.len(), 1);
+        assert!(answers.contains_key("https://new.example.com"));
+    }
+
+    #[test]
+    fn proxy_answers_replace_in_place_and_evict_the_oldest_resolution() {
+        let mut answers = Answers::new();
+        let now = Instant::now();
+        for i in 0..MAX_ANSWERS {
+            remember(
+                &mut answers,
+                i.to_string(),
+                None,
+                now + Duration::from_millis(i as u64),
+            );
+        }
+        let later = now + Duration::from_secs(1);
+        remember(
+            &mut answers,
+            "0".into(),
+            Some("http://proxy:80".into()),
+            later,
+        );
+        assert_eq!(answers.len(), MAX_ANSWERS);
+        assert!(answers.contains_key("1"));
+        remember(&mut answers, "new".into(), None, later);
+        assert_eq!(answers.len(), MAX_ANSWERS);
+        assert!(!answers.contains_key("1"));
+        assert_eq!(answers["0"].1.as_deref(), Some("http://proxy:80"));
+        assert!(answers["new"].1.is_none());
+    }
 
     #[test]
     fn no_proxy_covers_hosts_and_domains() {

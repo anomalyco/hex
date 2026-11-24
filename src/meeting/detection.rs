@@ -2,6 +2,9 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
+mod detector;
+pub use detector::{MeetingDetector, OfferId};
+
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -339,7 +342,11 @@ impl MeetingCandidate {
 /// microphone, so the user can choose to stop. It never stops anything.
 #[derive(Default)]
 pub struct CallPresence {
-    absent: Option<Run>,
+    /// When the current absence was first seen. Unlike a [`Run`], a gap
+    /// between observations never starts it over: a sleeping Mac can stall
+    /// the loop past [`MAX_OBSERVATION_GAP`], and the call is gone either way
+    /// (#2685).
+    absent_since: Option<Instant>,
     prompted: bool,
 }
 
@@ -351,12 +358,12 @@ impl CallPresence {
 
     fn observe_at(&mut self, present: bool, now: Instant) -> bool {
         if present {
-            self.absent = None;
+            self.absent_since = None;
             self.prompted = false;
             return false;
         }
-        let absent = self.absent.get_or_insert_with(|| Run::start(now));
-        if absent.extend(now) >= CALL_ENDED_AFTER && !self.prompted {
+        let since = *self.absent_since.get_or_insert(now);
+        if now.saturating_duration_since(since) >= CALL_ENDED_AFTER && !self.prompted {
             self.prompted = true;
             return true;
         }
@@ -388,13 +395,15 @@ pub struct AutoStop {
 }
 
 impl AutoStop {
-    /// The call ended: stop after the grace.
-    pub fn arm(&mut self) {
-        self.arm_at(Instant::now());
+    /// The call ended: stop after the grace. Returns when.
+    pub fn arm(&mut self) -> Instant {
+        self.arm_at(Instant::now())
     }
 
-    fn arm_at(&mut self, now: Instant) {
-        self.deadline = Some(now + AUTO_STOP_GRACE);
+    fn arm_at(&mut self, now: Instant) -> Instant {
+        let deadline = now + AUTO_STOP_GRACE;
+        self.deadline = Some(deadline);
+        deadline
     }
 
     /// Whether a stop is counting: armed, and its grace has not run out.
@@ -575,7 +584,7 @@ impl MeetingSource {
             Self::Banshee => "Banshee",
             Self::Zoom => "Zoom",
             Self::Teams => "Microsoft Teams",
-            Self::SlackHuddle => "Slack Huddle",
+            Self::SlackHuddle => "Slack huddle",
             Self::FaceTime => "FaceTime",
             Self::WhatsApp => "WhatsApp",
             Self::Gather => "Gather",
@@ -592,453 +601,6 @@ impl MeetingSource {
             Self::Messenger => "Messenger",
             Self::GroupMe => "GroupMe",
         }
-    }
-}
-
-#[derive(Default)]
-pub struct MeetingDetector {
-    pending: Option<Pending>,
-    /// Which Ask presentation can still answer. A later call in the same
-    /// app has the same key but must not inherit a delayed timeout.
-    open_offer: Option<OfferId>,
-    offered: Option<String>,
-    offered_application: Option<String>,
-    /// The offered call's meeting code, when its page named one: another
-    /// code in the same app is a different call, not this one returning.
-    offered_call: Option<String>,
-    /// The call a recording's page named just before its call-switch stop:
-    /// the browser can stay on the microphone and keep naming the ended call
-    /// (or none), so detection starts this call rather than snoozing it as
-    /// the ended one. Dropped after [`SWITCHED_CALL_MEMORY`] without a
-    /// detection using it.
-    switched: Option<SwitchedCall>,
-    /// The code of the call that stopped, handed to the recording detection
-    /// starts in its place: that recording keeps it so the page still naming
-    /// it never ends the new one.
-    switched_from: Option<String>,
-    /// The offered call's recording was stopped, by hand or on its own after
-    /// its call ended: the snooze ends once its app has been off the
-    /// microphone for [`CALL_ENDED_AFTER`], not a minute, so the next call is
-    /// offered (#1113).
-    stopped: bool,
-    /// The offer's capsule closed on its timeout without an answer: the
-    /// snooze ends as soon as the call app leaves the microphone, so a call
-    /// joined after its pre-join screen is offered again (#1267).
-    timed_out: bool,
-    /// When a candidate was last on the microphone (or known to be, while
-    /// recording); absence is counted from here, gaps included.
-    last_present: Option<Instant>,
-    calendar: Option<CalendarSnooze>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct OfferId(Instant);
-
-impl OfferId {
-    pub fn at(now: Instant) -> Self {
-        Self(now)
-    }
-}
-
-/// A candidate that has been on the microphone but is not yet stable.
-struct Pending {
-    key: String,
-    application: Option<String>,
-    /// A browser call whose page is not known (yet).
-    unresolved: bool,
-    run: Run,
-}
-
-/// The call a browser's page named just before a call-switch stop (#1775):
-/// the browser keeps the microphone, and its next reads can still name the
-/// ended call or none, so detection uses this candidate until the page names
-/// a call of its own or the call app leaves.
-struct SwitchedCall {
-    /// The code of the call whose recording stopped, when its page named one.
-    ended: Option<String>,
-    candidate: MeetingCandidate,
-    /// When the page named it; the memory lapses
-    /// [`SWITCHED_CALL_MEMORY`] later if no detection uses it.
-    noted: Instant,
-    /// The substitution was logged: a page that keeps naming the ended call
-    /// says so once per switch, not every 500 ms pass.
-    logged: bool,
-}
-
-/// A call the user already answered a calendar reminder for: recorded it,
-/// or dismissed it.
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct CalendarSnooze {
-    /// App bundle IDs and website hosts of the meeting's call service;
-    /// empty when the invitation had no call link, which covers the next
-    /// call alone.
-    keys: Vec<String>,
-    /// When the snooze lapses, in wall-clock milliseconds: the meeting's
-    /// end, or shortly after its start when it has no call link.
-    until_ms: i64,
-}
-
-impl CalendarSnooze {
-    fn covers(&self, candidate: &MeetingCandidate) -> bool {
-        self.keys.is_empty()
-            || [candidate.site.as_deref(), candidate.application.as_deref()]
-                .into_iter()
-                .flatten()
-                .any(|key| {
-                    self.keys
-                        .iter()
-                        .any(|known| crate::calendar::key_matches(key, known))
-                })
-    }
-}
-
-impl MeetingDetector {
-    /// A calendar reminder was answered: its call, when detected before
-    /// `until_ms`, is treated as already offered. `keys` names the call
-    /// service; empty covers the next call detected.
-    pub fn snooze_calendar_call(&mut self, keys: Vec<String>, until_ms: i64) {
-        self.calendar = Some(CalendarSnooze { keys, until_ms });
-    }
-
-    /// The call that was offered is still on the microphone, as a running
-    /// recording's call app is: its snooze must last from now, not from the
-    /// last detection pass.
-    pub fn keep_snooze_alive(&mut self) {
-        self.keep_snooze_alive_at(Instant::now());
-    }
-
-    fn keep_snooze_alive_at(&mut self, now: Instant) {
-        self.last_present = Some(now);
-    }
-
-    /// The snoozed call's recording stopped: by hand, or on its own once its
-    /// call ended (Stop when the call ends). Its app being off the
-    /// microphone is no longer that call, so the next call in the same app is
-    /// offered, or recorded under Always record (#1113). A call already gone
-    /// for [`CALL_ENDED_AFTER`] when its recording stops ends its snooze at
-    /// once, so the app retaking the microphone is a new call rather than the
-    /// snoozed one returning.
-    pub fn recording_stopped(&mut self) {
-        self.recording_stopped_at(Instant::now());
-    }
-
-    fn recording_stopped_at(&mut self, now: Instant) {
-        if self.offered.is_none() {
-            return;
-        }
-        // An automatic stop waits out the call's absence: the short absence
-        // that ends a hand-stopped call's snooze has already lasted, so there
-        // is nothing left to wait for.
-        if self
-            .last_present
-            .is_some_and(|seen| now.saturating_duration_since(seen) >= CALL_ENDED_AFTER)
-        {
-            self.end_snooze();
-        } else {
-            self.stopped = true;
-        }
-    }
-
-    /// The page named `candidate` just before the recording of the call whose
-    /// code is `ended` stopped: the browser never left the microphone, so
-    /// detection starts this call even while its reads still name the ended
-    /// call or none.
-    pub fn call_switched(&mut self, ended: Option<String>, candidate: MeetingCandidate) {
-        self.call_switched_at(ended, candidate, Instant::now());
-    }
-
-    fn call_switched_at(
-        &mut self,
-        ended: Option<String>,
-        candidate: MeetingCandidate,
-        now: Instant,
-    ) {
-        self.switched = Some(SwitchedCall {
-            ended,
-            candidate,
-            noted: now,
-            logged: false,
-        });
-        self.switched_from = None;
-    }
-
-    /// The code of the call whose page named the one detection just started,
-    /// taken once by the watcher: the new recording keeps it, so the page
-    /// still naming it never ends the new one.
-    pub fn take_switched_from(&mut self) -> Option<String> {
-        self.switched_from.take()
-    }
-
-    /// The page came back to the recorded call, or the user kept recording:
-    /// nothing starts on the switched call's behalf.
-    pub fn forget_switched_call(&mut self) {
-        self.switched = None;
-        self.switched_from = None;
-    }
-
-    /// The call a page named before a call-switch stop, while it is
-    /// remembered.
-    #[cfg(test)]
-    pub(crate) fn switched_call(&self) -> Option<&MeetingCandidate> {
-        self.switched.as_ref().map(|switched| &switched.candidate)
-    }
-
-    /// The offer's capsule closed on its timeout, unanswered.
-    pub fn offer_timed_out(&mut self, id: OfferId) {
-        if self.open_offer == Some(id) {
-            self.timed_out = true;
-            self.withdraw_offer();
-        }
-    }
-
-    pub fn open_offer(&self) -> Option<OfferId> {
-        self.open_offer
-    }
-
-    /// A recording or Meetings being turned off also retires the panel,
-    /// without changing the call's snooze.
-    pub fn withdraw_offer(&mut self) {
-        self.open_offer = None;
-    }
-
-    /// Whether the call app is on the microphone, seen while a recording is
-    /// transcribing and detection doesn't run: an absence then still ends
-    /// the snooze.
-    pub fn observe_call_app(&mut self, present: bool) {
-        self.observe_call_app_at(present, Instant::now());
-    }
-
-    fn observe_call_app_at(&mut self, present: bool, now: Instant) {
-        if present {
-            self.last_present = Some(now);
-        } else {
-            self.absent_at(now);
-        }
-    }
-
-    /// Whether the app is snoozed whatever page it shows, so its tabs need
-    /// not be read. A snoozed call with a meeting code isn't: the page can
-    /// show a different call.
-    pub fn is_application_snoozed(&self, canonical_bundle_id: &str) -> bool {
-        self.offered_application.as_deref() == Some(canonical_bundle_id)
-            && self.offered_call.is_none()
-    }
-
-    /// Whether `candidate` is the offered call: the same key, or the same
-    /// app unless both name different meeting codes.
-    fn snoozes(&self, candidate: &MeetingCandidate) -> bool {
-        if self.offered.as_deref() == Some(&candidate.key) {
-            return true;
-        }
-        candidate.application.is_some()
-            && self.offered_application == candidate.application
-            && !(self.offered_call.is_some()
-                && candidate.call.is_some()
-                && self.offered_call != candidate.call)
-    }
-
-    /// After a call-switch stop the browser can keep naming the ended call
-    /// (or none) while it stays on the microphone: the call it named before
-    /// the stop is the one to detect. A different application, a page that
-    /// names a call of its own, or a memory older than
-    /// [`SWITCHED_CALL_MEMORY`] is left alone.
-    fn substitute_switched(
-        &mut self,
-        candidate: Option<MeetingCandidate>,
-        now: Instant,
-    ) -> Option<MeetingCandidate> {
-        if self.switched.as_ref().is_some_and(|switched| {
-            now.saturating_duration_since(switched.noted) >= SWITCHED_CALL_MEMORY
-        }) {
-            self.switched = None;
-        }
-        let candidate = candidate?;
-        let Some(switched) = self.switched.as_ref() else {
-            return Some(candidate);
-        };
-        if candidate.application.is_none()
-            || candidate.application != switched.candidate.application
-        {
-            return Some(candidate);
-        }
-        if candidate.call.is_some() && candidate.call != switched.ended {
-            self.switched = None;
-            return Some(candidate);
-        }
-        if !switched.logged {
-            tracing::info!(
-                application = switched.candidate.application.as_deref(),
-                ended = switched.ended.as_deref().unwrap_or_default(),
-                call = switched.candidate.call.as_deref().unwrap_or_default(),
-                "the page still names the ended call; detecting the call it named before the stop"
-            );
-            if let Some(switched) = self.switched.as_mut() {
-                switched.logged = true;
-            }
-        }
-        self.switched
-            .as_ref()
-            .map(|switched| switched.candidate.clone())
-    }
-
-    /// No candidate is on the microphone: the snooze ends once that has
-    /// lasted long enough.
-    fn absent_at(&mut self, now: Instant) {
-        let since = *self.last_present.get_or_insert(now);
-        if self.timed_out {
-            self.end_snooze();
-            return;
-        }
-        let reset_after = if self.stopped {
-            CALL_ENDED_AFTER
-        } else {
-            ABSENT_FOR_RESET
-        };
-        if now.saturating_duration_since(since) >= reset_after {
-            self.end_snooze();
-        }
-    }
-
-    /// Forgets the snoozed call: the next one is offered as new.
-    fn end_snooze(&mut self) {
-        self.withdraw_offer();
-        self.offered = None;
-        self.offered_application = None;
-        self.offered_call = None;
-        self.stopped = false;
-        self.timed_out = false;
-        self.switched = None;
-        self.switched_from = None;
-    }
-
-    /// One observation under the user's answers, `default` for calls with
-    /// none of their own. A Don't offer call shows nothing but still counts
-    /// as present; Always record ones pass the same stability time and
-    /// snooze as an offer, so a stopped or dismissed call never starts again
-    /// until its app leaves the microphone.
-    pub fn detect(
-        &mut self,
-        candidate: Option<MeetingCandidate>,
-        choices: &[MeetingProviderChoice],
-        default: MeetingPolicy,
-    ) -> Option<Detection> {
-        self.detect_at(
-            candidate,
-            choices,
-            default,
-            Instant::now(),
-            crate::calendar::wall_clock_ms(),
-        )
-    }
-
-    fn detect_at(
-        &mut self,
-        candidate: Option<MeetingCandidate>,
-        choices: &[MeetingProviderChoice],
-        default: MeetingPolicy,
-        now: Instant,
-        now_ms: i64,
-    ) -> Option<Detection> {
-        let candidate = self.substitute_switched(candidate, now);
-        if candidate.as_ref().is_some_and(|candidate| {
-            candidate.policy(choices, default) == MeetingPolicy::NeverOffer
-        }) {
-            // Still on the microphone: an earlier offer stays snoozed.
-            self.pending = None;
-            self.last_present = Some(now);
-            return None;
-        }
-        let candidate = self.observe_at(candidate, now, now_ms)?;
-        // A default of Always record starts only calls Hex can name;
-        // a browser page it can't is offered instead of recording every page.
-        let records = match candidate.own_policy(choices) {
-            Some(policy) => policy == MeetingPolicy::AlwaysRecord,
-            None => default == MeetingPolicy::AlwaysRecord && candidate.can_always_record(),
-        };
-        Some(if records {
-            Detection::Record(candidate)
-        } else {
-            self.open_offer = Some(OfferId::at(now));
-            Detection::Offer(candidate)
-        })
-    }
-
-    fn observe_at(
-        &mut self,
-        candidate: Option<MeetingCandidate>,
-        now: Instant,
-        now_ms: i64,
-    ) -> Option<MeetingCandidate> {
-        let Some(candidate) = candidate else {
-            if self.pending.as_ref().is_some_and(|pending| {
-                now.saturating_duration_since(pending.run.last) > DROPOUT_GRACE
-            }) {
-                self.pending = None;
-            }
-            self.absent_at(now);
-            return None;
-        };
-        self.last_present = Some(now);
-        if self.snoozes(&candidate) {
-            self.pending = None;
-            return None;
-        }
-        let unresolved = candidate.source == MeetingSource::BrowserCall && candidate.site.is_none();
-        let held = match &mut self.pending {
-            Some(pending) if pending.key == candidate.key => pending.run.extend(now),
-            // The browser's page was found: the same browser has been on the
-            // microphone all along, so the run carries over.
-            Some(pending)
-                if pending.unresolved
-                    && candidate.site.is_some()
-                    && pending.application.is_some()
-                    && pending.application == candidate.application =>
-            {
-                pending.key = candidate.key.clone();
-                pending.unresolved = unresolved;
-                pending.run.extend(now)
-            }
-            _ => {
-                self.pending = Some(Pending {
-                    key: candidate.key.clone(),
-                    application: candidate.application.clone(),
-                    unresolved,
-                    run: Run::start(now),
-                });
-                Duration::ZERO
-            }
-        };
-        if held < candidate.required_stability() {
-            return None;
-        }
-        self.pending = None;
-        self.offered = Some(candidate.key.clone());
-        self.withdraw_offer();
-        self.offered_application = candidate.application.clone();
-        self.offered_call = candidate.call.clone();
-        self.stopped = false;
-        self.timed_out = false;
-        if self
-            .calendar
-            .as_ref()
-            .is_some_and(|snooze| now_ms >= snooze.until_ms)
-        {
-            self.calendar = None;
-        }
-        if let Some(snooze) = &self.calendar
-            && snooze.covers(&candidate)
-        {
-            tracing::info!(
-                source = candidate.source.label(),
-                "detected call already answered from its calendar reminder"
-            );
-            if snooze.keys.is_empty() {
-                self.calendar = None;
-            }
-            return None;
-        }
-        self.switched_from = self.switched.take().and_then(|switched| switched.ended);
-        Some(candidate)
     }
 }
 
@@ -1250,9 +812,10 @@ impl BrowserPageMemory {
 }
 
 fn is_browser_application(application_lower: &str) -> bool {
-    // Arc's and Zen's names are too short to match as a substring: `Citizen`
-    // and `Zendesk` are not browsers.
+    // Arc's, Aside's, and Zen's names are too short or too common to match as
+    // a substring: `Citizen`, `Seaside`, and `Zendesk` are not browsers.
     application_lower == "arc"
+        || application_lower == "aside"
         || application_lower == "zen"
         || application_lower.starts_with("zen ")
         || [
@@ -1281,6 +844,7 @@ fn context_matches_browser(
         "org.mozilla.firefox" => lower.contains("firefox"),
         "com.microsoft.edgemac" => lower.contains("edge"),
         "company.thebrowser.Browser" => lower == "arc",
+        "at.studio.AsideBrowser" => lower == "aside",
         "com.vivaldi.Vivaldi" => lower.contains("vivaldi"),
         "net.imput.helium" => lower.contains("helium"),
         "com.ardia.browser" => lower.contains("ardia"),
@@ -1373,6 +937,7 @@ pub(crate) const BROWSER_TITLE_SUFFIXES: &[&str] = &[
     " - Microsoft Edge",
     " - Safari",
     " - Arc",
+    " - Aside",
     " - Vivaldi",
     " - Helium",
     " - Ardia",
@@ -2142,6 +1707,26 @@ mod tests {
     }
 
     #[test]
+    fn a_gap_between_observations_never_restarts_a_call_ended_absence() {
+        let base = Instant::now();
+        let at = |s: u64| base + Duration::from_secs(s);
+        let mut presence = CallPresence::default();
+        // The call leaves and the Mac locks a moment later, and the
+        // controller's next pass comes 20 s on: the call still ended.
+        assert!(!presence.observe_at(false, at(0)));
+        assert!(presence.observe_at(false, at(20)));
+        // Once per absence, however long it runs.
+        assert!(!presence.observe_at(false, at(21)));
+        assert!(!presence.observe_at(false, at(60)));
+        // Back on the microphone: the next absence asks again on its own
+        // clock.
+        assert!(!presence.observe_at(true, at(61)));
+        assert!(!presence.observe_at(false, at(62)));
+        assert!(!presence.observe_at(false, at(64)));
+        assert!(presence.observe_at(false, at(65)));
+    }
+
+    #[test]
     fn an_ended_call_stops_after_the_grace_unless_it_comes_back_or_is_kept() {
         let base = Instant::now();
         let at = |ms: u64| base + Duration::from_millis(ms);
@@ -2254,6 +1839,15 @@ mod tests {
         .unwrap();
         assert_eq!(helium.title, "Weekly Architecture");
         assert!(helium.named);
+
+        let aside = candidate_from_context(&context(
+            "Aside",
+            Some("https://meet.google.com/abc-defg-hij"),
+            "Meet – Weekly Architecture - Aside",
+        ))
+        .unwrap();
+        assert_eq!(aside.title, "Weekly Architecture");
+        assert!(aside.named);
     }
 
     #[test]
@@ -3663,6 +3257,39 @@ mod tests {
     }
 
     #[test]
+    fn a_google_meet_call_in_aside_records_after_about_two_seconds() {
+        // Aside's Chromium audio service holds the microphone and reports
+        // `at.studio.AsideBrowser.helper`; the main app is
+        // `at.studio.AsideBrowser`.
+        let aside_helper = ActiveMicrophoneApplication {
+            pid: 5320,
+            bundle_id: "at.studio.AsideBrowser.helper".into(),
+            name: "Aside Helper".into(),
+        };
+        assert!(aside_helper.is_browser());
+        let meet = candidate_from_microphone(
+            &aside_helper,
+            &context(
+                "Aside",
+                Some("https://meet.google.com/abc-defg-hij"),
+                "Meet - Design sync - Aside",
+            ),
+        )
+        .unwrap();
+        assert_eq!(meet.source, MeetingSource::GoogleMeet);
+        assert_eq!(meet.application.as_deref(), Some("at.studio.AsideBrowser"));
+        assert_eq!(meet.application_name.as_deref(), Some("Aside"));
+        assert_eq!(meet.site.as_deref(), Some("meet.google.com"));
+        let always = [choice("meet.google.com", MeetingPolicy::AlwaysRecord)];
+        let mut watch = Watch::new();
+        assert!(watch.run(Some(&meet), &always, 2_000).is_empty());
+        assert_eq!(
+            watch.run(Some(&meet), &always, 500),
+            [(2_000, Detection::Record(meet))]
+        );
+    }
+
+    #[test]
     fn a_google_meet_call_in_arc_without_its_address_is_known_by_its_title() {
         let arc_helper = ActiveMicrophoneApplication {
             pid: 5120,
@@ -3709,5 +3336,89 @@ mod tests {
         watch.leave();
         watch.wall_ms = 30;
         assert_eq!(watch.stable(&slack, &[]), Some(Detection::Offer(slack)));
+    }
+
+    #[test]
+    fn late_offer_timeout_cannot_overwrite_a_stopped_call_snooze() {
+        let slack = slack_huddle();
+        let mut watch = Watch::new();
+        assert_eq!(
+            watch.stable(&slack, &[]),
+            Some(Detection::Offer(slack.clone()))
+        );
+        let offer_id = watch.detector.open_offer().unwrap();
+        let now = watch.now();
+        watch.detector.recording_stopped_at(now);
+        assert_eq!(watch.detector.open_offer(), None);
+        assert_eq!(watch.detector.take_withdrawn_offers(), vec![offer_id]);
+
+        // A stale timeout for that offer must not replace Stopped's 3 s grace
+        // with TimedOut's immediate reset on absence.
+        watch.detector.offer_timed_out(offer_id);
+        assert!(watch.detector.take_withdrawn_offers().is_empty());
+        assert!(watch.run(None, &[], 2_000).is_empty());
+        assert!(watch.run(Some(&slack), &[], 5_000).is_empty());
+        // Still ends after CALL_ENDED_AFTER (3 s).
+        assert!(watch.run(None, &[], 3_500).is_empty());
+        assert_eq!(watch.stable(&slack, &[]), Some(Detection::Offer(slack)));
+    }
+
+    #[test]
+    fn replacing_an_open_offer_records_withdrawal_even_at_the_same_instant() {
+        let slack = slack_huddle();
+        let zoom = zoom();
+        let mut watch = Watch::new();
+        assert_eq!(watch.stable(&slack, &[]), Some(Detection::Offer(slack)));
+        let first = watch.detector.open_offer().unwrap();
+        assert!(watch.detector.take_withdrawn_offers().is_empty());
+
+        // Consecutive OfferIds are distinct.
+        assert_ne!(OfferId::next(), OfferId::next());
+
+        assert_eq!(watch.stable(&zoom, &[]), Some(Detection::Offer(zoom)));
+        let second = watch.detector.open_offer().unwrap();
+        assert_ne!(first, second);
+        assert_eq!(watch.detector.take_withdrawn_offers(), vec![first]);
+    }
+
+    #[test]
+    fn switched_from_cannot_be_orphaned_across_new_switches_or_detections() {
+        let first = meet_in_brave("https://meet.google.com/abc-defg-hij", "Meet - Design sync");
+        let second = meet_in_brave("https://meet.google.com/xyz-wxyz-xyz", "Meet - Standup");
+        let zoom = zoom();
+        let mut watch = Watch::new();
+        assert!(watch.stable(&first, &[]).is_some());
+        watch.switch_to(first.call.clone(), second.clone());
+        assert!(watch.stable(&first, &[]).is_some());
+
+        // Starting another call switch replaces the unclaimed HandedOff code.
+        watch.switch_to(second.call.clone(), first.clone());
+        assert_eq!(watch.detector.take_switched_from(), None);
+
+        // Reaching stability without taking switched_from, then detecting an
+        // unrelated call, drops the stale HandedOff code rather than leaking it.
+        assert!(watch.stable(&second, &[]).is_some());
+        assert!(watch.stable(&zoom, &[]).is_some());
+        assert_eq!(watch.detector.take_switched_from(), None);
+    }
+
+    #[test]
+    fn withdraw_offer_retires_only_the_panel_while_keeping_the_snooze() {
+        let slack = slack_huddle();
+        let mut watch = Watch::new();
+        assert_eq!(
+            watch.stable(&slack, &[]),
+            Some(Detection::Offer(slack.clone()))
+        );
+        let id = watch.detector.open_offer().unwrap();
+
+        assert_eq!(watch.detector.withdraw_offer(), Some(id));
+        assert_eq!(watch.detector.open_offer(), None);
+        assert_eq!(watch.detector.take_withdrawn_offers(), vec![id]);
+        assert_eq!(watch.detector.withdraw_offer(), None);
+
+        // Call stays snoozed for the full minute after its panel closes.
+        assert!(watch.run(None, &[], 30_000).is_empty());
+        assert!(watch.run(Some(&slack), &[], 5_000).is_empty());
     }
 }

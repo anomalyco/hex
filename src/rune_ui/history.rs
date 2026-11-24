@@ -9,13 +9,13 @@
 
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
-use rune::{Cx, El, TextEdit, Tx, col, row, text};
+use rune::{El, TextEdit, Tx, col, row, text};
 use rune_kit::{Menu as KitMenu, MenuItem, Placement, Select, SelectAppearance, TextInput};
 
 use super::controls::{ButtonKind, Paint, button};
 use super::list_detail::{self as ld, Item};
 use super::lists::{Tone, error_panel, section_label, small_button};
-use super::{Menu, Ui};
+use super::{Menu, Modal, Pane, Ui};
 use crate::desktop::i18n::{event_age, tr, tr_fill, tr_named};
 use crate::history::playback::Playback;
 use crate::history::stats::{AppCount, DayCount, HistoryStats, ProfileOutputTime};
@@ -31,7 +31,7 @@ pub(super) mod unified;
 
 pub(super) use self::audio::AudioCopy;
 use self::audio::copy_audio;
-pub(super) use self::stats::close_stats;
+pub(super) use self::stats::modal as stats_modal;
 
 #[derive(Default)]
 pub(super) struct HistoryPane {
@@ -62,14 +62,12 @@ pub(super) struct HistoryPane {
     pub(super) typing_speed_drag: Option<u32>,
     /// The saved typing speed the stats compared against when last read.
     typing_wpm: u32,
-    /// The stats dialog is open.
-    pub(super) stats_open: bool,
     /// Every selected entry, when several are, and the Delete confirmation
     /// while the card shows one.
     pub(super) selection: selection::Selection,
     /// Labs › Keep recordings: the installed models Transcribe again
     /// offers, read when its menu opens.
-    models: Vec<(TranscriptionModelId, &'static str)>,
+    models: Vec<(TranscriptionModelId, std::borrow::Cow<'static, str>)>,
     /// The latest Transcribe again, for one entry.
     pub(super) again: Option<Again>,
     /// A model chosen for Transcribe again that takes a language hint,
@@ -89,7 +87,7 @@ pub(super) struct HistoryPane {
 pub(super) struct Pending {
     pub(super) id: u64,
     model: TranscriptionModelId,
-    name: &'static str,
+    name: String,
     pub(super) language: String,
 }
 
@@ -171,9 +169,14 @@ impl HistoryPane {
         }
     }
 
-    /// Escape: Delete… stops asking. Returns whether it was asking.
-    pub(super) fn cancel_delete(&mut self) -> bool {
-        self.delete_armed.take().is_some()
+    /// Escape or Cancel: Delete… stops asking and returns focus to it.
+    pub(super) fn cancel_delete(&mut self, tx: &mut Tx) -> bool {
+        if self.delete_armed.take().is_some() {
+            tx.focus("history-delete", tx.focus_visible());
+            true
+        } else {
+            false
+        }
     }
 
     /// Delete… asks for `id`, and stops any other confirmation.
@@ -195,9 +198,6 @@ impl HistoryPane {
             Some(store) if stats_on => Some(store.usage()),
             _ => None,
         };
-        if !self.has_stats() {
-            self.stats_open = false;
-        }
     }
 
     /// Whether the dialog has anything to show: retained dictations, or the
@@ -251,12 +251,6 @@ impl HistoryPane {
             if let Some(playback) = &mut self.playback {
                 playback.stop();
             }
-            changed = true;
-        }
-        // The dialog belongs to the pane and its switch: leaving History,
-        // turning Dictation stats off, or emptying the stats closes it.
-        if self.stats_open && (!visible || !stats_on || !self.has_stats()) {
-            self.stats_open = false;
             changed = true;
         }
         let Some(store) = self.store.as_ref().filter(|_| visible) else {
@@ -542,7 +536,7 @@ fn clear(ui: &mut Ui) {
 
 /// The models Transcribe again can use: every available one that is
 /// installed for the language it would run in.
-fn installed_models(ui: &Ui) -> Vec<(TranscriptionModelId, &'static str)> {
+fn installed_models(ui: &Ui) -> Vec<(TranscriptionModelId, std::borrow::Cow<'static, str>)> {
     crate::transcription::models::all_models()
         .into_iter()
         .filter(|model| model.available())
@@ -550,7 +544,7 @@ fn installed_models(ui: &Ui) -> Vec<(TranscriptionModelId, &'static str)> {
             let selection = ui.settings.transcription_for_model(model.id);
             crate::transcription::models::is_installed(model, &selection.language)
         })
-        .map(|model| (model.id, model.name))
+        .map(|model| (model.id, model.name.clone()))
         .collect()
 }
 
@@ -565,7 +559,7 @@ pub(super) fn language_choices(model: TranscriptionModelId) -> Option<Vec<&'stat
 
 /// A model chosen from Transcribe again's menu: one that takes a language
 /// waits for it, starting at the saved language; any other runs at once.
-pub(super) fn choose_model(ui: &mut Ui, id: u64, model: TranscriptionModelId, name: &'static str) {
+pub(super) fn choose_model(ui: &mut Ui, id: u64, model: TranscriptionModelId, name: &str) {
     ui.open = None;
     let Some(choices) = language_choices(model) else {
         ui.history.pending = None;
@@ -581,7 +575,7 @@ pub(super) fn choose_model(ui: &mut Ui, id: u64, model: TranscriptionModelId, na
     ui.history.pending = Some(Pending {
         id,
         model,
-        name,
+        name: name.to_owned(),
         language,
     });
 }
@@ -593,7 +587,7 @@ fn transcribe_pending(ui: &mut Ui) {
             ui,
             pending.id,
             pending.model,
-            pending.name,
+            &pending.name,
             Some(&pending.language),
         );
     }
@@ -736,11 +730,31 @@ fn delete(ui: &mut Ui, id: u64) {
     }
 }
 
+/// Polls History and closes the Dictation stats dialog when leaving History,
+/// turning the lab off, or emptying the stats.
+pub(super) fn poll(ui: &mut Ui) -> bool {
+    let visible = ui.pane == Pane::History
+        && !ui.labs_open
+        && ui.window.as_ref().is_none_or(rune::AppHandle::is_visible);
+    let stats_on = ui.settings.labs.history_stats;
+    let mut changed = ui.history.poll(
+        visible,
+        ui.settings.labs.keep_recordings,
+        stats_on,
+        ui.settings.typing_wpm,
+    );
+    if ui.is_modal(Modal::HistoryStats) && (!visible || !stats_on || !ui.history.has_stats()) {
+        ui.close_modal_if(Modal::HistoryStats);
+        changed = true;
+    }
+    changed
+}
+
 /// The header's retention menu and the list + detail body.
-pub(super) fn pane(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (Vec<El>, El) {
+pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
     #[cfg(all(target_os = "macos", hex_capture))]
     if ui.history.unified.enabled {
-        return unified::view(ui, p, cx, layer);
+        return unified::view(ui, p, layer);
     }
     let pane = &ui.history;
     let actions = header_actions(ui, p, layer);
@@ -784,6 +798,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (
                             title: entry.final_text.replace('\n', " "),
                             meta,
                             meta_ink: None,
+                            note: None,
                             time: event_age(entry.timestamp_ms),
                             hover: vec![copy_action(ui, p, id, true)],
                             selected,
@@ -814,9 +829,6 @@ pub(super) fn pane(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (
             ld::body(p, "history-body", column, detail(ui, p, layer))
         }
     };
-    if let Some(modal) = stats::modal(ui, p, cx) {
-        layer.extend(modal);
-    }
     (
         actions,
         col()
@@ -824,6 +836,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (
             .grow(1.0)
             .shrink()
             .children((!notices.is_empty()).then(|| ld::notices(notices)))
+            .children(stats::strip(ui, p))
             .child(body),
     )
 }
@@ -940,8 +953,7 @@ fn header_actions(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {
                     tr("Stats"),
                     ButtonKind::Secondary,
                     |ui: &mut Ui, _| {
-                        ui.open = None;
-                        ui.history.stats_open = true;
+                        ui.open_modal(Modal::HistoryStats);
                     },
                 )),
         ];
@@ -1112,7 +1124,9 @@ fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                 "history-cancel-delete",
                 tr("Cancel"),
                 ButtonKind::Secondary,
-                |ui: &mut Ui, _| ui.history.delete_armed = None,
+                |ui: &mut Ui, tx| {
+                    ui.history.cancel_delete(tx);
+                },
             ))
     });
     if !armed {
@@ -1122,7 +1136,10 @@ fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             "history-delete",
             ld::TRASH_ICON,
             tr("Delete…"),
-            move |ui: &mut Ui, _| ui.history.arm_delete(id),
+            move |ui: &mut Ui, tx| {
+                ui.history.arm_delete(id);
+                tx.focus("history-cancel-delete", tx.focus_visible());
+            },
         ));
     }
     col()
@@ -1143,7 +1160,12 @@ fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
 fn again_section(ui: &Ui, p: Paint, id: u64, layer: &mut Vec<El>) -> El {
     let again = ui.history.again.as_ref().filter(|again| again.id == id);
     let running = again.is_some_and(|again| again.worker.is_some());
-    let labels: Vec<&str> = ui.history.models.iter().map(|(_, name)| *name).collect();
+    let labels: Vec<&str> = ui
+        .history
+        .models
+        .iter()
+        .map(|(_, name)| name.as_ref())
+        .collect();
     let current = match again {
         Some(again) if running => tr_fill("Transcribing with {}…", &again.model),
         _ => tr("Transcribe again").to_string(),
@@ -1162,9 +1184,14 @@ fn again_section(ui: &Ui, p: Paint, id: u64, layer: &mut Vec<El>) -> El {
         })
         .on_close(|ui: &mut Ui| ui.open = None)
         .on_choose(move |ui: &mut Ui, choice: &str, _: &mut Tx| {
-            if let Some(&(model, name)) = ui.history.models.iter().find(|(_, name)| *name == choice)
-            {
-                choose_model(ui, id, model, name);
+            let chosen = ui
+                .history
+                .models
+                .iter()
+                .find(|(_, name)| name == choice)
+                .map(|(model, name)| (*model, name.to_string()));
+            if let Some((model, name)) = chosen {
+                choose_model(ui, id, model, &name);
             }
         })
         .build(p.k, layer)
@@ -1181,23 +1208,26 @@ fn again_section(ui: &Ui, p: Paint, id: u64, layer: &mut Vec<El>) -> El {
                 .child(section_label(p, "label", tr("Saved recording")).grow(1.0))
                 // Labs › Copy dictation audio: the kept WAV as a file on the
                 // clipboard, ready to attach.
-                .children(ui.settings.labs.copy_dictation_audio.then(|| {
-                    let audio = ui.history.audio.as_ref().filter(|audio| audio.id == id);
-                    let copying = audio.is_some_and(|audio| audio.worker.is_some());
-                    let copied = audio.is_some_and(|audio| matches!(audio.result, Some(Ok(()))));
-                    small_button(
-                        p,
-                        "again-copy-audio",
-                        if copying {
-                            tr("Copying…")
-                        } else if copied {
-                            tr("Copied")
-                        } else {
-                            tr("Copy audio")
-                        },
-                        move |ui: &mut Ui, _| copy_audio(ui, id),
-                    )
-                }))
+                .children(
+                    crate::labs::copy_dictation_audio_enabled(&ui.settings).then(|| {
+                        let audio = ui.history.audio.as_ref().filter(|audio| audio.id == id);
+                        let copying = audio.is_some_and(|audio| audio.worker.is_some());
+                        let copied =
+                            audio.is_some_and(|audio| matches!(audio.result, Some(Ok(()))));
+                        small_button(
+                            p,
+                            "again-copy-audio",
+                            if copying {
+                                tr("Copying…")
+                            } else if copied {
+                                tr("Copied")
+                            } else {
+                                tr("Copy audio")
+                            },
+                            move |ui: &mut Ui, _| copy_audio(ui, id),
+                        )
+                    }),
+                )
                 .child(small_button(
                     p,
                     "again-play",
@@ -1330,7 +1360,7 @@ fn language_row(ui: &Ui, p: Paint, pending: &Pending, layer: &mut Vec<El>) -> El
     let current = tr_named(
         "{model} · Language: {language}",
         &[
-            ("model", pending.name),
+            ("model", pending.name.as_str()),
             ("language", language_name(&pending.language)),
         ],
     );

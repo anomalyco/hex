@@ -123,20 +123,42 @@ pub(super) fn use_file(ui: &mut Ui) {
     ui.picker.import.use_after = ui.picker.import.chooser.is_some();
 }
 
+/// The first non-empty line of `error`, which is what a page or a row shows.
+fn first_line(error: &str) -> Option<String> {
+    error
+        .lines()
+        .next()
+        .map(str::to_owned)
+        .filter(|line| !line.trim().is_empty())
+}
+
+/// Why a file chosen with [`use_file`] can't be used, in one line. It wins
+/// over a refused pick's reason: the file is the newer attempt.
+pub(super) fn import_failure(ui: &Ui) -> Option<String> {
+    ui.picker.import.error.as_deref().and_then(first_line)
+}
+
 /// Why the model couldn't be prepared, in one line: the first line of the
 /// service's error ("Couldn't reach huggingface.co: …"), or the import's.
 pub(super) fn download_failure(ui: &Ui) -> Option<String> {
     ui.picker
         .import
         .error
-        .clone()
+        .as_deref()
         .or_else(|| {
             ui.view
                 .as_ref()
-                .and_then(|view| view.transcription.error.clone())
+                .and_then(|view| view.transcription.error.as_deref())
         })
-        .and_then(|error| error.lines().next().map(str::to_owned))
-        .filter(|line| !line.trim().is_empty())
+        .and_then(first_line)
+}
+
+/// Why the model the person picked can't run here, in one line ("… is
+/// unavailable"): the first run names it instead of waiting on a download
+/// that never started. Read only while the tour still reports that pick
+/// (`Flow::pick_failed`), so it never outlives the attempt.
+pub(super) fn pick_failure(ui: &Ui) -> Option<String> {
+    ui.found.error.as_deref().and_then(first_line)
 }
 
 /// Whether a file chosen with [`use_file`] is being checked and copied.
@@ -232,6 +254,12 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
                     let language = crate::transcription::models::definition(model)
                         .language_for(&ui.settings.transcription.language)
                         .to_owned();
+                    // The file replaces whatever the first run refused: that
+                    // pick is over, and its reason with it.
+                    ui.found.error = None;
+                    if let Some(tour) = &mut ui.tour {
+                        tour.flow.pick_replaced();
+                    }
                     ui.send(super::Request::ChooseModel { model, language });
                 }
             }
@@ -261,20 +289,20 @@ pub(super) fn status_note(model: &ModelDefinition) -> Option<String> {
 /// keeps the choice and runs the default model until it is fixed.
 pub(super) fn selection_notice(ui: &Ui) -> Option<String> {
     let model = crate::transcription::models::definition(ui.settings.transcription.model);
-    let fallback = crate::transcription::models::definition(custom_models::fallback().model).name;
+    let fallback = &crate::transcription::models::definition(custom_models::fallback().model).name;
     if model.id == TranscriptionModelId::ParakeetUltra && !model.available() {
         return Some(tr_named(
             "{model} needs Labs › Parakeet Ultra, so Hex uses {fallback} until you turn it on or choose another model",
-            &[("model", model.name), ("fallback", fallback)],
+            &[("model", model.name.as_ref()), ("fallback", fallback)],
         ));
     }
     let TranscriptionModelId::Custom(id) = model.id else {
         return None;
     };
     let name = if custom_models::is_registered(id) {
-        model.name
+        model.name.to_string()
     } else {
-        tr("The imported model")
+        tr("The imported model").to_owned()
     };
     // The same order fallback_reason uses: a file to fix is named first, and
     // only a ready import can be waiting on its Labs toggle.
@@ -290,7 +318,10 @@ pub(super) fn selection_notice(ui: &Ui) -> Option<String> {
             "{model} changed since it was added, so Hex uses {fallback} until you check it again in the speech model picker or choose another model"
         }
     };
-    Some(tr_named(notice, &[("model", name), ("fallback", fallback)]))
+    Some(tr_named(
+        notice,
+        &[("model", name.as_str()), ("fallback", fallback)],
+    ))
 }
 
 /// What an imported card's metadata line says.
@@ -298,7 +329,7 @@ pub(super) fn metadata(model: &ModelDefinition) -> String {
     let import = custom_models::imported()
         .into_iter()
         .find(|import| import.definition.id == model.id);
-    let languages = match model.languages {
+    let languages = match model.languages.as_ref() {
         [only] => crate::transcription::models::language_name(only).to_owned(),
         languages => crate::desktop::i18n::tr_fill("{} languages", &languages.len().to_string()),
     };
@@ -334,12 +365,7 @@ fn in_place(id: CustomModelId) -> bool {
 }
 
 /// Rename and Remove for an imported card, or its name field while renaming.
-pub(super) fn actions(
-    ui: &Ui,
-    p: Paint,
-    model: &'static ModelDefinition,
-    removable: bool,
-) -> Vec<El> {
+pub(super) fn actions(ui: &Ui, p: Paint, model: &ModelDefinition, removable: bool) -> Vec<El> {
     let TranscriptionModelId::Custom(id) = model.id else {
         return Vec::new();
     };
@@ -396,7 +422,7 @@ pub(super) fn actions(
             move |ui: &mut Ui, _| {
                 choose(ui);
                 ui.picker.import.reselect = ui.picker.import.chooser.is_some()
-                    && ui.settings.transcription.model == model.id;
+                    && ui.settings.transcription.model == TranscriptionModelId::Custom(id);
             },
         ));
     }
@@ -404,13 +430,14 @@ pub(super) fn actions(
     if ui.settings.transcription.model == model.id {
         return actions;
     }
+    let name = model.name.to_string();
     actions.push(button(
         p,
         "rename-model",
         tr("Rename"),
         ButtonKind::Secondary,
         move |ui: &mut Ui, _| {
-            ui.picker.import.renaming = Some((id, TextEdit::new(model.name)));
+            ui.picker.import.renaming = Some((id, TextEdit::new(name.clone())));
         },
     ));
     if removable {

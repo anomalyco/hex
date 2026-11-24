@@ -97,6 +97,7 @@ impl Fixture {
                 Ok(())
             },
         ));
+        let (hud, _hud_events) = crate::dictation::indicator::channel();
         Self {
             runtime: Runtime {
                 keyboard_switcher: crate::transcription::keyboard_model_switching::Switcher::new(
@@ -109,7 +110,9 @@ impl Fixture {
                 ),
                 settings,
                 preparation,
-                automatic_preparation: false,
+                automatic_preparation: None,
+                pending_swap: None,
+                hud,
                 recognition_start: None,
                 listener_failure: Default::default(),
                 event_reader: crate::desktop::events::EventReader::open(""),

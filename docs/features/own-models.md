@@ -156,6 +156,10 @@ one scan (found_models::scan)                                // setup.found-mode
 │   computer" and offers Use, never Download. It is not ready yet: only Hex's
 │   receipt for the full check (models/found/<model>.json) makes it ready, so
 │   Setup, Settings, and every listener agree (models::is_ready)
+├── Only what this build offers is kept: the window drops a found file naming a
+│   catalog model its Labs switch hides (Parakeet Ultra with the lab off), so
+│   the model step never lists it and never holds the recommended download for
+│   it (rune_ui::found::keep_usable)
 ├── Other compatible files -> "Found on this computer" at the top of the picker:
 │   name · Not tested by Hex · Q8_0/F16/F32 · owner/name@revision · languages,
 │   "It may be too big for this computer's GPU memory." when the tensor data
@@ -185,8 +189,8 @@ API's `/models` and the SDK's `ModelInfo.source` carry the same field.
 
 ```ts
 Onboarding opens -> scan; its own download waits until it answers  // setup.found-choice
-├── Nothing compatible found -> Setting up Hex, unchanged: the recommended
-│   model downloads by itself, and the model step never shows
+├── Nothing this build can run found -> Setting up Hex, unchanged: the
+│   recommended model downloads by itself, and the model step never shows
 └── Something found -> the first run's model step in place of Setting up Hex:
     "Choose a speech model", one card of radio rows, no buttons inside
     ├── Hex's recommended model first, selected, [Recommended] -> "731 MB
@@ -194,13 +198,25 @@ Onboarding opens -> scan; its own download waits until it answers  // setup.foun
     │   in the cache (one row, never two)
     ├── Then each found file -> its name, "On this computer" (a catalog model)
     │   or "On this computer · not tested by Hex"; no hashes, repositories,
-    │   revisions, or compression
+    │   revisions, or compression. Only what this build offers: a Parakeet Ultra
+    │   file with its Labs switch off is never a row and never holds the
+    │   recommended download
     ├── Picking a row starts it: ours downloads ("Downloading… 42%" on the row)
     │   or, already here, is checked in place; a found file is used where it
     │   is ("Checking…"). A later pick supersedes one still preparing
     ├── Continue starts the selected row if none was picked, then the story
     │   moves on once the pick is under way: ours with its download pill on
     │   top, a found one with no download page or pill at all
+    ├── A pick that can't run (an import that is gone, a model its Labs switch
+    │   hides) never reads as a download: the tour marks it failed and the
+    │   pick clears, so the list returns to the recommended row. The plain
+    │   download page, which shows without a list, names the reason with Try
+    │   again, Use a model file…, and Continue without a model; Try again
+    │   forgets that reason and asks again for the choice the language
+    │   capsule last set (live.choice). A model file the person chooses, or
+    │   any model the service is already preparing, ends it: the reason and
+    │   its actions go, so Try again never cancels the import
+    │   (tour.flow.model_failed, Flow::pick_failed, Flow::pick_replaced)
     ├── A pick that fails asks again on the list
     ├── Back on the pages after it returns to the list to change the pick,
     │   even with the model ready
@@ -225,10 +241,25 @@ in-place use and forgetting, a forgotten catalog file no longer counting as
 downloaded, the full check refusing a mismatched file),
 `transcription::gguf_header::tests`, `transcription::custom_models::tests`
 (including `a_relinked_copy_reads_as_changed_and_check_again_accepts_only_the_same_contents`,
-`a_receipt_survives_a_renumbered_volume_but_not_another_file`, and `a_file_added_in_place_is_recorded_by_path_copied_nowhere_and_forgetting_leaves_it`),
+`a_receipt_survives_a_renumbered_volume_but_not_another_file`,
+`a_file_added_in_place_is_recorded_by_path_copied_nowhere_and_forgetting_leaves_it`,
+`renaming_many_times_keeps_one_entry_and_frees_earlier_definitions`,
+`a_held_snapshot_keeps_its_name_across_a_rename`,
+`removing_an_import_frees_its_definition_after_the_last_reader`, and
+`an_in_place_path_change_rebuilds_the_definition`),
 `desktop::onboarding::tests::a_held_download_waits_for_the_person`,
+`a_pick_that_cannot_start_stays_failed_until_another_pick`,
+`a_scan_keeps_only_the_models_this_build_can_run`,
 `a_found_model_moves_on_without_a_download_and_back_returns_to_it`,
+`a_found_model_this_build_cannot_run_is_not_offered`,
+`an_unavailable_pick_fails_the_page_instead_of_downloading_forever`,
+`retrying_after_a_refused_pick_shows_the_next_download_failure`,
+`a_failed_pick_keeps_its_actions_without_a_reason`,
+`a_model_being_prepared_hides_the_refused_pick`,
+`a_chosen_file_ends_the_refused_pick_without_a_new_download`,
+`try_again_after_a_network_failure_asks_once`,
 `the_onboarding_model_list_starts_the_row_picked_or_the_recommended_one`,
+`linux::app::tests::a_model_this_build_cannot_run_says_why_and_starts_nothing`,
 `labs::tests::graduated_features_answer_by_name`, and the goldens
 `rune-picker-custom-models-light`, `rune-picker-found-light`, and
 `rune-onboarding-model-found-light`,

@@ -206,19 +206,12 @@ final class ShiftStateMachineTests: XCTestCase {
         XCTAssertEqual(KeyboardFieldRouting.route(for: .emailAddress), .keys(.email, initialLayer: .letters))
         XCTAssertEqual(KeyboardFieldRouting.route(for: .webSearch), .keys(.webSearch, initialLayer: .letters))
         XCTAssertEqual(KeyboardFieldRouting.route(for: .numbersAndPunctuation), .keys(.text, initialLayer: .numbers))
-        XCTAssertEqual(KeyboardFieldRouting.route(for: .numberPad), .handOff)
-        XCTAssertEqual(KeyboardFieldRouting.route(for: .decimalPad), .handOff)
-        XCTAssertEqual(KeyboardFieldRouting.route(for: .asciiCapableNumberPad), .handOff)
-    }
-
-    /// A number pad goes to the next keyboard where iOS asks for a globe, but not where Apple's
-    /// keyboard is split (the Duo unfolded and upright): that switch can end the host app there
-    /// (TestFlight build 121), so Hex stays on its 123 page.
-    func testNumberPadsStayOnHexWhereApplesKeyboardSplits() {
-        XCTAssertTrue(KeyboardFieldRouting.handsOffNumberPad(needsInputModeSwitchKey: true, posture: .phone))
-        XCTAssertFalse(KeyboardFieldRouting.handsOffNumberPad(needsInputModeSwitchKey: false, posture: .phone), "iOS's own globe")
-        XCTAssertTrue(KeyboardFieldRouting.handsOffNumberPad(needsInputModeSwitchKey: true, posture: .cover))
-        XCTAssertTrue(KeyboardFieldRouting.handsOffNumberPad(needsInputModeSwitchKey: true, posture: .unfoldedTall))
-        XCTAssertFalse(KeyboardFieldRouting.handsOffNumberPad(needsInputModeSwitchKey: true, posture: .unfoldedWide))
+        // Hex's own pads: nothing goes to the next keyboard any more, on any iPhone or posture.
+        XCTAssertEqual(KeyboardFieldRouting.route(for: .numberPad), .keys(.numberPad, initialLayer: .numbers))
+        XCTAssertEqual(KeyboardFieldRouting.route(for: .asciiCapableNumberPad), .keys(.numberPad, initialLayer: .numbers))
+        XCTAssertEqual(KeyboardFieldRouting.route(for: .decimalPad), .keys(.decimalPad, initialLayer: .numbers))
+        // iOS keeps these for its own keyboards (iOS 26.5 and 27.2); Apple's shows letters for the second.
+        XCTAssertEqual(KeyboardFieldRouting.route(for: .phonePad), .keys(.numberPad, initialLayer: .numbers))
+        XCTAssertEqual(KeyboardFieldRouting.route(for: .namePhonePad), .keys(.text, initialLayer: .letters))
     }
 }

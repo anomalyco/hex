@@ -138,7 +138,7 @@ pub(super) fn delete_in(
 /// An id comes from `hex meetings list --json` and names one folder directly
 /// under the meetings root: no separators, no `.` or `..`, no empty name, so
 /// a caller can't point deletion anywhere else.
-fn plausible_id(id: &str) -> bool {
+pub(super) fn plausible_id(id: &str) -> bool {
     !id.is_empty() && id != "." && id != ".." && !id.contains(['/', '\\']) && !id.contains('\0')
 }
 
@@ -174,7 +174,7 @@ pub(super) fn delete_meeting(
 }
 
 /// An active folder refuses for what its manifest says it is doing.
-fn refusal_for(status: MeetingStatus) -> DeleteRefusal {
+pub(super) fn refusal_for(status: MeetingStatus) -> DeleteRefusal {
     match status {
         MeetingStatus::Starting | MeetingStatus::Recording => DeleteRefusal::Recording,
         MeetingStatus::Transcribing => DeleteRefusal::Transcribing,

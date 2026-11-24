@@ -379,7 +379,7 @@ impl ChordCapture {
         // refuses it while Labs › Microphone key alone is off. Plain ⌫ turns an
         // optional shortcut off, and `settings::validate` refuses it as a
         // binding.
-        let stands_alone = is_function_key(&key.label)
+        let stands_alone = HotkeyKey::is_function_name(&key.label)
             || is_navigation_key(code)
             || key.is_section()
             || key.is_microphone()
@@ -422,13 +422,6 @@ impl ChordCapture {
     }
 }
 
-fn is_function_key(label: &str) -> bool {
-    label
-        .strip_prefix('F')
-        .and_then(|number| number.parse::<u8>().ok())
-        .is_some_and(|number| (1..=20).contains(&number))
-}
-
 /// Home, End, Page Up, Page Down, and Help (Insert on PC keyboards): keys
 /// that type nothing, so, like a function key, one may be a shortcut alone,
 /// as it could before (#1138).
@@ -447,6 +440,7 @@ pub(super) fn validate_hotkey(
     if matches!(
         target,
         ShortcutTarget::PasteLast
+            | ShortcutTarget::ModelSwitch
             | ShortcutTarget::Cancel
             | ShortcutTarget::Screenshot
             | ShortcutTarget::ScreenshotRecord
@@ -578,6 +572,9 @@ impl MacHost {
                     != PermissionState::Ready
                 {
                     let _ = crate::desktop::permission_guide::prompt_accessibility_trust();
+                    // macOS 27.3 moved posting key events to System & App
+                    // Protection Override, which lists Hex only after it asks.
+                    crate::desktop::permission_guide::request_post_event_access();
                     crate::desktop::permission_guide::show(PermissionKind::Accessibility);
                 }
             }
@@ -629,6 +626,12 @@ impl MacHost {
             MeetingRequest::Import(path) => self
                 .runtime()?
                 .meeting(crate::meeting::MeetingRequest::Import(path)),
+            MeetingRequest::DeleteTranscript { id, entries } => self
+                .runtime()?
+                .meeting(crate::meeting::MeetingRequest::DeleteTranscript { id, entries }),
+            MeetingRequest::SetMicrophoneMuted(muted) => self
+                .runtime()?
+                .meeting(crate::meeting::MeetingRequest::SetMicrophoneMuted(muted)),
             MeetingRequest::Summarize(id) => self
                 .runtime()?
                 .meeting(crate::meeting::MeetingRequest::Summarize(id)),
@@ -683,6 +686,13 @@ impl NativeHost for MacHost {
                         == crate::capture_host::ScreenAccess::Off
                 {
                     self.note_permission_asked(kind);
+                    if kind == PermissionKind::Accessibility {
+                        // macOS 27.3 adds an app to System & App Protection
+                        // Override only after it requests posting key events
+                        // (and may show its Privacy & Security notification).
+                        // Below 27.3 the guide's switch already covers it.
+                        crate::desktop::permission_guide::request_post_event_access();
+                    }
                     crate::desktop::permission_guide::show(kind);
                 }
             }
@@ -690,6 +700,13 @@ impl NativeHost for MacHost {
                 if let Some(slot) = stale_slot(kind)
                     && !self.resetting[slot]
                 {
+                    // A reset starts a fresh grant cycle: the next grant may
+                    // spend the one 27.3 keystroke restart again.
+                    if kind == PermissionKind::Accessibility
+                        && crate::desktop::permission_guide::split_accessibility()
+                    {
+                        crate::desktop::onboarding::clear_post_event_restart();
+                    }
                     self.resetting[slot] = true;
                     self.stale[slot].note_asked(Instant::now());
                     let tx = self.reset_tx.clone();
@@ -838,6 +855,14 @@ impl NativeHost for MacHost {
                 != "Accessibility",
         );
         changed |= update(
+            &mut state.accessibility_drag_supported,
+            crate::desktop::permission_guide::drag_supported(PermissionKind::Accessibility),
+        );
+        changed |= update(
+            &mut state.accessibility_split,
+            crate::desktop::permission_guide::split_accessibility(),
+        );
+        changed |= update(
             &mut state.activity_log,
             crate::app_paths::logs_dir()
                 .ok()
@@ -849,6 +874,20 @@ impl NativeHost for MacHost {
         let system_audio = crate::meeting::system_audio_ready();
         changed |= update(&mut state.permissions, permissions);
         changed |= update(&mut state.system_audio, system_audio);
+        // Below 27.3 there is no marker to read or clear, so neither the stat
+        // nor the removal runs.
+        if state.accessibility_split {
+            if state.accessibility_restart_done
+                && permissions.accessibility == PermissionState::Ready
+            {
+                // The grant is in: a later revocation may spend another restart.
+                crate::desktop::onboarding::clear_post_event_restart();
+            }
+            changed |= update(
+                &mut state.accessibility_restart_done,
+                crate::desktop::onboarding::post_event_restart_recorded(),
+            );
+        }
         // A Screen Recording guide has nothing left to point at once Hex can
         // record, or knows it must restart to: the guide's own preflight
         // keeps the answer it read at launch, so the read that saw the grant

@@ -1,0 +1,9 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Hex Preview installs nothing itself and asks for no install permission: Update opens the release's APK on
+         GitHub in the browser, and Android's own installer asks the person (Updates.kt). -->
+    <application>
+        <!-- As in release: baseline profiles still install; the shell's benchmark receiver is unnecessary. -->
+        <receiver android:name="androidx.profileinstaller.ProfileInstallReceiver" tools:node="remove" />
+    </application>
+</manifest>

@@ -14,7 +14,7 @@ use crate::audio::recording_environment::{CaptureMarker, RecordingEnvironmentCon
 use crate::audio::{CaptureInstant, RecoveringAudioInput, RecoveringAudioInputEvent};
 use crate::dictation::{
     CHUNK_GAP_TOLERANCE, ClipSource, DictationCapture, DictationClip, Finish, MAX_PADDED_GAP,
-    POST_RELEASE_TAIL, ReleaseTail,
+    POST_RELEASE_TAIL, ReleaseTail, TAIL_DELIVERY_GRACE,
 };
 use crate::feedback;
 use crate::suppression::PendingInputEvents;
@@ -22,8 +22,6 @@ use crate::transcription::engine::TranscriptionEngine;
 
 const RECOGNITION_QUEUE_CAPACITY: usize = 64;
 const MAX_RECOGNITION_BACKLOG: Duration = Duration::from_millis(500);
-/// How long past the tail itself a finish waits for the stream to deliver it.
-const TAIL_DELIVERY_GRACE: Duration = Duration::from_millis(100);
 /// The capture's rate while no input is open: a placeholder, since opening
 /// one starts a capture at the device's own rate.
 const CLOSED_INPUT_SAMPLE_RATE: u32 = 16_000;
@@ -189,7 +187,12 @@ struct Owner {
     /// Labs › Keep mic open after dictating: how long a finished or
     /// cancelled capture's microphone keeps open before it is released.
     linger: MicrophoneLinger,
-    pending_capture: Option<PendingCapture>,
+    /// What capture, if any, currently occupies the timeline. Every change
+    /// goes through `enter`/`leave`/`promote_pending`, which is the single
+    /// writer of `State::recording`.
+    slot: CaptureSlot,
+    /// The warm pre-roll timeline and (while `slot` is `Recording`) the
+    /// active capture recording.
     capture: DictationCapture,
     recording_environment: RecordingEnvironmentController,
     commands: Receiver<Command>,
@@ -200,11 +203,6 @@ struct Owner {
     pending_input: PendingInputEvents,
     last_captured_through: Option<CaptureInstant>,
     engine: Option<Arc<TranscriptionEngine>>,
-    /// Whether the active capture streams once it is intentional.
-    stream_capture: bool,
-    /// Whether the active capture keeps its audio when the microphone fails:
-    /// a programmatic capture's owner still finishes it.
-    keep_on_loss: bool,
     /// When the stream last opened or reopened, while it is open.
     stream_opened_at: Option<Instant>,
     /// When the timeline last had a gap or the stream last failed.
@@ -216,6 +214,17 @@ struct Owner {
     /// even with release-while-idle and switches only once it closes.
     #[cfg(hex_capture)]
     capture_sink: Option<CaptureSink>,
+}
+
+enum CaptureSlot {
+    Idle,
+    /// Press taken while the stream is closed: the capture starts when the
+    /// stream opens.
+    Pending(PendingCapture),
+    /// A live recording is running inside `Owner::capture`.
+    Recording {
+        kind: CaptureKind,
+    },
 }
 
 struct PendingCapture {
@@ -625,7 +634,7 @@ impl Owner {
             release_while_idle,
             away: false,
             linger: MicrophoneLinger::default(),
-            pending_capture: None,
+            slot: CaptureSlot::Idle,
             capture,
             recording_environment,
             commands,
@@ -636,8 +645,6 @@ impl Owner {
             pending_input,
             last_captured_through: None,
             engine,
-            stream_capture: false,
-            keep_on_loss: false,
             stream_opened_at,
             discontinuity_at: None,
             stop_phrase: crate::dictation::stop_phrase::Detector::new(),
@@ -680,6 +687,10 @@ impl Owner {
                 .input
                 .recv_timeout(Duration::from_millis(10), capture_idle);
             self.handle_input(event);
+            // The environment reports output suppression from its own
+            // thread, so the head rises here, before the next chunk or the
+            // finish finalizes the stream (#2338).
+            self.capture.apply_suppression_report();
             self.reconcile_input();
         }
     }
@@ -707,33 +718,38 @@ impl Owner {
                 if self.input.is_open() {
                     self.start_capture_at(kind, at);
                 } else {
-                    self.pending_capture = Some(PendingCapture {
+                    self.capture.cancel();
+                    self.enter(CaptureSlot::Pending(PendingCapture {
                         at,
                         kind,
                         intentional_at: None,
                         _capture: CaptureMarker::new(),
-                    });
+                    }));
                     self.input.request_open();
                 }
-                self.state.recording.store(true, Ordering::Release);
                 let _ = reply.send(true);
             }
             Command::BecomeIntentional { at, reply } => {
                 self.drain_through(at);
-                let became_intentional = if let Some(pending) = &mut self.pending_capture {
-                    pending.mark_intentional(at);
-                    false
-                } else {
-                    self.capture.become_intentional(at)
+                let became_intentional = match &mut self.slot {
+                    CaptureSlot::Pending(pending) => {
+                        pending.mark_intentional(at);
+                        false
+                    }
+                    CaptureSlot::Recording { .. } => self.capture.become_intentional(at),
+                    CaptureSlot::Idle => false,
                 };
                 let _ = reply.send(became_intentional);
             }
             Command::MarkIntentional { reply } => {
-                let became_intentional = if let Some(pending) = &mut self.pending_capture {
-                    pending.mark_intentional(pending.at + crate::dictation::MINIMUM_HOLD_DURATION);
-                    false
-                } else {
-                    self.capture.mark_intentional()
+                let became_intentional = match &mut self.slot {
+                    CaptureSlot::Pending(pending) => {
+                        pending
+                            .mark_intentional(pending.at + crate::dictation::MINIMUM_HOLD_DURATION);
+                        false
+                    }
+                    CaptureSlot::Recording { .. } => self.capture.mark_intentional(),
+                    CaptureSlot::Idle => false,
                 };
                 let _ = reply.send(became_intentional);
             }
@@ -744,7 +760,7 @@ impl Owner {
                 // engine treats a stream fed well past the clip as unusable.
                 self.capture.limit_stream_to(at, tail);
                 self.drain_through(at);
-                let announced = self.pending_capture.is_none()
+                let announced = matches!(self.slot, CaptureSlot::Recording { .. })
                     && !tail.is_zero()
                     && self.capture.would_transcribe(at);
                 if announced {
@@ -758,21 +774,27 @@ impl Owner {
                 } else {
                     (tail, None)
                 };
-                let mut finish = if self.pending_capture.take().is_some() {
-                    if !self.capture_sink_open() {
-                        self.input.cancel_open();
+                // The last chance the finish has to see a report: once the
+                // clip is submitted, its stream finalizes without a later
+                // head. A report that lands after this is ignored.
+                self.capture.apply_suppression_report();
+                let mut finish = match self.slot {
+                    CaptureSlot::Pending(_) => {
+                        if !self.capture_sink_open() {
+                            self.input.cancel_open();
+                        }
+                        Finish::Discard
                     }
-                    Finish::Discard
-                } else {
-                    self.capture.finish_with_tail(at, tail)
+                    CaptureSlot::Recording { .. } => self.capture.finish_with_tail(at, tail),
+                    CaptureSlot::Idle => Finish::Discard,
                 };
+                self.leave();
                 if let Finish::Transcribe(clip) = &mut finish {
                     clip.set_source(self.clip_source());
                     if clip.is_digital_silence() {
                         self.reopen_silent_stream();
                     }
                 }
-                self.state.recording.store(false, Ordering::Release);
                 let _ = reply.send(finish);
                 if let Some(event) = deferred {
                     self.handle_input(event);
@@ -780,28 +802,31 @@ impl Owner {
             }
             #[cfg(hex_capture)]
             Command::CancelSpoken { at, reply } => {
-                self.state.recording.store(false, Ordering::Release);
-                let samples = if self.pending_capture.take().is_some() {
-                    if !self.input.is_open() && !self.capture_sink_open() {
-                        self.input.cancel_open();
+                let samples = match self.slot {
+                    CaptureSlot::Pending(_) => {
+                        if !self.input.is_open() && !self.capture_sink_open() {
+                            self.input.cancel_open();
+                        }
+                        self.capture.cancel();
+                        Vec::new()
                     }
-                    self.capture.cancel();
-                    Vec::new()
-                } else {
-                    match self.capture.finish_with_tail(at, Duration::ZERO) {
-                        Finish::Transcribe(clip) => clip.into_cancel_samples(),
-                        Finish::Discard => Vec::new(),
+                    CaptureSlot::Recording { .. } => {
+                        match self.capture.finish_with_tail(at, Duration::ZERO) {
+                            Finish::Transcribe(clip) => clip.into_cancel_samples(),
+                            Finish::Discard => Vec::new(),
+                        }
                     }
+                    CaptureSlot::Idle => Vec::new(),
                 };
+                self.leave();
                 let _ = reply.send(samples);
             }
             Command::Cancel { reply } => {
-                self.pending_capture = None;
                 if !self.input.is_open() && !self.capture_sink_open() {
                     self.input.cancel_open();
                 }
                 self.capture.cancel();
-                self.state.recording.store(false, Ordering::Release);
+                self.leave();
                 let _ = reply.send(());
             }
             Command::SelectMicrophone { revision, device } => {
@@ -925,9 +950,53 @@ impl Owner {
     }
 
     fn capture_idle(&self) -> bool {
-        !self.capture.is_recording()
-            && self.pending_capture.is_none()
-            && self.pending_input.oldest().is_none()
+        matches!(self.slot, CaptureSlot::Idle) && self.pending_input.oldest().is_none()
+    }
+
+    /// Moves the capture slot into an active phase (`Pending` or `Recording`)
+    /// and publishes `State::recording = true`.
+    fn enter(&mut self, slot: CaptureSlot) {
+        debug_assert!(!matches!(slot, CaptureSlot::Idle));
+        debug_assert_eq!(
+            self.capture.is_recording(),
+            matches!(slot, CaptureSlot::Recording { .. })
+        );
+        self.slot = slot;
+        self.state.recording.store(true, Ordering::Release);
+    }
+
+    /// Leaves any active capture, returning the slot to `Idle` and publishing
+    /// `State::recording = false`.
+    fn leave(&mut self) {
+        debug_assert!(!self.capture.is_recording());
+        self.slot = CaptureSlot::Idle;
+        self.state.recording.store(false, Ordering::Release);
+    }
+
+    /// Leaves only a `Pending` capture (when its on-demand open fails). An
+    /// `Idle` or live `Recording` slot stays untouched so an unrelated open
+    /// failure never clears `State::recording` behind an active capture.
+    fn leave_pending(&mut self) -> bool {
+        if matches!(self.slot, CaptureSlot::Pending(_)) {
+            self.leave();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Promotes a `Pending` capture to `Recording` on the newly opened stream
+    /// without momentarily clearing `State::recording`.
+    fn promote_pending(&mut self) -> Option<PendingCapture> {
+        if !matches!(self.slot, CaptureSlot::Pending(_)) {
+            return None;
+        }
+        let CaptureSlot::Pending(pending) = std::mem::replace(&mut self.slot, CaptureSlot::Idle)
+        else {
+            unreachable!()
+        };
+        self.start_capture_at(pending.kind, pending.at);
+        Some(pending)
     }
 
     /// Whether the microphone may switch or close: no dictation capture and
@@ -974,11 +1043,11 @@ impl Owner {
                     );
                 } else if let Some(gap) = gap {
                     self.discontinuity_at = Some(Instant::now());
-                    let was_recording = self.capture.is_recording();
+                    let was_recording = matches!(self.slot, CaptureSlot::Recording { .. });
                     let capture_generation = self.state.capture_generation.load(Ordering::Acquire);
                     let kept = self.keep_lost_capture(self.last_captured_through, false);
                     self.capture = new_capture(self.sample_rate(), &self.recording_environment);
-                    self.state.recording.store(false, Ordering::Release);
+                    self.leave();
                     self.next_recognition_generation();
                     let _ = self.events.send(DictationAudioEvent::CaptureDiscontinuity {
                         was_recording,
@@ -1008,9 +1077,14 @@ impl Owner {
                     );
                 }
                 // Short taps and shortcut chords never reach the model; the
-                // stream starts with the backlog once the hold counts.
-                if self.stream_capture
-                    && self.capture.is_intentional()
+                // stream starts with the backlog once the hold counts. Only
+                // hotkey captures stream; programmatic ones need no speed-up.
+                if matches!(
+                    self.slot,
+                    CaptureSlot::Recording {
+                        kind: CaptureKind::Hotkey
+                    }
+                ) && self.capture.is_intentional()
                     && let Some(engine) = &self.engine
                 {
                     self.capture.begin_stream(engine);
@@ -1065,21 +1139,27 @@ impl Owner {
                     let capture = CaptureMarker::new();
                     self.capture.cancel();
                     self.close_input();
-                    self.pending_capture = Some(PendingCapture {
+                    self.enter(CaptureSlot::Pending(PendingCapture {
                         at,
                         kind: CaptureKind::Hotkey,
                         intentional_at: None,
                         _capture: capture,
-                    });
+                    }));
                     self.input.request_open();
                     return;
                 }
-                let was_recording = self.capture.is_recording();
+                let was_recording = matches!(self.slot, CaptureSlot::Recording { .. });
                 let capture_generation = self.state.capture_generation.load(Ordering::Acquire);
                 let kept = self.keep_lost_capture(lost_through, true);
-                let keep_hotkey = kept.is_some() && !self.keep_on_loss;
+                let keep_hotkey = kept.is_some()
+                    && matches!(
+                        self.slot,
+                        CaptureSlot::Recording {
+                            kind: CaptureKind::Hotkey
+                        }
+                    );
                 self.capture.cancel();
-                self.state.recording.store(false, Ordering::Release);
+                self.leave();
                 self.state.recovering.store(true, Ordering::Release);
                 let _ = self.events.send(DictationAudioEvent::Interrupted {
                     was_recording,
@@ -1108,8 +1188,7 @@ impl Owner {
                     .unwrap_or_else(|error| error.into_inner()) =
                     self.input.device_name().to_owned();
                 self.state.recovering.store(false, Ordering::Release);
-                if let Some(pending) = self.pending_capture.take() {
-                    self.start_capture_at(pending.kind, pending.at);
+                if let Some(pending) = self.promote_pending() {
                     if let Some(at) = pending.intentional_at {
                         let _ = self.capture.become_intentional(at);
                         let _ = self.events.send(DictationAudioEvent::ReadyIntentional {
@@ -1120,7 +1199,7 @@ impl Owner {
                         });
                     }
                 } else {
-                    self.state.recording.store(false, Ordering::Release);
+                    self.leave();
                     if self.release_while_idle && !self.capture_sink_open() {
                         self.close_input();
                     }
@@ -1128,10 +1207,9 @@ impl Owner {
                 let _ = self.events.send(DictationAudioEvent::Reopened);
             }
             RecoveringAudioInputEvent::OpenFailed(error) => {
-                let was_recording = self.pending_capture.take().is_some();
-                self.state.recording.store(false, Ordering::Release);
+                let was_pending = self.leave_pending();
                 self.reconcile_input();
-                if was_recording {
+                if was_pending {
                     let _ = self.events.send(DictationAudioEvent::OpenFailed {
                         capture_generation: self.state.capture_generation.load(Ordering::Acquire),
                         error,
@@ -1239,16 +1317,14 @@ impl Owner {
     }
 
     fn start_capture_at(&mut self, kind: CaptureKind, at: CaptureInstant) {
+        let while_dictating = crate::app_settings::recording_audio_behavior();
         match kind {
-            CaptureKind::Hotkey => self.capture.start_hotkey_at(
-                at,
-                crate::dictation::hotkey_pre_roll(crate::app_settings::recording_audio_behavior()),
-            ),
+            CaptureKind::Hotkey => self
+                .capture
+                .start_hotkey_at(at, crate::dictation::hotkey_pre_roll(while_dictating)),
             CaptureKind::Programmatic => self.capture.start_programmatic_at(at),
         }
-        // Only hotkey captures stream; programmatic ones need no speed-up.
-        self.stream_capture = matches!(kind, CaptureKind::Hotkey);
-        self.keep_on_loss = matches!(kind, CaptureKind::Programmatic);
+        self.enter(CaptureSlot::Recording { kind });
     }
 
     /// Finishes a capture the microphone cut short at the last audio delivered
@@ -1262,10 +1338,16 @@ impl Owner {
         through: Option<CaptureInstant>,
         keep_hotkey: bool,
     ) -> Option<DictationClip> {
+        let keep_on_loss = matches!(
+            self.slot,
+            CaptureSlot::Recording {
+                kind: CaptureKind::Programmatic
+            }
+        );
         let started_at = self
             .capture
             .started_at()
-            .filter(|_| self.keep_on_loss || (keep_hotkey && self.capture.is_intentional()))?;
+            .filter(|_| keep_on_loss || (keep_hotkey && self.capture.is_intentional()))?;
         let through = through.filter(|through| *through > started_at)?;
         match self.capture.finish_with_tail(through, Duration::ZERO) {
             Finish::Transcribe(mut clip) => {
@@ -3032,5 +3114,47 @@ pub(crate) mod tests {
         drop(open_sink(&mut owner, 4, at));
         chunk_at(&mut owner, at + Duration::from_millis(10));
         assert!(owner.capture_sink.is_none());
+    }
+
+    #[test]
+    fn unrelated_open_failed_never_clears_a_live_recording_flag() {
+        let (mut owner, audio, _samples) = owner_for_test(true);
+        let at = capture_time();
+        start(&mut owner, at);
+        assert!(audio.is_recording());
+
+        // An OpenFailed that does not belong to a pending capture must leave
+        // the live recording slot and State::recording untouched.
+        owner.handle_input(RecoveringAudioInputEvent::OpenFailed(
+            "unrelated failure".into(),
+        ));
+        assert!(audio.is_recording());
+        assert!(matches!(owner.slot, CaptureSlot::Recording { .. }));
+        assert!(audio.try_recv_event().is_none());
+
+        // Finishing leaves the slot cleanly and clears State::recording.
+        control(&mut owner, |reply| Command::Cancel { reply });
+        assert!(!audio.is_recording());
+        assert!(matches!(owner.slot, CaptureSlot::Idle));
+    }
+
+    #[test]
+    fn pending_open_failed_clears_recording_flag_and_emits_failure() {
+        let (mut owner, audio, _samples) = owner_for_test(false);
+        owner.release_while_idle = true;
+        let at = capture_time();
+        start(&mut owner, at);
+        assert!(audio.is_recording());
+        assert!(matches!(owner.slot, CaptureSlot::Pending(_)));
+
+        owner.handle_input(RecoveringAudioInputEvent::OpenFailed(
+            "microphone unavailable".into(),
+        ));
+        assert!(!audio.is_recording());
+        assert!(matches!(owner.slot, CaptureSlot::Idle));
+        assert!(matches!(
+            audio.try_recv_event(),
+            Some(DictationAudioEvent::OpenFailed { error, .. }) if error == "microphone unavailable"
+        ));
     }
 }

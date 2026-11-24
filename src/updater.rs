@@ -21,6 +21,7 @@ pub(crate) mod notes;
 #[cfg_attr(target_os = "macos", path = "updater/macos.rs")]
 #[cfg_attr(target_os = "windows", path = "updater/windows.rs")]
 mod platform;
+mod presentation;
 pub mod protocol;
 #[cfg(any(target_os = "macos", test))]
 mod staging;
@@ -39,6 +40,10 @@ use protocol::{Decision, Install};
 use platform::Staged;
 #[cfg(target_os = "macos")]
 pub use platform::finish_on_launch;
+#[cfg(target_os = "macos")]
+pub(crate) use presentation::menu_title;
+#[cfg_attr(target_os = "macos", allow(unused_imports))]
+pub(crate) use presentation::{UpdateOffer, offer, offer_hold};
 
 const APP: &str = "hex";
 const ARTIFACT: &str = "desktop";
@@ -128,22 +133,6 @@ fn is_dev_version(version: &str) -> bool {
     version.contains("-dev")
 }
 
-/// The control that confirms a channel switch, e.g. "Switch to Stable 2.3.1".
-pub fn switch_label(channel: &str, version: &str) -> String {
-    let channel = match channel {
-        "dev" => UpdateChannel::Dev.label(),
-        "stable" => UpdateChannel::Stable.label(),
-        other => other,
-    };
-    crate::desktop::i18n::tr_named(
-        "Switch to {channel} {version}",
-        &[
-            ("channel", crate::desktop::i18n::tr(channel)),
-            ("version", version),
-        ],
-    )
-}
-
 /// The Update channel Settings shows when none is saved: this build's own.
 pub fn build_channel() -> UpdateChannel {
     let home = home_channel(&Method::Unknown, BUILD_CHANNEL, crate::VERSION);
@@ -155,20 +144,30 @@ pub fn build_channel() -> UpdateChannel {
 }
 
 #[derive(Clone, Debug)]
-enum State {
+enum Phase {
     Disabled(DesktopUpdateStatus),
-    Checking,
-    Current,
-    Failed,
-    Downloading,
-    /// `Shared::staged` waits for the restart.
-    Ready,
-    /// Switched over; the restart is under way.
-    Applied,
-    /// A newer release this install cannot apply itself.
-    Download {
-        url: String,
+    Idle,
+    /// Checking the channel's manifest. `confirmed_switch` holds the SHA-256
+    /// of another channel's release the user just agreed to switch to;
+    /// `begin_check` consumes it for that single check, and any transition out
+    /// of `Checking` clears it.
+    Checking {
+        confirmed_switch: Option<String>,
     },
+    Available(Available),
+    Downloading,
+    /// `Core::staged` waits for Restart to update.
+    Staged,
+    /// Switched over (by Restart to update or quit); terminal so no later
+    /// check or download can ever un-apply it.
+    Applied,
+    Error,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum Available {
+    /// A newer release this install cannot apply itself.
+    Download { url: String },
     /// The setting names another channel, whose current release waits for
     /// the user to confirm the switch.
     Switch {
@@ -177,46 +176,298 @@ enum State {
         sha256: String,
     },
     /// The package manager serves another version.
-    Command {
-        command: String,
-    },
+    Command { command: String },
+}
+
+/// All mutable updater state under one lock so phase transitions, staging,
+/// switch confirmation, restart requests, and wake signals are atomic.
+struct Core {
+    phase: Phase,
+    /// The newest staged update. Checks continue while one waits, and a
+    /// different current release replaces it before the restart.
+    staged: Option<StagedUpdate>,
+    /// What the staged dev build changed, when the dev notes said.
+    notes: Option<UpdateNotes>,
+    /// The channel and start of the latest check.
+    last_check: Option<(String, std::time::Instant)>,
+    restart: Restart,
+    /// Set by "Check for updates", Dev window focus, switch confirmation, or
+    /// a check arriving mid-download; cleared when the worker wakes.
+    check_requested: bool,
+    stop: bool,
+}
+
+struct CheckStart {
+    restarting: bool,
+    staged: Option<StagedUpdate>,
+    confirmed_switch: Option<String>,
+}
+
+enum AdoptOutcome {
+    Adopted,
+    Discarded(Phase),
+}
+
+impl Core {
+    fn new(phase: Phase) -> Self {
+        Self {
+            phase,
+            staged: None,
+            notes: None,
+            last_check: None,
+            restart: Restart::Idle,
+            check_requested: false,
+            stop: false,
+        }
+    }
+
+    fn is_restarting(&self) -> bool {
+        matches!(self.restart, Restart::Requested)
+    }
+
+    fn status(&self, packaged: bool) -> DesktopUpdateStatus {
+        match &self.phase {
+            Phase::Disabled(status) => status.clone(),
+            Phase::Applied | Phase::Staged => DesktopUpdateStatus::ReadyToRestart,
+            // A staged update stays offered while a background check or
+            // download looks for a newer release, unless Restart to update
+            // is running its final check.
+            Phase::Checking { .. } | Phase::Downloading
+                if self.staged.is_some() && !self.is_restarting() =>
+            {
+                DesktopUpdateStatus::ReadyToRestart
+            }
+            // A package manager updates Hex: its own checks only look for
+            // the manager's command, so they show nothing of their own.
+            Phase::Checking { .. } | Phase::Idle | Phase::Error if packaged => {
+                DesktopUpdateStatus::PackageManager
+            }
+            Phase::Checking { .. } => DesktopUpdateStatus::Checking,
+            Phase::Idle => DesktopUpdateStatus::Current,
+            Phase::Error => DesktopUpdateStatus::Failed,
+            Phase::Downloading => DesktopUpdateStatus::Downloading,
+            Phase::Available(Available::Download { .. }) => DesktopUpdateStatus::Available,
+            Phase::Available(Available::Switch {
+                channel, version, ..
+            }) => DesktopUpdateStatus::SwitchAvailable {
+                channel: channel.clone(),
+                version: version.clone(),
+            },
+            Phase::Available(Available::Command { command }) => {
+                DesktopUpdateStatus::PackageUpdate {
+                    command: command.clone(),
+                }
+            }
+        }
+    }
+
+    fn notes(&self, packaged: bool) -> Option<UpdateNotes> {
+        (self.status(packaged) == DesktopUpdateStatus::ReadyToRestart)
+            .then(|| self.notes.clone())
+            .flatten()
+    }
+
+    /// Requests an immediate check. Mid-download requests record
+    /// `check_requested` without clobbering `Phase::Downloading`, so the
+    /// worker runs the check as soon as the download completes.
+    fn request_check(&mut self) -> bool {
+        match &self.phase {
+            Phase::Disabled(_) | Phase::Applied => return false,
+            Phase::Staged | Phase::Downloading | Phase::Checking { .. } => {}
+            Phase::Idle | Phase::Error | Phase::Available(_) => {
+                self.phase = Phase::Checking {
+                    confirmed_switch: None,
+                };
+            }
+        }
+        self.check_requested = true;
+        true
+    }
+
+    fn confirm_switch(&mut self) -> bool {
+        let Phase::Available(Available::Switch { sha256, .. }) = &self.phase else {
+            return false;
+        };
+        let sha256 = sha256.clone();
+        self.phase = Phase::Checking {
+            confirmed_switch: Some(sha256),
+        };
+        self.check_requested = true;
+        true
+    }
+
+    fn request_restart(&mut self, hold: Option<&'static str>) -> Result<bool> {
+        if let Some(hold) = hold {
+            return Err(eyre!(hold));
+        }
+        // A second click while the restart is under way changes nothing.
+        if matches!(self.restart, Restart::Requested) || matches!(self.phase, Phase::Applied) {
+            return Ok(false);
+        }
+        let ready = matches!(self.phase, Phase::Staged)
+            || (self.staged.is_some()
+                && matches!(self.phase, Phase::Checking { .. } | Phase::Downloading));
+        if !ready {
+            return Err(eyre!("no update is ready"));
+        }
+        self.restart = Restart::Requested;
+        if matches!(self.phase, Phase::Staged) {
+            self.phase = Phase::Checking {
+                confirmed_switch: None,
+            };
+        }
+        self.check_requested = true;
+        Ok(true)
+    }
+
+    fn take_restart(&mut self) -> Option<Result<()>> {
+        if !matches!(self.restart, Restart::Done(_)) {
+            return None;
+        }
+        match std::mem::take(&mut self.restart) {
+            Restart::Done(result) => Some(result.map_err(|error| eyre!(error))),
+            Restart::Idle | Restart::Requested => None,
+        }
+    }
+
+    fn begin_check(&mut self) -> CheckStart {
+        let restarting = matches!(self.restart, Restart::Requested);
+        let staged = self.staged.clone();
+        let confirmed_switch = match &mut self.phase {
+            Phase::Checking { confirmed_switch } => confirmed_switch.take(),
+            Phase::Disabled(_) | Phase::Applied => None,
+            _ => {
+                self.phase = Phase::Checking {
+                    confirmed_switch: None,
+                };
+                None
+            }
+        };
+        CheckStart {
+            restarting,
+            staged,
+            confirmed_switch,
+        }
+    }
+
+    fn begin_download(&mut self) {
+        if !matches!(self.phase, Phase::Applied | Phase::Disabled(_)) {
+            self.phase = Phase::Downloading;
+        }
+    }
+
+    /// Adopts a newly staged release unless a quit is installing (or already
+    /// installed) another. On discard, an older staged update stays
+    /// installable (`Staged`), an installed one stays `Applied`, and nothing
+    /// staged yields `Idle`.
+    fn adopt_staged(&mut self, update: StagedUpdate, quitting: bool) -> AdoptOutcome {
+        if quitting || matches!(self.phase, Phase::Applied | Phase::Disabled(_)) {
+            let next = if matches!(self.phase, Phase::Applied) {
+                Phase::Applied
+            } else if self.staged.is_some() {
+                Phase::Staged
+            } else {
+                Phase::Idle
+            };
+            return AdoptOutcome::Discarded(next);
+        }
+        self.staged = Some(update);
+        self.notes = None;
+        AdoptOutcome::Adopted
+    }
+
+    fn finish_check(&mut self, next: Phase) {
+        // Restart to update was pressed during this check: the next check,
+        // which starts at once, finishes it.
+        if matches!(self.restart, Restart::Requested) {
+            return;
+        }
+        if !matches!(self.phase, Phase::Applied | Phase::Disabled(_)) {
+            self.phase = next;
+        }
+    }
+
+    /// Switches to the newest staged update once Restart to update's final
+    /// check has run, whatever its result. True when Hex now quits. A meeting
+    /// that started recording since the click keeps the update staged and the
+    /// restart waiting, and a quit that began during the check never swaps: the
+    /// drain installs the update itself.
+    fn finish_restart(&mut self, next: Phase, hold: Option<&'static str>, quitting: bool) -> bool {
+        // Quitting installs the staged update itself (`install_on_quit`), and
+        // it holds this lock while it does; a swap here would exchange the same
+        // two bundles back and lose the update.
+        if matches!(self.phase, Phase::Applied) {
+            self.restart = Restart::Done(Ok(()));
+            return true;
+        }
+        if quitting {
+            // The drain installs what is staged; this check must not swap, nor
+            // hold the quit for an update that is already being installed.
+            self.restart = Restart::Done(Ok(()));
+            tracing::info!("a quit started during Restart to update; the drain installs it");
+            return true;
+        }
+        if let Some(hold) = hold {
+            self.phase = if self.staged.is_some() {
+                Phase::Staged
+            } else {
+                next
+            };
+            self.restart = Restart::Done(Err(hold.into()));
+            tracing::info!(reason = hold, "Restart to update waits for a meeting");
+            return false;
+        }
+        let result = match &self.staged {
+            Some(update) => {
+                platform::restart_into(&update.staged).map_err(|error| format!("{error:#}"))
+            }
+            None => Err("no update is ready".into()),
+        };
+        let restarted = result.is_ok();
+        if let Err(error) = &result {
+            tracing::warn!(%error, "could not restart into the update");
+        }
+        self.phase = if restarted {
+            Phase::Applied
+        } else if self.staged.is_some() {
+            Phase::Staged
+        } else {
+            next
+        };
+        self.restart = Restart::Done(result);
+        restarted
+    }
+
+    #[cfg(target_os = "macos")]
+    fn install_on_quit(&mut self) {
+        if matches!(self.phase, Phase::Applied | Phase::Disabled(_)) {
+            return;
+        }
+        if let Some(update) = &self.staged {
+            platform::install_on_quit(&update.staged);
+            self.phase = Phase::Applied;
+        }
+    }
 }
 
 struct Shared {
-    state: Mutex<State>,
+    core: Mutex<Core>,
+    signal: Condvar,
     /// A package manager installed Hex, so "up to date" is its to say.
     packaged: bool,
-    /// Set by "Check for updates" and `stop`; the worker waits on it between checks.
-    wake: Mutex<Wake>,
-    signal: Condvar,
-    /// The channel and start of the latest check.
-    last: Mutex<Option<(String, std::time::Instant)>>,
-    /// The SHA-256 of the other channel's release the user agreed to switch to.
-    confirmed: Mutex<Option<String>>,
-    /// The newest staged update. Checks continue while one waits, and a
-    /// different current release replaces it before the restart.
-    staged: Mutex<Option<StagedUpdate>>,
-    /// What the staged dev build changed, when the dev notes said.
-    notes: Mutex<Option<UpdateNotes>>,
     /// Why this install can't update itself (Windows), shown with Download
     /// update.
-    blocked: Mutex<Option<&'static str>>,
-    restart: Mutex<Restart>,
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    blocked: Option<&'static str>,
 }
 
 impl Shared {
-    fn new(state: State, packaged: bool) -> Self {
+    fn new(phase: Phase, packaged: bool, blocked: Option<&'static str>) -> Self {
         Self {
-            state: Mutex::new(state),
-            packaged,
-            wake: Mutex::new(Wake::default()),
+            core: Mutex::new(Core::new(phase)),
             signal: Condvar::new(),
-            last: Mutex::new(None),
-            confirmed: Mutex::new(None),
-            staged: Mutex::new(None),
-            notes: Mutex::new(None),
-            blocked: Mutex::new(None),
-            restart: Mutex::new(Restart::Idle),
+            packaged,
+            blocked,
         }
     }
 }
@@ -239,12 +490,6 @@ enum Restart {
     Requested,
     /// The worker switched over (the host quits) or could not.
     Done(std::result::Result<(), String>),
-}
-
-#[derive(Default)]
-struct Wake {
-    check: bool,
-    stop: bool,
 }
 
 #[derive(Clone)]
@@ -271,16 +516,19 @@ impl Updater {
             None
         };
         let checks = disabled.is_none();
+        let blocked = (method == Method::Unknown)
+            .then(platform::blocked)
+            .flatten();
         let shared = Arc::new(Shared::new(
             match disabled {
-                Some(status) => State::Disabled(status),
-                None => State::Checking,
+                Some(status) => Phase::Disabled(status),
+                None => Phase::Checking {
+                    confirmed_switch: None,
+                },
             },
             matches!(method, Method::Package(_)),
+            blocked,
         ));
-        if method == Method::Unknown {
-            *lock(&shared.blocked) = platform::blocked();
-        }
         if checks {
             let worker = shared.clone();
             if let Err(error) = std::thread::Builder::new()
@@ -288,18 +536,18 @@ impl Updater {
                 .spawn(move || run(&worker, &method))
             {
                 tracing::error!(%error, "could not start the updater");
-                *lock(&shared.state) = State::Failed;
+                lock(&shared.core).phase = Phase::Error;
             }
         }
         Self { shared }
     }
 
-    /// An updater with no worker in the Current state, for tests of when it
+    /// An updater with no worker in the Idle state, for tests of when it
     /// asks for a check.
     #[cfg(test)]
     fn idle_checking() -> Self {
         Self {
-            shared: Arc::new(Shared::new(State::Current, false)),
+            shared: Arc::new(Shared::new(Phase::Idle, false, None)),
         }
     }
 
@@ -308,43 +556,41 @@ impl Updater {
     pub fn idle() -> Self {
         Self {
             shared: Arc::new(Shared::new(
-                State::Disabled(DesktopUpdateStatus::Unavailable),
+                Phase::Disabled(DesktopUpdateStatus::Unavailable),
                 false,
+                None,
             )),
         }
     }
 
     /// Checks now instead of at the next interval. A staged update stays
-    /// offered while the check looks for a newer release.
+    /// offered while the check looks for a newer release, and a request that
+    /// arrives mid-download is queued to run as soon as the download ends.
     pub fn check_now(&self) {
-        let mut state = lock(&self.shared.state);
-        match &*state {
-            State::Disabled(_) | State::Applied | State::Downloading => return,
-            State::Ready => {}
-            _ => *state = State::Checking,
+        let wake = lock(&self.shared.core).request_check();
+        if wake {
+            self.shared.signal.notify_all();
         }
-        drop(state);
-        self.wake();
-    }
-
-    fn wake(&self) {
-        lock(&self.shared.wake).check = true;
-        self.shared.signal.notify_all();
     }
 
     /// The window opened or gained focus: on the Dev channel, check now
     /// unless a check started within the last minute.
     pub fn window_focused(&self) {
-        let recent = lock(&self.shared.last)
-            .as_ref()
-            .is_some_and(|(channel, at)| channel != "dev" || at.elapsed() < FOCUS_CHECK_GAP);
-        if !recent {
-            self.check_now();
+        let wake = {
+            let mut core = lock(&self.shared.core);
+            let recent = core
+                .last_check
+                .as_ref()
+                .is_some_and(|(channel, at)| channel != "dev" || at.elapsed() < FOCUS_CHECK_GAP);
+            !recent && core.request_check()
+        };
+        if wake {
+            self.shared.signal.notify_all();
         }
     }
 
     pub fn stop(&self) {
-        lock(&self.shared.wake).stop = true;
+        lock(&self.shared.core).stop = true;
         self.shared.signal.notify_all();
     }
 
@@ -352,42 +598,21 @@ impl Updater {
     /// an English sentence the window translates.
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub fn blocked(&self) -> Option<&'static str> {
-        matches!(*lock(&self.shared.state), State::Download { .. })
-            .then(|| *lock(&self.shared.blocked))
-            .flatten()
+        matches!(
+            lock(&self.shared.core).phase,
+            Phase::Available(Available::Download { .. })
+        )
+        .then_some(self.shared.blocked)
+        .flatten()
     }
 
     /// What the staged dev build changed, while Restart to update shows.
     pub fn notes(&self) -> Option<UpdateNotes> {
-        matches!(*lock(&self.shared.state), State::Ready | State::Applied)
-            .then(|| lock(&self.shared.notes).clone())
-            .flatten()
+        lock(&self.shared.core).notes(self.shared.packaged)
     }
 
     pub fn status(&self) -> DesktopUpdateStatus {
-        match &*lock(&self.shared.state) {
-            State::Disabled(status) => status.clone(),
-            // A package manager updates Hex: its own checks only look for
-            // the manager's command, so they show nothing of their own.
-            State::Checking | State::Current | State::Failed if self.shared.packaged => {
-                DesktopUpdateStatus::PackageManager
-            }
-            State::Checking => DesktopUpdateStatus::Checking,
-            State::Current => DesktopUpdateStatus::Current,
-            State::Failed => DesktopUpdateStatus::Failed,
-            State::Downloading => DesktopUpdateStatus::Downloading,
-            State::Ready | State::Applied => DesktopUpdateStatus::ReadyToRestart,
-            State::Download { .. } => DesktopUpdateStatus::Available,
-            State::Switch {
-                channel, version, ..
-            } => DesktopUpdateStatus::SwitchAvailable {
-                channel: channel.clone(),
-                version: version.clone(),
-            },
-            State::Command { command } => DesktopUpdateStatus::PackageUpdate {
-                command: command.clone(),
-            },
-        }
+        lock(&self.shared.core).status(self.shared.packaged)
     }
 
     /// Carries out an update control: check now, open the download, or
@@ -410,64 +635,39 @@ impl Updater {
     /// then switches to the newest staged update. A meeting recording holds
     /// it: the relaunch would cut the recording short.
     fn request_restart(&self, hold: Option<&'static str>) -> Result<()> {
-        if let Some(hold) = hold {
-            return Err(eyre!(hold));
+        let wake = lock(&self.shared.core).request_restart(hold)?;
+        if wake {
+            self.shared.signal.notify_all();
         }
-        let mut state = lock(&self.shared.state);
-        let mut restart = lock(&self.shared.restart);
-        // A second click while the restart is under way changes nothing.
-        if matches!(*restart, Restart::Requested) || matches!(*state, State::Applied) {
-            return Ok(());
-        }
-        if !matches!(*state, State::Ready) {
-            return Err(eyre!("no update is ready"));
-        }
-        *restart = Restart::Requested;
-        *state = State::Checking;
-        drop(restart);
-        drop(state);
-        self.wake();
         Ok(())
     }
 
     /// The outcome of Restart to update, once: `Ok` when the update starts
     /// as soon as Hex quits, which the caller must now do.
     pub fn take_restart(&self) -> Option<Result<()>> {
-        let mut restart = lock(&self.shared.restart);
-        if !matches!(*restart, Restart::Done(_)) {
-            return None;
-        }
-        match std::mem::take(&mut *restart) {
-            Restart::Done(result) => Some(result.map_err(|error| eyre!(error))),
-            Restart::Idle | Restart::Requested => None,
-        }
+        lock(&self.shared.core).take_restart()
     }
 
     /// The action of a single "update" menu item, which follows the status.
     #[cfg(target_os = "macos")]
     pub fn menu_action(&self) -> DesktopAction {
-        match self.status() {
-            DesktopUpdateStatus::ReadyToRestart => DesktopAction::RestartIntoUpdate,
-            DesktopUpdateStatus::Available => DesktopAction::OpenUpdate,
-            DesktopUpdateStatus::SwitchAvailable { .. } => DesktopAction::ConfirmUpdateSwitch,
-            _ => DesktopAction::CheckForUpdates,
-        }
+        presentation::menu_action(&self.status())
     }
 
     /// The user agreed to switch to the other channel's release on offer:
     /// download and stage it now.
     fn confirm_switch(&self) {
-        let State::Switch { sha256, .. } = lock(&self.shared.state).clone() else {
-            return;
-        };
-        *lock(&self.shared.confirmed) = Some(sha256);
-        self.check_now();
+        let wake = lock(&self.shared.core).confirm_switch();
+        if wake {
+            self.shared.signal.notify_all();
+        }
     }
 
     /// Opens the download an install that cannot update itself needs.
     fn open_download(&self) {
-        let State::Download { url } = lock(&self.shared.state).clone() else {
-            return;
+        let url = match &lock(&self.shared.core).phase {
+            Phase::Available(Available::Download { url }) => url.clone(),
+            _ => return,
         };
         if let Err(error) = crate::desktop::opencode_catalog::open_url(&url) {
             tracing::warn!(%error, "could not open the Hex download");
@@ -478,14 +678,7 @@ impl Updater {
     /// other platforms activate it when it is staged.
     #[cfg(target_os = "macos")]
     pub fn install_on_quit(&self) {
-        let mut state = lock(&self.shared.state);
-        if matches!(*state, State::Applied) {
-            return;
-        }
-        if let Some(update) = lock(&self.shared.staged).as_ref() {
-            platform::install_on_quit(&update.staged);
-            *state = State::Applied;
-        }
+        lock(&self.shared.core).install_on_quit();
     }
 }
 
@@ -513,21 +706,21 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 /// Waits `delay` or until woken; true when the updater should stop.
 fn wait(shared: &Shared, delay: Duration) -> bool {
-    let mut wake = lock(&shared.wake);
+    let mut core = lock(&shared.core);
     let deadline = std::time::Instant::now() + delay;
-    while !wake.check && !wake.stop {
+    while !core.check_requested && !core.stop {
         let now = std::time::Instant::now();
         if now >= deadline {
             break;
         }
-        wake = shared
+        core = shared
             .signal
-            .wait_timeout(wake, deadline - now)
+            .wait_timeout(core, deadline - now)
             .unwrap_or_else(|error| error.into_inner())
             .0;
     }
-    wake.check = false;
-    wake.stop
+    core.check_requested = false;
+    core.stop
 }
 
 /// How often a channel is checked: Dev every few minutes, others hourly.
@@ -546,151 +739,63 @@ fn run(shared: &Shared, method: &Method) {
         return;
     }
     loop {
-        let restarting = matches!(*lock(&shared.restart), Restart::Requested);
-        let staged = lock(&shared.staged).clone();
-        {
-            // A staged update stays offered while the check runs, and a quit
-            // that already installed the update is never un-applied.
-            let mut state = lock(&shared.state);
-            if !matches!(*state, State::Ready | State::Applied) {
-                *state = State::Checking;
+        let start = lock(&shared.core).begin_check();
+        let result = check(
+            shared,
+            method,
+            &mut cache,
+            start.staged.as_ref(),
+            start.restarting,
+            start.confirmed_switch.as_deref(),
+        );
+        let delay = {
+            let mut core = lock(&shared.core);
+            let interval = core
+                .last_check
+                .as_ref()
+                .map_or(CHECK_INTERVAL, |(channel, _)| check_interval(channel));
+            let (next, delay) = match result {
+                Ok(next) => {
+                    failures = 0;
+                    (next, interval)
+                }
+                Err(error) => {
+                    tracing::warn!(error = %format!("{error:#}"), "update check failed");
+                    failures = (failures + 1).min(8);
+                    let next = if core.staged.is_some() {
+                        Phase::Staged
+                    } else {
+                        Phase::Error
+                    };
+                    (next, (interval * 2u32.pow(failures)).min(MAX_BACKOFF))
+                }
+            };
+            if start.restarting {
+                if core.finish_restart(
+                    next,
+                    restart_hold(),
+                    crate::desktop::process_exit::quitting(),
+                ) {
+                    return;
+                }
+            } else {
+                core.finish_check(next);
             }
-        }
-        let result = check(shared, method, &mut cache, staged.as_ref(), restarting);
-        let interval = lock(&shared.last)
-            .as_ref()
-            .map_or(CHECK_INTERVAL, |(channel, _)| check_interval(channel));
-        let (next, delay) = match result {
-            Ok(next) => {
-                failures = 0;
-                (next, interval)
-            }
-            Err(error) => {
-                tracing::warn!(error = %format!("{error:#}"), "update check failed");
-                failures = (failures + 1).min(8);
-                let next = if lock(&shared.staged).is_some() {
-                    State::Ready
-                } else {
-                    State::Failed
-                };
-                (next, (interval * 2u32.pow(failures)).min(MAX_BACKOFF))
-            }
+            delay
         };
-        if restarting {
-            if finish_restart(
-                shared,
-                next,
-                restart_hold(),
-                crate::desktop::process_exit::quitting(),
-            ) {
-                return;
-            }
-        } else {
-            let mut state = lock(&shared.state);
-            // Restart to update was pressed during this check: the next
-            // check, which starts at once, finishes it.
-            if !matches!(*lock(&shared.restart), Restart::Requested) {
-                keep_applied(&mut state, next);
-            }
-        }
         if wait(shared, delay) {
             return;
         }
     }
 }
 
-/// Whether a release that just finished staging becomes the staged update.
-/// A quit installs the staged update itself (`install_on_quit`), so a
-/// download that lands afterwards must not replace it: the caller drops the
-/// folder it unpacked, because the bundle that update replaced now lives in
-/// the folder of the one the quit installed.
-fn adopts_staged_update(state: &State, quitting: bool) -> bool {
-    !quitting && !matches!(state, State::Applied)
-}
-
-/// The state a check leaves when it discards the release it staged because a
-/// quit is installing (or already installed) another. The older staged update
-/// must stay installable at quit (`Ready`), and an installed one keeps
-/// `Applied`; `Current` is the honest result when nothing is staged.
-fn discarded_state(state: &State, staged: bool) -> State {
-    if matches!(state, State::Applied) {
-        State::Applied
-    } else if staged {
-        State::Ready
-    } else {
-        State::Current
-    }
-}
-
 /// Why Restart to update has to wait: a recording or a launch recovery is
 /// still finishing a meeting, and the relaunch would cut it off.
 fn restart_hold() -> Option<&'static str> {
-    crate::meeting::recording()
-        .then_some("Hex is finishing a meeting; restart to update when it's done")
-}
-
-/// Writes `next` unless a quit already installed the staged update. That
-/// state must survive every later check: the bundle beneath this process has
-/// already been swapped, so a second swap would exchange it back.
-fn keep_applied(state: &mut State, next: State) {
-    if !matches!(*state, State::Applied) {
-        *state = next;
-    }
-}
-
-/// Switches to the newest staged update once Restart to update's final
-/// check has run, whatever its result. True when Hex now quits. A meeting
-/// that started recording since the click keeps the update staged and the
-/// restart waiting, and a quit that began during the check never swaps: the
-/// drain installs the update itself.
-fn finish_restart(
-    shared: &Shared,
-    next: State,
-    hold: Option<&'static str>,
-    quitting: bool,
-) -> bool {
-    let mut state = lock(&shared.state);
-    // Quitting installs the staged update itself (`install_on_quit`), and it
-    // holds this lock while it does; a swap here would exchange the same two
-    // bundles back and lose the update.
-    if matches!(*state, State::Applied) {
-        *lock(&shared.restart) = Restart::Done(Ok(()));
-        return true;
-    }
-    if quitting {
-        // The drain installs what is staged; this check must not swap, nor
-        // hold the quit for an update that is already being installed.
-        *lock(&shared.restart) = Restart::Done(Ok(()));
-        tracing::info!("a quit started during Restart to update; the drain installs it");
-        return true;
-    }
-    if let Some(hold) = hold {
-        let staged = lock(&shared.staged).is_some();
-        *state = if staged { State::Ready } else { next };
-        *lock(&shared.restart) = Restart::Done(Err(hold.into()));
-        tracing::info!(reason = hold, "Restart to update waits for a meeting");
-        return false;
-    }
-    let staged = lock(&shared.staged).clone();
-    let result = match &staged {
-        Some(update) => {
-            platform::restart_into(&update.staged).map_err(|error| format!("{error:#}"))
-        }
-        None => Err("no update is ready".into()),
-    };
-    let restarted = result.is_ok();
-    if let Err(error) = &result {
-        tracing::warn!(%error, "could not restart into the update");
-    }
-    *state = if restarted {
-        State::Applied
-    } else if staged.is_some() {
-        State::Ready
-    } else {
-        next
-    };
-    *lock(&shared.restart) = Restart::Done(result);
-    restarted
+    offer_hold(
+        &DesktopUpdateStatus::ReadyToRestart,
+        crate::meeting::recording(),
+    )
 }
 
 fn check(
@@ -699,7 +804,8 @@ fn check(
     cache: &mut transport::ManifestCache,
     staged: Option<&StagedUpdate>,
     restarting: bool,
-) -> Result<State> {
+    confirmed_switch: Option<&str>,
+) -> Result<Phase> {
     let updates = updates_dir()?;
     // Read each check, so a change from the window or `hex settings` applies
     // at the next one.
@@ -707,7 +813,7 @@ fn check(
     let home = home_channel(method, BUILD_CHANNEL, crate::VERSION);
     let channel = channel(method, setting, &home);
     let user_agent = transport::user_agent(&home, crate::VERSION);
-    *lock(&shared.last) = Some((channel.clone(), std::time::Instant::now()));
+    lock(&shared.core).last_check = Some((channel.clone(), std::time::Instant::now()));
     let manifest_url = manifest_url(&channel);
     let timeout = if restarting {
         RESTART_MANIFEST_TIMEOUT
@@ -736,11 +842,11 @@ fn check(
             // The notes may have been published after the build was staged.
             if let Some(staged) = staged
                 && !restarting
-                && lock(&shared.notes).is_none()
+                && lock(&shared.core).notes.is_none()
             {
                 fetch_notes(shared, &channel, &user_agent, &updates, &staged.version);
             }
-            Ok(State::Ready)
+            Ok(Phase::Staged)
         }
         Decision::None { .. } => {
             transport::prune(&updates, None);
@@ -752,28 +858,28 @@ fn check(
                     tracing::warn!(error = %format!("{error:#}"), "could not add hex.com to this install");
                 }
             }
-            Ok(State::Current)
+            Ok(Phase::Idle)
         }
         Decision::Notify {
             command, notes_url, ..
-        } => Ok(match command {
-            Some(command) => State::Command { command },
-            None => State::Download {
+        } => Ok(Phase::Available(match command {
+            Some(command) => Available::Command { command },
+            None => Available::Download {
                 url: notes_url.unwrap_or_else(|| "https://anoma.ly/hex".into()),
             },
-        }),
+        })),
         Decision::Install {
             reason: protocol::Reason::Switch,
             version,
             target,
         } if *method != Method::DownloadOnly
-            && lock(&shared.confirmed).as_deref() != Some(target.sha256.as_str()) =>
+            && confirmed_switch != Some(target.sha256.as_str()) =>
         {
-            Ok(State::Switch {
+            Ok(Phase::Available(Available::Switch {
                 channel,
                 version,
                 sha256: target.sha256,
-            })
+            }))
         }
         Decision::Install {
             version, target, ..
@@ -788,15 +894,13 @@ fn check(
                             .or(manifest.release.notes_url)
                     })
                     .unwrap_or_else(|| "https://anoma.ly/hex".into());
-                return Ok(State::Download { url });
+                return Ok(Phase::Available(Available::Download { url }));
             }
             let url = protocol::resolve_url(&manifest_url, &target.url)
                 .ok_or_else(|| eyre!("the update URL {} is not usable", target.url))?;
-            // A staged update stays offered while a newer one downloads in
-            // the background.
-            if staged.is_none() || restarting {
-                keep_applied(&mut lock(&shared.state), State::Downloading);
-            }
+            // Record the download phase; `Core::status` keeps any older
+            // staged update offered until this one replaces it.
+            lock(&shared.core).begin_download();
             transport::prune(&updates, Some(&target.sha256));
             #[cfg(target_os = "linux")]
             verify_linux_signature(&manifest, &manifest_url, &user_agent, &target, &updates)?;
@@ -807,40 +911,34 @@ fn check(
             #[cfg(not(target_os = "windows"))]
             let staged = platform::stage(&file, &version);
             let staged = staged.wrap_err_with(|| format!("could not stage Hex {version}"))?;
-            // A quit installs the staged update itself (`install_on_quit`) and
-            // holds both locks, so take them in the same order and look again
-            // under them: a release that lands after that must not replace the
-            // installed one or remove the folder its replaced bundle lives in.
+            // A quit installs the staged update itself (`install_on_quit`)
+            // under the same lock, so a release that lands afterwards is
+            // discarded instead of replacing the installed one.
             #[cfg(target_os = "macos")]
             let kept = staged.clone();
-            {
-                let state = lock(&shared.state);
-                let mut staged_updates = lock(&shared.staged);
-                if !adopts_staged_update(&state, crate::desktop::process_exit::quitting()) {
-                    let next = discarded_state(&state, staged_updates.is_some());
-                    drop(staged_updates);
-                    drop(state);
-                    #[cfg(target_os = "macos")]
-                    platform::discard(&kept);
-                    return Ok(next);
-                }
-                *staged_updates = Some(StagedUpdate {
+            let outcome = lock(&shared.core).adopt_staged(
+                StagedUpdate {
                     staged,
                     sha256: target.sha256,
                     version: version.clone(),
-                });
+                },
+                crate::desktop::process_exit::quitting(),
+            );
+            if let AdoptOutcome::Discarded(next) = outcome {
+                #[cfg(target_os = "macos")]
+                platform::discard(&kept);
+                return Ok(next);
             }
             // Now that this release is the staged update, the unpacked folder
             // of the release it replaced is no longer needed.
             #[cfg(target_os = "macos")]
             platform::remove_superseded(&kept);
-            *lock(&shared.notes) = None;
             // Restart to update's final check quits right after; notes
             // would only hold it up.
             if !restarting {
                 fetch_notes(shared, &channel, &user_agent, &updates, &version);
             }
-            Ok(State::Ready)
+            Ok(Phase::Staged)
         }
     }
 }
@@ -852,7 +950,14 @@ fn fetch_notes(shared: &Shared, channel: &str, user_agent: &str, updates: &Path,
         return;
     }
     let notes = notes::fetch(user_agent, &updates.join("notes"), crate::VERSION, version);
-    *lock(&shared.notes) = notes;
+    let mut core = lock(&shared.core);
+    if core
+        .staged
+        .as_ref()
+        .is_some_and(|staged| staged.version == version)
+    {
+        core.notes = notes;
+    }
 }
 
 /// Checks the manifest's `<target>-sig` file: Anomaly's release key signing
@@ -1060,23 +1165,43 @@ mod tests {
         assert_eq!(Method::Package("aur").channel(), "stable");
     }
 
+    fn staged_update(version: &str, sha: char) -> StagedUpdate {
+        StagedUpdate {
+            staged: Staged::dummy(),
+            sha256: sha.to_string().repeat(64),
+            version: version.into(),
+        }
+    }
+
     #[test]
     fn a_package_manager_install_never_shows_its_own_checks() {
-        let updater = |state: State, packaged: bool| Updater {
-            shared: Arc::new(Shared::new(state, packaged)),
+        let updater = |phase: Phase, packaged: bool| Updater {
+            shared: Arc::new(Shared::new(phase, packaged, None)),
         };
-        for state in [State::Checking, State::Current, State::Failed] {
+        for phase in [
+            Phase::Checking {
+                confirmed_switch: None,
+            },
+            Phase::Idle,
+            Phase::Error,
+        ] {
             assert_eq!(
-                updater(state, true).status(),
+                updater(phase, true).status(),
                 DesktopUpdateStatus::PackageManager
             );
         }
         assert_eq!(
-            updater(State::Checking, false).status(),
+            updater(
+                Phase::Checking {
+                    confirmed_switch: None,
+                },
+                false,
+            )
+            .status(),
             DesktopUpdateStatus::Checking
         );
         assert_eq!(
-            updater(State::Failed, false).status(),
+            updater(Phase::Error, false).status(),
             DesktopUpdateStatus::Failed
         );
     }
@@ -1189,13 +1314,14 @@ mod tests {
     }
 
     #[test]
-    fn a_switch_waits_for_the_user_to_confirm() {
+    fn a_switch_waits_for_the_user_to_confirm_and_clears_after_being_consumed_or_superseded() {
         let updater = Updater::idle_checking();
-        *lock(&updater.shared.state) = State::Switch {
+        let sha = "c".repeat(64);
+        lock(&updater.shared.core).phase = Phase::Available(Available::Switch {
             channel: "stable".into(),
             version: "2.3.1".into(),
-            sha256: "c".repeat(64),
-        };
+            sha256: sha.clone(),
+        });
         assert_eq!(
             updater.status(),
             DesktopUpdateStatus::SwitchAvailable {
@@ -1203,13 +1329,111 @@ mod tests {
                 version: "2.3.1".into()
             }
         );
-        assert!(lock(&updater.shared.confirmed).is_none());
+
         updater.act(&DesktopAction::ConfirmUpdateSwitch).unwrap();
+        assert_eq!(updater.status(), DesktopUpdateStatus::Checking);
+        {
+            let core = lock(&updater.shared.core);
+            assert!(core.check_requested, "confirming checks now");
+            assert!(matches!(
+                &core.phase,
+                Phase::Checking {
+                    confirmed_switch: Some(confirmed),
+                } if confirmed == &sha
+            ));
+        }
+
+        // Starting the check consumes the confirmation for that check alone;
+        // a failed or superseded check never keeps it set for later offers.
+        let start = lock(&updater.shared.core).begin_check();
+        assert_eq!(start.confirmed_switch.as_deref(), Some(sha.as_str()));
+        lock(&updater.shared.core).finish_check(Phase::Error);
+        assert_eq!(updater.status(), DesktopUpdateStatus::Failed);
+
+        let next_start = lock(&updater.shared.core).begin_check();
         assert_eq!(
-            lock(&updater.shared.confirmed).as_deref(),
-            Some("c".repeat(64).as_str())
+            next_start.confirmed_switch, None,
+            "a previous failed switch confirmation must not carry over"
         );
-        assert!(lock(&updater.shared.wake).check, "confirming checks now");
+
+        // Confirming again and then transitioning away (e.g. a manual check
+        // after switching channels, or adopting another state) clears it too.
+        lock(&updater.shared.core).phase = Phase::Available(Available::Switch {
+            channel: "stable".into(),
+            version: "2.3.1".into(),
+            sha256: sha,
+        });
+        updater.act(&DesktopAction::ConfirmUpdateSwitch).unwrap();
+        lock(&updater.shared.core).finish_check(Phase::Idle);
+        let after_reset = lock(&updater.shared.core).begin_check();
+        assert_eq!(after_reset.confirmed_switch, None);
+    }
+
+    #[test]
+    fn check_now_arriving_mid_download_is_queued_without_clobbering_downloading() {
+        let updater = Updater::idle_checking();
+        lock(&updater.shared.core).begin_download();
+        assert_eq!(updater.status(), DesktopUpdateStatus::Downloading);
+
+        updater.check_now();
+        assert_eq!(
+            updater.status(),
+            DesktopUpdateStatus::Downloading,
+            "a mid-download check keeps the Downloading status"
+        );
+        assert!(
+            lock(&updater.shared.core).check_requested,
+            "the request is recorded instead of silently dropped"
+        );
+
+        // Once the download finishes, wait() returns immediately to run the
+        // queued check rather than sleeping for the full interval.
+        lock(&updater.shared.core).finish_check(Phase::Staged);
+        let started = std::time::Instant::now();
+        assert!(
+            !wait(&updater.shared, Duration::from_secs(60)),
+            "queued check wakes wait() without stopping"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "wait() returned immediately for the queued check"
+        );
+        assert!(!lock(&updater.shared.core).check_requested);
+    }
+
+    #[test]
+    fn staged_update_stays_offered_during_background_check_and_download() {
+        let updater = Updater::idle_checking();
+        {
+            let mut core = lock(&updater.shared.core);
+            assert!(matches!(
+                core.adopt_staged(staged_update("0.0.0-dev-41", 'b'), false),
+                AdoptOutcome::Adopted
+            ));
+            core.finish_check(Phase::Staged);
+        }
+        assert_eq!(updater.status(), DesktopUpdateStatus::ReadyToRestart);
+
+        // Background check keeps the staged update offered.
+        let start = lock(&updater.shared.core).begin_check();
+        assert!(!start.restarting);
+        assert_eq!(
+            start.staged.as_ref().map(|s| s.version.as_str()),
+            Some("0.0.0-dev-41")
+        );
+        assert_eq!(updater.status(), DesktopUpdateStatus::ReadyToRestart);
+
+        // Background download of a newer release also keeps the older staged
+        // update offered, and a check_now during it is queued.
+        lock(&updater.shared.core).begin_download();
+        assert_eq!(updater.status(), DesktopUpdateStatus::ReadyToRestart);
+        updater.check_now();
+        assert!(lock(&updater.shared.core).check_requested);
+
+        // Clicking Restart to update while a background download is running
+        // switches status to Downloading for the restart flow.
+        updater.act(&DesktopAction::RestartIntoUpdate).unwrap();
+        assert_eq!(updater.status(), DesktopUpdateStatus::Downloading);
     }
 
     #[test]
@@ -1247,107 +1471,155 @@ mod tests {
         let updater = Updater::idle_checking();
         // Quitting installed the staged update and set Applied; the final
         // restart check finishes afterwards.
-        *lock(&updater.shared.state) = State::Applied;
-        *lock(&updater.shared.restart) = Restart::Requested;
-
-        assert!(
-            finish_restart(&updater.shared, State::Ready, None, false),
-            "the quit already installed the update; Hex still quits"
-        );
-        assert!(matches!(
-            *lock(&updater.shared.restart),
-            Restart::Done(Ok(()))
-        ));
-        assert!(matches!(*lock(&updater.shared.state), State::Applied));
+        {
+            let mut core = lock(&updater.shared.core);
+            core.phase = Phase::Applied;
+            core.restart = Restart::Requested;
+            assert!(
+                core.finish_restart(Phase::Staged, None, false),
+                "the quit already installed the update; Hex still quits"
+            );
+            assert!(matches!(core.restart, Restart::Done(Ok(()))));
+            assert!(matches!(core.phase, Phase::Applied));
+        }
     }
 
     #[test]
     fn a_restart_check_that_races_a_quit_never_swaps() {
         let updater = Updater::idle_checking();
-        *lock(&updater.shared.state) = State::Ready;
-        *lock(&updater.shared.restart) = Restart::Requested;
-
-        // A quit began during the final check: the drain installs whatever is
-        // staged, so this check must not swap (nor report "no update").
-        assert!(finish_restart(&updater.shared, State::Ready, None, true));
-        assert!(matches!(
-            *lock(&updater.shared.restart),
-            Restart::Done(Ok(()))
-        ));
-        assert!(matches!(*lock(&updater.shared.state), State::Ready));
+        {
+            let mut core = lock(&updater.shared.core);
+            core.phase = Phase::Staged;
+            core.restart = Restart::Requested;
+            // A quit began during the final check: the drain installs whatever
+            // is staged, so this check must not swap (nor report "no update").
+            assert!(core.finish_restart(Phase::Staged, None, true));
+            assert!(matches!(core.restart, Restart::Done(Ok(()))));
+            assert!(matches!(core.phase, Phase::Staged));
+        }
     }
 
     #[test]
     fn a_release_discarded_at_quit_leaves_the_older_one_installable() {
         // v1 is staged and a quit begins while v2 finishes downloading: v2 is
-        // discarded, but the state must stay Ready so install_on_quit (which
+        // discarded, but the state must stay Staged so install_on_quit (which
         // skips only Applied) still installs v1.
-        assert!(matches!(discarded_state(&State::Ready, true), State::Ready));
-        // A quit that already installed the update keeps Applied.
+        let mut core = Core::new(Phase::Downloading);
+        core.staged = Some(staged_update("0.0.0-dev-41", 'b'));
         assert!(matches!(
-            discarded_state(&State::Applied, true),
-            State::Applied
+            core.adopt_staged(staged_update("0.0.0-dev-42", 'c'), true),
+            AdoptOutcome::Discarded(Phase::Staged)
         ));
-        // Nothing staged: a plain current result, not a claim of installation.
+        assert_eq!(
+            core.staged.as_ref().map(|u| u.version.as_str()),
+            Some("0.0.0-dev-41"),
+            "the older staged update is preserved"
+        );
+
+        // A quit that already installed the update keeps Applied.
+        let mut core = Core::new(Phase::Applied);
+        core.staged = Some(staged_update("0.0.0-dev-41", 'b'));
         assert!(matches!(
-            discarded_state(&State::Current, false),
-            State::Current
+            core.adopt_staged(staged_update("0.0.0-dev-42", 'c'), true),
+            AdoptOutcome::Discarded(Phase::Applied)
+        ));
+
+        // Nothing staged: a plain Idle result, not a claim of installation.
+        let mut core = Core::new(Phase::Downloading);
+        assert!(matches!(
+            core.adopt_staged(staged_update("0.0.0-dev-42", 'c'), true),
+            AdoptOutcome::Discarded(Phase::Idle)
         ));
     }
 
     #[test]
-    fn a_quit_that_installed_the_update_is_never_overwritten() {
-        let mut state = State::Applied;
-        keep_applied(&mut state, State::Current);
-        assert!(matches!(state, State::Applied));
-        let mut state = State::Ready;
-        keep_applied(&mut state, State::Current);
-        assert!(matches!(state, State::Current));
+    fn applied_and_disabled_are_terminal_across_transitions() {
+        let mut applied = Core::new(Phase::Applied);
+        assert!(!applied.request_check());
+        assert!(!applied.check_requested);
+        applied.begin_check();
+        applied.begin_download();
+        applied.finish_check(Phase::Idle);
+        assert!(matches!(applied.phase, Phase::Applied));
+
+        let mut disabled = Core::new(Phase::Disabled(DesktopUpdateStatus::Unavailable));
+        assert!(!disabled.request_check());
+        assert!(!disabled.check_requested);
+        disabled.begin_check();
+        disabled.begin_download();
+        disabled.finish_check(Phase::Idle);
+        assert!(matches!(
+            disabled.phase,
+            Phase::Disabled(DesktopUpdateStatus::Unavailable)
+        ));
+
+        let mut staged = Core::new(Phase::Staged);
+        staged.finish_check(Phase::Idle);
+        assert!(matches!(staged.phase, Phase::Idle));
     }
 
     #[test]
     fn restart_to_update_waits_while_a_meeting_records() {
         let updater = Updater::idle_checking();
-        *lock(&updater.shared.state) = State::Ready;
-        let hold = Some("Hex is finishing a meeting; restart to update when it's done");
+        lock(&updater.shared.core).phase = Phase::Staged;
+        let hold = offer_hold(&DesktopUpdateStatus::ReadyToRestart, true);
+        assert!(hold.is_some());
         let error = updater.request_restart(hold).unwrap_err();
         assert!(error.to_string().contains("meeting"));
-        assert!(matches!(*lock(&updater.shared.state), State::Ready));
-        assert!(
-            matches!(*lock(&updater.shared.restart), Restart::Idle),
-            "a refused restart is not left pending"
-        );
+        {
+            let mut core = lock(&updater.shared.core);
+            assert!(matches!(core.phase, Phase::Staged));
+            assert!(
+                matches!(core.restart, Restart::Idle),
+                "a refused restart is not left pending"
+            );
 
-        // A meeting that started after the click keeps the restart waiting.
-        // Nothing is staged in this test, so the state follows the check's
-        // result rather than claiming an update is ready.
-        assert!(!finish_restart(
-            &updater.shared,
-            State::Current,
-            hold,
-            false
-        ));
-        assert!(matches!(*lock(&updater.shared.state), State::Current));
-        assert!(matches!(
-            *lock(&updater.shared.restart),
-            Restart::Done(Err(_))
-        ));
+            // A meeting that started after the click keeps the restart waiting.
+            // Nothing is staged in this test, so the state follows the check's
+            // result rather than claiming an update is ready.
+            assert!(!core.finish_restart(Phase::Idle, hold, false));
+            assert!(matches!(core.phase, Phase::Idle));
+            assert!(matches!(core.restart, Restart::Done(Err(_))));
+        }
     }
 
     #[test]
     fn a_release_that_finishes_staging_after_a_quit_installed_one_is_discarded() {
         // Hex is still running: the release becomes the staged update.
-        assert!(adopts_staged_update(&State::Ready, false));
-        assert!(adopts_staged_update(&State::Checking, false));
-        assert!(adopts_staged_update(&State::Downloading, false));
-        assert!(adopts_staged_update(&State::Current, false));
+        for phase in [
+            Phase::Staged,
+            Phase::Checking {
+                confirmed_switch: None,
+            },
+            Phase::Downloading,
+            Phase::Idle,
+        ] {
+            let mut core = Core::new(phase);
+            assert!(matches!(
+                core.adopt_staged(staged_update("0.0.0-dev-42", 'c'), false),
+                AdoptOutcome::Adopted
+            ));
+            assert_eq!(
+                core.staged.as_ref().map(|u| u.version.as_str()),
+                Some("0.0.0-dev-42")
+            );
+        }
         // Quitting installs what was staged (`install_on_quit`), so a release
         // that lands later must not replace it: the folder it unpacked into
         // holds the bundle the installed update replaced.
-        assert!(!adopts_staged_update(&State::Ready, true));
-        assert!(!adopts_staged_update(&State::Downloading, true));
-        assert!(!adopts_staged_update(&State::Applied, false));
-        assert!(!adopts_staged_update(&State::Applied, true));
+        for (phase, quitting) in [
+            (Phase::Staged, true),
+            (Phase::Downloading, true),
+            (Phase::Applied, false),
+            (Phase::Applied, true),
+        ] {
+            let mut core = Core::new(phase);
+            assert!(matches!(
+                core.adopt_staged(staged_update("0.0.0-dev-42", 'c'), quitting),
+                AdoptOutcome::Discarded(_)
+            ));
+            assert!(core.staged.is_none());
+        }
     }
 
     #[test]
@@ -1357,7 +1629,7 @@ mod tests {
             updater.act(&DesktopAction::RestartIntoUpdate).is_err(),
             "nothing is staged"
         );
-        *lock(&updater.shared.state) = State::Ready;
+        lock(&updater.shared.core).phase = Phase::Staged;
         updater.check_now();
         assert_eq!(
             updater.status(),
@@ -1365,15 +1637,15 @@ mod tests {
             "a check keeps the staged update offered"
         );
         assert!(
-            lock(&updater.shared.wake).check,
+            lock(&updater.shared.core).check_requested,
             "a staged update still checks"
         );
-        lock(&updater.shared.wake).check = false;
+        lock(&updater.shared.core).check_requested = false;
 
         updater.act(&DesktopAction::RestartIntoUpdate).unwrap();
         assert_eq!(updater.status(), DesktopUpdateStatus::Checking);
         assert!(
-            lock(&updater.shared.wake).check,
+            lock(&updater.shared.core).check_requested,
             "the final check starts at once"
         );
         updater
@@ -1384,7 +1656,7 @@ mod tests {
             "the final check is running"
         );
 
-        *lock(&updater.shared.restart) = Restart::Done(Ok(()));
+        lock(&updater.shared.core).restart = Restart::Done(Ok(()));
         assert!(matches!(updater.take_restart(), Some(Ok(()))));
         assert!(updater.take_restart().is_none(), "reported once");
     }
@@ -1400,26 +1672,32 @@ mod tests {
     fn focusing_the_window_checks_the_dev_channel_at_most_once_a_minute() {
         let updater = Updater::idle_checking();
         updater.window_focused();
-        assert!(lock(&updater.shared.wake).check, "the first focus checks");
-        lock(&updater.shared.wake).check = false;
-        *lock(&updater.shared.last) = Some(("dev".into(), std::time::Instant::now()));
+        assert!(
+            lock(&updater.shared.core).check_requested,
+            "the first focus checks"
+        );
+        lock(&updater.shared.core).check_requested = false;
+        lock(&updater.shared.core).last_check = Some(("dev".into(), std::time::Instant::now()));
         updater.window_focused();
-        assert!(!lock(&updater.shared.wake).check, "a check just started");
-        *lock(&updater.shared.last) = Some((
+        assert!(
+            !lock(&updater.shared.core).check_requested,
+            "a check just started"
+        );
+        lock(&updater.shared.core).last_check = Some((
             "dev".into(),
             std::time::Instant::now() - FOCUS_CHECK_GAP - Duration::from_secs(1),
         ));
         updater.window_focused();
         assert!(
-            lock(&updater.shared.wake).check,
+            lock(&updater.shared.core).check_requested,
             "the last check is over a minute old"
         );
-        lock(&updater.shared.wake).check = false;
-        *lock(&updater.shared.last) =
+        lock(&updater.shared.core).check_requested = false;
+        lock(&updater.shared.core).last_check =
             Some(("stable".into(), std::time::Instant::now() - CHECK_INTERVAL));
         updater.window_focused();
         assert!(
-            !lock(&updater.shared.wake).check,
+            !lock(&updater.shared.core).check_requested,
             "Stable keeps its hourly checks"
         );
     }

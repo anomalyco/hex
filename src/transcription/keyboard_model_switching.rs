@@ -6,6 +6,14 @@ use crate::app_settings::{KeyboardModelChoice, KeyboardModelSwitching};
 use crate::transcription::models::ModelDefinition;
 
 const DEBOUNCE: Duration = Duration::from_millis(300);
+const RETRY_BASE: Duration = Duration::from_secs(2);
+const RETRY_MAX: Duration = Duration::from_secs(60);
+
+fn retry_backoff(failures: u32) -> Duration {
+    RETRY_BASE
+        .saturating_mul(1_u32 << failures.min(5))
+        .min(RETRY_MAX)
+}
 
 /// One enabled keyboard input source, as the settings window lists it.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -49,13 +57,20 @@ pub(crate) fn source_from_window(
     (process_id != own_process_id && layout != 0).then(|| source_id(layout))
 }
 
+#[derive(Clone, Copy, Debug)]
+enum SwitchState {
+    Idle,
+    Pending { due: Instant, failures: u32 },
+    Applying { failures: u32 },
+}
+
 /// No models or workers live here: this only admits the latest picker choice.
 pub(crate) struct Switcher {
     settings: KeyboardModelSwitching,
     /// The observed source; unknown while switching is off, so turning it
     /// on waits for the observer's first report instead of a stale source.
     current: Option<String>,
-    due: Option<Instant>,
+    state: SwitchState,
 }
 
 impl Switcher {
@@ -63,7 +78,7 @@ impl Switcher {
         Self {
             current: current.filter(|_| settings.enabled),
             settings,
-            due: None,
+            state: SwitchState::Idle,
         }
     }
 
@@ -73,7 +88,14 @@ impl Switcher {
             return false;
         }
         self.current = source;
-        self.due = self.mapped().map(|_| now + DEBOUNCE);
+        self.state = if self.mapped().is_some() {
+            SwitchState::Pending {
+                due: now + DEBOUNCE,
+                failures: 0,
+            }
+        } else {
+            SwitchState::Idle
+        };
         true
     }
 
@@ -85,15 +107,48 @@ impl Switcher {
     }
 
     pub(crate) fn take_due(&mut self, now: Instant) -> Option<KeyboardModelChoice> {
-        if now < self.due? {
+        let SwitchState::Pending { due, failures } = self.state else {
+            return None;
+        };
+        if now < due {
             return None;
         }
-        self.due = None;
-        self.mapped().cloned()
+        let choice = self.mapped().cloned();
+        self.state = if choice.is_some() {
+            SwitchState::Applying { failures }
+        } else {
+            SwitchState::Idle
+        };
+        choice
+    }
+
+    pub(crate) fn commit(&mut self) {
+        if matches!(self.state, SwitchState::Applying { .. }) {
+            self.state = SwitchState::Idle;
+        }
+    }
+
+    pub(crate) fn fail(&mut self, now: Instant) {
+        if let SwitchState::Applying { failures } = self.state {
+            self.state = if self.mapped().is_some() {
+                SwitchState::Pending {
+                    due: now + retry_backoff(failures),
+                    failures: failures.saturating_add(1),
+                }
+            } else {
+                SwitchState::Idle
+            };
+        }
+    }
+
+    pub(crate) fn cancel_applying(&mut self) {
+        if matches!(self.state, SwitchState::Applying { .. }) {
+            self.state = SwitchState::Idle;
+        }
     }
 
     pub(crate) fn manual_choice(&mut self) {
-        self.due = None;
+        self.state = SwitchState::Idle;
     }
 
     /// Only enabling, disabling, or editing the active mapping affects work.
@@ -107,7 +162,14 @@ impl Switcher {
         if before == (self.settings.enabled, self.mapped().cloned()) {
             return false;
         }
-        self.due = self.mapped().map(|_| now);
+        self.state = if self.mapped().is_some() {
+            SwitchState::Pending {
+                due: now,
+                failures: 0,
+            }
+        } else {
+            SwitchState::Idle
+        };
         true
     }
 }
@@ -260,13 +322,13 @@ mod tests {
         };
         let v3 = definition(TranscriptionModelId::ParakeetV3);
         let english = definition(TranscriptionModelId::ParakeetUnifiedEnglish);
-        assert_eq!(source.language_for(v3, "en"), "ru");
-        assert_eq!(source.language_for(english, "en"), "en");
+        assert_eq!(source.language_for(&v3, "en"), "ru");
+        assert_eq!(source.language_for(&english, "en"), "en");
         let unknown = InputSource {
             languages: vec!["xx".into()],
             ..source
         };
-        assert_eq!(unknown.language_for(v3, "de"), "de");
+        assert_eq!(unknown.language_for(&v3, "de"), "de");
     }
 
     #[test]
@@ -285,5 +347,36 @@ mod tests {
     #[test]
     fn keyboard_source_is_none_without_a_layout() {
         assert_eq!(source_from_window(8, 7, 0), None);
+    }
+
+    #[test]
+    fn a_failed_keyboard_switch_retries_with_bounded_backoff_until_committed() {
+        let now = Instant::now();
+        let mut switcher = Switcher::new(mapped(&[("Spanish", spanish())]), Some("ABC".into()));
+        assert!(switcher.source_changed(Some("Spanish".into()), now));
+        assert_eq!(switcher.take_due(now + DEBOUNCE), Some(spanish()));
+        // While applying, duplicate ticks do not fire again.
+        assert_eq!(switcher.take_due(now + Duration::from_secs(5)), None);
+
+        let fail_1 = now + DEBOUNCE;
+        switcher.fail(fail_1);
+        assert_eq!(
+            switcher.take_due(fail_1 + Duration::from_millis(1_999)),
+            None
+        );
+        assert_eq!(switcher.take_due(fail_1 + RETRY_BASE), Some(spanish()));
+
+        let fail_2 = fail_1 + RETRY_BASE;
+        switcher.fail(fail_2);
+        assert_eq!(
+            switcher.take_due(fail_2 + Duration::from_millis(3_999)),
+            None
+        );
+        assert_eq!(
+            switcher.take_due(fail_2 + Duration::from_secs(4)),
+            Some(spanish())
+        );
+        switcher.commit();
+        assert_eq!(switcher.take_due(fail_2 + Duration::from_secs(120)), None);
     }
 }

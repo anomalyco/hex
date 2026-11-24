@@ -101,7 +101,7 @@ pub(super) fn prepare(
         }
     });
     progress::clear();
-    let name = model.name;
+    let name = model.name.as_ref();
     match answer {
         Ok((200, _)) => match outcome {
             Some(Ok(())) => Ok(()),

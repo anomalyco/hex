@@ -39,6 +39,18 @@ impl Shortcut {
     }
 }
 
+/// Per-capture output metadata for whichever shortcut machine is recording:
+/// whether Output processing is skipped (`raw`), and whether a `hex dictation
+/// start --print` command owns its transcript (`print`). Lives on `Hotkeys`
+/// only while a capture is active so neither fact can outlive a recording or
+/// leak into a later dictation.
+#[derive(Debug)]
+pub(super) struct ActiveCapture {
+    pub(super) shortcut: Shortcut,
+    pub(super) raw: bool,
+    pub(super) print: Option<PrintReply>,
+}
+
 /// The dictation shortcut machines: dictation, Labs › Second dictation
 /// shortcut while it is on and bound, Dictate without processing while it is
 /// bound, Labs › More dictation shortcuts' rows, and Labs › Caps Lock
@@ -54,12 +66,8 @@ pub(super) struct Hotkeys {
     /// Labs › Caps Lock dictation's hands-free toggle. Its binding is empty:
     /// presses arrive from the caps-lock worker, not the shortcut matcher.
     pub(super) caps_lock: DictationHotkey,
-    /// The recording (or the last) skips processing: the raw shortcut or
-    /// `hex dictation start --raw` started it.
-    pub(super) raw_capture: bool,
-    /// The recording answers a `hex dictation start --print` instead of
-    /// pasting or copying, however it ends.
-    pub(super) print_capture: Option<PrintReply>,
+    /// Output metadata for the recording currently in progress, if any.
+    pub(super) active: Option<ActiveCapture>,
     /// Whether the listener last saw shortcuts suspended, so that a capture
     /// a command starts during a pause is left alone.
     pub(super) suspended: bool,
@@ -75,8 +83,7 @@ impl Hotkeys {
             raw: None,
             extra: std::array::from_fn(|_| None),
             caps_lock,
-            raw_capture: false,
-            print_capture: None,
+            active: None,
             suspended: false,
         }
     }
@@ -180,6 +187,9 @@ impl Hotkeys {
 
     /// Stands `shortcut`'s machine down, as when its start was refused.
     pub(super) fn suspend(&mut self, shortcut: Shortcut) {
+        if self.active.as_ref().is_some_and(|a| a.shortcut == shortcut) {
+            self.fail_print("its recording already ended");
+        }
         match self.machine_mut(shortcut) {
             Some(machine) => machine.suspend(),
             None => self.dictation.suspend(),
@@ -236,6 +246,13 @@ impl Hotkeys {
         let raw_cancelled = rebind(&mut self.raw, hotkeys.raw_dictation, now);
         let second_cancelled = rebind(&mut self.second, hotkeys.second_dictation, now);
         let extra_cancelled = self.rebind_extra(hotkeys.extra_dictation, now);
+        if let Some(active) = &self.active
+            && ((raw_cancelled && active.shortcut == Shortcut::Raw)
+                || (second_cancelled && active.shortcut == Shortcut::Second)
+                || (extra_cancelled && matches!(active.shortcut, Shortcut::Extra(_))))
+        {
+            self.fail_print("its recording already ended");
+        }
         self.dictation.set_binding(hotkeys.dictation);
         for machine in self.fixed_machines() {
             machine.set_double_tap_enabled(crate::app_settings::double_tap_lock());
@@ -308,7 +325,7 @@ impl Hotkeys {
         }
         let action = self.caps_lock.caps_lock_toggle()?;
         if action == HotkeyAction::Start {
-            self.raw_capture = false;
+            self.begin_capture(Shortcut::CapsLock, false);
         }
         Some(action)
     }
@@ -317,6 +334,13 @@ impl Hotkeys {
     /// whether one was recording so the caller can cancel it.
     pub(super) fn stop_caps_lock(&mut self) -> bool {
         if self.caps_lock.is_recording() {
+            if self
+                .active
+                .as_ref()
+                .is_some_and(|active| active.shortcut == Shortcut::CapsLock)
+            {
+                self.active = None;
+            }
             self.caps_lock.suspend();
             true
         } else {
@@ -324,56 +348,110 @@ impl Hotkeys {
         }
     }
 
-    /// Keeps a `hex dictation start --print`'s reply for the recording it
-    /// just started, which answers it instead of pasting or copying.
-    pub(super) fn keep_print(&mut self, print: PrintReply) {
-        self.print_capture = Some(print);
+    /// Records a newly started capture's owning shortcut and `raw` mode. Any
+    /// leftover print reply from an older recording is failed immediately so
+    /// it can never answer this capture.
+    pub(super) fn begin_capture(&mut self, shortcut: Shortcut, raw: bool) {
+        self.fail_print("its recording already ended");
+        self.active = Some(ActiveCapture {
+            shortcut,
+            raw,
+            print: None,
+        });
     }
 
-    /// Takes the print-only recording's reply for the shortcut `action` that
-    /// ends it. Only the dictation machine owns the reply: `hex dictation
-    /// start` locks that one, and another shortcut's action leaves it alone.
-    /// A finish hands the reply to transcription; a discard never spoke, and
-    /// anything else Hex or the person ends it with is refused. A start means
-    /// the recording it belonged to already ended, so it is failed rather
-    /// than left to answer a later dictation.
-    pub(super) fn print_for(
+    /// Attaches a `hex dictation start --print`'s reply to the recording it
+    /// just started, which answers it instead of pasting or copying (preserving
+    /// `raw` if started with `--raw --print`).
+    pub(super) fn keep_print(&mut self, print: PrintReply) {
+        match &mut self.active {
+            Some(active) if active.shortcut == Shortcut::Dictation => {
+                if let Some(previous) = active.print.replace(print) {
+                    previous.send(PrintedTranscript::Failed(
+                        "its recording already ended".into(),
+                    ));
+                }
+            }
+            _ => {
+                self.fail_print("its recording already ended");
+                self.active = Some(ActiveCapture {
+                    shortcut: Shortcut::Dictation,
+                    raw: false,
+                    print: Some(print),
+                });
+            }
+        }
+    }
+
+    /// Takes the active capture's metadata, leaving `None` behind.
+    pub(super) fn take_capture(&mut self) -> Option<ActiveCapture> {
+        self.active.take()
+    }
+
+    /// Resolves `(raw, print)` for a shortcut's `action` and keeps `active`
+    /// synchronized with it. A `Start` begins a fresh capture (failing any
+    /// leftover print reply); an ending action from the owning shortcut takes
+    /// `active` and answers its `print` reply for discards or cancels, while
+    /// another shortcut's action leaves the active capture untouched.
+    pub(super) fn resolve_action(
         &mut self,
         shortcut: Shortcut,
         action: HotkeyAction,
-    ) -> Option<PrintReply> {
-        if shortcut != Shortcut::Dictation {
-            return None;
+    ) -> (bool, Option<PrintReply>) {
+        if action == HotkeyAction::Start {
+            let raw = shortcut == Shortcut::Raw;
+            self.begin_capture(shortcut, raw);
+            return (raw, None);
         }
-        let print = self.print_capture.take()?;
+        // Labs › Model switch shortcut: it switches no capture, so it never
+        // takes the active one; its own action does the swap.
+        if action == HotkeyAction::ModelSwitch {
+            return (false, None);
+        }
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|active| active.shortcut != shortcut)
+        {
+            return (false, None);
+        }
+        let Some(active) = self.active.take() else {
+            return (false, None);
+        };
         match action {
-            HotkeyAction::Finish => return Some(print),
-            HotkeyAction::Discard(_) => print.send(PrintedTranscript::NoSpeech),
-            HotkeyAction::Start => {
-                print.send(PrintedTranscript::Failed(
-                    "its recording already ended".into(),
-                ));
+            HotkeyAction::Finish => (active.raw, active.print),
+            HotkeyAction::Discard(_) => {
+                if let Some(print) = active.print {
+                    print.send(PrintedTranscript::NoSpeech);
+                }
+                (active.raw, None)
             }
             HotkeyAction::PasteLast
-            | HotkeyAction::PasteMeeting
+            | HotkeyAction::ModelSwitch
             | HotkeyAction::Cancel
-            | HotkeyAction::CancelShortcut => print.send(PrintedTranscript::Cancelled),
+            | HotkeyAction::CancelShortcut => {
+                if let Some(print) = active.print {
+                    print.send(PrintedTranscript::Cancelled);
+                }
+                (active.raw, None)
+            }
+            HotkeyAction::Start => unreachable!("handled above"),
         }
-        None
     }
 
-    /// Answers a print-only recording that Hex itself ends without a
-    /// transcript (a microphone loss, a suspended shortcut, a closed
-    /// listener), so its command never waits for the full cap.
+    /// Clears the active capture and answers any print-only recording that Hex
+    /// itself ends without a transcript (a microphone loss, a suspended
+    /// shortcut, a closed listener), so its command never waits for the cap.
     pub(super) fn fail_print(&mut self, why: &str) {
-        if let Some(print) = self.print_capture.take() {
+        if let Some(print) = self.active.take().and_then(|active| active.print) {
             print.send(PrintedTranscript::Failed(why.into()));
         }
     }
 
-    /// Answers a print-only recording that `hex dictation cancel` discards.
-    pub(super) fn cancel_print(&mut self) {
-        if let Some(print) = self.print_capture.take() {
+    /// Clears the active capture and answers any print-only recording that
+    /// `hex dictation cancel` discards.
+    pub(super) fn cancel_capture(&mut self) {
+        if let Some(print) = self.active.take().and_then(|active| active.print) {
             print.send(PrintedTranscript::Cancelled);
         }
     }
@@ -397,7 +475,9 @@ impl Hotkeys {
                 Some(HotkeyAction::Start) if others_recording => {
                     machine.suspend();
                 }
-                Some(HotkeyAction::PasteLast | HotkeyAction::PasteMeeting)
+                // Every machine carries the shared Paste Last and model switch
+                // keys; one action is enough.
+                Some(HotkeyAction::PasteLast | HotkeyAction::ModelSwitch)
                     if shortcut != Shortcut::Dictation => {}
                 Some(action) => actions.push((shortcut, action)),
                 None => {}
@@ -540,11 +620,12 @@ mod tests {
             ),
             [(Shortcut::Dictation, HotkeyAction::Finish)]
         );
-        // Only `print_for` takes the reply; the action alone leaves it.
-        assert!(hotkeys.print_capture.is_some());
-        let print = hotkeys
-            .print_for(Shortcut::Dictation, HotkeyAction::Finish)
-            .expect("the transcript goes to the printing start");
+        // Only `resolve_action` takes the reply; the action alone leaves it.
+        assert!(hotkeys.active.as_ref().is_some_and(|a| a.print.is_some()));
+        let (raw, print) = hotkeys.resolve_action(Shortcut::Dictation, HotkeyAction::Finish);
+        assert!(!raw);
+        let print = print.expect("the transcript goes to the printing start");
+        assert!(hotkeys.active.is_none());
         print.send(PrintedTranscript::Text("Ship it.".into()));
         assert_eq!(
             printed.recv_timeout(Duration::from_millis(50)),
@@ -556,9 +637,11 @@ mod tests {
         hotkeys.keep_print(start);
         assert!(
             hotkeys
-                .print_for(Shortcut::Dictation, HotkeyAction::Cancel)
+                .resolve_action(Shortcut::Dictation, HotkeyAction::Cancel)
+                .1
                 .is_none()
         );
+        assert!(hotkeys.active.is_none());
         assert!(matches!(
             printed.recv_timeout(Duration::from_millis(50)),
             Ok(PrintedTranscript::Cancelled)
@@ -580,10 +663,11 @@ mod tests {
         hotkeys.keep_print(start);
         assert!(
             hotkeys
-                .print_for(Shortcut::Raw, HotkeyAction::Finish)
+                .resolve_action(Shortcut::Raw, HotkeyAction::Finish)
+                .1
                 .is_none()
         );
-        assert!(hotkeys.print_capture.is_some());
+        assert!(hotkeys.active.as_ref().is_some_and(|a| a.print.is_some()));
         assert!(matches!(
             printed.try_recv(),
             Err(std::sync::mpsc::TryRecvError::Empty)
@@ -593,10 +677,11 @@ mod tests {
         // wait for the new capture.
         assert!(
             hotkeys
-                .print_for(Shortcut::Dictation, HotkeyAction::Start)
+                .resolve_action(Shortcut::Dictation, HotkeyAction::Start)
+                .1
                 .is_none()
         );
-        assert!(hotkeys.print_capture.is_none());
+        assert!(hotkeys.active.as_ref().is_some_and(|a| a.print.is_none()));
         assert!(matches!(
             printed.recv_timeout(Duration::from_millis(50)),
             Ok(PrintedTranscript::Failed(why)) if why == "its recording already ended"
@@ -607,12 +692,14 @@ mod tests {
         hotkeys.keep_print(start);
         assert!(
             hotkeys
-                .print_for(
+                .resolve_action(
                     Shortcut::Dictation,
                     HotkeyAction::Discard(DiscardCause::Key)
                 )
+                .1
                 .is_none()
         );
+        assert!(hotkeys.active.is_none());
         assert!(matches!(
             printed.recv_timeout(Duration::from_millis(50)),
             Ok(PrintedTranscript::NoSpeech)
@@ -622,10 +709,41 @@ mod tests {
         let (start, printed) = PrintReply::channel();
         hotkeys.keep_print(start);
         hotkeys.suspend_all();
-        assert!(hotkeys.print_capture.is_none());
+        assert!(hotkeys.active.is_none());
         assert!(matches!(
             printed.recv_timeout(Duration::from_millis(50)),
             Ok(PrintedTranscript::Failed(_))
         ));
+    }
+
+    /// Raw and print compose cleanly (`hex dictation start --raw --print` or
+    /// `hex dictation start --raw` + `stop --print`), and ending a raw capture
+    /// clears `raw` so it never leaks to the next dictation.
+    #[test]
+    fn raw_and_print_compose_on_the_active_capture_and_clear_on_end() {
+        let mut hotkeys = hotkeys();
+
+        // Start raw + print on the dictation machine: finishing returns both.
+        hotkeys.begin_capture(Shortcut::Dictation, true);
+        let (start, _printed) = PrintReply::channel();
+        hotkeys.keep_print(start);
+        let (raw, print) = hotkeys.resolve_action(Shortcut::Dictation, HotkeyAction::Finish);
+        assert!(raw, "raw --print preserves raw mode");
+        assert!(print.is_some(), "raw --print preserves the print reply");
+        assert!(hotkeys.active.is_none(), "active capture clears on finish");
+
+        // A raw shortcut capture taken by control stop keeps raw=true and clears.
+        let (raw, print) = hotkeys.resolve_action(Shortcut::Raw, HotkeyAction::Start);
+        assert!(raw && print.is_none());
+        let stopped = hotkeys.take_capture().expect("active raw capture");
+        assert!(stopped.raw);
+        assert!(stopped.print.is_none());
+        assert!(hotkeys.active.is_none());
+
+        // Nothing left latched when no capture is active.
+        assert_eq!(
+            hotkeys.resolve_action(Shortcut::Dictation, HotkeyAction::Finish),
+            (false, None)
+        );
     }
 }

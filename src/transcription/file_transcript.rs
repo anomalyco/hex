@@ -156,7 +156,7 @@ pub fn transcribe_audio_file(
     }
     check_extension(source)?;
     let model = validate(&selection).map_err(model_unavailable)?;
-    if !is_installed(model, &selection.language) {
+    if !is_installed(&model, &selection.language) {
         return Err(model_unavailable(format!(
             "{} is not installed; choose another model or install it",
             model.name

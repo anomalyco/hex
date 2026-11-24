@@ -878,3 +878,163 @@ fn chapters_list_spans_and_lines_and_say_when_there_are_none() {
     );
     assert!(chaptered.chapters("missing", NOW).is_err());
 }
+
+#[test]
+fn imported_meetings_render_speaker_consistently_across_export_query_chapters_and_search() {
+    let root = std::env::temp_dir().join(format!("hex-imported-markdown-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let id = "1790004000000-2001";
+    let dir = root.join(id);
+    fs::create_dir_all(&dir).unwrap();
+    let manifest = MeetingManifest {
+        schema_version: 1,
+        id: id.into(),
+        title: "Imported interview".into(),
+        provisional_title: None,
+        title_source: Some(crate::meeting::TitleSource::User),
+        created_at_ms: 1_790_004_000_000,
+        ended_at_ms: Some(1_790_004_060_000),
+        duration_ms: Some(60_000),
+        app: None,
+        calendar: None,
+        status: MeetingStatus::Complete,
+        system: crate::meeting::TrackManifest::default(),
+        microphone: crate::meeting::TrackManifest::default(),
+        echo_suppressed_utterances: 0,
+        notes: None,
+        notes_error: None,
+        notes_export_path: None,
+        notes_export_sha256: None,
+        notes_export_removed: false,
+        live_transcription_error: None,
+        export_path: None,
+        export_sha256: None,
+        export_error: None,
+        error: None,
+        chapters: vec![Chapter {
+            title: "Opening".into(),
+            summary: "Intro notes.".into(),
+            start_ms: 0,
+        }],
+        chapters_refined: true,
+        retention_applies: false,
+        audio_removed_at_ms: None,
+        imported: true,
+    };
+    let entries = vec![
+        TranscriptEntry {
+            source: MeetingSource::System,
+            start_ms: 1_000,
+            end_ms: 2_000,
+            text: "  Hello   ".into(),
+        },
+        TranscriptEntry {
+            source: MeetingSource::System,
+            start_ms: 3_000,
+            end_ms: 4_000,
+            text: ", welcome to the podcast.".into(),
+        },
+        TranscriptEntry {
+            source: MeetingSource::Microphone,
+            start_ms: 10_000,
+            end_ms: 12_000,
+            text: "Thanks for having me on the roadmap episode.".into(),
+        },
+    ];
+    fs::write(
+        dir.join("manifest.json"),
+        serde_json::to_string_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    let ndjson = entries
+        .iter()
+        .map(|entry| format!("{}\n", serde_json::to_string(entry).unwrap()))
+        .collect::<String>();
+    fs::write(dir.join("transcript.ndjson"), ndjson).unwrap();
+    let exported = super::super::markdown::render_document(&manifest, &entries);
+    fs::write(dir.join("transcript.md"), &exported).unwrap();
+
+    assert!(
+        exported.contains("**Speaker** · 00:01\nHello, welcome to the podcast."),
+        "{exported}"
+    );
+    assert!(
+        exported.contains("**Speaker** · 00:10\nThanks for having me on the roadmap episode."),
+        "{exported}"
+    );
+    assert!(
+        !exported.contains("**You**") && !exported.contains("**Them**"),
+        "{exported}"
+    );
+
+    let lib = Library::new(&root);
+    let md = lib.markdown(id, OffsetRange::default(), NOW).unwrap();
+    assert!(
+        md.contains("**Speaker** · 00:01\nHello, welcome to the podcast."),
+        "{md}"
+    );
+    assert!(
+        md.contains("**Speaker** · 00:10\nThanks for having me on the roadmap episode."),
+        "{md}"
+    );
+    assert!(!md.contains("**You**") && !md.contains("**Them**"), "{md}");
+
+    let chapter_md = lib.chapter_markdown(id, 1, NOW).unwrap();
+    assert!(
+        chapter_md.contains("**Speaker** · 00:01\nHello, welcome to the podcast."),
+        "{chapter_md}"
+    );
+    assert!(
+        !chapter_md.contains("**You**") && !chapter_md.contains("**Them**"),
+        "{chapter_md}"
+    );
+
+    let transcript = lib
+        .transcript(
+            &TranscriptQuery {
+                meeting_id: id.into(),
+                start: None,
+                end: None,
+                speaker: None,
+                max_chars: 20_000,
+                cursor: None,
+            },
+            NOW,
+        )
+        .unwrap();
+    assert!(
+        transcript.contains("] Speaker: Hello, welcome to the podcast."),
+        "{transcript}"
+    );
+    assert!(
+        !transcript.contains("] You:") && !transcript.contains("] Them:"),
+        "{transcript}"
+    );
+
+    let search = lib
+        .search(
+            &SearchQuery {
+                query: "roadmap".into(),
+                since: None,
+                until: None,
+                meeting_id: Some(id.into()),
+                limit: 10,
+                fuzzy: false,
+                include_in_progress: true,
+                vocabulary: Vec::new(),
+            },
+            NOW,
+        )
+        .unwrap();
+    assert!(search.contains("· Speaker ·"), "{search}");
+    assert!(search.contains("before (Speaker 00:01):"), "{search}");
+    assert!(
+        !search.contains("· You ·") && !search.contains("· Them ·"),
+        "{search}"
+    );
+
+    let listed = list(&lib, true);
+    assert!(listed.contains("participants: Speaker"), "{listed}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
