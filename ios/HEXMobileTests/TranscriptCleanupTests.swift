@@ -1381,6 +1381,30 @@ final class SpokenCleanupRulesTests: XCTestCase {
         XCTAssertEqual(TranscriptFormatter.format("dimmi i nomi", style: .polished, language: "it-IT"), "Dimmi i nomi.")
     }
 
+    /// Settings › Dictation › Lowercase off (TestFlight build 149: "i have lowercase toggled off,
+    /// but everything is still lowercase"): the whole pipeline keeps Polished's capitals, for a
+    /// speech model's capitalised text and for all-lowercase text alike, while Casual starts its
+    /// sentences lowercase and writes "i" for "I" whatever the switch says, as its hint promises.
+    func testLowercaseOffKeepsPolishedCapitalsAndCasualStillStartsLowercase() {
+        let capitalised = "Hey, I just got home. Are you free tomorrow?"
+        let lowercase = "hey i just got home are you free tomorrow"
+        func run(_ style: DictationStyle, _ text: String, lowercase: Bool = false) -> String {
+            DictationPipeline.Preferences(style: style, lowercase: lowercase).format(text, language: "en-US")
+        }
+        for text in [capitalised, lowercase] {
+            let polished = run(.polished, text)
+            XCTAssertEqual(polished.first, "H", polished)
+            XCTAssertTrue(polished.contains(" I "), polished)
+            let casual = run(.casual, text)
+            XCTAssertEqual(casual.first, "h", casual)
+            XCTAssertTrue(casual.contains(" i "), casual)
+            XCTAssertFalse(casual.contains(where: \.isUppercase), casual)
+            XCTAssertEqual(run(.polished, text, lowercase: true), polished.lowercased())
+        }
+        XCTAssertEqual(run(.polished, capitalised), capitalised)
+        XCTAssertEqual(run(.casual, capitalised), "hey i just got home. are you free tomorrow?")
+    }
+
     /// Casual texts: sentences may start lowercase, "I" is "i", an opening interjection loses
     /// its comma, and a short message its final full stop. Acronyms, names inside a sentence
     /// and words with inner capitals keep their case.
