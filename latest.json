@@ -1,18 +1,19 @@
 {
-  "versionCode": 2332,
-  "versionName": "0.2.2-preview.2332",
+  "versionCode": 2348,
+  "versionName": "0.2.2-preview.2348",
   "version": "0.2.2",
   "minSdk": 31,
-  "published": "2026-11-23",
-  "commit": "e89c470684a708c64cd6fecaedc04712ececbe60",
+  "published": "2026-11-24",
+  "commit": "1f467eff234f0785d7778ab445b71c9ef7c7a541",
   "apk": {
-    "url": "https://github.com/anomalyco/hex/releases/download/android-preview-2332/HexPreview-0.2.2-preview.2332.apk",
-    "size": 68997104,
-    "sha256": "e6e52f9a95e2291fa5eade713f15ad488707d81ba40088411d4bdfca4532ebbc"
+    "url": "https://github.com/anomalyco/hex/releases/download/android-preview-2348/HexPreview-0.2.2-preview.2348.apk",
+    "size": 67893195,
+    "sha256": "dd0024c771b04a167d3bbf385d19aaa178f9c83a58ef5cc50eaf0e738102ee77"
   },
   "notes": [
-    "Send feedback, on Home: tell us what's broken or missing, with a picture if you like.",
-    "Russian and Polish dictation.",
-    "Fixes a short dictation coming out wrong after a long one."
+    "Swipe typing: slide across a word's letters to type it. On by default, in Hex Preview › Keyboard.",
+    "Number row: switch it on in Hex Preview › Labs.",
+    "Dictation finishes sooner when you pause or stop talking, and ✕ stops it faster.",
+    "Hex Preview no longer installs its own updates, which is what Google Play Protect was flagging. From now on, Download update opens the download in your browser."
   ]
 }
