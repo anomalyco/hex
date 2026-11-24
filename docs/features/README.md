@@ -3260,8 +3260,9 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   Gboard's own (the ?123 page draws the same ones): a s d f g h j k l for
 │   @ # $ _ & - + ( ) and z x c v b n m for * " ' : ; ! ?, so ! and ? are reachable and
 │   no mark sits on two letter keys. Symbols follow the letter, so AZERTY q/w and QWERTZ y get
-│   none where their layouts draw them below row 1. With Local currency on, d holds the
-│   phone's symbol in $'s place. Row 1 keeps its digit while it shows one: with Number
+│   none where their layouts draw them below row 1. With Local currency on, d shows and
+│   holds the phone's symbol in $'s place, with the $ it replaced next in its hold list
+│   and d's accents after it. Row 1 keeps its digit while it shows one: with Number
 │   row off it hints and holds the digit first. With it on, the top row's letters show and
 │   hold Gboard's symbols in the hidden digit's place (q for %, p for }, r for =), while a
 │   letter that already has a row 2 or 3 symbol keeps that one wherever the layout draws it
@@ -3272,9 +3273,8 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   `theLocalCurrencyTakesDsSymbol` in KeyboardPageTest.kt cover the two rows, the currency
 │   and that no mark repeats, beside `withBothLabsTheTopRowShowsGboardsSymbols` and
 │   `theTopRowSymbolsStayOnTheTopRow` for the top row; `./gradlew :app:testDebugUnitTest
-│   :app:compileDebugKotlin -x prepareSpeechModel` passed 198 tests in
-│   https://github.com/anomalyco/hex/actions/runs/45450568457 (Temurin JDK 21 and Android SDK 36,
-│   GitHub-hosted); not tried on a device or emulator. The repo has no Android CI.
+│   :app:compileDebugKotlin -x prepareSpeechModel` passed 208 tests locally (OpenJDK 21 on Arch
+│   Linux, Android SDK 36); not tried on a device or emulator. The repo has no Android CI.
 ├── Labs > Output > Signature (off) -> one editable line (up to 200 characters; empty adds
 │   nothing, default "Sent from Hex") on its own line at the end of each keyboard dictation,
 │   added once; the next dictation starts on a new line below it, and a signed dictation
@@ -3291,9 +3291,8 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   bottom-row symbol where it has one, like AZERTY a for @. The keyboard is one row taller
 │   and the Hex menu matches that height; ?123, the symbols pages and the pads keep their keys
 │   and are a row shorter than the letters while it is on. Off, the page is unchanged.
-│   KeyboardPageTest covers it, including the top row's symbols, and passed in
-│   https://github.com/anomalyco/hex/actions/runs/45450568457 (testDebugUnitTest + compileDebugKotlin,
-│   GitHub-hosted); not tried on a device. The repo has no Android CI.
+│   KeyboardPageTest covers it, including the top row's symbols, and the 208-test run below
+│   covers it; not tried on a device. The repo has no Android CI.
 ├── Labs > Keyboard > Local currency (off) -> the phone's region picks the ?123 page's
 │   currency symbol in $'s place from a fixed set of single-character symbols: GBP £, EUR €,
 │   JPY and CNY ¥, INR ₹, PHP ₱, KRW ₩, RUB ₽ and UAH ₴. USD, a locale with no country, a
@@ -3306,16 +3305,16 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   local £, € or ¥, and gives only ¥'s slot to $ for ₹, ₱, ₩, ₽ and ₴, so £, ¢ and € stay drawn,
 │   no page draws a symbol twice, and $ is always on one of them; $'s holds drop the local symbol
 │   itself, whichever it is, so their list never repeats it.
-│   The letters page reads it too, for d's held symbol and corner hint in place of $;
-│   otherwise only the symbol pages read it, and a number, PIN, phone or date pad, including
-│   the symbols page's own 1234 pad, draws none and reads none. Off, both pages, d's hold
-│   and every other hold are unchanged.
+│   The letters page reads it too, only for d: its corner hint shows the local symbol instead
+│   of $, and holding d offers that symbol first, the $ it replaced next and d's accents
+│   after, never the same mark twice. A number, PIN, phone or date pad, including the symbols
+│   page's own 1234 pad, draws and reads none. Off, both pages, d's hold and every other hold
+│   are unchanged.
 │   Checks: `LocalCurrencyTest` (rows, holds, ten keys a row and region cases, 7/7),
 │   `SymbolPagesTest` (5/5) and `theLocalCurrencyTakesDsSymbol` in KeyboardPageTest.kt in
-│   android/app/src/test, and `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin`
-│   passed 198 tests in https://github.com/anomalyco/hex/actions/runs/45450568457 (Temurin JDK 21
-│   and Android SDK 36, GitHub-hosted); not tried on a device or emulator, and the repo has no
-│   Android CI.
+│   android/app/src/test, and `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin
+│   -x prepareSpeechModel` passed 208 tests locally (OpenJDK 21 on Arch Linux, Android SDK 36); not
+│   tried on a device or emulator, and the repo has no Android CI.
 ├── Labs > Keyboard > Emoji suggestions (off) -> on the English layout, while a word
 │   that names an emoji is being typed (smile -> 😊, joy/haha -> 😂, heart -> ❤️), the
 │   strip's last slot offers it beside the word suggestions, padded to that slot even when

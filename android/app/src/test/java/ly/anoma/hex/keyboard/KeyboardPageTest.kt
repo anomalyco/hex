@@ -145,7 +145,12 @@ class KeyboardPageTest {
         // On, d holds the phone's own, as the ?123 page shows it.
         assertEquals("£", LetterFeedback.letterSymbol('d', currency = '£')?.toString())
         assertEquals("€", LetterFeedback.letterSymbol('D', currency = '€')?.toString())
-        assertEquals(listOf("¥"), LetterFeedback.holds('d', "en", null, symbolsOnLetters = true, currency = '¥'))
+        // Holding d keeps Gboard's $ behind the phone's symbol: the local one first, then the $ it
+        // replaced, then d's accents, with no mark twice.
+        val local = LetterFeedback.holds('d', "en", null, symbolsOnLetters = true, currency = '¥')
+        assertEquals(listOf("¥", "$"), local)
+        assertEquals(local.size, local.distinct().size)
+        assertEquals(listOf("$"), LetterFeedback.holds('d', "en", null, symbolsOnLetters = true, currency = '$'))
         // As the letters page resolves it: with both labs on, d's corner shows the page's currency, and $
         // when the lab is off or the region has none.
         val letters = page(numberRow = true).copy(currency = '£')

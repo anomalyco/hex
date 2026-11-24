@@ -142,11 +142,17 @@ internal class LetterFeedback(private val host: ViewGroup) {
          * letter with no digit to show offers its symbol first instead: Gboard's on the second and third
          * rows. On the top row, while the number row holds its digit, Gboard's set only fills in for a
          * letter with no home- or bottom-row symbol of its own. [currency] is Labs › Keyboard › Local
-         * currency's symbol, which takes $'s place on d as it does on the ?123 page. */
+         * currency's symbol, which takes $'s place on d as it does on the ?123 page; holding d then offers
+         * it first, the $ it replaced next, and d's accents after. */
         fun holds(c: Char, language: String, digit: Char?, symbolsOnLetters: Boolean = false,
                   topRow: Boolean = false, currency: Char? = null): List<String> {
             val accents = options(c, language)
             val first = digit?.toString() ?: (if (symbolsOnLetters) letterSymbol(c, topRow, currency)?.toString() else null)
+            // Gboard keeps $ behind the phone's own symbol on d: holding d offers the local currency first,
+            // then the $ it replaced, then d's accents, and no mark twice.
+            if (first != null && digit == null && currency != null && c.lowercaseChar() == 'd') {
+                return (listOf(first, "$") + accents).distinct()
+            }
             return if (first == null) accents else listOf(first) + accents
         }
 
