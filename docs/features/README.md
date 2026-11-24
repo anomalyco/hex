@@ -3244,14 +3244,16 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
     quote — ‘ or “ — at the start, after whitespace, or after an opening bracket or quote, and
     the closing quote or apostrophe — ’ or ” — after anything else. A word a suggestion,
     autocorrection or swipe commits goes in with ’ for its straight apostrophe ("don't" becomes
-    "don’t"), and a dictation's straight quotes are placed by the same rules, after its spacing
-    is decided, in the same plain-text fields as the keys. A quote key's held alternates still
-    type exactly the character they show. Off, keys and picks insert the straight characters
-    they did before; a long-pressed ’ or ” now joins the word before it like ' and ", and ”
-    ends a word as " does. Checks: `./gradlew :app:compileDebugKotlin :app:testDebugUnitTest` passed with
-    149 tests (including `SmartQuotesTest`'s 12) on 2026-11-24, on Temurin JDK 21 and Android
-    SDK 36 (platform 36, build-tools 35/36, NDK 27.2.12479018); the repo has no Android CI, and
-    nothing was tried on a device or emulator. `python3 scripts/code-shape.py --check` passes.
+    "don’t"), your own text replacements get ’ for each straight apostrophe they contain (a " in
+    one stays straight), and a dictation's straight quotes are placed by the same rules, after its
+    spacing is decided, in the same plain-text fields as the keys. The strip shows the ’ a
+    suggestion will insert. A quote key's held alternates still type exactly the character they
+    show. Off, keys, picks and dictation insert the straight characters they did before, and
+    existing ’ and ” are treated like ' and " for word boundaries, spacing and lookups. Checks:
+    `./gradlew :app:compileDebugKotlin :app:testDebugUnitTest` passed with 150 tests (including
+    `SmartQuotesTest`'s 12) on 2026-11-24, on Temurin JDK 21 and Android SDK 36 (platform 36,
+    build-tools 35/36, NDK 27.2.12479018); the repo has no Android CI, and nothing was tried on a
+    device or emulator. `python3 scripts/code-shape.py --check` passes.
 Unmerged Windows / deferred features -> Not part of this map
 ```
 

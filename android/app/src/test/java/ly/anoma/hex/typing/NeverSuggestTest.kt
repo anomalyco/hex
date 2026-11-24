@@ -299,6 +299,23 @@ class NeverSuggestTest {
         assertEquals("your mother", second?.replacement)
     }
 
+    // The same rule as the straight-apostrophe test ("you're mother " stays): a correction that
+    // changes letters and carries an apostrophe ("your" -> "you're") is never revised by the word
+    // after it, with the apostrophe straight or smart.
+    @Test fun aCurledCountChangingFixIsNotRevised() {
+        val g = layout("en")
+        val w = word(spatial = false)
+        personal(w, emptyList(), mapOf("your" to "you're"))
+        val curly: (String) -> String = { it.replace('\'', '\u2019') }
+        w.reset("")
+        for (c in "your") w.tap(g, c)
+        val first = w.finish(' ', KeyPoint(183.93, 234.5), g, curly)
+        assertEquals("you’re", first?.replacement)
+        w.reset("you’re ")
+        for (c in "mother") w.tap(g, c)
+        assertNull(w.finish(' ', KeyPoint(183.93, 234.5), g, curly))
+    }
+
     // iOS testASpaceTappedAtTheSpaceBarsEdgeForALetterJoinsTheWords: a space tapped at the bar's top
     // edge, under a letter the word needed, joins the words at the next word's space.
     @Test fun aSpaceTappedAtTheBarsEdgeForALetterJoinsTheWords() {

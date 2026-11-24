@@ -292,7 +292,7 @@ internal class KeyboardEngine(
     private fun showSuggestions(w: TypingWord?) {
         cancelChip()
         if (w != null && w.token.isNotEmpty()) {
-            surface?.suggestions(Suggestion.withEmoji(w.strip(autocorrect = false), emojiFor(w)))
+            surface?.suggestions(Suggestion.withEmoji(w.strip(autocorrect = false).map(::shown), emojiFor(w)))
             // A stand-in's strip already is the finished one: nothing there changes after the pause.
             if (!feedback.autocorrect || w.standIn || !canEndWord()) return
             val token = w.token
@@ -301,7 +301,7 @@ internal class KeyboardEngine(
                 if (word === w && w.token == token) surface?.suggestions(Suggestion.withEmoji(w.strip(autocorrect = true).map {
                     if (it.kind == Suggestion.Kind.Fix && feedback.blocked(w.decoder.model.language, token, it.text))
                         Suggestion(it.text, Suggestion.Kind.Word) else it
-                }, emojiFor(w)))
+                }.map(::shown), emojiFor(w)))
             }.also { main.postDelayed(it, CHIP_PAUSE_MS) }
             return
         }
@@ -330,8 +330,14 @@ internal class KeyboardEngine(
     private fun showPredictions(before: String?) {
         val w = word
         surface?.suggestions(if (w != null && before != null && !symbols && canEndWord())
-            w.predictions(before, capitalize = capsWanted()).map { Suggestion(it, Suggestion.Kind.Next) } else emptyList())
+            w.predictions(before, capitalize = capsWanted()).map { shown(Suggestion(it, Suggestion.Kind.Next)) } else emptyList())
     }
+
+    /** A slot as the strip shows it: with Labs › Keyboard › Smart quotes on, a word shows the ’ it
+     * will insert ("I'm" shows "I’m"). A pick runs [smartWord] over this text again, which leaves a
+     * curly apostrophe unchanged. */
+    private fun shown(slot: Suggestion) =
+        if (smartQuotesHere()) Suggestion(SmartQuotes.word(slot.text), slot.kind) else slot
     private fun before() = if (secure) "" else target.before(96).orEmpty()
     private fun endsWith(suffix: String) = !secure && target.before(suffix.length) == suffix
     private fun canEndWord() = !secure && (target.after(1)?.firstOrNull()?.let {

@@ -64,6 +64,8 @@ class SmartQuotesTest {
         assertEquals("’em", SmartQuotes.word("'em"))
         assertEquals("O’Brien", SmartQuotes.word("O'Brien"))
         assertEquals("hello", SmartQuotes.word("hello"))
+        // A picked suggestion is mapped again as it goes in: a curly apostrophe stays as it is.
+        assertEquals("don’t", SmartQuotes.word(SmartQuotes.word("don't")))
     }
 
     @Test fun emptyTextStaysEmpty() {
