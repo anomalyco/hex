@@ -3311,28 +3311,30 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
     there Hex is opened from the keyboard switcher. Opening Hex in the subtype shows a keys-free
     bar in the strip's place: a status line, the recording's dot scope, ✕ and the Hex key (the
     mark idle, ✓ while recording; "Tap Hex to talk" idle). It starts listening by itself once
-    per entry into the subtype (a fresh voice view or a subtype change; a view restart or
-    rotation leaves the bar for a tap), through the same beginSpeech path (a password field or a
-    missing microphone shows the existing message and leaves the bar idle). It loads the keys'
-    typing model through KeyboardEngine.configureTyping with no surface — every surface call in
-    it is null-safe, and insertDictation uses that model for mid-sentence case — and finishes
-    through the same MicCapture, commitSpeech and KeyboardEngine.insertDictation path. The
-    commit is flushed with getTextBeforeCursor, and the leave happens only once capture.phase is
-    Idle after the completion's queue drained, so the switch never races the text and never
-    abandons another recording or transcription; ✕ discards and leaves at once. A note that
-    arrives with the final text ("Stopped at 1 minute") is not seen, since the bar leaves as
-    soon as the text is in. Leaving calls switchToPreviousInputMethod(), falling back to
-    Android's picker when there is no previous keyboard. The full-keyboard subtype behaves
-    exactly as before in every case. Checks: decision logic only, in `VoiceInputTest` (the bar
-    only with the lab on in the "voice" subtype, the one automatic listen per entry, with a new
-    client in the same subtype not arming again, the leave only when idle, the write only when
-    Android's list disagrees, and the subtype locale), and
+    per new keyboard service or change into the voice subtype, through the same beginSpeech path
+    (a password field or a missing microphone shows the existing message and leaves the bar
+    idle); a view restart or rotation, and a new field or app in the same subtype, leave the bar
+    for a tap. It loads the keys' typing model through KeyboardEngine.configureTyping with no
+    surface — every surface call in it is null-safe, and insertDictation uses that model for
+    mid-sentence case — and finishes through the same MicCapture, commitSpeech and
+    KeyboardEngine.insertDictation path. The commit is flushed with getTextBeforeCursor, and the
+    leave happens only once capture.phase is Idle after the completion's queue drained, so the
+    switch never races the text and never abandons another recording or transcription; ✕
+    discards and leaves at once. A note that arrives with the final text ("Stopped at 1 minute")
+    is not seen, since the bar leaves as soon as the text is in. Leaving calls
+    switchToPreviousInputMethod(), falling back to Android's picker when there is no previous
+    keyboard. The full-keyboard subtype behaves exactly as before in every case. Checks:
+    decision logic only, in `VoiceInputTest` (the bar only with the lab on in the "voice"
+    subtype, the one automatic listen per entry, with a new client in the same subtype not
+    arming again, the leave only when idle, the write only when Android's list disagrees, and
+    the subtype locale), and
     `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin :app:assembleDebug` passed with
     168 tests (VoiceInputTest 6/6) in https://github.com/anomalyco/hex/actions/runs/45375325357,
     a one-off GitHub-hosted run on Temurin JDK 21 and Android SDK 36 with NDK 27.2.12479018; the
     repo has no Android CI, nothing was tried on a device or emulator (still to check there: the
-    switcher's rows under both language settings, a keyboard's mic key, and a package update on
-    Android 12-13, where opening Hex restores the subtype), and
+    switcher's rows under both language settings, a keyboard's mic key, a package update on
+    Android 12-13 (where opening Hex restores the subtype), and whether switching away and back
+    starts a new keyboard service — if it reuses one, the next entry waits for a tap), and
     `python3 scripts/code-shape.py --check` passes.
 Unmerged Windows / deferred features -> Not part of this map
 ```

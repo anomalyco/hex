@@ -18,8 +18,9 @@ import ly.anoma.hex.useInter
 import kotlin.math.roundToInt
 
 /** The keyboard's voice-only bar (Labs › Keyboard › Voice input mode): a status line, the recording's dot
- * scope, ✕ to discard and ✓ to finish, in the strip's size and place. It has no keys: Android opened Hex in
- * its voice subtype from another keyboard, and Hex goes back there once the words are in. */
+ * scope, ✕ and the Hex key, in the strip's size and place. The Hex key is the Hex mark idle (tap to start)
+ * and ✓ while recording; ✕ discards, or goes back to the keyboard when idle. It has no keys: Android opened
+ * Hex in its voice subtype from another keyboard, and Hex goes back there once the words are in. */
 internal class VoiceInputView(context: Context, private val ime: HexKeyboard) : LinearLayout(context) {
     private val density = resources.displayMetrics.density
     private fun dp(value: Int) = (value * density).roundToInt()

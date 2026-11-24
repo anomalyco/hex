@@ -132,7 +132,7 @@ class HexKeyboard : InputMethodService() {
      * dictates. A new view each time, as before, so a rotation or a new window draws at its own size. */
     private fun inputView(voice: Boolean): View {
         this.voice = null; view = null; engine.surface = null
-        if (!voice) leavingAfterCommit = false
+        leavingAfterCommit = false
         return if (voice) VoiceInputView(this, this).also { this.voice = it }
         else KeyboardView(this, this).also {
             it.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
@@ -252,14 +252,16 @@ class HexKeyboard : InputMethodService() {
         else -> R.string.keyboard_hint_hold
     })
     private fun showStatus(phase: SpeechPhase, note: String?) {
-        val hint = speechNote(note) ?: idleHint()
         val bar = voice
-        if (bar != null) bar.status(phase, hint) else view?.status(phase, hint, note != null)
+        val keys = view
+        if (bar == null && keys == null) return
+        val hint = speechNote(note) ?: idleHint()
+        if (bar != null) bar.status(phase, hint) else keys?.status(phase, hint, note != null)
         // The commit's text is in and nothing else is queued: now the bar can leave for the usual keyboard.
-        if (voice != null && voiceCanLeave(leavingAfterCommit, phase) && capture.phase == SpeechPhase.Idle) {
+        if (bar != null && voiceCanLeave(leavingAfterCommit, phase) && capture.phase == SpeechPhase.Idle) {
             leavingAfterCommit = false
             returnToKeyboard()
-        } else if (voiceArmed && phase == SpeechPhase.Idle) {
+        } else if (bar != null && voiceArmed && phase == SpeechPhase.Idle) {
             // A dictation from the full keyboard settling now leaves an armed voice bar free to start.
             startVoice()
         }
@@ -312,7 +314,7 @@ class HexKeyboard : InputMethodService() {
         val own = currentInputEditorInfo?.packageName == packageName
         val signed = if (own) null else Signature.append(text, preferences.signatureText, preferences.signature)
         engine.insertDictation(signed ?: text, if (options.translate) "en" else options.spoken.code, signed != null)
-        if (voice) {
+        if (voice && this.voice != null) {
             // Synchronous: the editor holds the inserted text when this returns, so the switch can't race it,
             // and the leave waits for showStatus to see the queue idle.
             currentInputConnection?.getTextBeforeCursor(1, 0)
