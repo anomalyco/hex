@@ -2,11 +2,12 @@ import Foundation
 
 /// The check pass (`docs/specs/hex-words.md`, "Reading" step 5): one walk over the bytes before
 /// `JSONSerialization` builds anything. It never recurses, so 10,000 levels can't exhaust a
-/// stack, and it refuses with the first problem it meets: nested past 8 levels, an object that
-/// repeats a key (compared after decoding escapes, byte for byte, never by Swift's canonical
-/// equivalence), or anything strict RFC 8259 JSON doesn't allow, which `JSONSerialization`
-/// lets through: a repeated key keeps its last value there, and it decodes an escaped lone
-/// surrogate.
+/// stack, and it refuses for the first problem met reading from the start: the opening bracket
+/// that goes past 8 levels, a key at its second appearance in one object (compared after
+/// decoding escapes, byte for byte, never by Swift's canonical equivalence), or where the text
+/// stops being strict RFC 8259 JSON, which `JSONSerialization` doesn't hold to: a repeated key
+/// keeps its last value there, it decodes an escaped lone surrogate, and a number no 64-bit
+/// float can hold is notJSON for this format.
 nonisolated enum HexWordsCheck {
     static let maxDepth = 8
 
@@ -160,6 +161,10 @@ nonisolated enum HexWordsCheck {
             if index < count, bytes[index] == UInt8(ascii: "+") || bytes[index] == UInt8(ascii: "-") { index += 1 }
             guard index < count, isDigit(bytes[index]) else { throw Failure.refused(.notJSON) }
             while index < count, isDigit(bytes[index]) { index += 1 }
+        }
+        // A number a 64-bit float can't hold (`1e400`, a 400-digit integer) is notJSON here.
+        guard let value = Double(String(decoding: bytes[start..<index], as: UTF8.self)), value.isFinite else {
+            throw Failure.refused(.notJSON)
         }
         return index
     }
