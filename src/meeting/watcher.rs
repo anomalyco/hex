@@ -234,6 +234,11 @@ pub(crate) fn controller_loop(
 
     while !shutdown.load(Ordering::Relaxed) {
         let enabled = crate::app_settings::meetings_enabled();
+        // Labs › Mute the microphone while recording off: clear the switch on
+        // the first pass that sees it, so turning the lab back on in the same
+        // recording does not silently mute it again. The sink reads the same
+        // gate with each packet, so audio is already back by then.
+        crate::meeting::capture::reconcile_microphone_mute(crate::labs::meeting_microphone_mute());
         poll_import(&mut importing, &events);
         let requested_commands = meeting_requests
             .try_iter()
@@ -508,8 +513,11 @@ fn handle_command(
         // Labs › Mute the microphone while recording: it acts on the recording
         // under way, and only while the lab is on.
         ControllerCommand::SetMicrophoneMuted(muted) => {
-            if recording.is_some() && crate::labs::meeting_microphone_mute() {
-                crate::meeting::capture::set_microphone_muted(muted);
+            if crate::meeting::capture::request_microphone_mute(
+                recording.is_some(),
+                crate::labs::meeting_microphone_mute(),
+                muted,
+            ) {
                 tracing::info!(muted, "meeting microphone mute set");
             }
         }
@@ -1526,42 +1534,6 @@ mod tests {
         // The toggle off leaves every recording running until Stop.
         assert!(!stops_when_call_ends(Automatic, false, false));
         assert!(!stops_when_call_ends(OnRequest, false, false));
-    }
-
-    /// Labs › Mute the microphone while recording's request only acts on a
-    /// recording under way, and only with its lab on.
-    #[test]
-    fn a_microphone_mute_needs_a_recording_and_its_lab() {
-        use crate::meeting::capture::{microphone_mute_set, set_microphone_muted};
-        let (events, _received) = mpsc::sync_channel(4);
-        let mut detector = MeetingDetector::default();
-        let mut reminders = Reminders::default();
-        // A recording runs, but this OS has no lab: nothing is muted.
-        let mut recording = Some(active_recording(None, false, None));
-        handle_command(
-            &mut recording,
-            &mut None,
-            &mut detector,
-            &mut reminders,
-            ControllerCommand::SetMicrophoneMuted(true),
-            true,
-            &events,
-        );
-        assert!(!microphone_mute_set(), "the lab is off, so nothing muted");
-        // Nothing records: the request leaves the switch where it was.
-        set_microphone_muted(true);
-        let mut idle = None;
-        handle_command(
-            &mut idle,
-            &mut None,
-            &mut detector,
-            &mut reminders,
-            ControllerCommand::SetMicrophoneMuted(false),
-            true,
-            &events,
-        );
-        assert!(microphone_mute_set(), "an idle request is ignored");
-        set_microphone_muted(false);
     }
 
     #[test]

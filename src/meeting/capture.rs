@@ -99,8 +99,9 @@ impl PacketSink {
 
 /// Whether the recording leaves the microphone out of its track right now
 /// (Labs › Mute the microphone while recording): set by the controller while
-/// a meeting records and cleared when one starts or ends, so every recording
-/// begins with the microphone in. Read as each microphone packet arrives.
+/// a meeting records and cleared when one starts, ends, or the lab goes off,
+/// so every recording begins with the microphone in. Read as each microphone
+/// packet arrives.
 static MICROPHONE_MUTED: AtomicBool = AtomicBool::new(false);
 
 /// Whether the microphone's audio is left out of the recording now: the
@@ -111,9 +112,31 @@ pub fn microphone_muted() -> bool {
 }
 
 /// Sets the microphone's switch for the recording under way; the controller
-/// owns it and clears it when a recording starts or ends.
+/// owns it and clears it when a recording starts, ends, or the lab goes off.
 pub fn set_microphone_muted(muted: bool) {
     MICROPHONE_MUTED.store(muted, Ordering::Relaxed);
+}
+
+/// Applies a mute request from the Meetings pane or the menu bar, and
+/// reports whether it landed. It acts only while a recording runs with
+/// Labs › Mute the microphone while recording on; anything else leaves the
+/// switch as it is, so an idle request cannot mute the next recording.
+pub(super) fn request_microphone_mute(recording: bool, lab: bool, muted: bool) -> bool {
+    if !recording || !lab {
+        return false;
+    }
+    set_microphone_muted(muted);
+    true
+}
+
+/// Keeps the switch in step with the lab, once per controller pass: while the
+/// lab is off the switch clears, so a lab turned back on later in the same
+/// recording cannot silently mute it again. The sink already restores audio
+/// by reading the same gate with each packet.
+pub(super) fn reconcile_microphone_mute(lab: bool) {
+    if !lab {
+        set_microphone_muted(false);
+    }
 }
 
 /// The controller's switch alone, whatever the lab says; a check of what a
@@ -1183,6 +1206,64 @@ mod tests {
         assert_eq!(unmuted.samples, vec![0.5, -0.25, 0.125]);
         let call = receiver.try_recv().expect("the system track sent");
         assert_eq!(call.samples, vec![0.25, 0.5], "the call keeps recording");
+    }
+
+    /// Serializes the tests that move the process-wide microphone switch, so
+    /// one can't observe another's.
+    static MICROPHONE_MUTE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn mute_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        MICROPHONE_MUTE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
+
+    /// Labs › Mute the microphone while recording: a request lands only on a
+    /// recording under way with the lab on; anything else leaves the switch
+    /// alone, so an idle request cannot mute the next recording.
+    #[test]
+    fn a_microphone_mute_needs_a_recording_and_its_lab() {
+        let _lock = mute_test_lock();
+        set_microphone_muted(false);
+        assert!(
+            request_microphone_mute(true, true, true),
+            "a recording with the lab on takes the request"
+        );
+        assert!(microphone_mute_set(), "the switch is on");
+        assert!(
+            request_microphone_mute(true, true, false),
+            "unmuting in the same recording takes too"
+        );
+        assert!(!microphone_mute_set(), "the switch is off again");
+        // No lab: nothing lands, and a request to unmute leaves it as it was.
+        set_microphone_muted(true);
+        assert!(!request_microphone_mute(true, false, false));
+        assert!(
+            microphone_mute_set(),
+            "a lab that is off ignores the request"
+        );
+        // No recording: the switch a finished recording left is untouched.
+        assert!(!request_microphone_mute(false, true, false));
+        assert!(microphone_mute_set(), "an idle request is ignored");
+        set_microphone_muted(false);
+    }
+
+    /// Labs › Mute the microphone while recording's gate also holds the
+    /// switch: turning the lab off clears it on the next pass, so turning it
+    /// back on later in the same recording does not silently mute again.
+    #[test]
+    fn a_lab_turned_off_clears_the_microphone_mute() {
+        let _lock = mute_test_lock();
+        set_microphone_muted(true);
+        reconcile_microphone_mute(true);
+        assert!(microphone_mute_set(), "a lab that is on leaves the switch");
+        reconcile_microphone_mute(false);
+        assert!(!microphone_mute_set(), "the lab off clears the switch");
+        reconcile_microphone_mute(true);
+        assert!(
+            !microphone_mute_set(),
+            "a lab turned back on does not re-mute"
+        );
     }
 
     #[test]

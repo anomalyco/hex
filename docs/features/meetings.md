@@ -1359,9 +1359,10 @@ Mute microphone (macOS; Labs › Mute the microphone while recording, off by def
 ├── Choosing it sends MeetingRequest::SetMicrophoneMuted to the controller
 │   ├── It acts only while a recording runs and the lab is on; anything
 │   │   else is ignored
-│   └── The switch is cleared when a recording starts and when the
-│       finished worker's recording is taken, so every recording begins
-│       with the microphone in
+│   └── The switch is cleared when a recording starts, when the finished
+│       worker's recording is taken, and on the controller's next pass
+│       after the lab goes off, so every recording begins with the
+│       microphone in and a lab turned back on does not re-mute
 ├── On: the microphone's packets carry exact zeros at the length they
 │   arrived at (PacketSink::send_samples), so microphone.wav keeps the
 │   timeline it shares with system.wav and every position stays put
@@ -1371,13 +1372,15 @@ Mute microphone (macOS; Labs › Mute the microphone while recording, off by def
 │       recording, transcribing, and timing out as it always does
 ├── Unmute microphone puts the microphone back in the same recording
 ├── Turning the lab off mid-recording restores audio at once: the sink
-│   reads the lab with each packet. The pane, menu bar, and capsule read the
-│   same gate, so their controls go with it
-└── Checks: `a_muted_microphone_goes_silent_in_place_and_the_call_does_not`
-    (meeting/capture.rs, a synthetic mute; the lab is macOS-only) and
-    `a_microphone_mute_needs_a_recording_and_its_lab` (meeting/watcher.rs);
-    no Mac call ran with the switch, and the menu-bar, capsule, and pane
-    controls are macOS-only code this Linux build never compiled
+│   reads the lab with each packet, and the controller clears its switch on
+│   its next pass so turning the lab back on does not re-mute. The pane,
+│   menu bar, and capsule read the same gate, so their controls go with it
+└── Checks: `a_muted_microphone_goes_silent_in_place_and_the_call_does_not`,
+    `a_microphone_mute_needs_a_recording_and_its_lab`, and
+    `a_lab_turned_off_clears_the_microphone_mute` (meeting/capture.rs, a
+    synthetic mute; the lab is macOS-only); no Mac call ran with the switch,
+    and the menu-bar, capsule, and pane controls are macOS-only code this
+    Linux build never compiled
 ```
 
 ### Import Audio (Labs)

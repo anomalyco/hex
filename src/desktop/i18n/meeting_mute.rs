@@ -1,6 +1,7 @@
-//! Labs › Mute the microphone while recording's strings, and the switch the
-//! Meetings pane, menu bar, and recording capsule offer while a meeting
-//! records. Kept beside the main table so it stays under the source cap.
+//! Labs › Mute the microphone while recording's strings: the switch the
+//! Meetings pane and menu bar offer while a meeting records, and the notice
+//! the recording capsule shows. Kept beside the main table so it stays under
+//! the source cap.
 //!
 //! Not yet reviewed by native speakers, like their neighbouring tables.
 

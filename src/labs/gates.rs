@@ -45,7 +45,8 @@ pub fn stop_any_call_recording() -> bool {
 /// packets stay the same length and go silent, so the call's audio keeps
 /// recording and no "You" line is produced (macOS; read as each microphone
 /// packet reaches the track, so turning the lab off restores audio at once,
-/// and where the pane, menu bar, and capsule offer the switch).
+/// once per controller pass, which clears the switch, and where the pane and
+/// menu bar offer the switch and the capsule shows its notice).
 pub fn meeting_microphone_mute() -> bool {
     feature_on(Feature::MeetingMicrophoneMute)
 }
