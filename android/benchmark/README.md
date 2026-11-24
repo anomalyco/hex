@@ -87,9 +87,11 @@ Past 8 s of audio the app gives the small model's encoder the speech plus 640 fr
 1. `python3 benchmark/generate.py "$WORK/wavs"` writes the long clips after the 40 (their digests change with the 40's; see step 1 below).
 2. Build [native.cpp](native.cpp) as in step 2 below, or for the host with Apple clang against a host build of the same whisper.cpp (`-DGGML_NATIVE=OFF -DGGML_CPU_ARM_ARCH=armv8-a`, as the app builds it).
 3. From the folder holding `wavs/`, with `awk -F '\t' 'NR>1{print $1,$2}' benchmark/long.tsv > long.list`, run `HEX_APP=full ./whisperbench models/small.bin 4 long.list > results/long-full.tsv` and `HEX_APP=1 ./whisperbench models/small.bin 4 long.list > results/long-app.tsv`. `HEX_APP` is the app's decode (a fresh state for every clip, its token limit and single retry, its window); `HEX_APP=full` keeps the full window past 8 s.
-4. `python3 benchmark/score.py results` adds both to the per-clip output and exits with status 1, naming the clips, if any is worse.
+4. `python3 benchmark/score.py results` adds both to the per-clip output and exits with status 1, naming the clips, if any is worse, or if a clip past 30 s loses an utterance (half its words or more missing).
 
 On 24 Nov 2026 (Apple M5 host, armv8-a kernels, four threads; 34 of the 40 WAVs matched [audio.tsv](audio.tsv) with that Mac's voices) both made 43 errors on 900 words: no clip worse, three reworded with the same error count. The median decode went from 2.63 s to 1.96 s on that host.
+
+**Past 30 s** Whisper needs more than one 30 s window. Four of the clips (en30s3k12, es30l0m0m0, de30x3, no30x3: 35–47 s, sentences repeating as people repeat themselves) check that every utterance comes out. The app decodes audio past 30 s with timestamps, so each window ends at the last sentence it finished and the next starts there. Without them whisper.cpp moves on a whole 30 s at a time, cutting mid-sentence. On 24 Nov 2026 the decode before that change lost 7 of the 15 German utterances (score.py exited 1); with it every utterance came out (59 errors on 1,263 words against 108).
 
 ## Sources and licences
 

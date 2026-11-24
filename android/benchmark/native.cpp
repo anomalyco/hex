@@ -75,6 +75,7 @@ int main(int argc, char **argv) {
         auto p=whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
         if (getenv("HEX_SHORT_WINDOW") && audio.size() <= 8*16000) p.audio_ctx=512;
         p.n_threads=threads;p.language=lang.c_str();p.no_context=true;p.no_timestamps=true;p.suppress_nst=true;
+        if (getenv("HEX_APP") && audio.size()>30*16000) p.no_timestamps=false; // the app's long-audio decode
         p.print_progress=p.print_special=p.print_timestamps=p.print_realtime=false;
         // HEX_APP: the downloaded model exactly as app/src/main/cpp/hexspeech.cpp decodes it (the window sized to the
         // speech: up to 8 s plus 192 frames, at most 512, longer plus 640 until the full 1500; the token cap, one retry

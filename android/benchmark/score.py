@@ -13,6 +13,19 @@ def distance(a,b):
             n.append(min(n[-1]+1,d[j]+1,d[j-1]+int(x!=y)))
         d=n
     return d[-1]
+def matched(a,b):
+    """Which words of a the cheapest alignment with b keeps."""
+    d=[[0]*(len(b)+1) for _ in range(len(a)+1)]
+    for i in range(len(a)+1): d[i][0]=i
+    for j in range(len(b)+1): d[0][j]=j
+    for i in range(1,len(a)+1):
+        for j in range(1,len(b)+1): d[i][j]=min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+int(a[i-1]!=b[j-1]))
+    i,j,kept=len(a),len(b),[False]*len(a)
+    while i>0 and j>0:
+        if d[i][j]==d[i-1][j-1]+int(a[i-1]!=b[j-1]): kept[i-1]=a[i-1]==b[j-1]; i-=1; j-=1
+        elif d[i][j]==d[i-1][j]+1: i-=1
+        else: j-=1
+    return kept
 def summarize(rows):
     def wer(rs):
         return 100*sum(r["errors"] for r in rs)/sum(r["words"] for r in rs) if rs else None
@@ -45,18 +58,29 @@ if __name__=="__main__":
         print(name,summarize(rows),file=sys.stderr)
     # The long clips at the app's encoder window against the full one (README, Long clips): fails if any clip is worse.
     with (base/"long.tsv").open() as f: long={r["id"]:r for r in csv.DictReader(f,delimiter="\t")}
-    errors={}
+    errors={}; texts={}
     for name in ("long-full","long-app"):
         if not (data/(name+".tsv")).exists():continue
         errors[name]={}
         for x in (data/(name+".tsv")).read_text().splitlines():
             id,wall,cpu,load,hwm,text=x.split("\t",5); c=long[id]
             ref=words(" ".join(corpus[i]["reference"] for i in c["clips"].split(",")))
-            e=distance(ref,words(text)); errors[name][id]=(e,len(ref))
+            e=distance(ref,words(text)); errors[name][id]=(e,len(ref)); texts[(name,id)]=text
             out.writerow(dict(zip(fields,[name,id,c["lang"],"",len(ref),e,wall,cpu,load,hwm,"","",text.strip(),"ok" if text.strip() else "empty"])))
         assert set(errors[name])==set(long)
         print(name,"errors",sum(e for e,_ in errors[name].values()),"of",sum(n for _,n in errors[name].values()),"words",file=sys.stderr)
     if len(errors)==2:
         worse=[f"{id} ({errors['long-full'][id][0]} -> {e})" for id,(e,_) in errors["long-app"].items() if e>errors["long-full"][id][0]]
         print("long clips: no clip worse than the full window" if not worse else "long clips: worse than the full window: "+", ".join(worse),file=sys.stderr)
-        if worse: sys.exit(1)
+        # Past 30 s (more than one Whisper window), every utterance must come out: at most half its words missing.
+        lost=[]
+        for id,c in long.items():
+            if float(c["seconds"])<=30: continue
+            parts=c["clips"].split(","); ref=[]; owner=[]
+            for k,i in enumerate(parts): w=words(corpus[i]["reference"]); ref+=w; owner+=[k]*len(w)
+            kept=matched(ref,words(texts[("long-app",id)]))
+            for k,i in enumerate(parts):
+                idx=[n for n,o in enumerate(owner) if o==k]
+                if 2*sum(kept[n] for n in idx)<len(idx): lost.append(f"{id}: utterance {k+1} ({i})")
+        print("long clips past 30 s: every utterance kept" if not lost else "long clips past 30 s: utterances lost: "+", ".join(lost),file=sys.stderr)
+        if worse or lost: sys.exit(1)
