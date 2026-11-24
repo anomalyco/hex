@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.res.AssetManager
 import android.util.Log
 import ly.anoma.hex.BuildConfig
+import ly.anoma.hex.typing.TypingModel
 import java.io.File
 import java.time.LocalDate
 import java.util.concurrent.Executors
@@ -109,7 +110,7 @@ internal object SpeechModel {
         val before = opened
         decodeAt = 0L; decodeCpu = -1L; whisperRan = false
         val decoded = transcribe(engineFor(options), pcm, count, { abandoned == job },
-            english = { audio, n -> openEnglish(app) ?: decodeEnglish(audio, n, options.vocabulary, job) },
+            english = { audio, n -> openEnglish(app) ?: decodeEnglish(app, audio, n, options.vocabulary, job) },
             standard = { audio, n -> decodeStandard(app, audio, n, options.spoken.code, options.translate, whisperPrompt(options.vocabulary), job) })
         val ended = System.nanoTime()
         val started = if (decodeAt != 0L) decodeAt else ended
@@ -119,10 +120,18 @@ internal object SpeechModel {
         return decoded
     }
 
-    private fun decodeEnglish(pcm: ShortArray, count: Int, vocabulary: List<String>, job: Long): EnglishResult {
+    private fun decodeEnglish(app: Context, pcm: ShortArray, count: Int, vocabulary: List<String>, job: Long): EnglishResult {
         decodeStarts()
         return Parakeet.decode(english, pcm, count, vocabulary.takeIf { it.isNotEmpty() }?.toTypedArray(), job)
-            ?.decodeToString()?.trim()?.let(EnglishResult::Text) ?: EnglishResult.Failed
+            ?.decodeToString()?.let { SentenceEnds.restore(it, pcm, count) { word -> lowercaseEnglish(app, word) } }?.trim()
+            ?.let(EnglishResult::Text) ?: EnglishResult.Failed
+    }
+
+    /** English's typing model, memory-mapped from the APK, for [SentenceEnds]: opened on the first English dictation. */
+    private var englishWords: TypingModel? = null
+    private fun lowercaseEnglish(app: Context, word: String): Boolean {
+        val model = englishWords ?: TypingModel.asset(app.assets, "en").also { englishWords = it }
+        return model.index(word) >= 0 && (model.capitals?.percent(word) ?: -1) < 0
     }
 
     private fun decodeStandard(app: Context, pcm: ShortArray, count: Int, language: String, translate: Boolean, prompt: String?, job: Long): String? {

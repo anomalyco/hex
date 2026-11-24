@@ -79,6 +79,9 @@ Java_ly_anoma_hex_speech_Parakeet_decode(JNIEnv *env, jobject, jlong handle, jsh
     transcribe_run_params_init(&params);
     params.vocabulary = words.empty() ? nullptr : words.data();
     params.n_vocabulary = static_cast<int32_t>(words.size());
+    // Each word's start and end, for SentenceEnds (Kotlin): the text is the same with or without them, and they cost
+    // no measurable time.
+    params.timestamps = TRANSCRIBE_TIMESTAMPS_WORD;
     transcribe_set_abort_callback(session, [](void *mine) { return abandoned.load() == *static_cast<const jlong *>(mine); }, &job);
 #ifndef NDEBUG
     const auto started = std::chrono::steady_clock::now();
@@ -95,7 +98,16 @@ Java_ly_anoma_hex_speech_Parakeet_decode(JNIEnv *env, jobject, jlong handle, jsh
     if (status != TRANSCRIBE_OK) return nullptr;
     const char *text = transcribe_full_text(session);
     if (!text) return nullptr;
-    const std::string bytes(text);
+    // The text on the first line, then one "start\tend\tword" line (milliseconds) per word.
+    std::string bytes(text);
+    for (char &ch : bytes) if (ch == '\n') ch = ' ';
+    const int n_words = transcribe_n_words(session);
+    for (int i = 0; i < n_words; ++i) {
+        transcribe_word word;
+        transcribe_word_init(&word);
+        if (transcribe_get_word(session, i, &word) != TRANSCRIBE_OK || !word.text) continue;
+        bytes += '\n' + std::to_string(word.t0_ms) + '\t' + std::to_string(word.t1_ms) + '\t' + word.text;
+    }
     // JNI's modified UTF-8 is not standard UTF-8 (notably for supplementary code points).
     auto result = env->NewByteArray(static_cast<jsize>(bytes.size()));
     if (result) env->SetByteArrayRegion(result, 0, static_cast<jsize>(bytes.size()), reinterpret_cast<const jbyte *>(bytes.data()));

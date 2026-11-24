@@ -173,3 +173,61 @@ class FastEnglishRoutingTest {
         assertNull(dictationNote(null, null))
     }
 }
+
+// Faster English dictation: SentenceEnds puts back the sentence ends its model runs together. Kept here with the routing
+// cases until they have a file of their own.
+class SentenceEndsTest {
+    private val english = ly.anoma.hex.typing.TypingModel.file(File("src/main/assets/typing/en.hextm"), "en")
+    private fun lowercase(word: String) = english.index(word) >= 0 && (english.capitals?.percent(word) ?: -1) < 0
+
+    /** 16 kHz audio: speech (a loud tone) where [spoken] says, silence elsewhere, [ms] long. */
+    private fun audio(ms: Int, vararg spoken: IntRange) = ShortArray(ms * 16) { i ->
+        if (spoken.any { i / 16 in it }) (8000 * kotlin.math.sin(i * 0.3)).toInt().toShort() else 0
+    }
+    private fun decoded(vararg words: Triple<String, Int, Int>) =
+        words.joinToString(" ") { it.first } + words.joinToString("") { "\n${it.second}\t${it.third}\t${it.first}" }
+
+    @Test fun aCommonWordCapitalisedAfterAPauseStartsASentence() {
+        // "…back of the bus We should…": 600 ms of quiet between the sentences, as between two of the benchmark's clips.
+        val pcm = audio(3000, 0..1199, 1800..2999)
+        val out = SentenceEnds.restore(decoded(Triple("the", 600, 900), Triple("bus", 900, 1200),
+            Triple("We", 1800, 2000), Triple("should", 2000, 2400)), pcm, pcm.size, ::lowercase)
+        assertEquals("the bus. We should", out)
+    }
+    @Test fun withoutAPauseTheCapitalAloneIsNotEnough() {
+        // "…in New York…": the model capitalises a name that is also a common word, with no pause before it.
+        val pcm = audio(2000, 0..1999)
+        assertEquals("lives in New York", SentenceEnds.restore(decoded(Triple("lives", 0, 400), Triple("in", 400, 600),
+            Triple("New", 600, 900), Triple("York", 900, 1300)), pcm, pcm.size, ::lowercase))
+    }
+    @Test fun aNameAfterAPauseIsLeftAlone() {
+        val pcm = audio(3000, 0..999, 1700..2999)
+        assertEquals("I talked to Sarah", SentenceEnds.restore(decoded(Triple("I", 0, 200), Triple("talked", 200, 600),
+            Triple("to", 600, 1000), Triple("Sarah", 1700, 2200)), pcm, pcm.size, ::lowercase))
+    }
+    @Test fun iIsNeverASentenceStartOnItsOwn() {
+        val pcm = audio(3000, 0..999, 1700..2999)
+        assertEquals("on Saturday I didn't", SentenceEnds.restore(decoded(Triple("on", 0, 300), Triple("Saturday", 300, 1000),
+            Triple("I", 1700, 1800), Triple("didn't", 1800, 2200)), pcm, pcm.size, ::lowercase))
+    }
+    @Test fun punctuationTheModelWroteIsKept() {
+        val pcm = audio(3000, 0..999, 1700..2999)
+        assertEquals("the blue folder, I mean", SentenceEnds.restore(decoded(Triple("the", 0, 300), Triple("blue", 300, 600),
+            Triple("folder,", 600, 1000), Triple("I", 1700, 1800), Triple("mean", 1800, 2100)), pcm, pcm.size, ::lowercase))
+        assertEquals("warm. Move the", SentenceEnds.restore(decoded(Triple("warm.", 0, 1000), Triple("Move", 1700, 2000),
+            Triple("the", 2000, 2200)), pcm, pcm.size, ::lowercase))
+    }
+    @Test fun aShortPauseIsNotASentenceEnd() {
+        // 60 ms of quiet measured before a capitalised common word, the benchmark's longest inside a sentence: no period.
+        // (The frame that ends where the next word starts isn't counted, so 80 ms of silence measures 60.)
+        val pcm = audio(2000, 0..999, 1080..1999)
+        assertEquals("is Dune", SentenceEnds.restore(decoded(Triple("is", 600, 1000), Triple("Dune", 1080, 1500)),
+            pcm, pcm.size, ::lowercase))
+        assertEquals(60, SentenceEnds.quietMs(pcm, pcm.size, 600, 1080))
+    }
+    @Test fun wordsThatDontSpellTheTextLeaveItAsItCame() {
+        val pcm = audio(3000, 0..1199, 1800..2999)
+        val out = SentenceEnds.restore("the bus We should\n900\t1200\tbus\n1800\t2000\tWe", pcm, pcm.size, ::lowercase)
+        assertEquals("the bus We should", out)
+    }
+}
