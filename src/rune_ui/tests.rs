@@ -1783,7 +1783,8 @@ fn history_stats_strip_fits_the_smallest_window_in_russian() {
 #[test]
 fn output_agent_card_keeps_a_long_request_beside_its_actions() {
     let mut rt = runtime("output", true, MIN_WINDOW_SIZE);
-    // The examples cycle in a shuffled order; the first is the longest one.
+    // The examples cycle in a shuffled order; pin the default order so the
+    // first example shows.
     rt.state.output.order = Default::default();
     crate::desktop::i18n::apply(Some("hu"));
     rt.invalidate();
