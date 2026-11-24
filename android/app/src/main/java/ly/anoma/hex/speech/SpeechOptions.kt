@@ -53,7 +53,7 @@ internal fun typingLayout(pinned: Spoken?, spoken: DictationLanguage): Spoken? =
 internal data class SpeechOptions(val style: Style, val spoken: DictationLanguage, val clean: Boolean, val translate: Boolean,
                                    val lowercase: Boolean = false, val endWithPeriod: Boolean = true,
                                    val formatLists: Boolean = false, val spokenPunctuation: Boolean = false,
-                                   val vocabulary: List<String> = emptyList())
+                                   val vocabulary: List<String> = emptyList(), val fastEnglish: Boolean = false)
 internal class SpeechPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("speech", Context.MODE_PRIVATE)
     var style: Style
@@ -98,6 +98,10 @@ internal class SpeechPreferences(context: Context) {
     var vocabularyTerms: List<String>
         get() = prefs.getString("vocabularyTerms", null)?.split('\n').orEmpty().filter(String::isNotEmpty)
         set(value) { prefs.edit().putString("vocabularyTerms", VocabularySpelling.sanitize(value).joinToString("\n")).apply() }
+    // Labs › Faster English dictation, off by default: English dictations use the downloaded faster model once it is there.
+    var fastEnglish: Boolean
+        get() = prefs.getBoolean("fastEnglish", false)
+        set(value) { prefs.edit().putBoolean("fastEnglish", value).apply() }
     // Labs › Signature: the line added to each keyboard dictation, off by default.
     var signature: Boolean
         get() = prefs.getBoolean("signature", false)
@@ -108,5 +112,5 @@ internal class SpeechPreferences(context: Context) {
         set(value) { prefs.edit().putString("signatureText", value).apply() }
     fun options(nextEnglish: Boolean?) = SpeechOptions(style, spoken, clean,
         translation && spoken == DictationLanguage.Spanish && (nextEnglish ?: true), lowercase, endWithPeriod, formatLists, spokenPunctuation,
-        if (customVocabulary) vocabularyTerms else emptyList())
+        if (customVocabulary) vocabularyTerms else emptyList(), fastEnglish)
 }

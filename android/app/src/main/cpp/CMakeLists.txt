@@ -38,3 +38,40 @@ target_link_libraries(hexspeech PRIVATE whisper android log)
 target_link_options(hexspeech PRIVATE -Wl,--gc-sections -Wl,--exclude-libs,ALL)
 add_custom_command(TARGET hexspeech POST_BUILD VERBATIM
     COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM} -DLIB=$<TARGET_FILE:hexspeech> -P ${CMAKE_CURRENT_LIST_DIR}/check-imports.cmake)
+
+# Faster English dictation (Labs): transcribe.cpp at the commit desktop Hex pins, in a library of its own,
+# libhexenglish.so, loaded only when that switch is on. It vendors its own ggml, which builds whisper.cpp's targets'
+# names, so it is a separate CMake build. The same patch keeps ggml_abort in process, and a second one leaves only
+# Parakeet in transcribe.cpp's model registry, so the linker drops the other families. Either failing to apply fails
+# the build.
+include(ExternalProject)
+set(HEXENGLISH_FLAGS "-fvisibility=hidden -ffunction-sections -fdata-sections")
+ExternalProject_Add(transcribe_cpp
+    URL https://codeload.github.com/anomalyco/transcribe.cpp/tar.gz/60bed89dab84f7c1fddc3a17ad7fa8a27ddfba19
+    URL_HASH SHA256=45dbe23f9d061ba9182ff93770c61fa608cd53c8f3b6503c4efca1c9fd1045f6
+    TLS_VERIFY ON
+    DOWNLOAD_EXTRACT_TIMESTAMP ON
+    PATCH_COMMAND ${PATCH_EXECUTABLE} -p1 -N -t -F0 -i ${CMAKE_CURRENT_LIST_DIR}/ggml-no-debugger.patch
+        COMMAND ${PATCH_EXECUTABLE} -p1 -N -t -F0 -i ${CMAKE_CURRENT_LIST_DIR}/transcribe-parakeet-only.patch
+    CMAKE_ARGS -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE} -DANDROID_ABI=${ANDROID_ABI}
+        -DANDROID_PLATFORM=${ANDROID_PLATFORM} -DANDROID_STL=${ANDROID_STL}
+        -DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=${ANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES}
+        -DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM} -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        "-DCMAKE_C_FLAGS=${HEXENGLISH_FLAGS}" "-DCMAKE_CXX_FLAGS=${HEXENGLISH_FLAGS} -fvisibility-inlines-hidden"
+        -DTRANSCRIBE_BUILD_TESTS=OFF -DTRANSCRIBE_BUILD_EXAMPLES=OFF -DTRANSCRIBE_BUILD_TOOLS=OFF -DTRANSCRIBE_METAL=OFF
+        -DTRANSCRIBE_VULKAN=OFF -DTRANSCRIBE_USE_SYSTEM_BLAS=OFF -DTRANSCRIBE_USE_OPENMP=OFF -DTRANSCRIBE_BUILD_SHARED=OFF
+        -DTRANSCRIBE_GGML_BACKEND_DL=OFF -DTRANSCRIBE_INSTALL=OFF -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF
+        -DGGML_CPU_ARM_ARCH=armv8-a
+    INSTALL_COMMAND ""
+    BUILD_BYPRODUCTS <BINARY_DIR>/src/libtranscribe.a <BINARY_DIR>/ggml/src/libggml.a
+        <BINARY_DIR>/ggml/src/libggml-cpu.a <BINARY_DIR>/ggml/src/libggml-base.a)
+ExternalProject_Get_Property(transcribe_cpp SOURCE_DIR BINARY_DIR)
+add_library(hexenglish SHARED hexenglish.cpp)
+add_dependencies(hexenglish transcribe_cpp)
+target_compile_features(hexenglish PRIVATE cxx_std_17)
+target_include_directories(hexenglish PRIVATE ${SOURCE_DIR}/include)
+target_link_libraries(hexenglish PRIVATE -Wl,--start-group ${BINARY_DIR}/src/libtranscribe.a ${BINARY_DIR}/ggml/src/libggml.a
+    ${BINARY_DIR}/ggml/src/libggml-cpu.a ${BINARY_DIR}/ggml/src/libggml-base.a -Wl,--end-group android log)
+target_link_options(hexenglish PRIVATE -Wl,--gc-sections -Wl,--exclude-libs,ALL)
+add_custom_command(TARGET hexenglish POST_BUILD VERBATIM
+    COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM} -DLIB=$<TARGET_FILE:hexenglish> -P ${CMAKE_CURRENT_LIST_DIR}/check-imports.cmake)

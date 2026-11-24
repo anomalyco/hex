@@ -101,7 +101,7 @@ android {
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild.cmake {
             arguments += listOf("-DANDROID_STL=c++_static", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON")
-            targets += "hexspeech"
+            targets += listOf("hexspeech", "hexenglish")
         }
     }
     externalNativeBuild.cmake {
@@ -198,6 +198,25 @@ val verifyTypingModels by tasks.registering {
     }
 }
 tasks.named("preBuild").configure { dependsOn(prepareSpeechModel, verifyInter, verifyTypingModels) }
+// Every native library the APK ships, Hex's own and AndroidX's prebuilt ones, gets the check Hex's get when they are built
+// (src/main/cpp/check-imports.cmake): no call that starts, replaces or traces a process or loads a shared object, and
+// nothing exported but JNI entry points.
+tasks.matching { it.name.matches(Regex("merge(Debug|Release|Preview)NativeLibs")) }.configureEach {
+    val script = file("src/main/cpp/check-imports.cmake")
+    val cmake = android.sdkDirectory.resolve("cmake/3.22.1/bin/cmake")
+    val nm = android.ndkDirectory.resolve("toolchains/llvm/prebuilt").listFiles().orEmpty().map { it.resolve("bin/llvm-nm") }
+    doLast {
+        val tool = nm.first { it.canExecute() }
+        val libraries = outputs.files.asFileTree.matching { include("**/*.so") }.files
+        check(libraries.isNotEmpty()) { "No native libraries to check" }
+        for (library in libraries) {
+            val process = ProcessBuilder(cmake.path, "-DNM=${tool.path}", "-DLIB=${library.path}", "-P", script.path)
+                .redirectErrorStream(true).start()
+            val output = process.inputStream.bufferedReader().readText()
+            check(process.waitFor() == 0) { output.trim() }
+        }
+    }
+}
 
 dependencies {
     implementation("androidx.activity:activity-compose:1.10.1")

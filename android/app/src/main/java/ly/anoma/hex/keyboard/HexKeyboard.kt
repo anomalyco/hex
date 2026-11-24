@@ -31,6 +31,7 @@ import kotlin.math.roundToInt
 import ly.anoma.hex.MainActivity
 import ly.anoma.hex.R
 import ly.anoma.hex.diagnostics.Diagnostics
+import ly.anoma.hex.speech.LOW_MEMORY_NOTE
 import ly.anoma.hex.speech.LocalSpeech
 import ly.anoma.hex.speech.DictationPlace
 import ly.anoma.hex.speech.MicCapture
@@ -58,6 +59,7 @@ internal fun Context.speechNote(note: String?) = when (note) {
     "No speech heard" -> getString(R.string.keyboard_note_no_speech)
     "Speech model unavailable" -> getString(R.string.keyboard_note_model)
     "Stopped at 1 minute" -> getString(R.string.keyboard_note_minute)
+    LOW_MEMORY_NOTE -> getString(R.string.keyboard_note_low_memory)
     else -> note
 }
 

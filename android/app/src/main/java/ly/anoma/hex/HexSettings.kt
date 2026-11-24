@@ -113,6 +113,8 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val customVocabulary = remember(revision) { speech.customVocabulary }
     var vocabularyDraft by remember { mutableStateOf(speech.vocabularyTerms.joinToString("\n")) }
     val signature = remember(revision) { speech.signature }
+    val fastEnglish = remember(revision) { speech.fastEnglish }
+    val english = ModelStore.english.state.collectAsState().value
     var signatureDraft by remember { mutableStateOf(speech.signatureText) }
     val emojiSuggestions = remember(revision) { typing.emojiSuggestions }
     val keyboardTools = remember(revision) { typing.keyboardTools }
@@ -271,6 +273,9 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             val action = modelAction(model)
                             Entry(stringResource(R.string.model_title), modelStatus(model), action?.let { stringResource(it) } ?: "",
                                 if (action != null) download else null)
+                            if (fastEnglish && english == ModelStore.State.Ready) {
+                                Rule(); Entry(stringResource(R.string.fast_english_in_use), action = { open(Page.Labs) })
+                            }
                         }
                     }
                     Page.Keyboard -> {
@@ -317,6 +322,37 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                     Page.Diagnostics -> DiagnosticsPage()
                     Page.Labs -> {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Label(stringResource(R.string.labs_dictation), muted = true, size = 14,
+                                mod = Modifier.padding(start = 16.dp))
+                            Card {
+                                val size = ModelStore.english.megabytes
+                                                // Its line says what the download is, the numbers limit and what stays as it was, so it is
+                                // never cut off: three lines on a Pixel 8, five at font size 1.3.
+                                Toggle(stringResource(R.string.fast_english), stringResource(R.string.fast_english_detail, size),
+                                    fastEnglish, noteLines = Int.MAX_VALUE) {
+                                    speech.fastEnglish = it
+                                    // Off stops a download under way and drops its partial file; a finished one stays
+                                    // until Delete download.
+                                    if (!it && english != ModelStore.State.Ready) ModelStore.english.delete(context)
+                                }
+                                if (fastEnglish) {
+                                    Rule()
+                                    // The download starts only on this tap, with its size on the row.
+                                    when (english) {
+                                        ModelStore.State.Available -> Entry(stringResource(R.string.fast_english_download, size), value = "",
+                                            action = { ModelStore.english.download(context) })
+                                        is ModelStore.State.Loading -> Entry(stringResource(R.string.fast_english_loading, size, english.percent))
+                                        is ModelStore.State.Retry -> Entry(stringResource(when (english.problem) {
+                                            ModelStore.Problem.Connection -> R.string.fast_english_no_connection
+                                            ModelStore.Problem.Space -> R.string.fast_english_no_space
+                                            ModelStore.Problem.Server -> R.string.fast_english_stopped
+                                        }), value = stringResource(R.string.model_try_again), action = { ModelStore.english.download(context) })
+                                        ModelStore.State.Ready -> Entry(stringResource(R.string.fast_english_ready, size),
+                                            value = stringResource(R.string.fast_english_delete),
+                                            action = { ModelStore.english.delete(context); speech.fastEnglish = false })
+                                    }
+                                }
+                            }
                             Label(stringResource(R.string.labs_output), muted = true, size = 14,
                                 mod = Modifier.padding(start = 16.dp))
                             Card {
@@ -456,10 +492,10 @@ private fun reflow(lines: List<String>) = buildString {
 @Composable internal fun Rule() {
     Spacer(Modifier.fillMaxWidth().padding(start = 16.dp).height(1.dp).background(colorResource(R.color.rule)))
 }
-@Composable private fun RowScope.RowTitle(title: String, note: String?) {
+@Composable private fun RowScope.RowTitle(title: String, note: String?, noteLines: Int = 2) {
     Column(Modifier.weight(1f)) {
         Label(title, weight = FontWeight.Medium)
-        if (note != null) Label(note, size = 13, muted = true, lines = 2)
+        if (note != null) Label(note, size = 13, muted = true, lines = noteLines)
     }
 }
 @Composable internal fun Entry(title: String, note: String? = null, value: String = "›", action: (() -> Unit)? = null) {
@@ -470,11 +506,12 @@ private fun reflow(lines: List<String>) = buildString {
         if (action != null && value.isNotEmpty()) Label(value, muted = true, size = if (value == "›") 22 else 15)
     }
 }
-@Composable internal fun Toggle(title: String, note: String, on: Boolean, enabled: Boolean = true, change: (Boolean) -> Unit) {
+@Composable internal fun Toggle(title: String, note: String, on: Boolean, enabled: Boolean = true, noteLines: Int = 2,
+                                change: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().toggleable(on, enabled = enabled, role = Role.Switch, onValueChange = change)
         .heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        RowTitle(title, note)
+        RowTitle(title, note, noteLines)
         Box(Modifier.size(38.dp, 23.dp).background(colorResource(if (on) R.color.ink else R.color.modifier), RoundedCornerShape(50))
             .padding(3.dp), contentAlignment = if (on) Alignment.CenterEnd else Alignment.CenterStart) {
             Spacer(Modifier.size(17.dp).background(colorResource(if (on) R.color.page else R.color.key), RoundedCornerShape(50)))

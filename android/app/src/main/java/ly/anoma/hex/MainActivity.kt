@@ -95,19 +95,20 @@ class MainActivity : ComponentActivity() {
         for (name in listOf(Settings.Secure.DEFAULT_INPUT_METHOD, Settings.Secure.ENABLED_INPUT_METHODS))
             contentResolver.registerContentObserver(Settings.Secure.getUriFor(name), false, changed)
         refresh()
-        ModelStore.refresh(this)
+        ModelStore.small.refresh(this)
+        ModelStore.english.refresh(this)
         setContent {
             HexTheme {
                 BackHandler(page in 1..2) { go(page - 1) }
-                val model = ModelStore.state.collectAsState().value
-                if (page == 3) HexSettings(setup, speech, typing, model, { ModelStore.download(this) },
+                val model = ModelStore.small.state.collectAsState().value
+                if (page == 3) HexSettings(setup, speech, typing, model, { ModelStore.small.download(this) },
                     phase, transcript, notice, ::dictate, capture::cancel, { transcript = "" }, { go(it) },
                     { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) },
                     startPage = startPage)
                 else SetupScreen(page, setup, ::go, ::askForMic,
                     enable = { enabling = true; startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) },
                     choose = { imm.showInputMethodPicker() }, model = model,
-                    download = { ModelStore.download(this) })
+                    download = { ModelStore.small.download(this) })
             }
         }
     }

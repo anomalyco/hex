@@ -4,7 +4,7 @@
     <string name="app_name" translatable="false">Hex Preview</string>
     <!-- Setup names the app as Android's lists do (the launcher, the keyboard list and picker, the microphone
          prompt), so someone with Hex from Google Play as well picks the right one. "The Hex key" stays. -->
-    <string name="setup_welcome_detail">Hex Preview uses the internet only to download its speech model (190 MB), to check GitHub for updates and, when you tap Send, to send the feedback you write. Your voice and words stay on this device.</string>
+    <string name="setup_welcome_detail">Hex Preview uses the internet only to download its speech model (190 MB, plus any you add in Labs), to check GitHub for updates and, when you tap Send, to send the feedback you write. Your voice and words stay on this device.</string>
     <string name="setup_title">Set up Hex Preview</string>
     <string name="setup_detail">Allow the microphone, then choose Hex Preview as your keyboard.</string>
     <string name="setup_microphone_detail">So Hex Preview can hear you</string>

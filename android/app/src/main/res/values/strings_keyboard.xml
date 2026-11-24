@@ -16,6 +16,9 @@
     <string name="keyboard_note_model">Speech model unavailable</string>
     <!-- A recording reached its 1-minute limit: its text is inserted with this note. -->
     <string name="keyboard_note_minute">Stopped at 1 minute</string>
+    <!-- Labs › Faster English dictation: a shortage of memory sent an English dictation to the standard model. At most
+         once a day. -->
+    <string name="keyboard_note_low_memory">Phone was low on memory, so this one used standard dictation.</string>
     <string name="keyboard_cancel_dictation">Cancel dictation</string>
     <string name="keyboard_finish_dictation">Finish dictation</string>
     <string name="keyboard_undo_dictation">Undo dictation</string>

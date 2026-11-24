@@ -33,8 +33,12 @@ import ly.anoma.hex.keyboard.tap
 import ly.anoma.hex.keyboard.vibrates
 import ly.anoma.hex.speech.DictationPlace
 import ly.anoma.hex.speech.DictationTimes
+import ly.anoma.hex.speech.Engine
 import ly.anoma.hex.speech.ModelAtTick
 import ly.anoma.hex.speech.ModelStore
+import ly.anoma.hex.speech.RanOn
+import ly.anoma.hex.speech.SpeechPreferences
+import ly.anoma.hex.speech.engineFor
 import ly.anoma.hex.speech.SpeechModel
 import ly.anoma.hex.speech.Whisper
 import ly.anoma.hex.speech.lastDictation
@@ -51,17 +55,20 @@ internal object Diagnostics {
     private const val THREAD = "Hex speed test"
     private const val RUNS = 2
 
-    /** A way to run the clip: [threads] threads, [pool] of them kept ready with the model (0: new ones per graph). */
-    private class Mode(val label: String, val threads: Int, val pool: Int)
+    /** A way to run the clip: [threads] threads, [pool] of them kept ready with the model (0: new ones per graph), or
+     * with Faster English dictation's model ([english]). */
+    private class Mode(val label: String, val threads: Int, val pool: Int, val english: Boolean = false)
 
     /** Today's threads, the same kept ready, and six kept ready on a processor whose kernel rates six or more cores
      * fast (at least half the strongest core's cpu_capacity, Hex's own rule). */
-    private fun modes(): List<Mode> {
+    private fun modes(c: Context): List<Mode> {
         val threads = SpeechModel.threads
         val capacities = (0 until Runtime.getRuntime().availableProcessors())
             .map { read("/sys/devices/system/cpu/cpu$it/cpu_capacity")?.toIntOrNull() }
         return listOfNotNull(Mode("as now", threads, 0), Mode("threads kept ready", threads, threads),
-            Mode("threads kept ready, 6", 6, 6).takeIf { fastCores(capacities) >= 6 })
+            Mode("threads kept ready, 6", 6, 6).takeIf { fastCores(capacities) >= 6 },
+            // Labs › Faster English dictation's model, once it is downloaded, whether or not its switch is on.
+            Mode(FASTER_MODE, threads, 0, english = true).takeIf { ModelStore.english.installed(c) != null })
     }
 
     sealed interface Speed {
@@ -90,7 +97,7 @@ internal object Diagnostics {
     fun runInApp(context: Context) {
         if (busy) return
         val c = context.applicationContext
-        app.value = Speed.Running(0, RUNS * modes().size)
+        app.value = Speed.Running(0, RUNS * modes(c).size)
         worker.execute { if (facts.value == null) facts.value = collect(c); speedTest(c, app) }
     }
 
@@ -101,7 +108,7 @@ internal object Diagnostics {
     fun keyboardShown(context: Context, editor: String?, secure: Boolean, show: (StripNotice?) -> Unit) {
         if (!BuildConfig.DIAGNOSTICS || keyboard.value != Speed.Waiting || secure || editor == null || editor == context.packageName) return
         val c = context.applicationContext
-        keyboard.value = Speed.Running(0, RUNS * modes().size)
+        keyboard.value = Speed.Running(0, RUNS * modes(c).size)
         val close = c.getString(R.string.diagnostics_dismiss)
         show(StripNotice(c.getString(R.string.diagnostics_strip_running), close, tap = {}, dismiss = {}))
         worker.execute {
@@ -157,18 +164,19 @@ internal object Diagnostics {
         val pcm = runCatching { c.assets.open(CLIP).use { wavSamples(it.readBytes()) } }.getOrNull()
         if (pcm == null) { into.value = Speed.Failed; return }
         val runs = mutableListOf<Run>()
-        val modes = modes()
+        val modes = modes(c)
         // Each mode once, then each again, so warming up and heating up don't favour one.
         for (number in 1..RUNS) for (mode in modes) {
             into.value = Speed.Running(runs.size, RUNS * modes.size)
             val before = sched()
             val sampler = CoreSampler(THREAD, cores(), parseCpuList(before.allowed)).also { it.start() }
             // Negative jobs: no dictation's ✕ (MicCapture counts up from 1) can stop this decode.
-            val measured = SpeechModel.measure(c, pcm, mode.threads, mode.pool, -(++jobs))
+            val measured = if (mode.english) SpeechModel.measureEnglish(c, pcm, -(++jobs))
+                else SpeechModel.measure(c, pcm, mode.threads, mode.pool, -(++jobs))
             val (cores, clocks) = sampler.stop()
             if (measured == null) { into.value = Speed.Failed; return }
             runs += Run(mode.label, number, measured.downloaded, measured.wallMs, measured.cpuMs, measured.timings, measured.text,
-                before, sched(), cores, clocks)
+                before, sched(), cores, clocks, if (mode.english) SpeechModel.threads else 0)
         }
         into.value = Speed.Done(runs, pcm.size / 16_000.0)
     }
@@ -177,7 +185,7 @@ internal object Diagnostics {
         val memory = ActivityManager.MemoryInfo().also { c.getSystemService(ActivityManager::class.java).getMemoryInfo(it) }
         val cores = cores()
         val channel = when (BuildConfig.BUILD_TYPE) { "preview" -> "preview"; "release" -> "play"; else -> BuildConfig.BUILD_TYPE }
-        val library = runCatching { libraryLabel(Whisper.library()) }.getOrDefault("didn't load")
+        val library = runCatching { libraryLabel(Whisper.library()) }.getOrDefault("speech library didn't load")
         return listOf(
             "Build: Hex ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE}), $channel",
             // Build.ID is the public build number every phone on that release shares; Build.DISPLAY can carry a self-built
@@ -186,8 +194,10 @@ internal object Diagnostics {
                 "build ${Build.ID}, security patch ${Build.VERSION.SECURITY_PATCH}",
             "Processor: ${Build.SOC_MANUFACTURER} ${Build.SOC_MODEL}, ${cores.size} cores; ${clusterSummary(cores)}",
             "Memory: ${gb(memory.totalMem)} total, ${gb(memory.availMem)} available" + if (memory.lowMemory) ", low" else "",
-            "Speech: ${SpeechModel.threads} threads, $library library, downloaded model " +
-                if (ModelStore.installed(c) != null) "installed" else "not installed",
+            "Speech: ${SpeechModel.threads} threads, $library, downloaded model " +
+                if (ModelStore.small.installed(c) != null) "installed" else "not installed",
+            fasterEnglishLine(SpeechPreferences(c).fastEnglish, ModelStore.english.installed(c) != null,
+                engineFor(SpeechPreferences(c).options(null))),
         ) + haptics(c)
     }
 
@@ -231,7 +241,7 @@ internal fun read(path: String) = runCatching { File(path).readText().trim() }.g
 /** One speed test run: wall and processor time in ms, and whisper.cpp's timings (Whisper.timings). */
 internal class Run(val mode: String, val number: Int, val downloaded: Boolean, val wallMs: Long, val cpuMs: Long,
                    val timings: LongArray, val text: String, val before: Sched, val after: Sched, val cores: String?,
-                   val clocks: String? = null)
+                   val clocks: String? = null, val threads: Int = 0)
 
 /** Where the test's thread was scheduled: its cpuset, the process's cgroups, the cores it may use and its nice value. */
 internal data class Sched(val cpuset: String?, val cgroup: String?, val allowed: String?, val nice: Int?)
@@ -407,12 +417,22 @@ internal fun clusterSummary(cores: List<Core>): String =
 internal fun cgroupSummary(text: String) = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
     .joinToString(" ") { it.replace(Regex("(uid|pid)_\\d+"), "$1_*") }
 
-/** People read "standard" or "faster" for the speech library, never an engine's name. */
+/** The speed test's mode with Faster English dictation's model. */
+internal const val FASTER_MODE = "faster English dictation"
+
+/** Labs › Faster English dictation in the report: the switch, its download, and what the dictation language now uses,
+ * "faster" or "standard". The only line of the report that says "faster". */
+internal fun fasterEnglishLine(on: Boolean, downloaded: Boolean, engine: Engine) =
+    "Faster English dictation: ${if (on) "on" else "off"}, ${if (downloaded) "downloaded" else "not downloaded"}; " +
+        "the dictation language now uses ${if (engine == Engine.English && downloaded) "faster" else "standard"} dictation"
+
+/** Which build of the speech library runs, in words that can't be read as Faster English dictation (whose own line says
+ * "faster") or name an engine. */
 internal fun libraryLabel(file: String?) = when {
-    file == null -> "unknown"
-    file.contains("v82") -> "faster"
-    file.startsWith("libhexspeech") -> "standard"
-    else -> "other"
+    file == null -> "unknown build"
+    file.contains("v82") -> "newer-processor build"
+    file.startsWith("libhexspeech") -> "standard build"
+    else -> "other build"
 }
 
 /** A PCM16 mono 16 kHz WAV's samples, or null for anything else. */
@@ -453,7 +473,7 @@ internal fun runLines(run: Run, shared: Set<String> = emptySet()): String = buil
         val decoder = (t[0] + t[2] + t[3] + t[4]) / 1000
         append("; encoder $encoder ms, decoder $decoder ms, other ${maxOf(0, run.wallMs - encoder - decoder)} ms")
         append("; ${t[6]} threads, encoder window ${if (t[5] == 0L) "full" else "${t[5]}"}")
-    }
+    } else if (run.threads > 0) append("; ${run.threads} threads")
     val before = schedParts(run.before).filterKeys { it !in shared }
     val after = schedParts(run.after).filterKeys { it !in shared }
     if (before.isNotEmpty()) {
@@ -470,6 +490,17 @@ private fun schedParts(s: Sched) = linkedMapOf("cpuset" to (s.cpuset ?: "not rea
 
 private fun schedLine(parts: Map<String, String>) = parts.entries.joinToString(", ") { "${it.key} ${it.value}" }
 
+/** The model that wrote a dictation, in plain words; for a fallback, why. The faster model gives no encoder/decoder
+ * split, and after it failed the decode's time includes its try. */
+internal fun ranOn(ran: RanOn) = when (ran) {
+    RanOn.Standard -> "standard dictation"
+    RanOn.Faster -> "faster English dictation"
+    RanOn.NoFile -> "standard dictation, as faster English dictation's download is missing or failed its check"
+    RanOn.LowMemory -> "standard dictation, as the phone was low on memory for faster English dictation"
+    RanOn.LoadFailed -> "standard dictation, as faster English dictation's model didn't load"
+    RanOn.FasterFailed -> "standard dictation, after faster English dictation failed (its try is in the decode's time)"
+}
+
 /** The last real dictation's durations (MicCapture's [DictationTimes]), or that there was none since Hex started. */
 internal fun lastDictationLines(t: DictationTimes?): String = buildString {
     append("Last dictation (durations only, held in memory until Hex's process ends; a dictation discarded with ✕ isn't counted; nothing said or typed):")
@@ -478,8 +509,10 @@ internal fun lastDictationLines(t: DictationTimes?): String = buildString {
     val mark = if (t.tick) "✓" else "the 1-minute stop"
     append(if (t.place == DictationPlace.Keyboard) "  in the keyboard" else "  on Home")
     append(String.format(Locale.ROOT, ", %.1f s recorded, %.1f s kept", t.recordedMs / 1000.0, t.keptMs / 1000.0))
+    append("; ").append(ranOn(t.ran))
     val timings = t.timings?.takeIf { it.size >= 7 }
     if (timings != null) append("; ${timings[6]} threads, encoder window ${if (timings[5] == 0L) "full" else "${timings[5]}"}")
+    else if (t.threads > 0) append("; ${t.threads} threads")
     append("; model ").append(when (t.model) {
         ModelAtTick.Loaded -> "already loaded"
         ModelAtTick.LoadedWhileSpeaking -> "loaded while you spoke"
@@ -525,8 +558,13 @@ internal fun report(facts: List<String>?, app: Diagnostics.Speed, keyboard: Diag
                 val shared = all.first().filter { (name, value) -> all.all { it[name] == value } }
                 if (shared.isNotEmpty()) append("  same for every run: ").append(schedLine(shared)).append('\n')
                 speed.runs.forEach { append("  ").append(runLines(it, shared.keys)).append('\n') }
-                append("  text: ").append(first.text)
-                append(if (speed.runs.all { it.text == first.text }) " (every run)\n" else " (runs differ)\n")
+                // Each model's text once: the faster model's punctuation needn't match today's.
+                val (standard, faster) = speed.runs.partition { it.mode != FASTER_MODE }
+                for ((label, runs) in listOf("text" to standard, "$FASTER_MODE text" to faster)) {
+                    if (runs.isEmpty()) continue
+                    append("  ").append(label).append(": ").append(runs.first().text)
+                    append(if (runs.all { it.text == runs.first().text }) " (every run)\n" else " (runs differ)\n")
+                }
             }
         }
     }

@@ -7,7 +7,7 @@
     <string name="setup_step">第 %1$d 步，共 %2$d 步</string>
     <string name="setup_on_device" formatted="false">100% 设备端处理</string>
     <string name="setup_welcome_title">在任何应用中，\n用说话代替打字。</string>
-    <string name="setup_welcome_detail">Hex 只在下载语音模型（190 MB）和你点按“发送”提交反馈时使用网络。你的声音和文字都保留在这台设备上。</string>
+    <string name="setup_welcome_detail">Hex 只在下载语音模型（190 MB，以及你在实验室中添加的模型）和你点按“发送”提交反馈时使用网络。你的声音和文字都保留在这台设备上。</string>
     <string name="setup_get_started">开始使用</string>
     <string name="setup_title">设置 Hex</string>
     <string name="setup_detail">允许使用麦克风，然后选择 Hex 作为键盘。</string>
@@ -103,6 +103,17 @@
     <string name="settings_privacy_policy">隐私政策</string>
     <string name="settings_licences">开源许可</string>
     <string name="settings_labs">实验室</string>
+    <string name="labs_dictation">听写</string>
+    <string name="fast_english">更快的英语听写</string>
+    <string name="fast_english_detail">一次性下载 %1$d MB 后，英语听写快数倍。数字暂时以文字写出，其他语言不受影响。</string>
+    <string name="fast_english_download">下载 %1$d MB</string>
+    <string name="fast_english_loading">正在下载 %1$d MB · %2$d%%</string>
+    <string name="fast_english_ready">已就绪 · %1$d MB</string>
+    <string name="fast_english_delete">删除下载内容</string>
+    <string name="fast_english_stopped">下载已停止</string>
+    <string name="fast_english_no_connection">没有网络连接</string>
+    <string name="fast_english_no_space">存储空间不足</string>
+    <string name="fast_english_in_use">英语使用更快的听写（实验室）。</string>
     <string name="labs_output">输出</string>
     <string name="labs_keyboard">键盘</string>
     <string name="emoji_suggestions">表情符号建议</string>

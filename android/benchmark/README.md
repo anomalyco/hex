@@ -48,6 +48,38 @@ The external editor received the notebook sentence **1.91 s after mic stop** and
 
 **Model setup:** before downloading, bundled tiny inserted “The coffee is still warm.” offline. Retrying online showed download progress, then ready; the file’s verified device SHA-256 matched the small pin below. Airplane mode with Wi-Fi disabled was sufficient for both paste languages afterwards.
 
+## Faster English dictation (Labs)
+
+On 24 Nov 2026, an API 35 Google ARM64 emulator (4 vCPUs, 4 GiB) on the M5 Ultra Studio, which was also running two other emulators (load average about 13), so the absolute times below are slower than the 20 Nov ones above: read the ratios. Both engines are the app's own release native builds through [native.cpp](native.cpp): `HEX_APP=1 ./whisperbench` is the downloaded small model exactly as `hexspeech.cpp` decodes it (window sized to the speech up to 8 s, full window above, the token cap and single retry), and `./englishbench` (built with `-DTRANSCRIBE`) is Parakeet TDT-CTC 110M Q8_0 through transcribe.cpp as `hexenglish.cpp` runs it. Four threads; each clip's figure is the median of two runs. English only: the faster model is never used for another language.
+
+| English clips | Small: wall / CPU | Faster: wall / CPU | Faster, ×less | Word errors (small / faster) |
+|---|---:|---:|---:|---:|
+| 24 short (2.2–3.7 s), median | 1,563 / 3,975 ms | 76 / 263 ms | 21× / 15× | 0 / 0 of 186 |
+| 6 of 11.3–13.3 s, each | 2,552–2,698 / 9,603–10,082 ms | 207–222 / 786–852 ms | 12.0–13.1× / 11.8–12.8× | 8 / 0 of 186¹ |
+| 3 of 23.9–26.0 s, each | 2,894–2,979 / 10,603–10,968 ms | 414–487 / 1,565–1,867 ms | 5.9–7.2× / 5.7–7.0× | 8 / 0 of 186¹ |
+| One 60 s clip | 6,083 / 22,236 ms | 1,078 / 4,154 ms | 5.6× / 5.4× | — |
+| 4 short at 2 threads on 2 vCPUs, median | 1,071 ms wall | 96 ms wall | 11× | 0 / 0 |
+
+¹ Small leaves out the second of two identical sentences in the two clips that have one.
+
+Small's time is nearly flat from 8 to 30 s (the full 30 s window), while Parakeet's grows with the speech, so the gain is largest for 8–13 s and smallest for a minute. Peak native RSS: small 417 / 462 / 500 MiB (short / long / 60 s), faster 260 / 355 / 431 MiB; its weights are a read-only file mapping. Load: 27–117 ms. All 40 clips: small 5.26% WER (the same as on 20 Nov), faster 35.44%, all of it in Spanish, German and Norwegian, which it never sees in the app.
+
+### Sentence ends
+
+Parakeet TDT-CTC 110M sometimes runs two sentences together in its own output ("back of the bus We should", "Wednesday My brother"), from 11 s up; the 0.6B model and Whisper small wrote all 48 sentence ends of the long English clips. It isn't the attention window (forcing full attention on the 60 s clip left 4 of 30 missing) and no join is involved. The app puts them back in `SentenceEnds` (faster engine only, before Hex's shared formatting): a capitalised word that English writes in lowercase (in the English typing model, not on its capitals list, not "I") after a pause of at least 100 ms of quiet frames (MicCapture's −48 dBFS test) between the two words' starts. Counted on the host over every English clip (24 short, 9 long, the 60 s one, and 14 clips of 2–3 sentences full of names and places with 0.15 or 0.6 s between sentences), with word times from transcribe.cpp (which leave the text unchanged and cost no measurable time):
+
+| Rule | Missing ends restored | Stray periods |
+|---|---:|---:|
+| Capitalised common word, any pause | 9 of 10 | 8 (Dune, Main, Target, New, Godfather, Play…) |
+| … with ≥ 20 ms of quiet | 9 | 2 |
+| … with ≥ 40 ms | 9 | 0 (1 unaligned) |
+| … with ≥ 60 to ≥ 150 ms | 9 | 0 |
+| … with ≥ 180 ms | 8 | 0 |
+| … with ≥ 200 ms | 4 | 0 |
+| Any capitalised word with ≥ 100 ms | 9 | 0 |
+
+The one end not restored is "on Saturday I didn't": "I" is never taken as a sentence start. 100 ms is the middle of the band with no stray period; a capital alone after a pause added nothing here, so names are left as they are. Ten missing ends is a small sample; the rule has to be watched on real voices.
+
 ## Sources and licences
 
 - OpenAI’s [multilingual Whisper weights](https://github.com/openai/whisper#license), **MIT**; Q5_1 files from [ggerganov/whisper.cpp at 5359861…](https://huggingface.co/ggerganov/whisper.cpp/tree/5359861c739e955e79d9a303bcbc70fb988958b1). SHA-256: tiny `818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7`; base `422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898`; small `ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb`. [whisper.cpp/ggml v1.9.5](https://github.com/ggml-org/whisper.cpp/tree/d1be6fde11ac6e0407606b4e42fe72d34add8037) **MIT**.
