@@ -38,6 +38,7 @@ import ly.anoma.hex.speech.SpeechOptions
 import ly.anoma.hex.speech.SpeechModel
 import ly.anoma.hex.speech.SpeechPreferences
 import ly.anoma.hex.speech.Spoken
+import ly.anoma.hex.speech.keepAwake
 import ly.anoma.hex.speech.typingLayout
 import ly.anoma.hex.typing.PersonalWords
 import ly.anoma.hex.typing.SpatialDecoder
@@ -355,6 +356,8 @@ class HexKeyboard : InputMethodService() {
         if (!switchToPreviousInputMethod()) getSystemService(InputMethodManager::class.java).showInputMethodPicker()
     }
     private fun showStatus(phase: SpeechPhase, note: String?) {
+        // Hands-free dictation can outlast the display timeout; a hidden IME would cancel it.
+        window?.window.keepAwake(phase)
         val spoken = speechNote(note)
         val voice = bar
         if (voice != null) {
