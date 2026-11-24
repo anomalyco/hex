@@ -309,7 +309,7 @@ become replacements come last.
 | New replacement (heard key not in the list) | added at the end of the Global mode's list | added at the end of Word replacements |
 | Same heard key, same `write` (after NFC) | already there | already there |
 | Same heard key, another `write`: a **clash** | yours stays unless the person picks theirs, which replaces the output in place | the same |
-| A spelling-replacement with the same heard key as one of the file's replacements | n/a | `duplicate`: the file's replacement wins |
+| A spelling-replacement with the same heard key as one of the file's replacements, or as an earlier spelling-replacement | n/a | `duplicate`: the earlier one wins (the file's own replacements come first) |
 | Empty or blank `write` (a deletion) | added | not supported yet (`deletionNotSupported`) |
 | Replacement list holds 1,000 | `overDeviceLimit` | `overDeviceLimit` |
 | `learned` | dropped: it becomes the person's own replacement | dropped the same way; never written into what the phone learned |
