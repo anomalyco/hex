@@ -34,10 +34,10 @@ impl Capsule {
                 duration_ms,
                 hovered,
             };
+            // Windows: the finished panel is shorter than an open one, so
+            // its window shrinks only once the surface has landed on it.
             #[cfg(target_os = "windows")]
-            if let Some(resize) = &self.resize {
-                resize(panel::finalizing_window_size());
-            }
+            self.fit_recording_window();
         }
     }
 
@@ -50,6 +50,10 @@ impl Capsule {
         anchor: screen::Anchor,
         tx: &mut Tx,
     ) {
+        // Windows: the window this recording starts in was sized by the show
+        // that brought it (or is its offer's), not by the last recording.
+        #[cfg(target_os = "windows")]
+        self.recording_window.reset();
         self.state = State::Recording {
             recording,
             hovered: false,
@@ -74,6 +78,10 @@ impl Capsule {
             ReadyHover::Idle
         };
         self.state = State::Ready { manifest, hover };
+        // The ready panel is taller than the finalizing one, so this grows
+        // it here; a shrink would wait for the surface.
+        #[cfg(target_os = "windows")]
+        self.fit_recording_window();
     }
 }
 
@@ -125,16 +133,14 @@ impl MeetingCapsules {
         let handle = self.handle_for(id);
         let id = id.to_owned();
         handle.update_if(move |c, _| {
-            let State::Ready { manifest: m, .. } = &c.state else {
+            if !matches!(&c.state, State::Ready { manifest: m, .. } if m.id == id) {
                 return false;
-            };
-            #[cfg(target_os = "windows")]
-            if m.id == id
-                && let Some(resize) = &c.resize
-            {
-                resize(ready_window_size(m));
             }
-            m.id == id
+            // A summary arriving grows the panel here; a window only ever
+            // shrinks once the surface has landed.
+            #[cfg(target_os = "windows")]
+            c.fit_recording_window();
+            true
         });
     }
 

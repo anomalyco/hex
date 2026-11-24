@@ -164,6 +164,9 @@ impl Capsule {
         self.state = State::from_kind(kind, false, timer);
         self.presentation = presentation;
         self.stage = Default::default();
+        // Windows: this window's size is the show's, not the last kind's.
+        #[cfg(target_os = "windows")]
+        self.recording_window.reset();
         self.arm_offer_timeout();
         self.live = Live::default();
         self.waveform = None;

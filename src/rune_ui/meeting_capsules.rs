@@ -316,6 +316,10 @@ struct Capsule {
     /// back.
     keep_recording: Option<Arc<dyn Fn() + Send + Sync>>,
     resize: Option<Resize>,
+    /// Windows: the size the recording window was last given, which follows
+    /// what it draws (see [`panel::WindowFit`]).
+    #[cfg(target_os = "windows")]
+    recording_window: panel::WindowFit,
     choose: Choose,
     /// Where the capsule rests.
     corner: MeetingIndicatorCorner,
@@ -394,27 +398,6 @@ impl Capsule {
         }
     }
 
-    /// Windows sizes the recording capsule's window to the pill it draws.
-    /// Elsewhere the window stays at its largest and only the `.hit()` pill
-    /// takes the pointer.
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    fn fit_recording_window(&self) {
-        if self.presentation.inherits_offer_window() {
-            return;
-        }
-        if let (
-            Some(resize),
-            State::Recording {
-                recording: shown,
-                hovered,
-                stopping,
-            },
-        ) = (&self.resize, &self.state)
-        {
-            resize(recording_window_size(*hovered || *stopping, Some(shown)));
-        }
-    }
-
     /// The recording's pill is held open: by the pointer, or by Stop.
     #[cfg(test)]
     fn open(&self) -> bool {
@@ -487,10 +470,10 @@ impl Capsule {
             && ready.id == manifest.id
         {
             *ready = manifest;
+            // A longer summary grows the window here; one that goes shrinks
+            // it only once the surface has landed.
             #[cfg(target_os = "windows")]
-            if let Some(resize) = &self.resize {
-                resize(ready_window_size(ready));
-            }
+            self.fit_recording_window();
         }
     }
 
@@ -548,6 +531,16 @@ impl Capsule {
 
     /// The capsule's window size, for snapping a drag.
     fn window_size(&self) -> (f32, f32) {
+        // On Windows the recording window follows what it draws: snap by the
+        // size it was last given, not the one the surface is heading to.
+        #[cfg(target_os = "windows")]
+        if matches!(
+            self.state,
+            State::Recording { .. } | State::Finalizing { .. } | State::Ready { .. }
+        ) && let Some(size) = self.recording_window.size()
+        {
+            return size;
+        }
         if self.presentation.inherits_offer_window() {
             return self.presentation.window();
         }
@@ -755,6 +748,8 @@ impl MeetingCapsules {
                     show: None,
                     keep_recording: None,
                     resize: None,
+                    #[cfg(target_os = "windows")]
+                    recording_window: Default::default(),
                     choose: choose.clone(),
                     corner: MeetingIndicatorCorner::default(),
                     display: None,
@@ -1176,8 +1171,16 @@ fn dismiss_button(p: Paint) -> El {
 fn poll(capsule: &mut Capsule, now: f64, tx: &mut Tx) -> bool {
     // The surface first: the field is drawn once a frame, at the width the
     // wall has just reached.
-    let mut changed = capsule.step_stage(now, tx);
+    let staged = capsule.step_stage(now, tx);
+    let mut changed = staged;
     changed |= waveform::poll(capsule, now, tx);
+    // Windows: once the surface has landed, a window kept large for a
+    // closing panel can shrink to the pill it now draws. The waveform may
+    // still be moving, so this reads the surface alone.
+    #[cfg(target_os = "windows")]
+    if !staged {
+        capsule.settle_recording_window();
+    }
     if !capsule.throw.gliding() {
         return changed;
     }
@@ -1562,6 +1565,8 @@ mod tests {
             show: None,
             keep_recording: None,
             resize: None,
+            #[cfg(target_os = "windows")]
+            recording_window: Default::default(),
             choose: Arc::new(move |choice| saved.lock().unwrap().push(choice)),
             corner: MeetingIndicatorCorner::TopRight,
             display: None,

@@ -1045,9 +1045,17 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   pill `.hit()`); the window is as wide as the open pill, and clicks
      │   in its transparent rest reach the app beneath (#1305; not observed
      │   on a real Mac)
-     ├── Windows: each capsule's window is only as wide as the drawn pill,
-     │   so the area around it stays clickable (not verified on a real
-     │   Windows machine)
+     ├── Windows: each capsule's window is only as large as what it draws,
+     │   so the area around it stays clickable. The drawn pill opens the
+     │   recording and grows its window to the open panel; the whole window
+     │   then keeps it open while the panel springs out and shrinking it
+     │   waits for the closing surface to land, back to the pill. A pointer
+     │   that outran the opening pill used to collapse it and pull the
+     │   window out from under itself, and a window that shrank first cut
+     │   the closing panel. Entering the window where a closed panel was
+     │   opens nothing; only the pill does
+     │   // checks: the WindowFit tests in meeting_capsules/panel.rs; NOT
+     │   // verified on a real Windows machine
      ├── Windows: Rune waits for a swap-chain slot before each frame (Rune
      │   #985), so the pill's and panel's frames in flight stay bounded
      │   through a long recording (#1833; not measured on Windows)
