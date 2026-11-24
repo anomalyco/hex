@@ -163,8 +163,10 @@ internal class LetterFeedback(private val host: ViewGroup) {
         fun letterSymbol(c: Char, topRow: Boolean = false): Char? =
             letterSymbols[c.lowercaseChar()] ?: (if (topRow) topRowSymbols[c.lowercaseChar()] else null)
 
-        // Gboard's held symbols (Pixel 8 emulator, API 36, black box) on the keys Hex's pages share with
-        // its: the option Gboard selects first, then the rest left to right. Digits offer themselves first.
+        // Gboard's held symbols (Pixel 8 emulator, API 36, black box): the option Gboard selects first,
+        // then the rest left to right. Digits offer themselves first. Each key here is drawn on one of the
+        // two symbol pages, < and > as the =< page's keys beside space; ? and ! hold Spanish's ¿ and ¡,
+        // which neither page has a key of its own for.
         private val symbols = mapOf('1' to "1½⅓¼⅕⅙⅐⅛⅑⅒", '2' to "2⅔⅖", '3' to "3⅗¾⅜", '4' to "4⅘", '5' to "5⅝⅚",
             '7' to "7⅞", '0' to "0∅ⁿ", '#' to "№", '$' to "¢€£₹¥₱", '-' to "_—–·", '+' to "±", '(' to "<[{",
             ')' to ">]}", '*' to "†★‡", '"' to "”„“«»", '\'' to "’‚‘‹›", '!' to "¡", '?' to "¿‽", '.' to "…",

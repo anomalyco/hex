@@ -44,18 +44,27 @@ internal data class KeyboardPage(
     val pad: Pad? = null,
     /** Labs › Keyboard › Number row: the letter pages draw 1 to 0 above their letters too. */
     val numberRow: Boolean = false,
-    /** Labs › Keyboard › Local currency: the phone's symbol, read once for the page, that the 123 page shows
-     * in place of $, or null for $. */
+    /** Labs › Keyboard › Local currency: the phone's symbol, read once for the page, that the ?123 page shows
+     * in place of $, or null for $. The =< page then shows $ in that symbol's slot, or in ¥'s for one it has
+     * none, so both pages keep their keys and neither draws a symbol twice. */
     val currency: Char? = null,
 ) {
-    val lines: List<String> get() {
-        val code = language.layoutCode
-        return when {
-            !symbols -> KeyboardLetters.rows(code)
-            more -> KeyboardLetters.symbols(code, currency)
-            else -> KeyboardLetters.numbers(code, currency)
-        }
+    val lines: List<String> get() = when {
+        !symbols -> KeyboardLetters.rows(language.layoutCode)
+        more -> KeyboardLetters.symbols(currency)
+        else -> KeyboardLetters.numbers(currency)
     }
+
+    /** What the bottom row's comma key types: the field's own mark on the letters (Gboard's @ in an email
+     * field and / in a URL), a comma on ?123, and =<'s <, which that page's seven-key row leaves out. */
+    val commaText: String get() = when {
+        !symbols -> kind.mark
+        more -> "<"
+        else -> ","
+    }
+
+    /** What the bottom row's period key types: . on the letters and ?123, and =<'s >. */
+    val periodText: String get() = if (symbols && more) ">" else "."
 
     /** The ten digits above the letter rows while the number row shows; ?123 and the pads keep their own. */
     val digits: String? get() = if (numberRow && !symbols && pad == null) KeyboardLetters.DIGITS else null

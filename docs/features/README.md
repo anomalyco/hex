@@ -3167,6 +3167,18 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   path receives none
 └── Proof limits: unit tests only; no CI compiles the iOS targets
 Android keyboard -> English, Spanish, German and Bokmål typing assistance
+├── Symbol pages -> Gboard's ?123 and =< pages (Pixel 8 emulator, API 36), the same on every
+│   layout: ?123 draws 1–0, then @ # $ _ & - + ( ) /, then * " ' : ; ! ? between the page switch
+│   and delete, and =< draws ~ ` | • √ π ÷ × § Δ, then £ ¢ € ¥ ^ ° = { } \, then % © ® ™ ✓ [ ]
+│   the same way, so ` types again, and #, _, +, *, = and every other printable ASCII character
+│   types from the letters, one of the two pages, or a hold. The bottom row is ABC , 1234 space .
+│   enter under ?123 and Gboard's ABC < 1234 space > enter under =<, whose own rows have no < or >;
+│   a held < or > keeps the marks it had there. Spanish's ¿ and ¡ are the holds on ? and ! (the
+│   rows have no keys of their own for them). Checks: `SymbolPagesTest` in android/app/src/test
+│   (both pages' keys, every printable ASCII character for each layout and local currency, no key
+│   drawn twice on a page) and `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` passed
+│   175 tests on 2026-11-24 on OpenJDK 21 and Android SDK 36 (offline, `-x prepareSpeechModel`);
+│   the repo has no Android CI, and nothing was tried on a device or emulator.
 ├── Português, Nederlands, Polski or Русский with no pinned layout -> English's keys and
 │   accents (DictationLanguage.layout is null), with English's word list only standing in for
 │   the keys' geometry: the strip keeps what was typed and your own dictionary words as
@@ -3246,18 +3258,18 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 │   system locale with a country is read, and its `Currency.currencyCode` rather than a
 │   localized symbol chooses the character, so the same phone shows the same one in any
 │   language. Holding the key offers $ first, then $'s held symbols without a second copy
-│   of the local one, in their order. The second symbols page always draws $, with ten keys
-│   still: where it drew that currency for £, € and ¥ (with £ or € local, ¥ stays in $'s
-│   holds; with ¥ local, $'s holds drop it because ¥ is the ?123 key), and where it drew ¥
-│   for ₹, ₱, ₩, ₽ and ₴, so that page reads €£$ there and $ is on one of the two pages.
+│   of the local one, in their order. The =< page's money row (£ ¢ € ¥) shows $ in the slot of a
+│   local £, € or ¥, and gives only ¥'s slot to $ for ₹, ₱, ₩, ₽ and ₴, so £, ¢ and € stay drawn,
+│   no page draws a symbol twice, and $ is always on one of them; $'s holds drop the local symbol
+│   itself, whichever it is, so their list never repeats it.
 │   Only the symbol pages read the currency: a number, PIN, phone or date pad, including the
 │   symbols page's own 1234 pad, draws none and reads none. Off, both pages and every hold
 │   are unchanged.
-│   Checks: `LocalCurrencyTest` in android/app/src/test (rows, holds and region cases) and
-│   `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` on a GitHub-hosted runner
-│   (https://github.com/anomalyco/hex/actions/runs/45359081407: LocalCurrencyTest 6/6 and
-│   KeyboardPageTest 7/7 passed, 156 tests in all, the latest observed verification); not
-│   tried on a device or emulator, and the repo has no Android CI.
+│   Checks: `LocalCurrencyTest` (rows, holds, ten keys a row and region cases, 7/7) and
+│   `SymbolPagesTest` (5/5) in android/app/src/test, and
+│   `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin`
+│   passed 175 tests on 2026-11-24 on OpenJDK 21 and Android SDK 36 (offline, with
+│   `-x prepareSpeechModel`); not tried on a device or emulator, and the repo has no Android CI.
 ├── Labs > Keyboard > Emoji suggestions (off) -> on the English layout, while a word
 │   that names an emoji is being typed (smile -> 😊, joy/haha -> 😂, heart -> ❤️), the
 │   strip's last slot offers it beside the word suggestions, padded to that slot even when

@@ -22,18 +22,22 @@ internal object KeyboardLetters {
     /** Row 1's digits, 1 to 0 on its first ten keys, as Gboard draws and holds them. */
     fun digit(row: Int, index: Int): Char? = if (row == 0 && index < 10) DIGITS[index] else null
 
-    /** The 123 page and the second symbols page; Spanish puts ¿ and ¡ on the second page's last row. A Labs
-     * local currency takes $'s place on the 123 page, and the second page then shows $ where it drew that
-     * currency, or where it draws ¥ for one it never drew, so $ always stays on one of the two pages. */
-    fun numbers(layoutCode: String, currency: Char? = null) =
-        listOf("1234567890", "-/:;()${currency ?: '$'}&@\"", punctuation(layoutCode, more = false))
-    fun symbols(layoutCode: String, currency: Char? = null): List<String> {
+    /** Gboard's ?123 page (Pixel 8 emulator, API 36), top to bottom: its ten digits, ten marks, and the
+     * seven keys between the page switch and delete. [currency] is Labs › Keyboard › Local currency's
+     * symbol, in $'s place, or null for $. */
+    fun numbers(currency: Char? = null) =
+        listOf(DIGITS, "@#${currency ?: '$'}_&-+()/", "*\"':;!?")
+
+    /** Gboard's =< page: the marks the ?123 page has no room for, on the same seven-key last row. A
+     * local currency that page took $'s place with gives up its own slot here for $; one Hex has no slot
+     * for takes only ¥'s, so £, ¢ and € stay drawn and nothing is duplicated. $ is always on one of the
+     * two pages. */
+    fun symbols(currency: Char? = null): List<String> {
         val money = when {
-            currency == null -> "€£¥"
-            currency in "€£¥" -> "€£¥".replace(currency, '$')
-            else -> "€£$"
+            currency == null -> "£¢€¥"
+            currency in "£¢€¥" -> "£¢€¥".replace(currency, '$')
+            else -> "£¢€$"
         }
-        return listOf("[]{}#%^*+=", "_\\|~<>$money•", punctuation(layoutCode, more = true))
+        return listOf("~`|•√π÷×§Δ", "${money}^°={}\\", "%©®™✓[]")
     }
-    private fun punctuation(layoutCode: String, more: Boolean) = if (more && layoutCode == "es") ".,¿¡'" else ".,?!'"
 }
