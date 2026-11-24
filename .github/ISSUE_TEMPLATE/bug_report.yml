@@ -21,8 +21,8 @@ body:
     id: platform
     attributes:
       label: Platform
-      description: Where you run Hex.
-      placeholder: "macOS, Windows, Linux X11, Linux Wayland, Android, TypeScript SDK, or other"
+      description: Which Hex you're reporting on.
+      placeholder: "macOS, Windows, Linux X11, Linux Wayland, iOS, Android, TypeScript SDK, or other"
     validations:
       required: true
   - type: input
