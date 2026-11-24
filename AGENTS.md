@@ -546,7 +546,9 @@ substitute for source inspection or a second roadmap.
   audio sources (macOS: Core Audio process tap, ScreenCaptureKit fallback;
   Linux: one `pw-record` per hardware sink's monitor, mixed; Windows: WASAPI
   loopback); one failing never stops the other, and resumed audio is padded
-  onto the timeline.
+  onto the timeline. With Labs › Choose meeting audio on, the system source
+  records one output device or one app instead, records silence while it is
+  missing and reattaches when it returns, and never widens to every output.
 - `meeting/runtime`: the Linux and Windows apps' meeting controller thread,
   capsules, recording state, and tray items (macOS runs the same controller
   from `macos_rune`).
@@ -1223,9 +1225,13 @@ CoreAudio formats, AppleScript details, or event serialization.
   Recording consent), never requiring a display; ScreenCaptureKit is only the
   fallback. Linux records every hardware output's PipeWire monitor through one
   `pw-record` each, mixed, and Windows its WASAPI loopback; neither asks for
-  consent. Losing either source never stops the other or the meeting: it
-  retries until Stop, and resumed audio is padded with silence so WAV
-  positions stay on the shared capture clock.
+  consent. With Labs › Choose meeting audio on, all of them record one output
+  device or one app instead, record silence while it is missing and reattach
+  when it returns, and never widen to every output; a chosen source needs the
+  same System Audio Recording consent on macOS even when Screen Recording is
+  granted. A choice applies mid-recording. Losing either source never stops
+  the other or the meeting: it retries until Stop, and resumed audio is padded
+  with silence so WAV positions stay on the shared capture clock.
 - Meeting recording prevents idle sleep but does not apply dictation mute or
   pause-media behavior.
 - Meeting notes (Apple Intelligence, or OpenCode only once the user turns on

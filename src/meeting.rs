@@ -23,6 +23,7 @@ const FINAL_PENDING_FILE: &str = "final.pending";
 /// as an import the launch sweep may remove once its lock is free.
 const IMPORT_PENDING_FILE: &str = "import.pending";
 
+pub(crate) mod audio_source;
 mod capture;
 mod chapters;
 mod chunk_level;

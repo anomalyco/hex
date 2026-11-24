@@ -1449,6 +1449,53 @@ fn meetings_off_offers_the_opt_in_and_keeps_the_pane() {
     assert!(rt.find("meetings-view").is_some());
 }
 
+/// Labs › Choose meeting audio puts Computer audio in Meetings › Settings:
+/// all computer audio first, and a saved device the list doesn't have stays
+/// visible with why, so the choice is never silently lost.
+#[test]
+fn meeting_audio_source_lists_all_audio_and_keeps_a_missing_choice_visible() {
+    use crate::meeting::audio_source::SourceChoice;
+    let mut rt = runtime("meetings-settings", true, (980.0, 2400.0));
+    settle(&mut rt);
+    assert!(
+        rt.find("meeting-audio-source").is_none(),
+        "hidden while the lab is off"
+    );
+    assert_eq!(
+        rt.state.settings.labs.meeting_audio_source_choice,
+        SourceChoice::All
+    );
+    rt.update(|ui, _| ui.settings.labs.meeting_audio_source = true);
+    refresh(&mut rt);
+    assert!(rt.find("meeting-audio-source").is_some());
+    assert_eq!(
+        a11y_value(&rt, "meeting-audio-source-control-trigger").as_deref(),
+        Some("All computer audio")
+    );
+    rt.update(|ui, _| {
+        ui.settings.labs.meeting_audio_source_choice = SourceChoice::Output {
+            id: "alsa_output.dock".into(),
+            name: "Dock speakers".into(),
+        };
+    });
+    refresh(&mut rt);
+    assert_eq!(
+        a11y_value(&rt, "meeting-audio-source-control-trigger").as_deref(),
+        Some("Dock speakers"),
+        "the saved device stays the shown choice"
+    );
+    assert!(
+        texts(&rt).iter().any(|text| text == "not connected"),
+        "a missing device says why it isn't listed"
+    );
+    tap(&mut rt, "meeting-audio-source-control-trigger");
+    tap(&mut rt, "meeting-audio-source-menu-item0");
+    assert_eq!(
+        rt.state.settings.labs.meeting_audio_source_choice,
+        SourceChoice::All
+    );
+}
+
 #[test]
 fn meetings_settings_save_and_ask_for_system_audio() {
     let mut rt = runtime("meetings-settings", true, (980.0, 2400.0));

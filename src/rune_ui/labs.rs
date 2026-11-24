@@ -709,6 +709,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
     rows.push(row(Feature::Appearance, Some(&PANEL)));
     if caps.meetings {
         rows.push(row(Feature::LiveChapters, None));
+        rows.push(row(Feature::MeetingAudioSource, None));
         rows.push(row(Feature::StopAnyCallRecording, None));
         // macOS's menu bar, capsule, and Meetings pane offer the switch.
         if cfg!(target_os = "macos") {
@@ -1131,6 +1132,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::ClipboardPhrase => "lab-clipboard-phrase",
         Feature::MeetingMicrophoneMute => "lab-meeting-microphone-mute",
         Feature::MeetingIndicatorDisplay => "lab-meeting-indicator-display",
+        Feature::MeetingAudioSource => "lab-meeting-audio-source",
     }
 }
 
