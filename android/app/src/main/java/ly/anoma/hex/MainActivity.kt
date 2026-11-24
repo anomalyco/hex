@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.style.TextAlign
 import kotlinx.coroutines.delay
+import ly.anoma.hex.keyboard.VoiceInput
 import ly.anoma.hex.keyboard.speechNote
 import ly.anoma.hex.speech.*
 import ly.anoma.hex.typing.TypingPreferences
@@ -92,6 +93,8 @@ class MainActivity : ComponentActivity() {
         for (name in listOf(Settings.Secure.DEFAULT_INPUT_METHOD, Settings.Secure.ENABLED_INPUT_METHODS))
             contentResolver.registerContentObserver(Settings.Secure.getUriFor(name), false, changed)
         refresh()
+        // Labs › Keyboard › Voice input mode keeps its subtype in Android's own settings, which outlive Hex.
+        VoiceInput.apply(this, typing.voiceInput)
         ModelStore.refresh(this)
         setContent {
             HexTheme {

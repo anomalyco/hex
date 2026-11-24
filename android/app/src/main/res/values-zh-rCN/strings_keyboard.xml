@@ -3,11 +3,16 @@
     <string name="keyboard_hint_hold">按住 Hex 说话</string>
     <string name="keyboard_hint_password">密码框中不能听写</string>
     <string name="keyboard_hint_microphone">请在 Hex 中允许使用麦克风</string>
+    <string name="keyboard_hint_voice">点按 ✓ 说话</string>
     <string name="keyboard_note_microphone">麦克风不可用，请再试一次。</string>
     <string name="keyboard_note_transcribe">无法转录，请再试一次。</string>
     <string name="keyboard_note_no_speech">没有听到说话</string>
     <string name="keyboard_note_model">语音模型不可用</string>
     <string name="keyboard_note_minute">已录满 1 分钟，录音停止</string>
+    <string name="voice_input_label">语音输入</string>
+    <string name="voice_input_listening">正在聆听…</string>
+    <string name="voice_input_transcribing">正在转录…</string>
+    <string name="voice_input_back">返回键盘</string>
     <string name="keyboard_cancel_dictation">取消听写</string>
     <string name="keyboard_finish_dictation">完成听写</string>
     <string name="keyboard_undo_dictation">撤销听写</string>

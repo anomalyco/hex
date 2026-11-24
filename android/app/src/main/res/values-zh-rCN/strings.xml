@@ -120,4 +120,6 @@
     <string name="keyboard_tools_detail">在建议栏中显示表情、粘贴、设置和撤销</string>
     <string name="smart_quotes">智能引号</string>
     <string name="smart_quotes_detail">用 ’ ‘ “ ” 代替 \' 和 \"</string>
+    <string name="voice_input">语音输入模式</string>
+    <string name="voice_input_detail">在常用键盘旁听写。请在键盘切换器中选择“语音输入”。</string>
 </resources>

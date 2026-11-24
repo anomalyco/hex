@@ -3273,7 +3273,7 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
     Checks: `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` (includes
     `KeyboardToolsTest`) and `python3 scripts/code-shape.py --check`; the repo has no
     Android CI. Not tried on a device or emulator.
-└── Labs > Keyboard > Smart quotes (off) -> in a plain-text field (not a password, email or URL
+├── Labs > Keyboard > Smart quotes (off) -> in a plain-text field (not a password, email or URL
     field, or a TYPE_NULL field such as a terminal), the ' and " keys type ’ ‘ “ ”: an opening
     quote — ‘ or “ — at the start, after whitespace, or after an opening bracket or quote, and
     the closing quote or apostrophe — ’ or ” — after anything else. A word a suggestion,
@@ -3288,6 +3288,25 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
     `SmartQuotesTest`'s 12) on 2026-11-24, on Temurin JDK 21 and Android SDK 36 (platform 36,
     build-tools 35/36, NDK 27.2.12479018); the repo has no Android CI, and nothing was tried on a
     device or emulator. `python3 scripts/code-shape.py --check` passes.
+└── Labs > Keyboard > Voice input mode (off) -> adds Hex's second input subtype, "Voice input", only
+    while the toggle is on; off, nothing is registered and the full keyboard's subtype is untouched.
+    With it on, the subtype is added with
+    InputMethodManager.setAdditionalInputMethodSubtypes and re-added on every app start and IME
+    create (Android keeps additional subtypes in its own settings across reboots); turning the
+    toggle off passes an empty list, which removes it. The subtype is auxiliary with the phone's
+    language: Android's keyboard picker lists it while a keyboard is shown (a one-shot entry, and
+    what getShortcutInputMethodsAndSubtypes() reads for a keyboard's voice-input shortcut), never
+    makes it the default, never puts it in the globe-key rotation, and switchToLastInputMethod never
+    returns to it. Opening Hex in it shows a keys-free bar in the strip's place: a status line, the
+    recording's dot scope, ✕ and ✓. It starts listening by itself through the same beginSpeech path
+    (a password field or a missing microphone shows the existing message and leaves the bar idle),
+    finishes through the same MicCapture, commitSpeech and KeyboardEngine.insertDictation path, and
+    after the text is in (or ✕ discards) calls switchToPreviousInputMethod(), falling back to
+    Android's picker when there is no previous keyboard. It never switches away while text is still
+    being transcribed. The full-keyboard subtype behaves exactly as before in every case.
+    Checks: `VoiceInputTest` (the bar only with the lab on in the "voice" subtype) and
+    `python3 scripts/code-shape.py --check`; not compiled or run here (this machine has no Android
+    SDK or JDK 21, and the repo has no Android CI), and nothing was tried on a device or emulator.
 Unmerged Windows / deferred features -> Not part of this map
 ```
 

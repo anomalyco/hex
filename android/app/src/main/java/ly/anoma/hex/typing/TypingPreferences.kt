@@ -57,6 +57,10 @@ internal class TypingPreferences(context: Context) {
     var smartQuotes: Boolean
         get() = prefs.getBoolean(SMART_QUOTES, false)
         set(value) { prefs.edit().putBoolean(SMART_QUOTES, value).apply() }
+    /** Labs › Keyboard › Voice input mode: Hex's voice-only subtype beside the usual keyboard, off by default. */
+    var voiceInput: Boolean
+        get() = prefs.getBoolean(VOICE_INPUT, false)
+        set(value) { prefs.edit().putBoolean(VOICE_INPUT, value).apply() }
 
     // Remember only explicit rejection of this exact pair in this language; never save typed text.
     private fun pair(language: String, original: String, replacement: String): String {
@@ -79,5 +83,6 @@ internal class TypingPreferences(context: Context) {
         const val EMOJI_SUGGESTIONS = "emojiSuggestions"
         const val KEYBOARD_TOOLS = "keyboardTools"
         const val SMART_QUOTES = "smartQuotes"
+        const val VOICE_INPUT = "voiceInput"
     }
 }

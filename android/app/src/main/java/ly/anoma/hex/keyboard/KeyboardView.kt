@@ -108,7 +108,7 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
     }
     /** [note]: [hint] is a dictation's note, not the idle hint. */
     fun status(phase: SpeechPhase, hint: String, note: Boolean = false) {
-        cue(this.phase, phase); this.phase = phase
+        speechCue(this.phase, phase, ime.feedback.haptics); this.phase = phase
         val idle = phase == SpeechPhase.Idle
         strip.prepare(phase, hint)
         if (!idle) { heldAt = null; closeMenu() }
@@ -117,21 +117,22 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
         if (idle) keys.refreshSpace()
         strip.update()
     }
-    /** iPhone Hex's light tap as dictation starts; as the microphone closes (done, cancelled or failed), a
-     * lighter tick that iPhone Hex doesn't have, so someone using TalkBack, which is quiet while Hex records,
-     * feels both ends. Android's own pair for a gesture's start and end (a click and a tick). */
-    private fun cue(from: SpeechPhase, to: SpeechPhase) {
-        fun recording(p: SpeechPhase) = p == SpeechPhase.Opening || p == SpeechPhase.Listening
-        val modern = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
-        val effect = when {
-            !recording(from) && recording(to) -> if (modern) HapticFeedbackConstants.GESTURE_START else HapticFeedbackConstants.CONFIRM
-            recording(from) && !recording(to) -> if (modern) HapticFeedbackConstants.GESTURE_END else HapticFeedbackConstants.CONTEXT_CLICK
-            else -> return
-        }
-        if (vibrates(context, ime.feedback.haptics)) performHapticFeedback(effect)
-    }
     fun setLevel(value: Float) = strip.setLevel(value)
     fun cancelGestures() { strip.cancelGestures(); keys.cancelGestures() }
     /** The editor went away: the next one starts on the letters. */
     fun reset() { heldAt = null; closeMenu(); closeEmoji() }
+}
+
+/** iPhone Hex's light tap as dictation starts; as the microphone closes (done, cancelled or failed), a
+ * lighter tick that iPhone Hex doesn't have, so someone using TalkBack, which is quiet while Hex records,
+ * feels both ends. Android's own pair for a gesture's start and end (a click and a tick). */
+internal fun View.speechCue(from: SpeechPhase, to: SpeechPhase, haptics: Boolean) {
+    fun recording(p: SpeechPhase) = p == SpeechPhase.Opening || p == SpeechPhase.Listening
+    val modern = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+    val effect = when {
+        !recording(from) && recording(to) -> if (modern) HapticFeedbackConstants.GESTURE_START else HapticFeedbackConstants.CONFIRM
+        recording(from) && !recording(to) -> if (modern) HapticFeedbackConstants.GESTURE_END else HapticFeedbackConstants.CONTEXT_CLICK
+        else -> return
+    }
+    if (vibrates(context, haptics)) performHapticFeedback(effect)
 }

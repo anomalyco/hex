@@ -128,4 +128,6 @@
     <string name="keyboard_tools_detail">Emoji, paste, settings and undo in the suggestion strip</string>
     <string name="smart_quotes">Smart quotes</string>
     <string name="smart_quotes_detail">Types ’ ‘ “ ” for \' and \"</string>
+    <string name="voice_input">Voice input mode</string>
+    <string name="voice_input_detail">Dictate beside your usual keyboard. Pick “Voice input” in the switcher.</string>
 </resources>
