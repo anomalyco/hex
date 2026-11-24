@@ -668,6 +668,21 @@
       }
     },
     {
+      "name": "Phone: two terms with the same spelling: the first term's spelling-replacement is added, the second is a duplicate",
+      "receiver": "phone",
+      "before": {"vocabulary": [], "replacements": []},
+      "incoming": {
+        "vocabulary": [{"term": "Rune", "soundsLike": ["roon"]}, {"term": "Ruin", "soundsLike": ["roon"]}],
+        "replacements": []
+      },
+      "expect": {
+        "after": {"vocabulary": ["Rune", "Ruin"], "replacements": [{"heard": "roon", "write": "Rune"}]},
+        "summary": {"addedTerms": 2, "updatedTerms": 0, "alreadyHaveTerms": 0, "addedReplacements": 1, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [{"path": "vocabulary[1].soundsLike[0]", "reason": "duplicate"}],
+        "clashes": []
+      }
+    },
+    {
       "name": "Phone: a spelling that clashes with your replacement keeps yours",
       "receiver": "phone",
       "before": {"vocabulary": [], "replacements": [{"heard": "open code", "write": "Open Code"}]},
