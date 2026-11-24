@@ -231,6 +231,16 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
 
     private fun cased(c: Char) = if (current?.let { !it.symbols && it.shifted } == true) c.uppercaseChar().toString() else c.toString()
 
+    /** Types a page key's own character at [p] (its touch, when the page has one): a quote key asks the
+     * engine for its smart form (Labs › Keyboard › Smart quotes), and every other key types as before.
+     * A long press's picked alternate goes through [KeyboardEngine.type] instead, so it inserts exactly
+     * the character it shows. */
+    private fun typeFromKey(text: String, g: KeyGrid?, p: KeyPoint?) {
+        if (text.length == 1 && (text[0] == '\'' || text[0] == '"')) ime.engine.quote(text[0])
+        else if (g != null && p != null) ime.engine.letter(text, p.x, p.y, g)
+        else ime.engine.type(text)
+    }
+
     fun showPage(page: KeyboardPage) {
         val shown = current
         val letterSymbols = ime.feedback.letterSymbols
@@ -294,7 +304,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                     val g = if (symbols) null else geometry()
                     val p = touch ?: g?.centres?.get(c)
                     val text = (downText ?: cased(c)).let { if (symbols || touch == null) it else likelier(c, it, touch!!) }
-                    if (g != null && p != null) ime.engine.letter(text, p.x, p.y, g) else ime.engine.type(text)
+                    typeFromKey(text, g, p)
                 }
                 row.add(k, at, width); at += width
                 if (!symbols) { letters[c] = k; caseKeys.add(c to k) }
@@ -309,7 +319,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                 }
                 slides[k] = { p ->
                     val g = if (symbols) null else geometry()
-                    if (g != null) ime.engine.letter(cased(c), p.x, p.y, g) else ime.engine.type(cased(c))
+                    typeFromKey(cased(c), g, p)
                 }
                 typesOnLift(k, preview = { cased(c) }, holds = { listOf(holds()) }, swipes = !symbols,
                     down = { e ->
@@ -318,7 +328,10 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                     },
                     type = { option ->
                         val text = downText ?: cased(c)
-                        if (option != null && option != text) {
+                        // A held alternate inserts exactly what it shows, even when it is the key's own
+                        // character (the French apostrophe's straight form): it never takes the
+                        // smart-quote path a plain press does.
+                        if (option != null && (option != text || text == "'" || text == "\"")) {
                             val g = geometry(); val p = touch
                             if (g != null && p != null) ime.engine.letter(option, p.x, p.y, g, explicit = true) else ime.engine.type(option)
                         } else k.performClick()

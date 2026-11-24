@@ -334,7 +334,7 @@ internal class KeyboardEngine(
     private fun before() = if (secure) "" else target.before(96).orEmpty()
     private fun endsWith(suffix: String) = !secure && target.before(suffix.length) == suffix
     private fun canEndWord() = !secure && (target.after(1)?.firstOrNull()?.let {
-        !it.isLetterOrDigit() && it !in "'_/@#"
+        !it.isLetterOrDigit() && it !in "'’_/@#"
     } ?: true)
     private fun inputDone() {
         val was = shift.uppercase
@@ -410,7 +410,8 @@ internal class KeyboardEngine(
         if (old.isEmpty() && !w.startsWord(before())) return
         val holds = SpaceRules.separates(target.after(1))
         clearSpaces()
-        if (replace(old, if (holds) text else "$text ")) {
+        val committed = smartWord(text)
+        if (replace(old, if (holds) committed else "$committed ")) {
             resetTyping()
             val b = before()
             if (holds) heldAnchor = b else pickedAnchor = b
@@ -418,6 +419,10 @@ internal class KeyboardEngine(
             inputDone()
         }
     }
+
+    /** A word a pick, autocorrection or swipe commits: with Labs › Keyboard › Smart quotes on, its
+     * straight apostrophes go in as ’ ("don't" becomes "don’t"). Off, it is exactly the text offered. */
+    private fun smartWord(text: String) = if (feedback.smartQuotes) SmartQuotes.word(text) else text
 
     /** The space bar, tapped at [point] in [grid]'s coordinates (null off the letters page). */
     fun space(point: KeyPoint? = null, grid: KeyGrid? = null) {
@@ -442,14 +447,17 @@ internal class KeyboardEngine(
             val old = w.token; val lang = w.decoder.model.language
             // Your text replacements first, whatever autocorrect is set to; they never offer an undo.
             val swap = w.textReplacement(b)
-            if (swap != null && replace(swap.original, swap.replacement + " ")) { resetTyping(); afterSpace(now); return }
+            if (swap != null && replace(swap.original, smartWord(swap.replacement) + " ")) { resetTyping(); afterSpace(now); return }
             if (feedback.autocorrect && old.isNotEmpty() && endsWith(prefix + old)) {
                 val fix = w.finish(' ', point, grid)
-                if (fix != null && !feedback.blocked(lang, fix.original, fix.replacement) && replace(fix.original, fix.replacement + " ")) {
-                    cancelChip()
-                    undo = Undo(lang, fix.original, fix.replacement)
-                    if (expectedCaret >= 0) expectedCaret += fix.replacement.length + 1 - fix.original.length
-                    w.reset(); afterSpace(now); return
+                if (fix != null && !feedback.blocked(lang, fix.original, fix.replacement)) {
+                    val fixed = smartWord(fix.replacement)
+                    if (replace(fix.original, fixed + " ")) {
+                        cancelChip()
+                        undo = Undo(lang, fix.original, fixed)
+                        if (expectedCaret >= 0) expectedCaret += fixed.length + 1 - fix.original.length
+                        w.reset(); afterSpace(now); return
+                    }
                 }
             }
         }
@@ -459,6 +467,17 @@ internal class KeyboardEngine(
         val b = before()
         spaceAnchor = b; spaceAt = now
         showPredictions(b); inputDone()
+    }
+
+    /** A quote key's own character (' or ") as it goes in: Labs › Keyboard › Smart quotes makes it
+     * ’ or ‘ and “ or ” by the text before the cursor; off, and in a password field or an email or
+     * URL field, it is exactly the key's character. The keys' long-press alternates never come here:
+     * they type what they show. */
+    fun quote(value: Char) {
+        if (!target.connected) return
+        val smart = feedback.smartQuotes && !secure && FieldKind.of(editor?.inputType ?: 0) == FieldKind.Text
+        val placed = if (smart) SmartQuotes.typed(value, before().lastOrNull()) else value
+        type(placed.toString())
     }
 
     fun type(value: String) {
@@ -479,11 +498,11 @@ internal class KeyboardEngine(
         val w = word
         if (mark && w != null && !symbols && canEndWord() && !afterSwipe) {
             val swap = w.textReplacement(text)
-            if (swap != null && replace(swap.original, swap.replacement + value)) { resetTyping(); showPredictions(before()); inputDone(); return }
+            if (swap != null && replace(swap.original, smartWord(swap.replacement) + value)) { resetTyping(); showPredictions(before()); inputDone(); return }
             if (feedback.autocorrect && w.token.isNotEmpty() && endsWith(prefix + w.token)) {
                 val fix = w.finish(value[0])
                 if (fix != null && !feedback.blocked(w.decoder.model.language, fix.original, fix.replacement) &&
-                    replace(fix.original, fix.replacement + value)) { resetTyping(); showPredictions(before()); inputDone(); return }
+                    replace(fix.original, smartWord(fix.replacement) + value)) { resetTyping(); showPredictions(before()); inputDone(); return }
             }
         }
         resetTyping(); target.commit(value); showPredictions(if (w != null) before() else null)
@@ -580,7 +599,9 @@ internal class KeyboardEngine(
             if (model == null) SpokenText.continuing(text, before, language)
             else SpokenText.continuing(text, before, language) { model.index(it) >= 0 && (model.capitals?.percent(it) ?: -1) < 50 }
         }
-        val result = dictationInsertion(shaped, before, target.after(1)?.firstOrNull(), standalone)
+        // The same smart quotes as the keys and the strip: “this”, don’t, and ‘nested “quotes”’.
+        val dictated = if (feedback.smartQuotes) SmartQuotes.text(shaped, before?.lastOrNull()) else shaped
+        val result = dictationInsertion(dictated, before, target.after(1)?.firstOrNull(), standalone)
         if (result.isNotEmpty() && target.commit(result)) {
             continuation.record(if (signature) result else null)
             if (!secure) offerUndo(Dictated(result, target.after(16).orEmpty()))
@@ -665,7 +686,8 @@ internal class KeyboardEngine(
         if (!swiping) return
         val b = before()
         val first = retries.reordered(readings, b).firstOrNull() ?: return
-        surface?.suggestions(listOf(Suggestion(swipeCased(first, swipeCapital(b, SwipeText.needsSpace(b))), Suggestion.Kind.Word)))
+        surface?.suggestions(listOf(Suggestion(smartWord(swipeCased(first, swipeCapital(b, SwipeText.needsSpace(b)))),
+            Suggestion.Kind.Word)))
     }
 
     /** The swipe ended: its best reading goes in (none when [readings] is empty, as for a cancelled swipe), after a
@@ -680,8 +702,8 @@ internal class KeyboardEngine(
         val ordered = retries.typing(readings, b)
         val space = SwipeText.needsSpace(b)
         val capital = swipeCapital(b, space)
-        val text = swipeCased(ordered.first(), capital)
-        val alternatives = swipeAlternatives(w, ordered, capital)
+        val text = smartWord(swipeCased(ordered.first(), capital))
+        val alternatives = swipeAlternatives(w, ordered, capital).map(::smartWord)
         clearSpaces(); resetTyping()
         if (!target.commit(if (space) " $text" else text)) return
         swiped = Swiped(text, alternatives); takenBack = null

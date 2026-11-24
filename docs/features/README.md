@@ -3223,7 +3223,7 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 │   Checks: `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` (includes
 │   `EmojiKeywordsTest`) and `python3 scripts/code-shape.py --check`; the repo has no
 │   Android CI.
-└── Labs > Keyboard > Keyboard tools (off) -> while the strip has nothing else to show (no
+├── Labs > Keyboard > Keyboard tools (off) -> while the strip has nothing else to show (no
     suggestion chips, Undo dictation, notice or dictation) and the field is not a password,
     PIN or other secure field, the "Hold Hex to talk" hint becomes up to four icon buttons
     without making the keyboard taller: Emoji (the bottom row's emoji key, so only on the
@@ -3239,6 +3239,21 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
     Checks: `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` (includes
     `KeyboardToolsTest`) and `python3 scripts/code-shape.py --check`; the repo has no
     Android CI. Not tried on a device or emulator.
+└── Labs > Keyboard > Smart quotes (off) -> the ' and " keys type ’ ‘ “ ” by the text before
+    the cursor: ’ after a letter, digit or closing quote, and ‘ at the field's start, after a
+    space, or after an opening bracket or quote; “ opens the same way, and ” closes after
+    anything else. A word a suggestion, autocorrection or swipe commits goes in with ’ for its
+    straight apostrophe ("don't" becomes "don’t"), and a dictation's straight quotes are placed
+    by the same rules, so pairs become “this”, ‘this’ and ‘nested “quotes”’. A quote key's held
+    alternates still type exactly the character they show, and the space a pick holds, next-word
+    suggestions, autocorrection and swipe spacing read ’ and ” as they do ' and ". Off, every
+    key, pick and dictation inserts exactly what it did before. Checks: `SmartQuotesTest` (11
+    tests: contractions, possessives, leading and closing quotes, quote pairs, nested quotes,
+    brackets, empty and already-curly text) compiled and passed with JUnit 4.13.2 on Kotlin
+    2.1.20 from the Gradle caches; `python3 scripts/code-shape.py --check`. `./gradlew
+    testDebugUnitTest` did not run here: there is no Android SDK, and the only JDK (26) is newer
+    than the wrapper's Gradle 8.11.1 supports. The repo has no Android CI; not tried on a device
+    or emulator.
 Unmerged Windows / deferred features -> Not part of this map
 ```
 

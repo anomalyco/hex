@@ -16,11 +16,11 @@ import kotlin.math.hypot
 internal object SwipeText {
     /** Whether a swiped word needs a space before it: unless the text before the cursor is empty or ends in a
      * space, a line break or opening punctuation (a bracket, an opening quote, ¿ or ¡, or a mark that starts a word
-     * such as @ # /). A straight quote opens when nothing or a space comes before it. */
+     * such as @ # /). A quote opens when nothing or a space comes before it, straight or typographic. */
     fun needsSpace(before: String?): Boolean {
         val last = before?.lastOrNull() ?: return false
         if (last.isWhitespace() || last == '\uFFFC' || last in OPENING) return false
-        if (last == '"' || last == '\'') {
+        if (last == '"' || last == '\'' || last == '”') {
             val previous = before.getOrNull(before.length - 2)
             return !(previous == null || previous.isWhitespace() || previous in OPENING)
         }
@@ -36,10 +36,12 @@ internal class SwipeRetries {
     private var place: String? = null
     private val words = ArrayList<String>()
 
-    /** [readings] with the words taken back where [before] ends moved after the others. */
+    /** [readings] with the words taken back where [before] ends moved after the others. A word's
+     * apostrophe counts either way, so a reading with a straight one matches the smart one inserted. */
     fun reordered(readings: List<String>, before: String?): List<String> {
         if (words.isEmpty() || place(before) != place) return readings
-        return readings.filter { it.lowercase() !in words } + readings.filter { it.lowercase() in words }
+        fun key(word: String) = word.lowercase().replace('\u2019', '\'')
+        return readings.filter { key(it) !in words } + readings.filter { key(it) in words }
     }
 
     /** [reordered], for a swipe going in now; one somewhere else forgets the words. */
@@ -52,7 +54,7 @@ internal class SwipeRetries {
     fun tookBack(word: String, before: String?) {
         val at = place(before)
         if (at != place) { words.clear(); place = at }
-        words.add(word.lowercase())
+        words.add(word.lowercase().replace('\u2019', '\''))
     }
 
     fun forget() { place = null; words.clear() }
