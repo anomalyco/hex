@@ -2762,6 +2762,10 @@ fn hand_off(how: HandOff, bundle: &Path) -> anyhow::Result<()> {
         // crate's own reads TIS off the main thread. A capture replaces what
         // a dictation watch has in front of it, as another paste would.
         HandOff::Paste => {
+            // macOS 27.3 refuses to post ⌘V without its keystroke grant, so
+            // fail before the clipboard changes instead of after.
+            crate::paste::ensure_keystroke_access()
+                .map_err(|error| anyhow::anyhow!("{error:#}"))?;
             crate::paste::note_paste();
             scrawl_capture::handoff::paste_bundle_with(bundle, &|| {
                 crate::keyboard::post_command('v').map_err(|error| anyhow::anyhow!("{error:#}"))

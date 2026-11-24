@@ -117,11 +117,16 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
     let accessibility_stale = ui
         .platform
         .stale(crate::desktop::onboarding::PermissionKind::Accessibility);
+    let accessibility_split = ui.platform.accessibility_split;
+    let accessibility_restart_done = ui.platform.accessibility_restart_done;
     let Some(tour) = &mut ui.tour else {
         return false;
     };
     let before = tour.flow.view();
     let step = before.step;
+    tour.flow.set_post_event_split(accessibility_split);
+    tour.flow
+        .set_post_event_restart_done(accessibility_restart_done);
     let mut effect = tour.flow.on(Input::Status(status, model));
     tour.flow.set_accessibility_stale(accessibility_stale);
     if tour

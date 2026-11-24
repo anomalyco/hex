@@ -123,6 +123,10 @@ impl Paster {
         capture: &Payload,
         target: &super::recent::Target,
     ) -> Result<()> {
+        // Before the clipboard is touched: macOS 27.3 refuses to post ⌘V
+        // without its keystroke grant, which would otherwise look like a
+        // capture that landed.
+        super::ensure_keystroke_access()?;
         // A capture's sheet and summary replace what a running dictation
         // watch has in front of it, exactly as another dictation would.
         super::note_paste();
