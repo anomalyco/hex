@@ -13,6 +13,10 @@ impl Flow {
             self.uncopied = true;
             return actions;
         }
+        if input == Input::Copied {
+            self.uncopied = false;
+            return actions;
+        }
         if let Input::Drawing(on) = input {
             self.drawing = on;
             return actions;
@@ -197,6 +201,18 @@ impl Flow {
                     ..Sent::picked(&Dest::new(to, ""), false, now, None)
                 }),
                 Delivered::Queued { why, .. } => Phase::Queued { why, at: now },
+            },
+            (
+                Phase::Routed(Routed {
+                    route: Route::ResolvingRule { name },
+                    taken_back: false,
+                    ..
+                }),
+                Input::Refined(Route::Unreachable { why }),
+            ) => Phase::Failed {
+                at: now,
+                what: Failure::Send(name),
+                why: plain_reason(&why),
             },
             (Phase::Routed(routed), Input::Refined(route)) if !routed.taken_back => {
                 Phase::Routed(routes::refine(routed, route, now, self.suggest_on_route))

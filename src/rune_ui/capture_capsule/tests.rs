@@ -55,7 +55,7 @@ fn guess_five() -> Route {
             ("SEER", "you were just in it"),
             ("HEX", "same page"),
             ("HOME", "mentioned"),
-            ("OPENCODE IOS", "2 min ago"),
+            ("OPENCODE IOS", "2m ago"),
             ("RUNE", "an hour ago"),
         ]
         .map(|(name, why)| Dest::new(name, why))
@@ -654,7 +654,7 @@ fn the_ready_line_and_its_list_share_their_edges() {
         let slot = match (e.key.as_deref(), e.text.as_deref()) {
             (Some("shell"), _) => 0,
             (Some("thumb"), _) => 1,
-            (_, Some("Annotation")) => 2,
+            (_, Some("Annotation copied")) => 2,
             (Some("box"), _) if e.path.contains("paste") => 3,
             _ => continue,
         };
@@ -753,7 +753,7 @@ fn the_preview_nests_in_the_capsules_left_corners() {
     // The lead reads its label too; the words themselves are drawn last.
     let words = elements
         .iter()
-        .rfind(|e| e.text.as_deref() == Some("Annotation"));
+        .rfind(|e| e.text.as_deref() == Some("Annotation copied"));
     let (shell, words) = (shell.unwrap().rect, words.unwrap().rect);
     assert!(near(words[0] - shell[0], ISLAND_INSET + DONE_TEXT_X));
 }

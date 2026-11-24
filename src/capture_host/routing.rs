@@ -1346,10 +1346,7 @@ fn recent(candidates: &[smart::Candidate], shown: &[&str], now_ms: u64) -> Vec<R
         .map(|candidate| RouteDest {
             session: candidate.id.clone(),
             name: candidate.label().to_owned(),
-            why: format!(
-                "{} ago",
-                smart::ago_text(now_ms.saturating_sub(candidate.updated_ms))
-            ),
+            why: crate::desktop::i18n::event_age_at(candidate.updated_ms, now_ms),
             directory: candidate.directory.clone(),
         })
         .collect()
@@ -1811,7 +1808,7 @@ mod tests {
             vec![RouteDest {
                 session: "ses_b".into(),
                 name: "Beta".into(),
-                why: "1 min ago".into(),
+                why: "1m ago".into(),
                 directory: Some("/tmp/ses_b".into()),
             }]
         );

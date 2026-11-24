@@ -38,6 +38,8 @@ pub(crate) struct Follow {
     /// The shown capture is a Screenshots recording: once it stops, the
     /// screenshot card takes it and the capsule folds.
     clip: bool,
+    /// The shown capture's initial clipboard copy failed.
+    uncopied: bool,
 }
 
 impl Follow {
@@ -97,6 +99,7 @@ impl Follow {
                 self.worked = recording.worked;
                 self.began = recording.screen;
                 self.clip = recording.clip;
+                self.uncopied = false;
                 // No target chips: Annotate records the screen, and the
                 // capsule's toolbar (the pen) takes their place.
                 inputs.push(Input::Stage(Stage::Recording));
@@ -128,8 +131,12 @@ impl Follow {
                 inputs.push(Input::NothingHeard);
             }
             if copy_failed(snapshot, self.shown.as_ref()) {
+                self.uncopied = true;
                 inputs.push(Input::CopyFailed);
             }
+        } else if self.uncopied && !copy_failed(snapshot, self.shown.as_ref()) {
+            self.uncopied = false;
+            inputs.push(Input::Copied);
         }
         inputs.extend(stage);
         inputs.extend(self.routed(snapshot));
@@ -559,6 +566,7 @@ pub(crate) fn act(action: Action) {
             crate::capture_host::toggle_pen();
             return;
         }
+        Action::Copy(bundle) => vec![command(CaptureCommand::Copy(bundle))],
         Action::Paste(bundle) => vec![command(CaptureCommand::Paste(bundle))],
         Action::Inspect => vec![command(CaptureCommand::Inspect)],
         Action::Allow(need) => {
@@ -694,6 +702,24 @@ mod tests {
             bundle: bundle(name),
             routing,
         }
+    }
+
+    #[test]
+    fn a_failed_copy_recovers_when_retry_clears_copy_error() {
+        let mut follow = Follow::default();
+        assert_eq!(
+            follow.next(&recording("a")),
+            [Input::Stage(Stage::Recording)]
+        );
+        let mut failed = settled("a", Stage::Done);
+        failed.last.as_mut().unwrap().copy_error = Some("clipboard busy".into());
+        assert_eq!(
+            follow.next(&failed),
+            [Input::CopyFailed, written("a", false)]
+        );
+        // Once the retry clears copy_error on the same bundle, Follow emits Copied.
+        assert_eq!(follow.next(&settled("a", Stage::Done)), [Input::Copied]);
+        assert_eq!(follow.next(&settled("a", Stage::Done)), []);
     }
 
     #[test]

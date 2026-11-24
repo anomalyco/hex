@@ -294,25 +294,36 @@ impl Id {
     /// The space between `self` and the item after it. The finished
     /// capsule's label stands clear of its actions, and the actions and ✕
     /// sit together as one cluster, so Undo never floats between them.
-    fn gap_before(self, next: Id) -> f32 {
+    /// `self_active` / `next_active` distinguish a filled pill `Id::Ask`
+    /// (Allow, Restart Hex, Try again) from plain text asks.
+    fn gap_before(self, self_active: bool, next: Id, next_active: bool) -> f32 {
+        let next_button = matches!(next, Id::Paste | Id::Undo) || (next == Id::Ask && next_active);
+        let self_button = matches!(self, Id::Paste | Id::Undo) || (self == Id::Ask && self_active);
         match (self, next) {
             (Id::Done, Id::Why) => CHIP_GAP,
             // The field's well starts the label's trail after it: 12 pt,
             // as the lead's inset is.
             (Id::Done | Id::Why, Id::Field) => 0.0,
-            // Paste's fill starts 16 pt after the words, as far as the
-            // lead sits from the wall and ✕ from the other: the words'
-            // trail, this, and the fill's 2 pt inset in its chip.
-            (Id::Done, Id::Paste) => PASTE_LEAD - LEAD_TRAIL - BUTTON_INSET,
-            (Id::Why, Id::Paste) => PASTE_LEAD - LEAD_TRAIL * 0.5 - BUTTON_INSET,
+            // Button fills (Paste, Undo, Allow, Restart Hex, Try again)
+            // start 16 pt after the words, as far as the lead sits from the
+            // wall and ✕ from the other: the words' trail, this, and the
+            // box's 2 pt inset in its chip.
+            (Id::Done, _) if next_button => PASTE_LEAD - LEAD_TRAIL - BUTTON_INSET,
+            (Id::Why, _) if next_button => PASTE_LEAD - LEAD_TRAIL * 0.5 - BUTTON_INSET,
             // The label's trail and the action's padding already part
             // them.
             (Id::Done | Id::Why, _) => GROUP_GAP,
-            // ✕'s circle has air of its own, so it tucks into a worded
+            // Dividers breathe on both sides so a lit pen pill never crowds them.
+            (Id::Divider, _) | (_, Id::Divider) => GROUP_GAP,
+            // Stop and Discard sit slightly apart so destructive ✕ isn't flush beside ■.
+            (Id::Finish, Id::Cancel) => CHIP_GAP + 2.0,
+            // Boxed buttons and icons keep one even step beside ✕.
+            (_, Id::Close) if self_button => CHIP_GAP,
+            (Id::Inspect | Id::Search, Id::Close) => CHIP_GAP,
+            // ✕'s circle has air of its own, so it tucks into a plain worded
             // action's right padding; drawn later, it takes the overlap's
-            // presses. Icons beside ✕ keep one even step.
-            (Id::Undo | Id::Ask | Id::Next | Id::Pick(_), Id::Close) => -CLOSE_HUG,
-            (Id::Paste | Id::Inspect | Id::Search, Id::Close) => CHIP_GAP,
+            // presses.
+            (Id::Ask | Id::Next | Id::Pick(_), Id::Close) => -CLOSE_HUG,
             _ if self.group() == next.group() => CHIP_GAP,
             _ => GROUP_GAP,
         }
@@ -421,7 +432,7 @@ const ROW_MAX: f32 = PANEL_W - 32.0;
 fn row_width(raw: &[(Id, String, f32, bool)]) -> f32 {
     let gaps: f32 = raw
         .windows(2)
-        .map(|pair| pair[0].0.gap_before(pair[1].0))
+        .map(|pair| pair[0].0.gap_before(pair[0].3, pair[1].0, pair[1].3))
         .sum();
     raw.iter().map(|r| r.2).sum::<f32>() + gaps + 2.0 * ISLAND_INSET
 }
@@ -518,13 +529,27 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
                 false,
             ));
         }
+        // A filled primary ask (Allow, Restart Hex, Try again) sits in
+        // Paste's slot before any icon button (Inspect).
+        if let Some(ask) = done
+            .ask
+            .as_ref()
+            .filter(|_| done.ask_button && (!listed || done.ask_keys))
+        {
+            let width = keyed_width(&[], ask, medium()).max(44.0);
+            raw.push((Id::Ask, ask.clone(), width, true));
+        }
         if done.inspect && !done.inspect_preview() {
             raw.push((Id::Inspect, String::new(), CHIP_H, false));
         }
         // Where to send it is a click away, beside Paste, never opened for you.
         // Over the suggestions it's Search, with the capture shortcut that
         // opens it.
-        if let Some(ask) = done.ask.as_ref().filter(|_| !listed || done.ask_keys) {
+        if let Some(ask) = done
+            .ask
+            .as_ref()
+            .filter(|_| !done.ask_button && (!listed || done.ask_keys))
+        {
             if listed && done.ask_keys {
                 raw.push((Id::Search, ask.clone(), CHIP_H, false));
             } else {
@@ -701,7 +726,7 @@ fn line(pres: &Pres, clock: &str, metered: bool) -> ([f32; 4], Vec<Item>) {
         }
         Pres::Done(done) => done_items(done, &mut raw),
     }
-    let gap_after = |i: usize| raw[i].0.gap_before(raw[i + 1].0);
+    let gap_after = |i: usize| raw[i].0.gap_before(raw[i].3, raw[i + 1].0, raw[i + 1].3);
     let mut widths: Vec<f32> = raw.iter().map(|r| r.2).collect();
     let span = |widths: &[f32], from: usize| -> f32 {
         widths[from..].iter().sum::<f32>()
@@ -1518,10 +1543,20 @@ mod tests {
             );
             for pair in items.windows(2) {
                 let gap = pair[1].rect[0] - pair[0].rect[0] - pair[0].rect[2];
-                let want = pair[0].id.gap_before(pair[1].id);
+                let want = pair[0]
+                    .id
+                    .gap_before(pair[0].active, pair[1].id, pair[1].active);
                 assert!((gap - want).abs() < 1e-3, "{gap} != {want}");
                 assert!(
-                    [CHIP_GAP, GROUP_GAP, 0.0, -CLOSE_HUG].contains(&want),
+                    [
+                        CHIP_GAP,
+                        CHIP_GAP + 2.0,
+                        GROUP_GAP,
+                        PASTE_LEAD - LEAD_TRAIL * 0.5 - BUTTON_INSET,
+                        0.0,
+                        -CLOSE_HUG,
+                    ]
+                    .contains(&want),
                     "{want}"
                 );
             }

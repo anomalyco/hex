@@ -3,6 +3,9 @@ use super::*;
 
 impl Flow {
     pub(super) fn paste_bundle(&self) -> Option<&std::path::PathBuf> {
+        if self.uncopied {
+            return None;
+        }
         let (bundle, routing) = self.written.as_ref()?;
         match &self.phase {
             Phase::Saved { .. } if !routing => Some(bundle),
@@ -147,6 +150,22 @@ impl Flow {
                         }
                     }
                 }
+            }
+            (_, Id::Ask)
+                if self.uncopied
+                    && matches!(
+                        &self.phase,
+                        Phase::Saved { .. }
+                            | Phase::Routed(Routed {
+                                route: Route::Unreachable { .. },
+                                ..
+                            })
+                    ) =>
+            {
+                let Some((bundle, _)) = &self.written else {
+                    return Vec::new();
+                };
+                vec![Action::Copy(bundle.clone())]
             }
             (_, Id::Ask | Id::Search) => self.input(Input::OpenList, now),
             (_, Id::Row(row) | Id::Pick(row)) => self.input(Input::SendRow(row), now),

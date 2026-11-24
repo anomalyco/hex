@@ -3,9 +3,9 @@
 use super::short;
 use crate::desktop::i18n::{tr, tr_fill};
 
-/// Name the finished item, not a clipboard format (it can also be a ZIP).
+/// Name the finished item and what happened to it (it can also be a ZIP).
 pub(crate) fn annotation() -> &'static str {
-    tr("Annotation")
+    tr("Annotation copied")
 }
 pub(super) fn not_running() -> &'static str {
     tr("OpenCode isn't running")

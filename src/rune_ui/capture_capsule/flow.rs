@@ -291,6 +291,8 @@ pub(crate) enum Input {
     NothingHeard,
     /// The written capture's summary didn't reach the clipboard.
     CopyFailed,
+    /// A retry put the written capture on the clipboard.
+    Copied,
     /// The router sent the capture, from the capsule or not
     /// (`hex capture send`).
     Settled,
@@ -339,6 +341,8 @@ pub(crate) enum Action {
         to: String,
         always: Option<String>,
     },
+    /// Copy the capture to the clipboard again after a failed copy.
+    Copy(std::path::PathBuf),
     /// Paste the capture into the app in front.
     Paste(std::path::PathBuf),
     /// Open the capture to look it over.
@@ -449,6 +453,9 @@ pub(crate) struct Done {
     /// The capture shortcut opens the search from here: its keycaps sit
     /// on the chip ("Search ⌥⇧S").
     pub(crate) ask_keys: bool,
+    /// Draw `ask` as a filled pill button (Allow, Restart Hex, Try again)
+    /// rather than plain text.
+    pub(crate) ask_button: bool,
     /// Open: what's typed into the field, and the list under it.
     pub(crate) open: Option<(TextEdit, List)>,
     pub(crate) inspect: bool,
@@ -483,6 +490,7 @@ impl Done {
             held: None,
             ask: None,
             ask_keys: false,
+            ask_button: false,
             open: None,
             inspect: false,
             paste: false,
@@ -1169,7 +1177,8 @@ impl Flow {
         {
             done.held = Some(pause.end - pause.since);
         }
-        // A copy that failed never reads as one that worked.
+        // A copy that failed never reads as one that worked, and never offers
+        // Paste (which needs the clipboard that just failed).
         if let Pres::Done(done) = &mut pres
             && self.uncopied
             && done.lead == Lead::Check
@@ -1177,6 +1186,10 @@ impl Flow {
         {
             done.lead = Lead::Warning;
             done.text = tr("Couldn't copy").into();
+            if done.ask.is_none() && self.written.is_some() {
+                done.ask = Some(tr("Try again").into());
+                done.ask_button = true;
+            }
         }
         // Scrawl's "No speech": a capture with no words still copies.
         if let Pres::Done(done) = &mut pres
@@ -1323,7 +1336,7 @@ mod tests {
         );
         assert_eq!(done(&flow, 0.0).text, "Looking for sessions…");
         for (input, title, paste) in [
-            (Input::Routed(guess()), "Annotation", true),
+            (Input::Routed(guess()), "Annotation copied", true),
             (Input::Sending, "Sending…", false),
             (Input::Settled, "Sent", false),
         ] {
@@ -3038,7 +3051,7 @@ mod tests {
         flow.input(Input::Stage(Stage::Done), 1.0);
         flow.input(Input::Routed(Route::Nothing { recent: Vec::new() }), 1.0);
         let shown = done(&flow, 1.0);
-        assert_eq!(shown.text, "Annotation");
+        assert_eq!(shown.text, "Annotation copied");
         assert_eq!(shown.why.as_deref(), Some("no speech"));
         // The next recording starts fresh.
         flow.input(Input::Stage(Stage::Recording), 2.0);
@@ -3051,11 +3064,12 @@ mod tests {
     /// once it did: a copy that failed says so, with a warning.
     #[test]
     fn a_failed_copy_never_reads_as_copied() {
+        use super::super::surface::Id;
         let mut flow = Flow::new();
         flow.input(Input::Stage(Stage::Recording), 0.0);
         flow.input(Input::Stage(Stage::Done), 1.0);
         let shown = done(&flow, 1.0);
-        assert_eq!(shown.text, "Annotation");
+        assert_eq!(shown.text, "Annotation copied");
         assert_eq!(shown.lead, Lead::Check);
 
         for route in [
@@ -3066,17 +3080,38 @@ mod tests {
             let mut flow = Flow::new();
             flow.input(Input::Stage(Stage::Recording), 0.0);
             flow.input(Input::CopyFailed, 1.0);
-            flow.input(Input::Stage(Stage::Done), 1.0);
-            if let Some(route) = route {
+            flow.input(
+                Input::Written {
+                    bundle: "sample.scrawl".into(),
+                    routing: route.is_some(),
+                },
+                1.0,
+            );
+            if let Some(route) = route.clone() {
                 flow.input(Input::Routed(route), 1.0);
             }
             let shown = done(&flow, 1.0);
             assert_eq!(shown.text, "Couldn't copy");
             assert_eq!(shown.lead, Lead::Warning);
+            assert!(!shown.paste, "failed copy never offers Paste");
+            if route.is_none() {
+                assert_eq!(shown.ask.as_deref(), Some("Try again"));
+                assert!(shown.ask_button);
+                assert_eq!(
+                    flow.click(Id::Ask, 1.5),
+                    vec![Action::Copy("sample.scrawl".into())]
+                );
+                // Once the retry copies, the capsule recovers cleanly.
+                flow.input(Input::Copied, 1.6);
+                let recovered = done(&flow, 1.6);
+                assert_eq!(recovered.lead, Lead::Check);
+                assert_eq!(recovered.text, "Annotation copied");
+                assert!(recovered.paste);
+            }
             // The next recording starts fresh.
             flow.input(Input::Stage(Stage::Recording), 2.0);
             flow.input(Input::Stage(Stage::Done), 3.0);
-            assert_eq!(done(&flow, 3.0).text, "Annotation");
+            assert_eq!(done(&flow, 3.0).text, "Annotation copied");
         }
     }
 
@@ -3143,6 +3178,63 @@ mod tests {
         assert_eq!(flow.keys(), None);
         flow.input(Input::OpenList, 0.5);
         assert_eq!(done(&flow, 0.5).open, None);
+    }
+
+    /// Without OpenCode running (and with no rule or explicit send), an
+    /// annotation finishes cleanly as "Annotation copied" with Paste — never
+    /// a scary yellow warning about a tool the user may not have.
+    #[test]
+    fn opencode_not_running_finishes_cleanly_without_warning() {
+        for why in [
+            "it isn't running",
+            "OpenCode isn't running",
+            "Could not reach server at http://127.0.0.1:4096",
+        ] {
+            let mut flow = Flow::new();
+            flow.input(
+                Input::Written {
+                    bundle: "sample.scrawl".into(),
+                    routing: true,
+                },
+                0.0,
+            );
+            flow.input(Input::Routed(Route::Unreachable { why: why.into() }), 0.1);
+            let shown = done(&flow, 0.1);
+            assert_eq!(shown.lead, Lead::Check, "{why}");
+            assert_eq!(shown.text, "Annotation copied", "{why}");
+            assert_eq!(shown.why, None, "{why}");
+            assert!(shown.paste, "{why}");
+            assert!(shown.inspect, "{why}");
+            assert_eq!(shown.ask, None, "{why}");
+            assert_eq!(flow.keys(), None, "{why}");
+        }
+
+        // A saved folder rule that tried to send while OpenCode isn't running
+        // still warns, because a send was attempted.
+        let mut ruled = Flow::new();
+        ruled.input(
+            Input::Written {
+                bundle: "sample.scrawl".into(),
+                routing: true,
+            },
+            0.0,
+        );
+        ruled.input(
+            Input::Routed(Route::ResolvingRule {
+                name: "board".into(),
+            }),
+            0.1,
+        );
+        ruled.input(
+            Input::Refined(Route::Unreachable {
+                why: "it isn't running".into(),
+            }),
+            0.2,
+        );
+        let failed = done(&ruled, 0.2);
+        assert_eq!(failed.lead, Lead::Warning);
+        assert_eq!(failed.text, "Couldn't send to board");
+        assert_eq!(failed.why.as_deref(), Some("OpenCode isn't running"));
     }
 
     /// Kit: Escape never ends a screen recording (it may be meant for the
@@ -3261,8 +3353,9 @@ mod tests {
         let shown = done(&flow, 1.0);
         assert_eq!(shown.lead, Lead::Warning);
         assert_eq!(shown.text, "Hex needs Screen Recording");
-        assert_eq!(shown.why.as_deref(), Some("to see your screen"));
+        assert_eq!(shown.why, None);
         assert_eq!(shown.ask.as_deref(), Some("Allow"));
+        assert!(shown.ask_button);
         assert_eq!(flow.keys(), None);
 
         assert_eq!(flow.click(Id::Ask, 2.0), vec![Action::Allow(screen)]);
@@ -3281,13 +3374,19 @@ mod tests {
 
         flow.input(Input::Permission(screen, Grant::Restart), 61.0);
         let restart = done(&flow, 61.0);
-        assert_eq!(restart.text, "Screen Recording is on");
+        assert_eq!(restart.text, "Screen Recording allowed");
+        assert_eq!(
+            restart.why.as_deref(),
+            Some("restart Hex to start annotating")
+        );
         assert_eq!(restart.ask.as_deref(), Some("Restart Hex"));
+        assert!(restart.ask_button);
         assert_eq!(flow.click(Id::Ask, 62.0), vec![Action::Restart]);
 
         flow.input(Input::Permission(screen, Grant::Ready), 63.0);
         let ready = done(&flow, 63.0);
         assert_eq!(ready.lead, Lead::Check);
+        assert_eq!(ready.ask.as_deref(), Some("Annotate"));
         assert!(ready.ask_keys);
         assert_eq!(
             flow.click(Id::Ask, 64.0),

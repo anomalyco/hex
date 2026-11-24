@@ -331,6 +331,9 @@ pub enum CaptureCommand {
     /// The pointer is on the capsule (`true`) or left it: a rule's send
     /// still waiting out its Undo window pauses while it is there.
     Hold(bool),
+    /// Copies the capsule's written capture to the clipboard again after a
+    /// failed initial copy.
+    Copy(PathBuf),
     /// Pastes the capsule's written capture, never a later completion.
     Paste(PathBuf),
     /// Opens the newest written capture's contact sheet: Hex has no review
@@ -1362,6 +1365,7 @@ impl CaptureHost {
             }
             CaptureCommand::Undo => Ok(self.route(routing::Job::Undo)),
             CaptureCommand::Hold(on) => Ok(self.route(routing::Job::Hold(on))),
+            CaptureCommand::Copy(bundle) => self.hand_off(HandOff::Copy, Some(bundle)),
             CaptureCommand::Paste(bundle) => self.hand_off(HandOff::Paste, Some(bundle)),
             CaptureCommand::Inspect => self.hand_off(HandOff::Inspect, None),
         };
@@ -1697,16 +1701,23 @@ impl CaptureHost {
             if HANDING_OFF.swap(true, Ordering::AcqRel) {
                 return Ok(self.report(false, None));
             }
+            let outcomes = self.outcomes.clone();
             let spawned = std::thread::Builder::new()
                 .name("capture-hand-off".into())
                 .spawn(move || {
                     let done = hand_off(how, &bundle);
-                    if let Err(error) = done {
-                        tracing::warn!(
-                            error = format!("{error:#}"),
-                            ?how,
-                            "capture hand-off failed"
-                        );
+                    match done {
+                        Ok(()) if matches!(how, HandOff::Copy) => {
+                            lock(&outcomes).copied(&bundle);
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                error = format!("{error:#}"),
+                                ?how,
+                                "capture hand-off failed"
+                            );
+                        }
+                        Ok(()) => {}
                     }
                     HANDING_OFF.store(false, Ordering::Release);
                 });
@@ -2739,14 +2750,25 @@ pub fn on_clip_written(written: fn(PathBuf)) {
 /// What the capsule's Paste and Inspect do with the newest written capture.
 #[derive(Clone, Copy, Debug)]
 enum HandOff {
+    Copy,
     Paste,
     Inspect,
 }
 
-/// Pastes or opens a written capture: its contact sheet and summary.
+/// Copies a written capture to the clipboard as the writer does (ZIP when
+/// Labs › Copy a capture as one file is on, else the summary).
+fn copy_bundle(bundle: &Path) -> anyhow::Result<()> {
+    if crate::capture_zip::copy_as_zip(bundle) {
+        return Ok(());
+    }
+    copy_to_clipboard(bundle)
+}
+
+/// Copies, pastes, or opens a written capture: its contact sheet and summary.
 #[cfg(target_os = "macos")]
 fn hand_off(how: HandOff, bundle: &Path) -> anyhow::Result<()> {
     objc2::rc::autoreleasepool(|_| match how {
+        HandOff::Copy => copy_bundle(bundle),
         // ⌘V from Hex's keyboard layout snapshot, marked as Hex's: the
         // crate's own reads TIS off the main thread. A capture replaces what
         // a dictation watch has in front of it, as another paste would.
@@ -2766,6 +2788,7 @@ fn hand_off(how: HandOff, bundle: &Path) -> anyhow::Result<()> {
 #[cfg(target_os = "linux")]
 fn hand_off(how: HandOff, bundle: &Path) -> anyhow::Result<()> {
     match how {
+        HandOff::Copy => copy_bundle(bundle),
         HandOff::Paste => {
             let (dir, loaded) = scrawl_capture::handoff::load_bundle(bundle)?;
             let summary = scrawl_capture::sketch::summary_markdown(&loaded, &dir);
@@ -2797,6 +2820,7 @@ fn hand_off(how: HandOff, bundle: &Path) -> anyhow::Result<()> {
 #[cfg(target_os = "windows")]
 fn hand_off(how: HandOff, bundle: &Path) -> anyhow::Result<()> {
     match how {
+        HandOff::Copy => copy_bundle(bundle),
         HandOff::Paste => scrawl_capture::handoff::paste_bundle_image_and_text(bundle),
         HandOff::Inspect => inspect(bundle),
     }
