@@ -26,8 +26,10 @@ is frozen once this page merges: a change that a version 1 reader would misread 
 
 ## Why JSON
 
-- **All three apps read it natively:** `serde_json` on the desktop, Foundation on the iPhone,
-  `android.util.JsonReader` on Android. No new dependency anywhere.
+- **No new dependency anywhere:** `serde_json` on the desktop and Foundation's
+  `JSONSerialization` on the iPhone, each after the check pass below. On Android, a small strict
+  parser in Kotlin, grown from that check pass: `org.json` is lenient, and neither it nor
+  `android.util.JsonReader` runs in the app's JVM unit tests.
 - **It holds both lists.** The desktop's CSV (Teams' custom dictionary columns) has room for
   terms and their spellings only. Adding replacements to it would break the Teams layout people
   already use, so the CSV stays as it is, beside this file.
