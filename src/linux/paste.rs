@@ -491,6 +491,12 @@ impl LinuxPaster {
         }
     }
 
+    /// The session's clipboard, for a reader that outlives this borrow
+    /// (Labs › Clipboard phrase).
+    pub(crate) fn clipboard(&self) -> Selection {
+        self.selection
+    }
+
     /// The clipboard's plain text, bounded and within the read deadline.
     pub(crate) fn clipboard_text(&self) -> Result<Option<String>> {
         self.selection.current().text()

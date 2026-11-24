@@ -736,9 +736,7 @@ pub(crate) struct Ui {
 struct Drafts {
     modes: bool,
     vocabulary: bool,
-    phrase: bool,
-    stop_phrase: bool,
-    signature: bool,
+    labs: labs::LabDrafts,
 }
 
 impl Ui {
@@ -940,9 +938,7 @@ impl Ui {
         let mut candidate = self.settings.clone();
         self.modes.project(&mut candidate);
         candidate.vocabulary = self.vocabulary.project();
-        self.lab_store.project_phrase(&mut candidate);
-        self.lab_store.project_stop_phrase(&mut candidate);
-        self.lab_store.project_signature(&mut candidate);
+        self.lab_store.project(&mut candidate);
         candidate
     }
 
@@ -954,9 +950,7 @@ impl Ui {
         Drafts {
             modes: modes.dictation_processing != settings.dictation_processing,
             vocabulary: self.vocabulary.project() != settings.vocabulary,
-            phrase: self.lab_store.phrase_dirty(settings),
-            stop_phrase: self.lab_store.stop_phrase_dirty(settings),
-            signature: self.lab_store.signature_dirty(settings),
+            labs: self.lab_store.drafts(settings),
         }
     }
 
@@ -1145,11 +1139,8 @@ impl Ui {
             // text that actually changed may reset the field, so any other
             // external save leaves its focus and caret alone. A lab toggled
             // elsewhere resyncs it, dropping a stale draft.
-            self.lab_store.follow_saved(
-                &self.settings.labs,
-                &service.labs,
-                (drafts.phrase, drafts.stop_phrase, drafts.signature),
-            );
+            self.lab_store
+                .follow_saved(&self.settings.labs, &service.labs, drafts.labs);
             self.settings = service.clone();
             self.settings_changed();
         }

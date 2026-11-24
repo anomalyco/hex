@@ -820,6 +820,19 @@ pub(super) const KEYS: &[Key] = &[
          \"Sent from Hex\" by default, and empty adds nothing",
     ),
     key(
+        "labs.clipboard_phrase",
+        Kind::Bool,
+        "Labs: labs.clipboard_phrase_text spoken in a normal dictation becomes the clipboard's \
+         text in double quotes, before it is pasted, kept in History, and remembered for Paste \
+         Last",
+    ),
+    key(
+        "labs.clipboard_phrase_text",
+        Kind::Text,
+        "Labs: the words replaced with the clipboard, at least two words and six letters; \
+         \"my clipboard\" by default",
+    ),
+    key(
         "labs.dictation_style",
         Kind::Bool,
         "Labs: every normal dictation is written as Polished, Casual, Notes, or Verbatim \

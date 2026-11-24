@@ -65,6 +65,10 @@ struct MacOutputAdapter<'a, F> {
 }
 
 impl<F: FnMut(&str, PasteMode) -> Result<String>> OutputAdapter for MacOutputAdapter<'_, F> {
+    fn clipboard_text(&mut self) -> Option<String> {
+        crate::dictation::clipboard_phrase::system_text()
+    }
+
     fn insert(&mut self, text: &str, plan: InsertPlan) -> Result<InsertResult, String> {
         let (mode, send) = match plan {
             InsertPlan::CopyOnly => (PasteMode::CopyOnly, false),

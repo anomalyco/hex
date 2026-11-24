@@ -930,6 +930,19 @@
     },
     {
       "added": "2026-11-24",
+      "group": "output",
+      "groupTitle": "Output",
+      "id": "clipboard-phrase",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "Say \"my clipboard\" while dictating and Hex pastes what you copied there, in quotes",
+      "title": "Clipboard phrase"
+    },
+    {
+      "added": "2026-11-24",
       "group": "meetings",
       "groupTitle": "Meetings",
       "id": "meeting-microphone-mute",

@@ -348,6 +348,14 @@ pub struct LabsSettings {
     /// the field returns to its default.
     #[serde(deserialize_with = "deserialize_signature")]
     pub signature_text: String,
+    /// A spoken phrase inside a normal dictation becomes the clipboard's
+    /// text in double quotes before it is pasted (every OS).
+    pub clipboard_phrase: bool,
+    /// The words replaced while `clipboard_phrase` is on: at least two words
+    /// and six letters, or the default. Another value fails to load, so the
+    /// field returns to its default.
+    #[serde(deserialize_with = "deserialize_phrase")]
+    pub clipboard_phrase_text: String,
     /// A key or click joining a held modifier-only shortcut a second or more
     /// after it went down reaches the app in front and leaves the dictation
     /// recording, which the release still finishes (macOS and Windows).
@@ -445,7 +453,8 @@ where
     }
 }
 
-/// A saved phrase (`voice_prompt_phrase`, `stop_phrase_text`) must pass
+/// A saved phrase (`voice_prompt_phrase`, `stop_phrase_text`,
+/// `clipboard_phrase_text`) must pass
 /// [`crate::dictation::voice_prompt::phrase_problem`]; another value fails to
 /// load, so the field returns to the default with the usual launch note.
 fn deserialize_phrase<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -560,6 +569,8 @@ impl Default for LabsSettings {
             stop_phrase_text: crate::dictation::stop_phrase::DEFAULT_PHRASE.to_owned(),
             signature: false,
             signature_text: crate::dictation::signature::DEFAULT_TEXT.to_owned(),
+            clipboard_phrase: false,
+            clipboard_phrase_text: crate::dictation::clipboard_phrase::DEFAULT_PHRASE.to_owned(),
             hold_through_keys: false,
             modes_editor: false,
             gnome_meeting_capsules: false,

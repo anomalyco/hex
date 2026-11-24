@@ -13,6 +13,7 @@ use crate::dictation::modes::output::{
     OutputTarget, deliver, resolve_paste_last,
 };
 use crate::dictation::paste_last::LastDictation;
+use crate::linux::clipboard::Selection;
 use crate::linux::paste::LinuxPaster;
 
 /// What happens to a transcript before and after it is pasted: the modes
@@ -45,9 +46,25 @@ struct LinuxOutputAdapter<'a, 'b> {
     typing: Option<crate::linux::live_typing::Session>,
     insert: Option<Insert<'a>>,
     last_dictation: &'b mut Option<LastDictation>,
+    /// The session's clipboard, read for Labs › Clipboard phrase; `None`
+    /// when the paster couldn't start.
+    clipboard: Option<Selection>,
 }
 
 impl OutputAdapter for LinuxOutputAdapter<'_, '_> {
+    fn clipboard_text(&mut self) -> Option<String> {
+        match self.clipboard?.current().text() {
+            Ok(text) => text,
+            Err(error) => {
+                tracing::info!(
+                    error = format!("{error:#}"),
+                    "Clipboard phrase could not read the clipboard"
+                );
+                None
+            }
+        }
+    }
+
     fn cancel_pending(&mut self) {
         if let Some(session) = self.typing.take() {
             session.cancel();
@@ -120,6 +137,7 @@ impl DictationOutput {
         target: OutputTarget,
         language: &str,
         insert: Option<Insert<'_>>,
+        clipboard: Option<Selection>,
         last_dictation: &mut Option<LastDictation>,
         audio_ms: u64,
         inference_ms: u64,
@@ -163,6 +181,7 @@ impl DictationOutput {
             typing,
             insert,
             last_dictation,
+            clipboard,
         };
         match deliver(input, self.history.as_ref(), &mut adapter).map_err(|error| eyre!(error))? {
             DeliveryOutcome::VoicePromptNothing => Ok(String::new()),
