@@ -620,6 +620,10 @@ fn rows(ui: &Ui) -> Vec<Row> {
     if caps.meetings {
         rows.push(row(Feature::LiveChapters, None));
         rows.push(row(Feature::StopAnyCallRecording, None));
+        // macOS's menu bar, capsule, and Meetings pane offer the switch.
+        if cfg!(target_os = "macos") {
+            rows.push(row(Feature::MeetingMicrophoneMute, None));
+        }
         // macOS's status item lists them, from the meeting controller's own
         // calendar read.
         if cfg!(target_os = "macos") {
@@ -1023,6 +1027,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::VocabularyMenu => "lab-vocabulary-menu",
         Feature::DictationStyle => "lab-dictation-style",
         Feature::StopAnyCallRecording => "lab-stop-any-call-recording",
+        Feature::MeetingMicrophoneMute => "lab-meeting-microphone-mute",
     }
 }
 

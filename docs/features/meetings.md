@@ -1018,7 +1018,9 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
   -> Menu bar: record symbol + elapsed time
      ├── "Recording · <title> · 12:34" -> Meetings pane
      │   └── title follows the provisional title (see Titles And Summary)
-     └── Stop & Transcribe
+     ├── Stop & Transcribe
+     └── Mute Microphone / Unmute Microphone (Labs › Mute the microphone
+         while recording; see Mute Microphone (Labs))
      (Idle menu bar: "Record Meeting"; "Copy Last Meeting Transcript" sits
       under Paste Last Dictation; there is no Meetings… item, Settings… opens
       the same window)
@@ -1055,8 +1057,9 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   │   the rows' 14 pt inset on both sides: the time's right edge is one
      │   │   line at rest, open and finished (open and finished in a left corner)
      │   │   (`the_header_keeps_the_rows_inset_at_rest_open_and_finished`)
-     │   └── "Microphone is silent" (warning) or, for its first 10 s, "Started
-     │       automatically" shows beside the meter
+     │   └── "Microphone is silent" (warning), "Microphone muted" (Labs ›
+     │       Mute the microphone while recording, in its place), or, for its
+     │       first 10 s, "Started automatically" shows beside the meter
      ├── Hover -> the pill reveals three full-width actions beside the header:
      │   Stop nearest the meter, Copy agent prompt, Copy all; pointer
      │   leaving -> eases back to rest (a held press keeps it open). A bottom
@@ -1341,6 +1344,40 @@ labs.stop_any_call_recording // meetings.auto-stop-any
       `only_an_automatic_browser_call_with_a_code_keeps_reading_its_page`
       (meeting/watcher.rs); not observed on a real Mac, Windows, or Linux
       call, or a real Slack huddle
+```
+
+### Mute Microphone (Labs)
+
+```ts
+Mute microphone (macOS; Labs › Mute the microphone while recording, off by default)
+├── Shown only while a meeting records with the lab on
+│   ├── Meetings pane: a Secondary button beside Stop & transcribe
+│   ├── Menu bar: a row under Stop & Transcribe; the status line adds
+│   │   "Microphone muted" while it is on
+│   └── Recording capsule: "Microphone muted" beside the meter, in place
+│       of the silence warning and the automatic-recording notice
+├── Choosing it sends MeetingRequest::SetMicrophoneMuted to the controller
+│   ├── It acts only while a recording runs and the lab is on; anything
+│   │   else is ignored
+│   └── The switch is cleared when a recording starts and when the
+│       finished worker's recording is taken, so every recording begins
+│       with the microphone in
+├── On: the microphone's packets carry exact zeros at the length they
+│   arrived at (PacketSink::send_samples), so microphone.wav keeps the
+│   timeline it shares with system.wav and every position stays put
+│   ├── The microphone source still sees what the device carries, so its
+│   │   digital-silence watch neither warns nor reopens for the mute
+│   └── No "You" line is produced while it is on; the call's audio keeps
+│       recording, transcribing, and timing out as it always does
+├── Unmute microphone puts the microphone back in the same recording
+├── Turning the lab off mid-recording restores audio at once: the sink
+│   reads the lab with each packet. The pane, menu bar, and capsule read the
+│   same gate, so their controls go with it
+└── Checks: `a_muted_microphone_goes_silent_in_place_and_the_call_does_not`
+    (meeting/capture.rs, a synthetic mute; the lab is macOS-only) and
+    `a_microphone_mute_needs_a_recording_and_its_lab` (meeting/watcher.rs);
+    no Mac call ran with the switch, and the menu-bar, capsule, and pane
+    controls are macOS-only code this Linux build never compiled
 ```
 
 ### Import Audio (Labs)
@@ -2021,7 +2058,9 @@ Menu bar (idle) -> Copy Last Meeting Transcript
 
 ```ts
 Header: Start recording (the pane's one Primary button) / red dot, elapsed
-        time, and Stop & transcribe (Secondary), grouped at the right
+        time, Mute microphone or Unmute microphone (Secondary, Labs › Mute the
+        microphone while recording only), and Stop & transcribe (Secondary),
+        grouped at the right
 List (on the title's edge, no divider; grouped Today / Yesterday / date)
 ├── Search meetings (title, app, notes, final transcript) above the rows
 └── Row: title (generated when present), time on the right; meta line

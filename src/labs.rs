@@ -563,6 +563,19 @@ mod tests {
     }
 
     #[test]
+    fn the_meeting_microphone_mute_lab_is_a_macos_meetings_lab_off_by_default() {
+        let feature = Feature::MeetingMicrophoneMute;
+        assert_eq!(feature.name(), "meeting-microphone-mute");
+        assert_eq!(feature.group(), Group::Meetings);
+        assert_eq!(feature.audience(), Audience::Everyone);
+        assert_eq!(feature.oses(), &[Os::Macos]);
+        assert_eq!(feature.added(), 20261124);
+        assert!(!feature.on(&AppSettings::default()));
+        assert_eq!(feature.on_this_os(), cfg!(target_os = "macos"));
+        assert_eq!(Feature::from_name("meeting-microphone-mute"), Some(feature));
+    }
+
+    #[test]
     fn the_stop_any_call_recording_lab_ships_on_every_os_and_is_off_by_default() {
         let feature = Feature::StopAnyCallRecording;
         assert_eq!(feature.name(), "stop-any-call-recording");

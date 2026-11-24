@@ -95,6 +95,7 @@ impl Feature {
             Self::VoiceIsolation => "Voice isolation",
             Self::DictateWhileAnnotating => "Dictate while annotating",
             Self::StopAnyCallRecording => "Stop every call recording when the call ends",
+            Self::MeetingMicrophoneMute => "Mute the microphone while recording",
         }
     }
 
@@ -350,6 +351,9 @@ impl Feature {
             }
             Self::StopAnyCallRecording => {
                 "Also stop an offered, calendar, or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off"
+            }
+            Self::MeetingMicrophoneMute => {
+                "Adds a mute button to meeting recordings. Hex keeps recording the call's audio but leaves out your microphone until you unmute."
             }
         }
     }

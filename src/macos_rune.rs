@@ -1062,6 +1062,21 @@ impl Pump {
                     tracing::warn!(%error, "could not stop meeting from status item");
                 }
             }
+            // Labs › Mute the microphone while recording: the recording's own
+            // microphone leaves or returns; the call's audio records on.
+            StatusItemAction::ToggleMeetingMicrophoneMute => {
+                if !crate::labs::meeting_microphone_mute() {
+                    return;
+                }
+                let muted = !crate::meeting::microphone_muted();
+                if let Err(error) = self
+                    .runtime
+                    .meeting(MeetingRequest::SetMicrophoneMuted(muted))
+                {
+                    tracing::warn!(%error, "could not mute the meeting microphone");
+                }
+                self.meeting_menu_at = Instant::now();
+            }
             StatusItemAction::CopyLastMeetingTranscript => {
                 let copied = crate::meeting::latest_transcript_markdown().and_then(|markdown| {
                     arboard::Clipboard::new()?.set_text(markdown)?;

@@ -54,6 +54,18 @@ pub(super) struct PacketSink {
 
 impl PacketSink {
     pub(super) fn send(&self, sample_rate: u32, samples: Vec<f32>, pts_us: Option<i64>) {
+        self.send_samples(sample_rate, samples, pts_us, microphone_muted());
+    }
+
+    /// [`Self::send`] with the microphone's mute given, so a test holds it
+    /// without the macOS-only Labs switch.
+    fn send_samples(
+        &self,
+        sample_rate: u32,
+        mut samples: Vec<f32>,
+        pts_us: Option<i64>,
+        muted: bool,
+    ) {
         if samples.is_empty() {
             return;
         }
@@ -62,6 +74,13 @@ impl PacketSink {
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
                 .observe(sample_rate, &samples);
+        }
+        // A muted microphone keeps its packets' length, and with it the WAV
+        // timeline the two tracks share, but carries exact zeros. The
+        // switches are read here, past the source's own silence watch, which
+        // must keep hearing what the microphone really carries.
+        if muted && self.source == MeetingSource::Microphone {
+            samples.fill(0.0);
         }
         record_level(self.source, &samples);
         let packet = AudioPacket {
@@ -76,6 +95,32 @@ impl PacketSink {
             self.drops.fetch_add(1, Ordering::Relaxed);
         }
     }
+}
+
+/// Whether the recording leaves the microphone out of its track right now
+/// (Labs › Mute the microphone while recording): set by the controller while
+/// a meeting records and cleared when one starts or ends, so every recording
+/// begins with the microphone in. Read as each microphone packet arrives.
+static MICROPHONE_MUTED: AtomicBool = AtomicBool::new(false);
+
+/// Whether the microphone's audio is left out of the recording now: the
+/// controller's switch, and Labs › Mute the microphone while recording still
+/// on. Turning the lab off therefore restores audio without stopping.
+pub fn microphone_muted() -> bool {
+    MICROPHONE_MUTED.load(Ordering::Relaxed) && crate::labs::meeting_microphone_mute()
+}
+
+/// Sets the microphone's switch for the recording under way; the controller
+/// owns it and clears it when a recording starts or ends.
+pub fn set_microphone_muted(muted: bool) {
+    MICROPHONE_MUTED.store(muted, Ordering::Relaxed);
+}
+
+/// The controller's switch alone, whatever the lab says; a check of what a
+/// request did on an OS whose lab never turns on.
+#[cfg(test)]
+pub(super) fn microphone_mute_set() -> bool {
+    MICROPHONE_MUTED.load(Ordering::Relaxed)
 }
 
 /// The newest buffer's loudness per source (f32 bits, 0 to 1) and when it
@@ -1105,6 +1150,39 @@ mod tests {
         silence.reset();
         silence.observe(1_000, &[0.0; 20_000]);
         assert!(!silence.stalled(), "the new stream must carry sound again");
+    }
+
+    /// Labs › Mute the microphone while recording: a muted microphone's
+    /// packets carry exact zeros at the length they arrived at, so the WAV
+    /// timeline and every position they share with the call's audio stay put;
+    /// the system track and an unmuted microphone are untouched.
+    #[test]
+    fn a_muted_microphone_goes_silent_in_place_and_the_call_does_not() {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(8);
+        let sink = |source| PacketSink {
+            source,
+            sender: sender.clone(),
+            drops: Arc::new(AtomicU64::new(0)),
+            clock: Instant::now(),
+            system_silence: None,
+        };
+        let microphone = sink(MeetingSource::Microphone);
+        microphone.send_samples(1_000, vec![0.5, -0.25, 0.125], None, true);
+        microphone.send_samples(1_000, vec![0.5, -0.25, 0.125], None, false);
+        let system = sink(MeetingSource::System);
+        system.send_samples(1_000, vec![0.25, 0.5], None, true);
+
+        let muted = receiver.try_recv().expect("the muted microphone sent");
+        assert_eq!(
+            muted.samples,
+            vec![0.0; 3],
+            "muted means silence, not a gap"
+        );
+        assert_eq!(muted.samples.len(), 3, "the packet keeps its length");
+        let unmuted = receiver.try_recv().expect("the unmuted microphone sent");
+        assert_eq!(unmuted.samples, vec![0.5, -0.25, 0.125]);
+        let call = receiver.try_recv().expect("the system track sent");
+        assert_eq!(call.samples, vec![0.25, 0.5], "the call keeps recording");
     }
 
     #[test]

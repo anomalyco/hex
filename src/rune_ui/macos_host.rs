@@ -625,6 +625,9 @@ impl MacHost {
             MeetingRequest::DeleteTranscript { id, entries } => self
                 .runtime()?
                 .meeting(crate::meeting::MeetingRequest::DeleteTranscript { id, entries }),
+            MeetingRequest::SetMicrophoneMuted(muted) => self
+                .runtime()?
+                .meeting(crate::meeting::MeetingRequest::SetMicrophoneMuted(muted)),
             MeetingRequest::Summarize(id) => self
                 .runtime()?
                 .meeting(crate::meeting::MeetingRequest::Summarize(id)),
