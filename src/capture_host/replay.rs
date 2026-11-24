@@ -356,7 +356,7 @@ impl Controller {
             {
                 let mut out = lock(outcomes);
                 out.held = true;
-                out.started(bundle.clone(), now, TargetKind::Display);
+                out.start(bundle.clone(), now, TargetKind::Display, false);
                 out.stopped(&bundle, End::Finish);
                 out.release();
             }
@@ -469,7 +469,7 @@ impl Controller {
         {
             let mut out = lock(outcomes);
             out.held = true;
-            out.started(bundle.clone(), press_at, TargetKind::Display);
+            out.start(bundle.clone(), press_at, TargetKind::Display, false);
             out.progress(&bundle, Stage::Recording);
             out.release();
         }

@@ -95,7 +95,7 @@ pub(super) fn actions(
     id: OfferId,
     candidate: &MeetingCandidate,
     choosing: bool,
-) -> (rune::Color, String, String, Vec<El>) {
+) -> (String, String, Vec<El>) {
     let action = |key: &str, label: &str, primary, press: fn(&mut Capsule)| {
         let face = match key {
             "offer-more" => IconButton::new(&crate::rune_ui::meetings::MORE_ICON)
@@ -151,12 +151,7 @@ pub(super) fn actions(
                 c.record_offer();
             }));
         }
-        return (
-            p.muted(),
-            label,
-            tr("Change anytime in Settings").to_owned(),
-            actions,
-        );
+        return (label, tr("Change anytime in Settings").to_owned(), actions);
     }
     let mut actions = Vec::new();
     if candidate.provider().is_some() {
@@ -170,7 +165,7 @@ pub(super) fn actions(
         c.close();
     }));
     actions.push(action("record", tr("Record"), true, Capsule::record_offer));
-    (p.muted(), candidate.offer_title(), String::new(), actions)
+    (candidate.offer_title(), String::new(), actions)
 }
 
 impl Capsule {

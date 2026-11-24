@@ -807,7 +807,7 @@ pub(super) fn rewrite_export_transcript(
     if manifest.export_sha256.as_deref() != Some(super::text_sha256(original.as_bytes()).as_str()) {
         return Ok(());
     }
-    let rendered = super::transcript::render_markdown(manifest, entries);
+    let rendered = super::markdown::render_document(manifest, entries);
     rewrite_markdown_file(&path, &mut manifest.export_sha256, |_| rendered)?;
     Ok(())
 }

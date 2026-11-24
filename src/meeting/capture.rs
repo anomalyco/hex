@@ -390,17 +390,18 @@ fn call_app_inputs(application: &str) -> Vec<String> {
 #[derive(Default)]
 struct InputRecorders {
     seen: Mutex<SeenInput>,
-    /// When our own renegotiating open last changed the device's rate; a
-    /// recorder that disappears just after it is the driver restarting
-    /// streams, not another app letting go.
-    renegotiated: Mutex<Option<Instant>>,
 }
 
-/// The last input whose recorders were seen, and those processes.
+/// The last input whose recorders were seen, those processes, and when our
+/// own renegotiating open last changed that device's rate.
 #[derive(Default)]
 struct SeenInput {
     uid: Option<String>,
     pids: Vec<i32>,
+    /// When our own renegotiating open last changed the device's rate; a
+    /// recorder that disappears just after it is the driver restarting
+    /// streams, not another app letting go.
+    renegotiated: Option<Instant>,
 }
 
 impl InputRecorders {
@@ -420,17 +421,15 @@ impl InputRecorders {
     /// within [`RENEGOTIATION_SETTLE`] of it, ignores a disappearing pid:
     /// the driver is restarting its streams, not another app letting go.
     fn update(&self, uid: Option<&str>, current: Vec<i32>, now: Instant) -> bool {
-        let mut renegotiated = self
-            .renegotiated
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
         let mut seen = self.seen.lock().unwrap_or_else(|error| error.into_inner());
         let same_input = seen.uid.as_deref() == uid;
         if !same_input {
             // The old input's rate change means nothing to this one.
-            *renegotiated = None;
+            seen.renegotiated = None;
         }
-        let settled = renegotiated.is_none_or(|at| now.duration_since(at) >= RENEGOTIATION_SETTLE);
+        let settled = seen
+            .renegotiated
+            .is_none_or(|at| now.duration_since(at) >= RENEGOTIATION_SETTLE);
         let released = same_input && settled && released_processes(&seen.pids, &current);
         seen.uid = uid.map(str::to_owned);
         seen.pids = current;
@@ -442,16 +441,17 @@ impl InputRecorders {
         *self.seen.lock().unwrap_or_else(|error| error.into_inner()) = SeenInput {
             uid: uid.map(str::to_owned),
             pids: current,
+            renegotiated: None,
         };
     }
 
     /// Notes that this open renegotiated the device's sample rate, which
     /// restarts its other streams.
     fn note_renegotiation(&self, now: Instant) {
-        *self
-            .renegotiated
+        self.seen
             .lock()
-            .unwrap_or_else(|error| error.into_inner()) = Some(now);
+            .unwrap_or_else(|error| error.into_inner())
+            .renegotiated = Some(now);
     }
 }
 
@@ -509,8 +509,6 @@ struct MicrophoneSource {
     call_input: Option<String>,
     /// The input UIDs the call app last reported recording from.
     call_inputs: Vec<String>,
-    /// The UID of this stream's input.
-    opened_uid: Option<String>,
     call_input_checked: Instant,
     /// The processes recording from the input, shared across reopens.
     recorders: Arc<InputRecorders>,
@@ -558,10 +556,9 @@ impl MicrophoneSource {
             silence_recovery.forget_release();
         }
         let input = *input;
-        let opened_uid = input.uid.clone();
         let now = Instant::now();
         // A release from the old input says nothing about the new one.
-        if !recorders.same_input(opened_uid.as_deref()) {
+        if !recorders.same_input(input.uid.as_deref()) {
             silence_recovery.forget_release();
         }
         if application.is_some() {
@@ -571,8 +568,8 @@ impl MicrophoneSource {
             // Compare this open against the set the last stream saw, so an
             // app that let go while the source was down still counts as a
             // release. The shared state keeps it if this stream fails too.
-            if let Some(current) = recording_processes(opened_uid.as_deref())
-                && recorders.update(opened_uid.as_deref(), current, now)
+            if let Some(current) = recording_processes(input.uid.as_deref())
+                && recorders.update(input.uid.as_deref(), current, now)
             {
                 silence_recovery.note_release();
             }
@@ -601,7 +598,6 @@ impl MicrophoneSource {
             application,
             call_input,
             call_inputs,
-            opened_uid,
             call_input_checked: Instant::now(),
             recorders,
             recorders_checked: Instant::now(),
@@ -612,7 +608,7 @@ impl MicrophoneSource {
     /// is when another app's voice processing can leave it digitally silent.
     /// A manual recording has no call app and never holds the device.
     fn call_app_holds_device(&self) -> bool {
-        call_app_reports_input(self.opened_uid.as_deref(), &self.call_inputs)
+        call_app_reports_input(self.input.uid.as_deref(), &self.call_inputs)
     }
 
     /// Notes an application other than Hex stopping recording from this
@@ -627,12 +623,12 @@ impl MicrophoneSource {
             return;
         }
         self.recorders_checked = now;
-        let Some(current) = recording_processes(self.opened_uid.as_deref()) else {
+        let Some(current) = recording_processes(self.input.uid.as_deref()) else {
             return;
         };
         if self
             .recorders
-            .update(self.opened_uid.as_deref(), current, now)
+            .update(self.input.uid.as_deref(), current, now)
         {
             self.silence.note_release();
         }
@@ -713,9 +709,8 @@ impl MicrophoneSource {
         // A new device starts a fresh zero count, but a warning raised by the
         // old one stays until real audio clears it.
         self.silence.reset(input.sample_rate);
-        self.opened_uid = input.uid.clone();
-        if let Some(current) = recording_processes(self.opened_uid.as_deref()) {
-            self.recorders.reset(self.opened_uid.as_deref(), current);
+        if let Some(current) = recording_processes(input.uid.as_deref()) {
+            self.recorders.reset(input.uid.as_deref(), current);
         }
         self.recorders_checked = now;
         // A release or renegotiation from the old input says nothing about
@@ -758,7 +753,7 @@ impl LiveSource for MicrophoneSource {
                     SilenceAction::Gated => {
                         tracing::info!(
                             device = %self.input.device_name,
-                            device_uid = ?self.opened_uid,
+                            device_uid = ?self.input.uid,
                             call_app_inputs = ?self.call_inputs,
                             "meeting microphone is digitally silent but the call app does not report recording from it; not reopening or warning"
                         );

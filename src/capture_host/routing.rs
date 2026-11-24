@@ -590,111 +590,6 @@ impl Worker {
         }
     }
 
-    #[cfg(test)]
-    fn written_before(&mut self, bundle: PathBuf, look: Look) {
-        let started = Instant::now();
-        let Look {
-            router,
-            seen,
-            until,
-            model,
-            ..
-        } = look;
-        let live = seen
-            .recv_timeout(until.saturating_duration_since(Instant::now()))
-            .unwrap_or_else(|error| {
-                match error {
-                    RecvTimeoutError::Timeout => {
-                        tracing::warn!("looking for a capture's route took too long");
-                    }
-                    RecvTimeoutError::Disconnected => {
-                        tracing::error!("looking for a capture's route panicked");
-                    }
-                }
-                None
-            });
-        let waited = started.elapsed();
-        let loaded = scrawl_capture::handoff::load_bundle(&bundle)
-            .map(|(_, loaded)| loaded)
-            .inspect_err(|error| tracing::warn!(error = %format!("{error:#}"), "could not read a capture to route"))
-            .ok();
-        let candidates = live
-            .as_ref()
-            .map(|live| live.candidates.clone())
-            .unwrap_or_default();
-        if let Some(live) = &live
-            && let Some(error) = &live.error
-        {
-            tracing::warn!(
-                bundle = %bundle_name(&bundle),
-                error,
-                read = live.candidates.len(),
-                "a capture's look couldn't read all of OpenCode's sessions"
-            );
-            if auth_refused(error) {
-                tracing::warn!("{AUTH_HINT}");
-            }
-        }
-        let unread = live.as_ref().and_then(sessions_unread);
-        let terminal = live.as_ref().and_then(|live| live.terminal.clone());
-        // Judged even without the sessions: a rule, page, or publisher names
-        // one outright, and the record keeps what was seen for a replay.
-        let (decision, url) = router.run(|| match (live, &loaded) {
-            (Some(live), Some(loaded)) => {
-                let (judgement, url) = routing::judge_capture_with(&bundle, loaded, live, &model);
-                (judged(judgement.decision, unread.as_deref()), url)
-            }
-            (Some(live), None) => (Decided::Failed, live.url),
-            (None, _) => (Decided::Failed, None),
-        });
-        let bundle_id = loaded
-            .as_ref()
-            .and_then(|loaded| loaded.target.bundle_id.clone());
-        let app = loaded.as_ref().and_then(|loaded| loaded.target.app.clone());
-        let rule = policy::rule_key(url.as_deref(), terminal.as_deref(), bundle_id.as_deref());
-        let site = rule.as_ref().map(|rule| match rule {
-            (RuleKind::Site, key) => key
-                .split_once("://")
-                .map_or(key.as_str(), |(_, host)| host)
-                .to_owned(),
-            (RuleKind::App, key) => app.clone().unwrap_or_else(|| key.clone()),
-            (RuleKind::Terminal, _) => site_of(rule),
-        });
-        let Answered {
-            answer,
-            send: rule_send,
-            shown,
-        } = answer_for(decision, url.as_deref(), site, &candidates, now_ms());
-        tracing::info!(
-            bundle = %bundle_name(&bundle),
-            answer = answer_kind(&answer),
-            why = shown.as_ref().map(|shown| shown.why.as_str()),
-            look_wait_ms = waited.as_millis() as u64,
-            judge_ms = started.elapsed().saturating_sub(waited).as_millis() as u64,
-            "capture routed"
-        );
-        if let Some(shown) = &shown
-            && let Err(error) = routing::record_shown(&bundle, shown)
-        {
-            tracing::warn!(error = %format!("{error:#}"), "could not record how a capture's route was shown");
-        }
-        self.current = Some(Routed {
-            bundle,
-            router,
-            url,
-            app,
-            rule,
-            candidates,
-            answer,
-            send: SendState::Idle,
-        });
-        self.publish();
-        // A saved rule sends at once; the capsule's Undo takes it back.
-        if let Some(dest) = rule_send {
-            self.send_current(dest, None, None);
-        }
-    }
-
     /// The capsule's pick: sends the newest capture to `to` now, after
     /// taking back a send elsewhere. `always` also saves a rule for its
     /// site or app.
@@ -1028,8 +923,6 @@ enum Decided {
     Judged(smart::Decision),
     /// OpenCode's sessions couldn't be read: why, in a few words.
     Unreachable(String),
-    #[cfg(test)]
-    Failed,
 }
 
 /// Why a look read no sessions at all, when its read failed.
@@ -1293,10 +1186,6 @@ fn answer_for(
             recent: recent(&[]),
         }),
         Decided::Unreachable(why) => Answered::of(RouteAnswer::Unreachable { why }),
-        #[cfg(test)]
-        Decided::Failed => Answered::of(RouteAnswer::NoAnswer {
-            recent: recent(&[]),
-        }),
     };
     // The early local read, a saved rule, or a list read without a title can
     // leave a `ses…` id where a name goes; the capsule and the bundle say the
@@ -1832,9 +1721,6 @@ mod tests {
             RouteAnswer::Guess { ref suggested, ref recent, site: Some(ref site) }
                 if suggested.len() == 1 && recent.is_empty() && site == "example.com"
         ));
-        let Answered { answer, send, .. } = answer_for(Decided::Failed, None, None, &candidates, 0);
-        assert!(send.is_none());
-        assert!(matches!(answer, RouteAnswer::NoAnswer { ref recent } if recent.len() == 1));
     }
 
     /// The Air's first sends: Studio's OpenCode couldn't read the contact
@@ -2588,114 +2474,6 @@ mod tests {
             );
             assert!(!worker.current.as_ref().unwrap().send.is_pending_rule());
             std::fs::remove_dir_all(bundle.parent().unwrap()).unwrap();
-        }
-
-        #[test]
-        #[ignore = "paired wall-clock benchmark; fake 60 ms remote and 2.5 s routing model"]
-        fn paired_written_to_route_and_send() {
-            fn remote(path: &str, budget: Duration) -> anyhow::Result<Vec<u8>> {
-                std::thread::sleep(Duration::from_millis(60));
-                sessions(path, budget)
-            }
-            fn old_send(path: &Path, id: &str) -> anyhow::Result<scrawl_capture::handoff::Posted> {
-                // Light copy, idle check, post: three serialized round trips.
-                std::thread::sleep(Duration::from_millis(180));
-                posted(path, id)
-            }
-            fn new_send(path: &Path, id: &str) -> anyhow::Result<scrawl_capture::handoff::Posted> {
-                // Idle check and post; copying is no longer on this path.
-                std::thread::sleep(Duration::from_millis(120));
-                posted(path, id)
-            }
-            fn model(_: &[u8], _: Duration) -> anyhow::Result<Vec<u8>> {
-                std::thread::sleep(Duration::from_millis(2500));
-                Ok(serde_json::to_vec(&serde_json::json!({
-                    "model": "fixture", "answers": {
-                        "target": {"type":"choice", "choice":"targets.t1", "confidence":0.95, "probabilities":{"targets.t1":0.95,"targets.t2":0.05}},
-                        "any_fits": {"type":"noul", "noul":0.95}
-                    }
-                }))?)
-            }
-            for (name, target) in [
-                ("session", Some("ses_board")),
-                ("folder", Some("/p/board")),
-                ("guess", None),
-            ] {
-                for after in [false, true] {
-                    let mut shown = Vec::new();
-                    let mut sent = Vec::new();
-                    for sample in 0..8 {
-                        let router = router_with(|c| {
-                            c.smart_routing = true;
-                            c.jev_routing = target.is_none();
-                            if let Some(target) = target {
-                                c.apps.insert("com.example.board".into(), target.into());
-                            }
-                        });
-                        let mut senses = senses(no_tab);
-                        senses.hooks.api = remote;
-                        let context = RouteContext {
-                            front_bundle_id: None,
-                            captured_bundle_id: Some("com.example.board".into()),
-                            app_pid: None,
-                        };
-                        let mut look = look_with(context, router, senses).unwrap();
-                        if after {
-                            // Preparation completes during the recording, before Written.
-                            let live = look.seen.recv_timeout(Duration::from_secs(5)).unwrap();
-                            let (tx, rx) = mpsc::sync_channel(1);
-                            tx.send(live).unwrap();
-                            look.seen = rx;
-                        }
-                        look.model.ask = model;
-                        let bundle = written("com.example.board");
-                        let outcomes = SharedOutcomes::default();
-                        lock(&outcomes).fail(bundle.clone(), "test".into());
-                        let mut worker = worker(outcomes.clone());
-                        worker.forward = if after { new_send } else { old_send };
-                        let started = Instant::now();
-                        let observer = std::thread::spawn(move || {
-                            loop {
-                                if lock(&outcomes)
-                                    .last
-                                    .as_ref()
-                                    .and_then(|c| c.route.as_ref())
-                                    .is_some_and(|r| r.answer != RouteAnswer::Looking)
-                                {
-                                    return started.elapsed();
-                                }
-                                assert!(started.elapsed() < Duration::from_secs(10));
-                                std::thread::park_timeout(Duration::from_millis(1));
-                            }
-                        });
-                        if after {
-                            worker.written(bundle.clone(), look);
-                        } else {
-                            worker.written_before(bundle.clone(), look);
-                        }
-                        settle_with_clock(&mut worker, false);
-                        let elapsed = started.elapsed();
-                        let first = observer.join().unwrap();
-                        if sample > 0 {
-                            shown.push(first.as_millis());
-                            if target.is_some() {
-                                sent.push(elapsed.saturating_sub(first).as_millis());
-                            }
-                        }
-                        let _ = std::fs::remove_dir_all(bundle.parent().unwrap());
-                    }
-                    shown.sort();
-                    sent.sort();
-                    eprintln!(
-                        "METRIC {name}_{}_written_to_shown_ms={} range={}-{} routed_to_sent_ms={:?}",
-                        if after { "after" } else { "before" },
-                        shown[3],
-                        shown[0],
-                        shown[6],
-                        sent.get(3)
-                    );
-                }
-            }
         }
 
         /// What the worker answers for a capture of `bundle_id` looked at

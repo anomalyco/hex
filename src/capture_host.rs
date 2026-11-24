@@ -1663,9 +1663,7 @@ impl CaptureHost {
         self.input.recording(None);
         microphone::hide_level();
         drop(active.quiet.take());
-        let microphone =
-            std::mem::replace(&mut active.microphone, microphone::Microphone::Timeline);
-        let closed = microphone.close(audio, now).unwrap_or_else(|error| {
+        let closed = active.microphone.close(audio, now).unwrap_or_else(|error| {
             tracing::warn!(%error, "could not close the capture sink");
             None
         });
@@ -2698,13 +2696,7 @@ fn finish_captures(
                     missing_transcript = written.missing_transcript.as_deref(),
                     "capture finished"
                 );
-                let copy_error = if crate::capture_zip::copy_as_zip(&bundle) {
-                    None
-                } else {
-                    copy_to_clipboard(&bundle)
-                        .err()
-                        .map(|error| format!("{error:#}"))
-                };
+                let copy_error = copy_bundle(&bundle).err().map(|error| format!("{error:#}"));
                 let route = look.as_ref().map(|_| CaptureRoute::looking());
                 #[cfg(target_os = "macos")]
                 if let Err(error) = paste_source::mark_ready(&bundle, crate::history::now_ms()) {
@@ -4647,7 +4639,7 @@ mod tests {
         let mut outcomes = lock(&host.outcomes);
         for index in 0..MAX_FINISHING {
             let bundle = dir.join(format!("gone-{index}"));
-            outcomes.started(bundle.clone(), t(0), TargetKind::Pointer);
+            outcomes.start(bundle.clone(), t(0), TargetKind::Pointer, false);
             outcomes.stopped(&bundle, End::Discard);
         }
         assert_eq!(outcomes.finishing_count(), 0);
@@ -4675,7 +4667,7 @@ mod tests {
             let mut outcomes = lock(&host.outcomes);
             for index in 0..MAX_FINISHING {
                 let bundle = dir.join(format!("writing-{index}"));
-                outcomes.started(bundle.clone(), t(0), TargetKind::Pointer);
+                outcomes.start(bundle.clone(), t(0), TargetKind::Pointer, false);
                 outcomes.stopped(&bundle, End::Finish);
             }
         }
@@ -4782,7 +4774,7 @@ mod tests {
         let live = LiveInput(Arc::default());
         let outcomes = SharedOutcomes::default();
         let bundle = PathBuf::from("/work.scrawl");
-        lock(&outcomes).started(bundle.clone(), t(0), TargetKind::Pointer);
+        lock(&outcomes).start(bundle.clone(), t(0), TargetKind::Pointer, false);
         live.recording(Some(&bundle));
         live.attach(&bundle, InputSink::default(), t(0), false, &outcomes);
         let (sender, received) = mpsc::sync_channel(4);
@@ -5122,7 +5114,7 @@ mod tests {
         let mut outcomes = Outcomes::on(feed);
         let (one, two) = (PathBuf::from("/c/one"), PathBuf::from("/c/two"));
         let since = CaptureInstant::from_nanos(5);
-        outcomes.started(one.clone(), since, TargetKind::Pointer);
+        outcomes.start(one.clone(), since, TargetKind::Pointer, false);
         let recording = watch.changed().unwrap();
         assert_eq!(
             recording.recording,
@@ -5152,7 +5144,7 @@ mod tests {
         );
 
         // A second capture records while the first is written.
-        outcomes.started(two.clone(), since, TargetKind::Window);
+        outcomes.start(two.clone(), since, TargetKind::Window, false);
         outcomes.stopped(&two, End::Cancel);
         // A cancelled capture's stage stays put.
         outcomes.progress(&two, Stage::Writing);
@@ -5209,7 +5201,7 @@ mod tests {
 
         // A dropped watcher stops being woken.
         drop(watch);
-        outcomes.started(one, since, TargetKind::Pointer);
+        outcomes.start(one, since, TargetKind::Pointer, false);
         assert!(feed.watchers.lock().unwrap().is_empty());
     }
 
