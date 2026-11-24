@@ -24,6 +24,8 @@ const PANE_THUMB_HOVER: f32 = 10.0;
 
 pub(super) static COPY_ICON: &Icon = &rune_theme_opencode::icons::OUTLINE_COPY;
 pub(super) static TRASH_ICON: &Icon = &rune_theme_opencode::icons::TRASH;
+// Only macOS History's Edit uses it, now Rename is in the meeting's menu.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(super) static EDIT_ICON: &Icon = &rune_theme_opencode::icons::EDIT;
 pub(super) static HISTORY_ICON: &Icon = &rune_theme_opencode::icons::STATUS;
 pub(super) static SEARCH_ICON: &Icon = &rune_theme_opencode::icons::MAGNIFYING_GLASS;
