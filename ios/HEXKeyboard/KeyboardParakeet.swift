@@ -378,6 +378,7 @@ private nonisolated final class FootprintPeak: @unchecked Sendable {
 enum KeyboardTranscription {
     static func transcribe(_ url: URL, hints: [String], audioSeconds: Double) async throws -> (String, SpeechLanguage, String) {
         if let parakeet = await KeyboardParakeet.shared.transcribe(url, audioSeconds: audioSeconds) {
+            noteLanguage(parakeet.language)
             return (parakeet.text, parakeet.language, parakeet.engine)
         }
         let started = Date()
@@ -389,6 +390,12 @@ enum KeyboardTranscription {
             ))
         }
         let engine = language.module == .dictation ? "Apple Speech (keyboard, DictationTranscriber)" : "Apple Speech (keyboard)"
+        noteLanguage(language)
         return (text, language, engine)
+    }
+
+    /// For Settings' Translate what I say, which checks the pair the keyboard translates.
+    private static func noteLanguage(_ language: SpeechLanguage) {
+        DictationTranslationSettings().noteKeyboardDictation(in: language.identifier, languages: LanguageSettings())
     }
 }

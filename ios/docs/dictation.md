@@ -748,6 +748,24 @@ The App Group carries the switch, so in-keyboard dictation, a warm
 session, and the Action Button all follow it. The keyboard shares the
 app's String Catalog, so the Hex key menu is in Chinese on a Chinese iPhone.
 
+Settings checks and downloads the pair the keyboard translates: from the
+language the keyboard dictates in (Settings › Dictation language, else the
+keyboard's language Automatic follows, else the language of the keyboard's
+last dictation on Automatic, which the keyboard writes as a code and a time in
+`experiments.translateDictation.keyboardAutomaticLanguage`, else the iPhone's
+first language Hex dictates, as the keyboard's Automatic picks), never Hex's
+own Automatic pick, which follows Hex's language when it is set apart from the
+iPhone's in iOS Settings (the keyboard keeps the iPhone's: TestFlight build
+149, Hex in English on a Chinese iPhone). Turning the switch on or picking a
+target there checks the pair and, when its packs aren't on the iPhone, shows
+Apple's download sheet at once; opening the page only shows where the pair
+stands ("Chinese to English is ready. Works offline.", or the download
+button), and before Hex knows the spoken language it says to dictate once
+with the Hex keyboard. A first dictation from the keyboard's switch or menu
+still finds out from the keyboard's note. Debug simulator builds take
+`-hexTranslationStatus installed|supported|unsupported` in place of Apple's
+answer, which the simulator reports as unsupported for every pair.
+
 ## Screen stays on while dictating in Hex
 
 Recording and transcribing set

@@ -2557,12 +2557,22 @@
         }
       }
     },
-    "Ready. Works offline." : {
+    "%@ to %@ is ready. Works offline." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已就绪，可离线使用。"
+            "value" : "从%1$@翻译成%2$@已就绪，可离线使用。"
+          }
+        }
+      }
+    },
+    "Dictate once with the Hex keyboard, then check back here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先用 Hex 键盘听写一次，再回来这里查看。"
           }
         }
       }
