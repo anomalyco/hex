@@ -142,7 +142,7 @@ export function renderAndroid(origin: string): string {
 </section>
 <section>
 <h2>Updates</h2>
-<p>Hex Preview looks for a newer build when you open it and at most once a day from the keyboard, and shows what changed. Tap <strong>Download update</strong> and your browser downloads the new build from GitHub. Open the download and tap <strong>Update</strong> when Android asks.</p>
+<p>Hex Preview looks for a newer build when you open it and at most once a day from the keyboard, and shows what changed. Tap <strong>Download update</strong> and your browser downloads the new build from GitHub. Open the download and tap <strong>Update</strong> when Android asks. The first time, Android asks you to allow your browser to install apps: allow it, go back, and tap the download again.</p>
 <p>On a build before 2348, the button says <strong>Update</strong> and Hex Preview installs that one update itself. If Google Play Protect asks to scan it, tap <strong>Scan app</strong>, then <strong>Install</strong>.</p>
 <p>Updating closes the keyboard for a moment. Tap a text field to bring it back.</p>
 </section>
