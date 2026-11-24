@@ -1,6 +1,6 @@
 //! Annotate Auto-send rules and redesigned finished-capsule strings, kept
-//! beside [`super::TRANSLATIONS`] and the French, Portuguese, and Russian
-//! tables so those stay under the source cap.
+//! beside [`super::TRANSLATIONS`] and the French, Portuguese, Russian, and
+//! Hungarian tables so those stay under the source cap.
 //!
 //! Not yet reviewed by native speakers, like their neighbouring tables.
 
@@ -223,4 +223,60 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
     ("Queued for {}", "В очереди в {}"),
     ("Cancel send", "Отменить отправку"),
     ("queued", "в очереди"),
+];
+
+/// Hungarian, for the strings above.
+#[rustfmt::skip]
+pub(super) const HUNGARIAN: &[(&str, &str)] = &[
+    ("1 rule", "1 szabály"),
+    ("{} rules", "{} szabály"),
+    ("No rules", "Nincs szabály"),
+    ("Auto-send rules", "Automatikus küldési szabályok"),
+    ("Auto-send with Jev", "Automatikus küldés a Jevvel"),
+    ("When no rule matches, send if Jev is sure; every send waits 3 seconds with Undo", "Ha egyetlen szabály sem illeszkedik, küldje el, ha a Jev biztos benne; minden küldés 3 másodpercet vár Visszavonás lehetőséggel"),
+    ("Each send waits 3 seconds first, so you can Undo it.", "Minden küldés előbb 3 másodpercet vár, hogy visszavonhassa."),
+    ("Saved rules and Jev", "Mentett szabályok és Jev"),
+    ("Send matching annotations automatically", "Az illeszkedő jegyzetek automatikus küldése"),
+    ("Rules", "Szabályok"),
+    ("Rule", "Szabály"),
+    ("Jev", "Jev"),
+    ("Add rule", "Szabály hozzáadása"),
+    ("New rule", "Új szabály"),
+    ("Save rule", "Szabály mentése"),
+    ("Remove rule", "Szabály eltávolítása"),
+    ("Rule saved", "Szabály mentve"),
+    ("All rules…", "Összes szabály…"),
+    ("Always…", "Mindig…"),
+    ("Choose Always… after a send, or add a rule above.", "Küldés után válassza a Mindig… lehetőséget, vagy adjon hozzá szabályt fent."),
+    ("Subpath", "Részútvonal"),
+    ("Website", "Webhely"),
+    ("Terminal folder", "Terminálmappa"),
+    ("App", "Alkalmazás"),
+    ("Kind", "Fajta"),
+    ("Match", "Illeszkedés"),
+    ("Destination", "Cél"),
+    ("Address", "Cím"),
+    ("This page and pages under it, or a whole website", "Ez az oldal és az alatta lévő oldalak, vagy egy egész webhely"),
+    ("A terminal working in this folder or below it", "Egy terminál, amely ebben a mappában vagy alatta dolgozik"),
+    ("Any window of this app", "Ennek az alkalmazásnak bármely ablaka"),
+    ("Choose an app", "Válasszon alkalmazást"),
+    ("Choose a session", "Válasszon munkamenetet"),
+    ("Choose a project", "Válasszon projektet"),
+    ("Choose another session", "Válasszon másik munkamenetet"),
+    ("Specific session", "Adott munkamenet"),
+    ("Project folder", "Projektmappa"),
+    ("Other folder…", "Másik mappa…"),
+    ("Session", "Munkamenet"),
+    ("Project", "Projekt"),
+    ("Even after newer sessions start", "Még ha újabb munkamenetek indulnak is"),
+    ("Its newest session", "A legújabb munkamenete"),
+    ("When I annotate", "Amikor jegyzetet készítek"),
+    ("This page and pages under it", "Ez az oldal és az alatta lévő oldalak"),
+    ("The whole site", "Az egész webhely"),
+    ("Terminal folder, and folders in it", "Terminálmappa és a benne lévő mappák"),
+    ("This session, always", "Mindig ez a munkamenet"),
+    ("The project's newest session", "A projekt legújabb munkamenete"),
+    ("Queued for {}", "Sorban: {}"),
+    ("Cancel send", "Küldés megszakítása"),
+    ("queued", "sorban"),
 ];

@@ -20,6 +20,7 @@ mod failures;
 mod french;
 mod history;
 mod hud_height;
+mod hungarian;
 mod labs;
 mod meeting_mute;
 mod meetings;
@@ -46,7 +47,7 @@ pub(crate) type LanguageChoice = (Option<&'static str>, &'static str);
 
 /// The selectable interface languages: persisted code and native name. The
 /// leading `None` entry follows the system display language. Português
-/// (Brasil), Français, 繁體中文, and Русский have not had a native
+/// (Brasil), Français, 繁體中文, Русский, and Magyar have not had a native
 /// speaker's review yet.
 pub(crate) const LANGUAGE_CHOICES: &[LanguageChoice] = &[
     (None, "System"),
@@ -61,6 +62,7 @@ pub(crate) const LANGUAGE_CHOICES: &[LanguageChoice] = &[
     (Some("pt"), "Português (Brasil)"),
     (Some("fr"), "Français"),
     (Some("ru"), "Русский"),
+    (Some("hu"), "Magyar"),
 ];
 
 /// [`LANGUAGE_CHOICES`] in the order the select offers them: System first,
@@ -112,9 +114,12 @@ const FRENCH_COLUMN: u8 = 7;
 const TRADITIONAL_CHINESE_COLUMN: u8 = 8;
 /// Russian, kept in its own table ([`russian::TRANSLATIONS`]).
 const RUSSIAN_COLUMN: u8 = 9;
+/// Hungarian, kept in its own table ([`hungarian::TRANSLATIONS`]).
+const HUNGARIAN_COLUMN: u8 = 10;
 
 /// The column for a persisted code; `pt` (any Portuguese system language)
-/// is Brazilian Portuguese, `fr` any French one, and `ru` any Russian one.
+/// is Brazilian Portuguese, `fr` any French one, `ru` any Russian one, and
+/// `hu` any Hungarian one.
 fn column_for_code(code: &str) -> u8 {
     match code {
         "pl" => 0,
@@ -127,6 +132,7 @@ fn column_for_code(code: &str) -> u8 {
         "pt" => PORTUGUESE_COLUMN,
         "fr" => FRENCH_COLUMN,
         "ru" => RUSSIAN_COLUMN,
+        "hu" => HUNGARIAN_COLUMN,
         _ => ENGLISH,
     }
 }
@@ -325,6 +331,7 @@ pub(crate) fn tr(english: &str) -> &str {
         PORTUGUESE_COLUMN => portuguese::table(),
         FRENCH_COLUMN => french::table(),
         RUSSIAN_COLUMN => russian::table(),
+        HUNGARIAN_COLUMN => hungarian::table(),
         _ => &tables()[column as usize],
     };
     table.get(english).copied().unwrap_or(english)
@@ -439,6 +446,13 @@ mod tests {
         );
         assert_eq!(column_for_code("ru"), super::RUSSIAN_COLUMN);
         assert!(LANGUAGE_CHOICES.contains(&(Some("ru"), "Русский")));
+        assert_eq!(column_for_language_tag("hu-HU"), super::HUNGARIAN_COLUMN);
+        assert_eq!(
+            column_for_language_tag("hu_HU.UTF-8"),
+            super::HUNGARIAN_COLUMN
+        );
+        assert_eq!(column_for_code("hu"), super::HUNGARIAN_COLUMN);
+        assert!(LANGUAGE_CHOICES.contains(&(Some("hu"), "Magyar")));
     }
 
     #[test]
@@ -524,6 +538,15 @@ mod tests {
         super::set_current(super::RUSSIAN_COLUMN);
         assert_eq!(super::tr("Don't switch"), "Не переключать");
         assert_eq!(super::tr_fill("Remove {}?", "x"), "Удалить x?");
+        super::set_current(super::ENGLISH);
+        assert_eq!(super::tr("Don't switch"), "Don't switch");
+    }
+
+    #[test]
+    fn hungarian_translates_with_its_column() {
+        super::set_current(super::HUNGARIAN_COLUMN);
+        assert_eq!(super::tr("Don't switch"), "Ne váltson");
+        assert_eq!(super::tr_fill("Remove {}?", "x"), "Eltávolítja ezt: x?");
         super::set_current(super::ENGLISH);
         assert_eq!(super::tr("Don't switch"), "Don't switch");
     }
@@ -815,6 +838,7 @@ mod tests {
             ("French", super::french::table()),
             ("Portuguese", super::portuguese::table()),
             ("Russian", super::russian::table()),
+            ("Hungarian", super::hungarian::table()),
         ];
         for english in [
             "Use Menu, Pause, or Scroll Lock as a shortcut by itself, such as Caps Lock remapped to Menu",

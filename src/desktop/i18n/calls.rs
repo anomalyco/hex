@@ -74,3 +74,28 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
     ("Stop now", "Остановить сейчас"),
     ("Couldn't record", "Не удалось записать"),
 ];
+
+/// Hungarian, for the strings above.
+#[rustfmt::skip]
+pub(super) const HUNGARIAN: &[(&str, &str)] = &[
+    ("Ask each time", "Minden alkalommal kérdez"),
+    ("Don't offer", "Ne ajánlja fel"),
+    ("Always record", "Mindig rögzít"),
+    ("Calls", "Hívások"),
+    ("When a call starts", "Amikor egy hívás elkezdődik"),
+    ("Apps and websites", "Alkalmazások és webhelyek"),
+    ("Apps and websites show up here after Hex sees a call in them.", "Az alkalmazások és webhelyek itt jelennek meg, miután a Hex hívást észlel bennük."),
+    ("A small offer appears beside the menu bar", "A menüsor mellett megjelenik egy kis ajánlat"),
+    ("Recording starts with the call; you'll see it in the menu bar", "A felvétel a hívással együtt indul; a menüsorban láthatja"),
+    ("Start recordings yourself from the menu bar", "A felvételeket a menüsorból indíthatja el"),
+    ("A small offer appears on screen", "A képernyőn megjelenik egy kis ajánlat"),
+    ("Recording starts with the call", "A felvétel a hívással együtt indul"),
+    ("Start recordings yourself from Hex", "A felvételeket a Hexből indíthatja el"),
+    ("{} seconds after the call app leaves the microphone", "{} másodperccel azután, hogy a hívás alkalmazása elengedi a mikrofont"),
+    ("{name}: {answer}", "{name}: {answer}"),
+    ("{} apps and websites answer differently", "{} alkalmazás és webhely válaszol másként"),
+    ("{} call ended", "{}-hívás befejeződött"),
+    ("Recording stops in {} s", "A felvétel {} s múlva leáll"),
+    ("Stop now", "Leállítás most"),
+    ("Couldn't record", "Nem sikerült rögzíteni"),
+];
