@@ -1,6 +1,5 @@
 use std::cell::UnsafeCell;
 use std::io::Cursor;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
@@ -661,32 +660,17 @@ fn validate_driver_bundle(bundle_dir: &std::path::Path) -> Result<String, String
         .ok_or_else(|| "Driver Info.plist is missing or invalid".into())
 }
 
-fn bundled_driver_path() -> Option<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(contents_dir) = exe.parent().and_then(|p| p.parent())
-    {
-        candidates.push(contents_dir.join("Library/HexMicrophone.driver"));
-        candidates.push(contents_dir.join("Resources/HexMicrophone.driver"));
-    }
-    if let Some(home) = dirs::home_dir() {
-        candidates.push(home.join("Library/Caches/hex-mic/HexMicrophone.driver"));
-    }
-    candidates.push(PathBuf::from(
-        "/Applications/Hex.app/Contents/Library/HexMicrophone.driver",
-    ));
-    candidates
-        .into_iter()
-        .find(|candidate| validate_driver_bundle(candidate).is_ok())
+fn bundled_driver_source() -> Result<driver_source::DriverSource, String> {
+    driver_source::resolve(validate_driver_bundle)
 }
 
 fn bundled_driver_version() -> String {
     static CACHED: OnceLock<String> = OnceLock::new();
     CACHED
         .get_or_init(|| {
-            bundled_driver_path()
-                .and_then(|path| read_driver_bundle_version(&path))
-                .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+            bundled_driver_source()
+                .map(|source| source.version)
+                .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string())
         })
         .clone()
 }
@@ -760,22 +744,25 @@ pub fn install_driver_async() {
         let _ = thread::Builder::new()
             .name("hex-mic-install".into())
             .spawn(|| {
-                let Some(src_bundle) = bundled_driver_path() else {
-                    set_driver_action_state(DriverActionState::Failed(
-                        "Bundled HexMicrophone.driver was not found in Hex.app".into(),
-                    ));
-                    return;
-                };
-                let version = match validate_driver_bundle(&src_bundle) {
-                    Ok(v) => v,
+                let source = match bundled_driver_source() {
+                    Ok(source) => source,
                     Err(reason) => {
                         set_driver_action_state(DriverActionState::Failed(reason));
                         return;
                     }
                 };
+                // Shipped builds install only their own Developer ID-signed
+                // copy; local builds skip the check to install a local build.
+                if !driver_source::allows_local_source()
+                    && let Err(reason) = driver_source::verify_signature(&source.path)
+                {
+                    set_driver_action_state(DriverActionState::Failed(reason));
+                    return;
+                }
+                let driver_source::DriverSource { path, version } = source;
                 let state = run_driver_osascript(
                     INSTALL_DRIVER_APPLESCRIPT,
-                    Some(&src_bundle),
+                    Some(&path),
                     |st| st.driver_loaded,
                     || {
                         DriverActionState::DoneInstalled(
@@ -1242,6 +1229,8 @@ pub fn demo_snapshot() -> DemoSnapshot {
 
 // ── macOS CoreAudio HAL Sink Client ─────────────────────────────────────────
 
+mod driver_source;
+
 #[cfg(target_os = "macos")]
 mod macos_hal;
 
@@ -1541,6 +1530,7 @@ mod tests {
     #[test]
     fn driver_plugin_loopback_streams_at_48khz_under_20ms_latency() {
         use std::ffi::{CString, c_void};
+        use std::path::PathBuf;
         use std::process::Command;
 
         let out_dir =

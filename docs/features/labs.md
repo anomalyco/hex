@@ -4282,7 +4282,10 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   `an_installed_driver_keeps_the_voice_filter_on` in
   [panes.rs](../../src/rune_ui/tests/panes.rs);
   `the_setting_or_an_installed_driver_turns_the_voice_filter_on_and_labs_never_does`
-  in [app_settings.rs](../../src/app_settings.rs).
+  in [app_settings.rs](../../src/app_settings.rs). Shipped builds install only
+  the driver copy inside Hex.app, checking its Developer ID signature before
+  the admin prompt; local builds may install the cache copy at
+  `~/Library/Caches/hex-mic` without that check.
 - Meetings (beta): see [Meetings](meetings.md). Its toggle is
   `meetings.enabled`; on, Meetings is a top-level sidebar item (debug builds
   keep it available regardless).

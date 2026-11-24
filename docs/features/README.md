@@ -1707,7 +1707,9 @@ or the driver installed; off, the pane is hidden  // fun.hex-microphone; macOS, 
 │   ├── macOS -> select Hex Microphone as the input in the call app / In use (by name only when observed on that input) + Uninstall
 │   │   ├── Version mismatch -> Update + Uninstall
 │   │   ├── Pre-Anomaly com.kitlangton driver at the same path -> Update replaces it in place
-│   │   ├── Not installed -> Install -> macOS admin prompt -> copies bundled HexMicrophone.driver + restarts coreaudiod
+│   │   ├── Not installed -> Install -> signature check -> macOS admin prompt -> copies its own HexMicrophone.driver + restarts coreaudiod
+│   │   │   ├── Shipped build -> only the copy in its own Hex.app (Contents/Library, else Contents/Resources); a missing, invalid, or unsigned copy fails with that reason and never falls back to another path
+│   │   │   └── Local build -> may use ~/Library/Caches/hex-mic or /Applications/Hex.app, with no signature check
 │   │   └── Inline state -> Installing… / Uninstalling… / Cancelled / Failed with reason
 ├── Live microphone capture -> Raw audio to Hex transcription (unmodified)
 │   ├── Source -> Hex's dictation microphone (System default follows the OS default, never Hex Microphone itself), never a meeting's second stream
@@ -1722,6 +1724,7 @@ or the driver installed; off, the pane is hidden  // fun.hex-microphone; macOS, 
 
 Sources: [audio/voice_filter.rs](../../src/audio/voice_filter.rs),
 [audio/hex_microphone.rs](../../src/audio/hex_microphone.rs),
+[audio/hex_microphone/driver_source.rs](../../src/audio/hex_microphone/driver_source.rs),
 [HexMicrophoneDriver.c](../../macos/HexMicrophoneDriver/HexMicrophoneDriver.c),
 [build-app.sh](../../scripts/build-app.sh),
 and [rune_ui/fun.rs](../../src/rune_ui/fun.rs). Checks:
@@ -1735,6 +1738,13 @@ and [rune_ui/fun.rs](../../src/rune_ui/fun.rs). Checks:
 `only_the_listeners_current_input_feeds_hex_microphone`,
 `driver_plugin_loopback_streams_at_48khz_under_20ms_latency`,
 `driver_plist_version_and_status_mismatch_are_detected`,
+`an_invalid_copy_in_the_app_bundle_fails_instead_of_falling_back`,
+`an_invalid_copy_in_resources_fails_instead_of_falling_back`,
+`a_shipped_build_without_its_own_copy_finds_no_driver`,
+`a_local_build_falls_back_to_the_cache_copy`,
+`a_valid_copy_in_the_app_bundle_wins`,
+`the_resources_copy_is_used_when_library_has_none`,
+`the_driver_requirement_compiles_and_rejects_an_ad_hoc_copy`,
 `osascript_failure_classifies_user_cancel_and_errors`,
 `audio_service_restart_interrupts_stream_and_recovers`,
 `voice_filter_saves_the_mode_and_applies_the_tuning_live`,
