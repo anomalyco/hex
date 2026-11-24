@@ -326,9 +326,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 mod = Modifier.padding(start = 16.dp))
                             Card {
                                 val size = ModelStore.english.megabytes
-                                // Its line says what the download is and what stays as it was, so it may take three.
+                                                // Its line says what the download is, the numbers limit and what stays as it was, so it is
+                                // never cut off: three lines on a Pixel 8, five at font size 1.3.
                                 Toggle(stringResource(R.string.fast_english), stringResource(R.string.fast_english_detail, size),
-                                    fastEnglish, noteLines = 3) {
+                                    fastEnglish, noteLines = Int.MAX_VALUE) {
                                     speech.fastEnglish = it
                                     // Off stops a download under way and drops its partial file; a finished one stays
                                     // until Delete download.
