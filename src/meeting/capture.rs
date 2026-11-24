@@ -243,11 +243,6 @@ fn supervise(
                         break Some(error);
                     }
                     if let Some(error) = system_silence_stalled(sink) {
-                        tracing::warn!(
-                            ?source,
-                            %error,
-                            "meeting capture source went digitally silent; reopening it"
-                        );
                         break Some(error);
                     }
                 };

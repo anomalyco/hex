@@ -1550,12 +1550,16 @@ Capture sources (meeting/capture.rs)                // meetings.capture
     aggregate device; no display dependency
     -> the aggregate names no output device, so the tap hears the one that was
        default when it was created; the source remembers that UID
-    -> every 2 s it re-reads the default output's UID
-       -> a different, readable UID -> warn with from/to and reopen, which
-          rebuilds the tap and its aggregate (a failed read never reopens)
+       // not verified on a live device: no mid-call output change was
+       // observed with the tap open
+    -> every 2 s it re-reads the default output's UID; a baseline that could
+       not be read adopts the first one that can, rather than never checking
+       -> a different, readable UID -> reopen with the from/to in its error,
+          which rebuilds the tap and its aggregate (a failed read never reopens)
     -> a system track that carried sound then delivers only exact zeros for
-       15 s -> warn and reopen; the reopened stream starts unarmed, so it
-       takes new sound plus another 15 s of zeros to fire again
+       15 s -> reopen, logged once by the supervisor with the reason; the
+       reopened stream starts unarmed, so it takes new sound plus another
+       15 s of zeros to fire again
        // checks: a_system_source_reopens_only_for_a_different_readable_output,
        // system_silence_never_fires_before_the_track_carried_sound,
        // system_silence_fires_after_fifteen_seconds_of_exact_zeros,
