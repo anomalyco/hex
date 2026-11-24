@@ -128,11 +128,38 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         return capitalisedName(word) ?: word
     }
 
+    // An Italian or French elision typed without its apostrophe, joined back up ("laltro" ->
+    // "l'altro", "dellanno" -> "dell'anno", "lheure" -> "l'heure"), or null. The longest elision the
+    // language has whose remainder is a word of its own of two letters or more starting with a vowel
+    // (accents and ligatures included) or a silent h; "dellanno" gives "dell'anno", never "d'ellanno".
+    // A spelling the model knows as typed is no elision ("lago", "della"), nor are your own words.
+    // The straight apostrophe is the strip's spelling, as suggestOnly's contractions are: shown() and
+    // smartWord (KeyboardEngine) make it ’ when Labs › Keyboard › Smart quotes is on. A suggestion
+    // only, like those: space never applies it.
+    private fun elided(word: String): String? {
+        val elisions = ELISIONS[model.language] ?: return null
+        if (model.index(word) >= 0 || (decoder.personal?.index(word) ?: -1) >= 0) return null
+        for (cut in word.length - 2 downTo 1) {
+            val prefix = word.substring(0, cut)
+            if (prefix !in elisions) continue
+            val rest = word.substring(cut)
+            if (!elidesInto(rest[0]) || model.index(rest) < 0) continue
+            // A listed slur or swear stays out of an elision too (your own words are yours to offer).
+            if (model.neverSuggest.blocks(rest, suggestSwearWords, -1) && decoder.personal?.owns(rest) != true) continue
+            return prefix + "'" + rest
+        }
+        return null
+    }
+    // A vowel an elision runs into, accents and ligatures included ("un'altra", "l'uomo", "l'heure"),
+    // and h, which French elides too ("l'homme").
+    private fun elidesInto(c: Char) = c.lowercaseChar() in "aeiouàèéìíîòóùúâêëïôûüÿœæ" || c.lowercaseChar() == 'h'
+
     /** The strip while a word is typed (iOS AutocorrectEngine.suggestions): what was typed
      * ([Suggestion.Kind.Typed]), then what space will put in ([Suggestion.Kind.Fix]) or the likeliest
      * candidate, then the runner-up. An unfinished word that space leaves alone (no word yet, "th")
      * gets three candidates instead. Candidates: a suggest-only English contraction ("ill" ->
-     * "I'll"), the likeliest completions of a 1–3 letter word after the word before, then, for a
+     * "I'll") or an Italian or French elision typed without its apostrophe ("laltro" -> "l'altro"),
+     * the likeliest completions of a 1–3 letter word after the word before, then, for a
      * word of three letters or more, the decoder's other readings of the taps before completions by
      * frequency (after two letters the word is usually unfinished: completions first). Never what was
      * typed again. [autocorrect] off: no fix and no readings, completions only. */
@@ -154,6 +181,9 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         }
         fix?.let { pool.add(it) }
         if (autocorrect && fix == null && !standIn && model.language == "en") suggestOnly[lower]?.let { add(matchCase(token, it)) }
+        // An elision typed without its apostrophe ("laltro", "dellanno"): Italian and French write the
+        // article against the word, so the strip offers the two joined up, as English's contractions are.
+        if (autocorrect && !standIn && '\'' !in lower) elided(lower)?.let { add(matchCase(token, it)) }
         // Your own word, completed once two letters match, before the dictionary's: a word you added is
         // likelier what you mean than a reading's runner-up ("zor" offers "Zorbex" beside the fix "or").
         if (token.length >= 2) decoder.personal?.completions(lookup(token))?.firstOrNull()?.let { add(yours(it)) }

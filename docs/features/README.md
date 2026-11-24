@@ -3324,11 +3324,20 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
     "don’t"), your own text replacements get ’ for each straight apostrophe they contain (a " in
     one stays straight), and a dictation's straight quotes are placed by the same rules, after its
     spacing is decided, in the same plain-text fields as the keys. The strip shows the ’ a
-    suggestion will insert. A quote key's held alternates still type exactly the character they
+    suggestion will insert. An Italian or French elision typed without its apostrophe is offered
+    joined up while the word after it is one of the model's own, two letters or more starting with a
+    vowel or h: "laltro" offers "l’altro", "dellanno" "dell’anno", "unaltra" "un’altra", "lho"
+    "l’ho" and "lheure" "l’heure"; the longest elision wins ("dell'anno", never "d'ellanno"), and a
+    spelling the model knows as typed ("lago", "della", "dove", "sanno") is left alone. English
+    keeps its own contractions. The elision rule only ever adds a suggestion, never a fix: where the
+    decoder itself already reads the joined-up word ("dell'anno", "un'altra"), its own fix is
+    unchanged. A quote key's held alternates still type exactly the character they
     show. Off, keys, picks and dictation insert the straight characters they did before, and
     existing ’ and ” are treated like ' and " for word boundaries, spacing and lookups. Checks:
-    `./gradlew :app:compileDebugKotlin :app:testDebugUnitTest` passed with 150 tests (including
-    `SmartQuotesTest`'s 12) on 2026-11-24, on Temurin JDK 21 and Android SDK 36 (platform 36,
+    `ElisionSuggestionTest` (5: both languages' elisions, the longest prefix, a word the model
+    knows, English unchanged, and a picked elision left as it is) and
+    `./gradlew :app:compileDebugKotlin :app:testDebugUnitTest` passed with 200 tests (including
+    `SmartQuotesTest`'s 12) on 2026-11-24, on OpenJDK 21 and Android SDK 36 (platform 36,
     build-tools 35/36, NDK 27.2.12479018); the repo has no Android CI, and nothing was tried on a
     device or emulator. `python3 scripts/code-shape.py --check` passes.
 ├── Labs > Keyboard > Password manager suggestions (off) -> while Android's autofill service —
