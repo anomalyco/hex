@@ -123,7 +123,15 @@ internal object SpeechModel {
     private fun decodeEnglish(app: Context, pcm: ShortArray, count: Int, vocabulary: List<String>, job: Long): EnglishResult {
         decodeStarts()
         return Parakeet.decode(english, pcm, count, vocabulary.takeIf { it.isNotEmpty() }?.toTypedArray(), job)
-            ?.decodeToString()?.let { SentenceEnds.restore(it, pcm, count) { word -> lowercaseEnglish(app, word) } }?.trim()
+            ?.decodeToString()?.let { decoded ->
+                // A formatting step never costs a dictation: if it fails, the model's text goes out as it came.
+                try {
+                    SentenceEnds.restore(decoded, pcm, count) { word -> lowercaseEnglish(app, word) }
+                } catch (e: Exception) {
+                    Log.w("HexSpeech", "sentence ends skipped: ${e.javaClass.simpleName}")
+                    decoded.substringBefore('\n')
+                }
+            }?.trim()
             ?.let(EnglishResult::Text) ?: EnglishResult.Failed
     }
 

@@ -51,11 +51,14 @@ internal object SentenceEnds {
         return quietMs(pcm, count, word.startMs, next.startMs) >= PAUSE_MS
     }
 
-    /** The longest run of quiet 20 ms frames between [fromMs] and [toMs] (16 kHz). */
+    /** The longest run of quiet 20 ms frames between [fromMs] and [toMs] (16 kHz); 0 for times out of order. Word times
+     * come from the library, so they're clamped to the audio rather than trusted. */
     fun quietMs(pcm: ShortArray, count: Int, fromMs: Int, toMs: Int): Int {
+        if (fromMs >= toMs) return 0
+        val samples = minOf(count, pcm.size).coerceAtLeast(0).toLong()
         var best = 0; var run = 0
-        var at = fromMs * 16
-        val end = minOf(toMs * 16, count)
+        var at = (fromMs.coerceAtLeast(0) * 16L).coerceAtMost(samples).toInt()
+        val end = minOf(toMs * 16L, samples).toInt()
         while (at < end - FRAME) {
             var energy = 0.0
             for (i in at until at + FRAME) energy += pcm[i].toDouble() * pcm[i]

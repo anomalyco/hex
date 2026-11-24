@@ -225,7 +225,23 @@ class SentenceEndsTest {
             pcm, pcm.size, ::lowercase))
         assertEquals(60, SentenceEnds.quietMs(pcm, pcm.size, 600, 1080))
     }
-    @Test fun wordsThatDontSpellTheTextLeaveItAsItCame() {
+    @Test fun aNegativeWordStartIsClampedToTheAudio() {
+        // The library's word times aren't trusted: a start before the audio measures from its first sample.
+        val pcm = audio(3000, 600..1199, 1800..2999)
+        assertEquals(600, SentenceEnds.quietMs(pcm, pcm.size, -400, 1800))
+        assertEquals("the bus. We should", SentenceEnds.restore(decoded(Triple("the", -400, 900), Triple("bus", 900, 1200),
+            Triple("We", 1800, 2000), Triple("should", 2000, 2400)), pcm, pcm.size, ::lowercase))
+    }
+    @Test fun aStartAfterTheNextWordsAddsNothing() {
+        val pcm = audio(3000, 0..1199, 1800..2999)
+        assertEquals(0, SentenceEnds.quietMs(pcm, pcm.size, 2000, 1800))
+        assertEquals(0, SentenceEnds.quietMs(pcm, pcm.size, 1800, 1800))
+        assertEquals("the bus We should", SentenceEnds.restore(decoded(Triple("the", 600, 900), Triple("bus", 2500, 2600),
+            Triple("We", 1800, 2000), Triple("should", 2000, 2400)), pcm, pcm.size, ::lowercase))
+        // Times past the audio's end measure only what the audio has.
+        assertEquals(0, SentenceEnds.quietMs(pcm, pcm.size, 9000, 12000))
+    }
+        @Test fun wordsThatDontSpellTheTextLeaveItAsItCame() {
         val pcm = audio(3000, 0..1199, 1800..2999)
         val out = SentenceEnds.restore("the bus We should\n900\t1200\tbus\n1800\t2000\tWe", pcm, pcm.size, ::lowercase)
         assertEquals("the bus We should", out)
