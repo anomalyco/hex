@@ -158,6 +158,13 @@ internal object SpeechModel {
                     Log.w("HexSpeech", "sentence ends skipped: ${e.javaClass.simpleName}")
                     decoded.substringBefore('\n')
                 }
+            }?.let { text ->
+                try {
+                    SpokenNumbers.digits(text, vocabulary)
+                } catch (e: Exception) {
+                    Log.w("HexSpeech", "numbers as digits skipped: ${e.javaClass.simpleName}")
+                    text
+                }
             }?.trim()
             ?.let(EnglishResult::Text) ?: EnglishResult.Failed
     }
