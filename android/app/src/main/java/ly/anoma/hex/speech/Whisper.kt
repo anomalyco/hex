@@ -166,6 +166,19 @@ internal object SpeechModel {
         return if (bytes == null || timings == null) null
             else Measured(small, wall, processor, timings, bytes.decodeToString().trim())
     }
+    /** Labs › Diagnostics' speed test with Faster English dictation's model, as an English dictation with that switch on
+     * runs it (its own thread count, SentenceEnds included); null when that model isn't downloaded or failed. Opening it
+     * frees today's model, as a dictation would; the timing starts once it is open. */
+    @Synchronized fun measureEnglish(app: Context, pcm: ShortArray, job: Long): Measured? {
+        if (ModelStore.english.installed(app) == null || openEnglish(app) != null) return null
+        val cpu = android.os.Process.getElapsedCpuTime()
+        val started = System.nanoTime()
+        val result = decodeEnglish(app, pcm, pcm.size, emptyList(), job)
+        val wall = (System.nanoTime() - started) / 1_000_000
+        val processor = android.os.Process.getElapsedCpuTime() - cpu
+        keep()
+        return (result as? EnglishResult.Text)?.let { Measured(true, wall, processor, LongArray(0), it.text) }
+    }
     /** [wallMs] and [cpuMs] (the whole process's processor time) cover the decode alone. */
     class Measured(val downloaded: Boolean, val wallMs: Long, val cpuMs: Long, val timings: LongArray, val text: String)
 
