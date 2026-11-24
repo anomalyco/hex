@@ -97,6 +97,7 @@ impl Feature {
             Self::StopAnyCallRecording => "Stop every call recording when the call ends",
             Self::ClipboardPhrase => "Clipboard phrase",
             Self::MeetingMicrophoneMute => "Mute the microphone while recording",
+            Self::MeetingIndicatorDisplay => "Indicator on any display",
         }
     }
 
@@ -358,6 +359,9 @@ impl Feature {
             }
             Self::MeetingMicrophoneMute => {
                 "Adds a mute button to meeting recordings. Hex keeps recording the call's audio but leaves out your microphone until you unmute."
+            }
+            Self::MeetingIndicatorDisplay => {
+                "Drag the meeting recording indicator to another display and it stays there"
             }
         }
     }

@@ -1491,6 +1491,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Stop every call recording when the call ends", "Arrêter chaque enregistrement d'appel à la fin de l'appel"),
     ("Also stop an offered, calendar, or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off", "Arrête aussi un enregistrement lancé depuis une proposition, le calendrier ou à la main 30 s après que son app d'appel libère le micro, même avec « Arrêter à la fin de l'appel » désactivé"),
     ("Also stop an offered or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off", "Arrête aussi un enregistrement lancé depuis une proposition ou à la main 30 s après que son app d'appel libère le micro, même avec « Arrêter à la fin de l'appel » désactivé"),
+    ("Indicator on any display", "Indicateur sur n’importe quel écran"),
+    ("Drag the meeting recording indicator to another display and it stays there", "Faites glisser l’indicateur d’enregistrement de réunion vers un autre écran : il y reste"),
 ];
 
 #[cfg(test)]

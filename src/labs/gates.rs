@@ -51,6 +51,14 @@ pub fn meeting_microphone_mute() -> bool {
     feature_on(Feature::MeetingMicrophoneMute)
 }
 
+/// Labs › Indicator on any display: a released meeting capsule lands in
+/// the corner of the display under the pointer, and the capsules show on the
+/// display they were dragged to instead of only the primary display (macOS
+/// and Windows; read as each capsule draws and as each drag ends).
+pub fn meeting_indicator_display() -> bool {
+    feature_on(Feature::MeetingIndicatorDisplay)
+}
+
 /// The playground in the window.
 pub fn playground() -> bool {
     feature_on(Feature::Playground)

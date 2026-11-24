@@ -42,13 +42,21 @@ impl Capsule {
     }
 
     /// The controller accepted the recording: the offer's handoff ends and
-    /// the recording takes the surface it left.
-    pub(super) fn start_recording(&mut self, recording: Recording, tx: &mut Tx) {
+    /// the recording takes the surface it left, in the corner and on the
+    /// display the caller read from that surface.
+    pub(super) fn start_recording(
+        &mut self,
+        recording: Recording,
+        anchor: screen::Anchor,
+        tx: &mut Tx,
+    ) {
         self.state = State::Recording {
             recording,
             hovered: false,
             stopping: false,
         };
+        self.corner = anchor.corner;
+        self.display = anchor.display;
         self.waveform = Some(Box::new(waveform::Listening::new(Instant::now())));
         self.live = Live::default();
         self.throw.stop();

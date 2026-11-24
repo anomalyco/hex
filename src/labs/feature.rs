@@ -231,6 +231,7 @@ define_features! {
     StopAnyCallRecording => labs(stop_any_call_recording), "stop-any-call-recording", Meetings, Everyone, EVERY, 20261123;
     ClipboardPhrase => labs(clipboard_phrase), "clipboard-phrase", Output, Everyone, EVERY, 20261124, extra: ["labs.clipboard_phrase_text"];
     MeetingMicrophoneMute => labs(meeting_microphone_mute), "meeting-microphone-mute", Meetings, Everyone, MACOS, 20261124;
+    MeetingIndicatorDisplay => labs(meeting_indicator_display), "meeting-indicator-display", Meetings, Everyone, MACOS_WINDOWS, 20261124;
 }
 
 impl Feature {

@@ -164,9 +164,12 @@ Requires the selected local dictation model, Microphone, and System Audio
 Recording (the "System Audio Recording Only" list under Privacy & Security ›
 Screen & System Audio Recording; `NSAudioCaptureUsageDescription`). Screen
 Recording alone still works through the ScreenCaptureKit fallback. The opt-in is `meetings.enabled` in `settings.json`, alongside
-`meetings.show_recording_indicator` (default `true`) and
-`meetings.recording_indicator_corner` (default `top_right`)
-([app_settings.rs](../../src/app_settings.rs) `MeetingSettings`). Recording
+`meetings.show_recording_indicator` (default `true`),
+`meetings.recording_indicator_corner` (default `top_right`), and
+`meetings.recording_indicator_display` (only chosen while Labs › Indicator on
+any display is on; left out of the file while the indicator rests on the
+primary display) ([app_settings.rs](../../src/app_settings.rs)
+`MeetingSettings`). Recording
 refuses to start without either grant and asks macOS for System Audio Recording.
 
 ## Linux and Windows
@@ -386,6 +389,10 @@ that has been tried by hand on a real Windows PC or X11 desktop; only a native
 Wayland capsule returns to the corner it started in
 (`primary_screen_size` in
 [rune_ui/meeting_capsules/screen.rs](../../src/rune_ui/meeting_capsules/screen.rs)).
+Every capsule otherwise stays on the primary display, on every OS; Labs ›
+Indicator on any display is the opt-in that lets a release land on the display
+under the pointer (macOS and Windows, `labs.meeting_indicator_display`; see
+[the floating indicator](#record)).
 Verified: Linux and Windows x64 build and lint
 (`cargo clippy`, `cargo xwin clippy`); the single default-output PipeWire
 monitor capture and the pw-dump parsing were checked by hand on Arch/niri
@@ -1044,7 +1051,9 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      ├── Windows: Rune waits for a swap-chain slot before each frame (Rune
      │   #985), so the pill's and panel's frames in flight stay bounded
      │   through a long recording (#1833; not measured on Windows)
-     ├── In the saved recording_indicator_corner
+     ├── In the saved recording_indicator_corner, on the primary display, or
+     │   on the display it was dragged to with Labs › Indicator on any
+     │   display (macOS and Windows; `screen::target` pins the window there)
      ├── Follows the setting mid-recording: turning it off hides the pill and
      │   on shows it, keeping the recording's start time, within a second
      │   (the_recording_capsule_follows_the_indicator_setting_mid_recording;
@@ -1174,6 +1183,26 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   macOS, Windows, Linux X11, and XWayland when GNOME floats it there,
      │   though Windows and X11 have not been tried on a real machine; only a
      │   native Wayland capsule returns to the corner it started in)
+     ├── Labs › Indicator on any display (off by default; macOS and Windows;
+     │   labs.meeting_indicator_display) -> a release lands in the nearest
+     │   corner of the display under the pointer, measured by that display's
+     │   own size, and saves that display with the corner
+     │   (meetings.recording_indicator_display): a capsule dragged onto a
+     │   second display jumps there instead of gliding, and every capsule
+     │   shows on the saved display from then on. A display that is no longer
+     │   connected places the capsule on the primary display and keeps the
+     │   saved name, and a pointer on no display at all keeps the one it was
+     │   dragged on. Off, every show is put back on the primary display
+     │   explicitly (a pinned capsule returns when the lab goes off), and the
+     │   saved display has no effect
+     │   // checks: the tests in meeting_capsules/screen.rs (a release on its
+     │   // own display, a throw onto another, a pointer on no display, a saved
+     │   // display that is gone, which display holds a pointer, a saved id's
+     │   // target, and the lab off putting a capsule back on the primary);
+     │   // the_display_lab_lands_a_release_on_the_pointer_s_display and
+     │   // without_the_display_lab_a_release_keeps_the_primary_display
+     │   // (meeting_capsules.rs); NOT verified on real multi-monitor hardware
+     │   // on either OS (see Labs)
      ├── Copy agent prompt (first, filled) -> a prompt telling a coding agent
      │   to read this meeting with `hex meetings show <id> --md`, catch up with
      │   `--from <mm:ss>` from the last turn copied into it, and search with
@@ -1200,7 +1229,9 @@ Detected app leaves the microphone for about 3 s     // meetings.call-ended
 Panel capsules move like the recording capsule (#1093, graduated from Labs; only a native Wayland capsule still returns to its corner) // meetings.panel-drag
   The panel capsules: offer, reminder, left the call, the finished meeting,
   Recording automatically
-  -> Each opens in the saved recording_indicator_corner (read as it shows)
+  -> Each opens in the saved recording_indicator_corner (read as it shows),
+     on the saved display with Labs › Indicator on any display (or the
+     primary display when that display is gone)
      ├── Drag its body (or the recording pill) -> follows the pointer one to one
      ├── Release -> the corner nearest where the throw would coast to rest
      │   (release velocity over the last 80 ms, capped at 6000 pt/s, coasting
@@ -1210,7 +1241,9 @@ Panel capsules move like the recording capsule (#1093, graduated from Labs; only
      │   recording capsule moves there too. A press mid-glide catches it
      │   where it is. Reduce Motion -> it jumps into the new corner; with no
      │   screen to measure (a native Wayland capsule) -> it returns to the
-     │   corner it started in
+     │   corner it started in. Labs › Indicator on any display: the corner is
+     │   measured on the display under the pointer, and a release over
+     │   another display jumps there, saving that display for the corner
      ├── Press on a button -> the button, as before
      └── Escape mid-drag -> back where it was, nothing saved
   -> The finished meeting opens in the corner its recording ended in

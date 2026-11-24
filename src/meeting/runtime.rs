@@ -63,8 +63,8 @@ impl Meetings {
                     crate::app_settings::save_meeting_provider(choice);
                     chosen.update(move |ui, _| crate::rune_ui::meeting_settings_saved(ui));
                 },
-                move |corner| {
-                    crate::app_settings::save_meeting_indicator_corner(corner);
+                move |corner, display| {
+                    crate::app_settings::save_meeting_indicator_anchor(corner, display);
                     moved.update(move |ui, _| crate::rune_ui::meeting_settings_saved(ui));
                 },
             )

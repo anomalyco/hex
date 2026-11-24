@@ -951,6 +951,18 @@
       ],
       "summary": "Adds a mute button to meeting recordings. Hex keeps recording the call's audio but leaves out your microphone until you unmute.",
       "title": "Mute the microphone while recording"
+    },
+    {
+      "added": "2026-11-24",
+      "group": "meetings",
+      "groupTitle": "Meetings",
+      "id": "meeting-indicator-display",
+      "oses": [
+        "macos",
+        "windows"
+      ],
+      "summary": "Drag the meeting recording indicator to another display and it stays there",
+      "title": "Indicator on any display"
     }
   ]
 }
