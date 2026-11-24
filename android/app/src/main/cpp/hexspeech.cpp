@@ -123,7 +123,7 @@ Java_ly_anoma_hex_speech_Whisper_threadPool(JNIEnv *, jobject, jlong handle, jin
     drop_pool(ctx);
     if (threads <= 0) return true;
     auto params = ggml_threadpool_params_default(threads);
-    // Started paused: the workers sleep as soon as they start instead of polling for a graph, and the first decode's
+    // Started paused: the workers sleep as soon as they start instead of polling for a graph, and each decode's first
     // kickoff is where ggml applies the mask to the thread that runs it (ggml-cpu.c: kickoff resumes a paused pool), then
     // hexspeech's decode puts that thread's own affinity back. Not strict, as ggml's per-graph pools are: every worker
     // may use every core of the mask.
