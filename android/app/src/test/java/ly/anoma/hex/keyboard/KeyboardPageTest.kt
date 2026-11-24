@@ -105,13 +105,4 @@ class KeyboardPageTest {
         assertEquals("@", LetterFeedback.letterSymbol('a', topRow = true)?.toString())
         assertEquals("_", LetterFeedback.letterSymbol('z', topRow = true)?.toString())
     }
-
-    // Android counts the stored Keyboard vibration value only where the phone declares that setting (Pixel);
-    // elsewhere (the emulator, phones without the switch) a stored 0 must not silence Hex's taps.
-    @Test fun keyboardVibrationOffSilencesOnlyWhereThePhoneHasTheSwitch() {
-        assertEquals(false, keyboardVibrationAllows(supported = true, stored = 0))
-        assertEquals(true, keyboardVibrationAllows(supported = true, stored = 1))
-        assertEquals(true, keyboardVibrationAllows(supported = false, stored = 0))
-        assertEquals(true, keyboardVibrationAllows(supported = false, stored = 1))
-    }
 }

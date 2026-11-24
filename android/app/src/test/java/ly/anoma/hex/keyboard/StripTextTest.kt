@@ -81,19 +81,20 @@ class StripTextTest {
         // A realme on Android 16 that only feels the system's own keyboard-switch vibration.
         assertEquals(listOf(
             "Hex's Haptics switch: on",
-            "Keyboard vibration switch: this phone has none (stored value 0, ignored)",
+            "Keyboard vibration switch: this phone has none (stored value 0)",
             "Touch feedback: on, strength not set; ringer: vibrate only",
             "So Hex asks the phone to vibrate on a key press: yes",
             "Your phone says it can play: click unknown, tick unknown, strength control no",
         ), hapticsLines(HapticsFacts(true, false, "0", "1", "not set", "vibrate", true, "unknown", "unknown", false)))
-        // A Pixel with its keyboard switch off: that line is the one that stops Hex.
+        // A phone with the keyboard switch off (a Pixel, or a Galaxy S23 on One UI 9 storing 0): Hex still asks, as
+        // only its own switch stops it; Android then applies touch feedback.
         val pixel = hapticsLines(HapticsFacts(true, true, "0", "0", "2", "silent", true, "yes", "yes", true))
-        assertEquals("Keyboard vibration switch: off", pixel[1])
+        assertEquals("Keyboard vibration switch: off (Hex doesn't follow it)", pixel[1])
         assertEquals("Touch feedback: off, strength 2; ringer: silent", pixel[2])
-        assertEquals("So Hex asks the phone to vibrate on a key press: no, because the keyboard vibration switch is off", pixel[3])
+        assertEquals("So Hex asks the phone to vibrate on a key press: yes", pixel[3])
         val off = hapticsLines(HapticsFacts(false, true, "not set", "1", "not set", "sound", false, "no", "no", false))
         assertEquals("Hex's Haptics switch: off", off[0])
-        assertEquals("Keyboard vibration switch: not set", off[1])
+        assertEquals("Keyboard vibration switch: not set (Hex doesn't follow it)", off[1])
         assertEquals("Touch feedback: on, strength not set; ringer: sound on", off[2])
         assertEquals("So Hex asks the phone to vibrate on a key press: no, because Hex's Haptics switch is off", off[3])
         assertEquals("Your phone says it can play: click no, tick no, strength control no (it reports no vibrator)", off[4])
