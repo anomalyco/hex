@@ -99,7 +99,8 @@ android {
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild.cmake {
             arguments += listOf("-DANDROID_STL=c++_static", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON")
-            targets += "hexspeech"
+            // Whisper.kt loads hexspeech_v82 on a processor with ARMv8.2's dot-product instructions, else hexspeech.
+            targets += listOf("hexspeech", "hexspeech_v82")
         }
     }
     externalNativeBuild.cmake {
