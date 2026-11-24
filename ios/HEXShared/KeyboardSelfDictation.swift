@@ -13,6 +13,8 @@ nonisolated struct KeyboardSelfDictation {
     enum Reason: String {
         case memory
         case speechModel
+        /// Hex found Apple has no speech model for the language on this iPhone.
+        case languageUnavailable
         /// Hex saw the keyboard open it for a dictation, whatever the keyboard's reason.
         case openedHex
     }
@@ -59,7 +61,7 @@ nonisolated struct KeyboardSelfDictation {
 
     /// Why the keyboard can't dictate in its own process, or nil when it dictates by itself.
     /// From iOS 26, with `includeRecentHandoff` false (the keyboard's own question), only
-    /// `speechModel` or `memory`.
+    /// `speechModel`, `languageUnavailable` or `memory`.
     func handoffReason(
         osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
         now: Date = Date(),
@@ -72,8 +74,9 @@ nonisolated struct KeyboardSelfDictation {
            now.timeIntervalSince(handed.at) < Self.recentWindow {
             return handed.reason
         }
-        if LanguageSettings(defaults: defaults).keyboardNeedsHex(now: now) {
-            return .speechModel
+        let languages = LanguageSettings(defaults: defaults)
+        if languages.keyboardNeedsHex(now: now) {
+            return languages.keyboardLanguageUnavailable ? .languageUnavailable : .speechModel
         }
         if !hasMemoryToStart || Self.simulatesShortMemory(defaults) {
             return .memory

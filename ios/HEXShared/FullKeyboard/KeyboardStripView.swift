@@ -1065,6 +1065,8 @@ final class FullAccessHintView: UIView {
         open?.title = notice.button
         openButton.configuration = open
         openButton.accessibilityHint = nil
+        // A notice that can't offer anything (no button) keeps only its ✕.
+        openButton.isHidden = notice.button.isEmpty
         dismissButton.isHidden = !notice.dismissible
         setNeedsLayout()
     }
@@ -1081,7 +1083,7 @@ final class FullAccessHintView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        let buttonWidth = openButton.sizeThatFits(CGSize(width: bounds.width, height: chipHeight)).width
+        let buttonWidth = openButton.isHidden ? 0 : openButton.sizeThatFits(CGSize(width: bounds.width, height: chipHeight)).width
         openButton.frame = CGRect(
             x: chipLeads ? 0 : bounds.width - buttonWidth,
             y: (bounds.height - chipHeight) / 2,

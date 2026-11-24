@@ -1265,7 +1265,7 @@ final class KeyboardViewController: UIInputViewController {
             lastAvailabilityNote = now
             let change: String = switch reason {
             case nil: "dictating in the keyboard"
-            case .speechModel: "speech model missing here, Dictate says so with Open Hex"
+            case .speechModel, .languageUnavailable: "speech model missing here, Dictate says so"
             case .memory, .openedHex: "short of memory, Dictate says so with Open Hex"
             }
             KeyboardProbeLog.shared.write("\(change) \(KeyboardProbeLog.memory())")

@@ -959,7 +959,7 @@ final class FullKeyboardView: UIView {
     /// Hex, and ✕.
     var dictationBlockNotice: KeyboardStripNotice? {
         guard model.hasFullAccess, let block = model.dictationBlock else { return nil }
-        return KeyboardStripNotice(title: block.line, detail: "", button: String(localized: "Open Hex"), dismissible: true)
+        return KeyboardStripNotice(title: block.line, detail: "", button: block.opensHex ? String(localized: "Open Hex") : "", dismissible: true)
     }
 
     /// The notice's ✕ puts away the notice that shows.

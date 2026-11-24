@@ -165,11 +165,12 @@ final class KeyboardSpeechPreparation {
         state = next
     }
 
-    /// The Hex key opens Hex, which dictates with its own model (KeyboardViewController reads
-    /// keyboardNeedsHex); marked again at each launch, as the mark lasts a day.
+    /// Apple has no speech model for the language here: a dictation tap in the keyboard says so
+    /// (`KeyboardDictationBlock.languageUnavailable`, from `keyboardNeedsHex`); marked again at
+    /// each launch, as the mark lasts a day.
     private func handOffToHex(_ settings: LanguageSettings, generation: Int) {
         guard !Task.isCancelled, generation == self.generation else { return }
-        settings.markKeyboardNeedsHex()
+        settings.markKeyboardNeedsHex(unavailable: true)
         state = .followsApp
         // A download that ended in the handoff isn't part of onboarding's progress either.
         downloads = false

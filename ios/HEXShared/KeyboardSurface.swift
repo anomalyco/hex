@@ -671,28 +671,13 @@ struct KeyboardSurfaceView: View {
         }
     }
 
-    /// The note's only controls: Open Hex, the one part that opens Hex, and ✕, which puts the
-    /// note away. A tap on the words does nothing.
+    /// The note's only controls: Open Hex, the one part that opens Hex (where Hex can help),
+    /// and ✕, which puts the note away. A tap on the words does nothing.
     private func noteActions(_ note: BarNote, palette p: KeyboardChromePalette) -> some View {
         HStack(spacing: 6) {
-            Button {
-                model.onKeyFeedback?()
-                switch note {
-                case .translation: model.onOpenURL?(KeyboardLaunchRequest.translationSettings.url)
-                case .dictationBlock: model.openHexForDictationBlock()
-                }
-            } label: {
-                Text("Open Hex")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(p.textBase)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .padding(.horizontal, 11)
-                    .frame(height: 26)
-                    .background(p.chipActiveFill, in: Capsule())
+            if note == .translation || model.dictationBlock?.opensHex == true {
+                openHexChip(note, palette: p)
             }
-            .buttonStyle(TopBarChipButtonStyle())
-            .accessibilityHint(note == .translation ? Text("Opens Hex's Settings") : Text("Opens Hex to dictate there"))
 
             Button {
                 model.onKeyFeedback?()
@@ -713,6 +698,27 @@ struct KeyboardSurfaceView: View {
             .accessibilityLabel("Dismiss")
         }
         .layoutPriority(1)
+    }
+
+    private func openHexChip(_ note: BarNote, palette p: KeyboardChromePalette) -> some View {
+        Button {
+            model.onKeyFeedback?()
+            switch note {
+            case .translation: model.onOpenURL?(KeyboardLaunchRequest.translationSettings.url)
+            case .dictationBlock: model.openHexForDictationBlock()
+            }
+        } label: {
+            Text("Open Hex")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(p.textBase)
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.horizontal, 11)
+                .frame(height: 26)
+                .background(p.chipActiveFill, in: Capsule())
+        }
+        .buttonStyle(TopBarChipButtonStyle())
+        .accessibilityHint(note == .translation ? Text("Opens Hex's Settings") : Text("Opens Hex to dictate there"))
     }
 
     /// A dictation that didn't go in by itself, as the full keyboard's strip offers it: the
@@ -1154,11 +1160,11 @@ struct KeyboardSurfaceView: View {
     private var idleTriggerSpec: (icon: String, title: String, width: CGFloat) {
         switch model.route {
         case .setUp:
-            return ("arrow.up.forward.app.fill", "Set up Hex", 112)
+            return ("arrow.up.forward.app.fill", String(localized: "Set up Hex"), 112)
         case .needsModel:
-            return ("mic.fill", "Set up", 88)
+            return ("mic.fill", String(localized: "Set up"), 88)
         case .warm, .inKeyboard, .opensHex:
-            return ("mic.fill", "Dictate", 94)
+            return ("mic.fill", String(localized: "Dictate"), 94)
         }
     }
 

@@ -51,6 +51,9 @@ nonisolated enum KeyboardDictationBlock: Equatable, Sendable {
     /// The keyboard couldn't get this language's speech model (BCP 47) twice in a row; Hex
     /// downloads it (`LanguageSettings.keyboardNeedsHex`).
     case speechModel(language: String)
+    /// Hex found Apple has no speech model for this language on this iPhone: downloading in
+    /// Hex can't help, so the line has no Open Hex (`LanguageSettings.keyboardLanguageUnavailable`).
+    case languageUnavailable(language: String)
     /// Less memory left than a dictation needs to start (`KeyboardLocalDictation.hasMemoryToStart`).
     /// Dictate works again by itself once there is.
     case memory
@@ -61,11 +64,19 @@ nonisolated enum KeyboardDictationBlock: Equatable, Sendable {
         switch self {
         case .speechModel(let language):
             String(localized: "Download \(SpeechModelUnavailable.interfaceName(language)) in Hex to dictate")
+        case .languageUnavailable(let language):
+            String(localized: "\(SpeechModelUnavailable.interfaceName(language)) isn't available on this iPhone yet")
         case .memory:
             String(localized: "Not enough memory to dictate here")
         case .setUp:
             String(localized: "Finish setting up Hex to dictate")
         }
+    }
+
+    /// Whether the line offers Open Hex: where Hex can do what it says.
+    var opensHex: Bool {
+        if case .languageUnavailable = self { return false }
+        return true
     }
 
     /// What a dictation tap on `route` says instead of dictating, or nil where it dictates (or
@@ -84,6 +95,8 @@ nonisolated enum KeyboardDictationBlock: Equatable, Sendable {
             return .setUp
         case .opensHex(.speechModel):
             return .speechModel(language: language ?? "en-US")
+        case .opensHex(.languageUnavailable):
+            return .languageUnavailable(language: language ?? "en-US")
         case .opensHex(.memory):
             return .memory
         case .opensHex(.openedHex), .opensHex(nil):
@@ -258,6 +271,7 @@ final class KeyboardViewModel: ObservableObject {
 
     /// The line's Open Hex: the one way a dictation the keyboard can't take goes to Hex.
     func openHexForDictationBlock() {
+        guard dictationBlock?.opensHex != false else { return }
         dismissDictationBlock()
         onOpenURL?(coldStartURL)
     }

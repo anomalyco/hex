@@ -65,7 +65,7 @@ final class DictationSSOTTests: XCTestCase {
         XCTAssertTrue(localRoute.dictatesInPlace)
 
         // Otherwise opensHex carries the reason (or nil when unsupported).
-        for reason: KeyboardSelfDictation.Reason? in [nil, .memory, .speechModel, .openedHex] {
+        for reason: KeyboardSelfDictation.Reason? in [nil, .memory, .speechModel, .languageUnavailable, .openedHex] {
             let route = DictationRoute.resolve(
                 hasFullAccess: true,
                 isModelInstalled: true,
@@ -85,6 +85,7 @@ final class DictationSSOTTests: XCTestCase {
             (.needsModel, .setUp),
             (.opensHex(.speechModel), .speechModel(language: "de-DE")),
             (.opensHex(.memory), .memory),
+            (.opensHex(.languageUnavailable), .languageUnavailable(language: "de-DE")),
             (.setUp, nil),
             (.warm, nil),
             (.inKeyboard, nil),
@@ -98,6 +99,10 @@ final class DictationSSOTTests: XCTestCase {
         XCTAssertEqual(KeyboardDictationBlock.speechModel(language: "en-US").line, "Download English in Hex to dictate")
         XCTAssertEqual(KeyboardDictationBlock.memory.line, "Not enough memory to dictate here")
         XCTAssertEqual(KeyboardDictationBlock.setUp.line, "Finish setting up Hex to dictate")
+        // Apple has no model for it here: downloading in Hex can't help, so no Open Hex.
+        XCTAssertEqual(KeyboardDictationBlock.languageUnavailable(language: "mt-MT").line, "Maltese isn't available on this iPhone yet")
+        XCTAssertFalse(KeyboardDictationBlock.languageUnavailable(language: "mt-MT").opensHex)
+        XCTAssertTrue(KeyboardDictationBlock.speechModel(language: "en-US").opensHex)
     }
 
     @MainActor
@@ -484,7 +489,14 @@ final class DictationSSOTTests: XCTestCase {
         languages.markKeyboardNeedsHex()
         XCTAssertEqual(selfDict.handoffReason(osMajorVersion: 26, hasMemoryToStart: true, includeRecentHandoff: false), .speechModel)
         XCTAssertFalse(selfDict.dictatesItself(osMajorVersion: 26))
+        languages.markKeyboardNeedsHex(unavailable: true)
+        XCTAssertEqual(
+            selfDict.handoffReason(osMajorVersion: 26, hasMemoryToStart: true, includeRecentHandoff: false),
+            .languageUnavailable,
+            "Hex found Apple has no model for the language here"
+        )
         languages.clearKeyboardNeedsHex()
+        XCTAssertFalse(languages.keyboardLanguageUnavailable)
 
         selfDict.recordHandedToHex(.memory)
         XCTAssertEqual(selfDict.handoffReason(osMajorVersion: 26, includeRecentHandoff: true), .memory)
