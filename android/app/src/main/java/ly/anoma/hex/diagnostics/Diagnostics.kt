@@ -43,6 +43,19 @@ internal object Diagnostics {
     private const val THREAD = "Hex speed test"
     private const val RUNS = 2
 
+    /** A way to run the clip: [threads] threads, [pool] of them kept ready with the model (0: new ones per graph). */
+    private class Mode(val label: String, val threads: Int, val pool: Int)
+
+    /** Today's threads, the same kept ready, and six kept ready on a processor whose kernel rates six or more cores
+     * fast (at least half the strongest core's cpu_capacity, Hex's own rule). */
+    private fun modes(): List<Mode> {
+        val threads = SpeechModel.threads
+        val capacities = (0 until Runtime.getRuntime().availableProcessors())
+            .map { read("/sys/devices/system/cpu/cpu$it/cpu_capacity")?.toIntOrNull() }
+        return listOfNotNull(Mode("as now", threads, 0), Mode("threads kept ready", threads, threads),
+            Mode("threads kept ready, 6", 6, 6).takeIf { fastCores(capacities) >= 6 })
+    }
+
     sealed interface Speed {
         data object Idle : Speed
         /** Run in the keyboard was tapped: the test starts the next time the keyboard opens in another app. */
@@ -69,7 +82,7 @@ internal object Diagnostics {
     fun runInApp(context: Context) {
         if (busy) return
         val c = context.applicationContext
-        app.value = Speed.Running(0, RUNS)
+        app.value = Speed.Running(0, RUNS * modes().size)
         worker.execute { if (facts.value == null) facts.value = collect(c); speedTest(c, app) }
     }
 
@@ -80,7 +93,7 @@ internal object Diagnostics {
     fun keyboardShown(context: Context, editor: String?, secure: Boolean, show: (StripNotice?) -> Unit) {
         if (!BuildConfig.DIAGNOSTICS || keyboard.value != Speed.Waiting || secure || editor == null || editor == context.packageName) return
         val c = context.applicationContext
-        keyboard.value = Speed.Running(0, RUNS)
+        keyboard.value = Speed.Running(0, RUNS * modes().size)
         val close = c.getString(R.string.diagnostics_dismiss)
         show(StripNotice(c.getString(R.string.diagnostics_strip_running), close, tap = {}, dismiss = {}))
         worker.execute {
@@ -115,15 +128,17 @@ internal object Diagnostics {
         val pcm = runCatching { c.assets.open(CLIP).use { wavSamples(it.readBytes()) } }.getOrNull()
         if (pcm == null) { into.value = Speed.Failed; return }
         val runs = mutableListOf<Run>()
-        for (number in 1..RUNS) {
-            into.value = Speed.Running(runs.size, RUNS)
+        val modes = modes()
+        // Each mode once, then each again, so warming up and heating up don't favour one.
+        for (number in 1..RUNS) for (mode in modes) {
+            into.value = Speed.Running(runs.size, RUNS * modes.size)
             val before = sched()
             val sampler = CoreSampler(THREAD).also { it.start() }
             // Negative jobs: no dictation's ✕ (MicCapture counts up from 1) can stop this decode.
-            val measured = SpeechModel.measure(c, pcm, SpeechModel.threads, -(++jobs))
+            val measured = SpeechModel.measure(c, pcm, mode.threads, mode.pool, -(++jobs))
             val cores = sampler.stop()
             if (measured == null) { into.value = Speed.Failed; return }
-            runs += Run("as now", number, measured.downloaded, measured.wallMs, measured.cpuMs, measured.timings, measured.text,
+            runs += Run(mode.label, number, measured.downloaded, measured.wallMs, measured.cpuMs, measured.timings, measured.text,
                 before, sched(), cores)
         }
         into.value = Speed.Done(runs, pcm.size / 16_000.0)
@@ -223,6 +238,13 @@ internal fun taskStat(stat: String): Triple<String, Char, Int>? {
     val fields = stat.substring(close + 1).trim().split(' ')
     val cpu = fields.getOrNull(36)?.toIntOrNull() ?: return null
     return Triple(stat.substring(open + 1, close), fields[0].firstOrNull() ?: return null, cpu)
+}
+
+/** Cores the kernel rates at least half the strongest core's capacity; 0 when any core's capacity is unreadable. */
+internal fun fastCores(capacities: List<Int?>): Int {
+    if (capacities.isEmpty() || capacities.any { it == null }) return 0
+    val top = capacities.maxOf { it!! }
+    return if (top <= 0) 0 else capacities.count { it!! * 2 >= top }
 }
 
 /** "0-3,6" for 0, 1, 2, 3 and 6. */

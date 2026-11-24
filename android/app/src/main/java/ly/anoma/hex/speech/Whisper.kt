@@ -64,16 +64,19 @@ internal object SpeechModel {
     }
 
     /** Labs › Diagnostics' speed test: decodes [pcm] as English on [threads] threads, as a dictation does, the model
-     * already loaded, and returns the text and whisper.cpp's timings, or null when it failed. */
-    @Synchronized fun measure(app: Context, pcm: ShortArray, threads: Int, job: Long): Measured? {
+     * already loaded, and returns the text and whisper.cpp's timings, or null when it failed. [pool] threads are kept
+     * ready with the model for this decode (0: new threads for every graph, as dictation does); the pool is freed
+     * afterwards, so dictation is unchanged. */
+    @Synchronized fun measure(app: Context, pcm: ShortArray, threads: Int, pool: Int, job: Long): Measured? {
         val small = load(app)
-        if (handle == 0L) return null
+        if (handle == 0L || !Whisper.threadPool(handle, pool)) return null
         val cpu = android.os.Process.getElapsedCpuTime()
         val started = System.nanoTime()
         val bytes = Whisper.decode(handle, small, pcm, pcm.size, threads, "en", false, null, job)
         val wall = (System.nanoTime() - started) / 1_000_000
         val processor = android.os.Process.getElapsedCpuTime() - cpu
         val timings = Whisper.timings()
+        Whisper.threadPool(handle, 0)
         keep()
         return if (bytes == null || timings == null) null
             else Measured(small, wall, processor, timings, bytes.decodeToString().trim())
@@ -123,6 +126,9 @@ internal object Whisper {
     external fun abort(job: Long)
     /** The last decode's timings, for Labs › Diagnostics (hexspeech.cpp says what each is). */
     external fun timings(): LongArray?
+    /** Keeps [threads] worker threads ready with the model [handle] for its decodes, or none (0, ggml's default: new
+     * threads for every graph). The pool is freed with the model. Only Labs › Diagnostics asks for one today. */
+    external fun threadPool(handle: Long, threads: Int): Boolean
     /** The file this library loaded from, for Labs › Diagnostics. */
     external fun library(): String?
 }

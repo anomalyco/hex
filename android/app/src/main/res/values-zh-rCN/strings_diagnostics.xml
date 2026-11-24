@@ -8,7 +8,7 @@
     <string name="diagnostics_none">点按“检查这台手机”或运行一项测试来生成报告。</string>
     <string name="diagnostics_copy">复制报告</string>
     <string name="diagnostics_speed">速度测试</string>
-    <string name="diagnostics_speed_detail">将内置的一段 11 秒英文音频转写两次，可能需要一两分钟。</string>
+    <string name="diagnostics_speed_detail">用 Hex 的每种运行方式将内置的一段 11 秒英文音频各转写两次，可能需要几分钟。</string>
     <string name="diagnostics_run_app">在应用中运行</string>
     <string name="diagnostics_run_keyboard">在键盘中运行</string>
     <string name="diagnostics_run_keyboard_detail">然后在其他应用中打开一个文本框</string>

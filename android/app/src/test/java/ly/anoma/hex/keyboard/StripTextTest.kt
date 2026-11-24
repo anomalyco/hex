@@ -8,6 +8,7 @@ import ly.anoma.hex.diagnostics.cgroupSummary
 import ly.anoma.hex.diagnostics.clusterSummary
 import ly.anoma.hex.diagnostics.coresSummary
 import ly.anoma.hex.diagnostics.cpuRanges
+import ly.anoma.hex.diagnostics.fastCores
 import ly.anoma.hex.diagnostics.libraryLabel
 import ly.anoma.hex.diagnostics.report
 import ly.anoma.hex.diagnostics.taskStat
@@ -45,6 +46,11 @@ class StripTextTest {
         val cores = (0..5).map { Core(it, 870, 3_532_800) } + (6..7).map { Core(it, 1024, 4_320_000) }
         assertEquals("cpu 0-5: capacity 870, up to 3.53 GHz; cpu 6-7: capacity 1024, up to 4.32 GHz", clusterSummary(cores))
         assertEquals("cpu 0-1: capacity not readable, top frequency not readable", clusterSummary(listOf(Core(0, null, null), Core(1, null, null))))
+    }
+    @Test fun diagnosticsCountFastCoresForTheSixThreadRun() {
+        assertEquals(8, fastCores(List(6) { 870 } + List(2) { 1024 })) // Snapdragon 8 Elite
+        assertEquals(2, fastCores(List(6) { 160 } + List(2) { 1024 })) // Snapdragon 695
+        assertEquals(0, fastCores(listOf(1024, null)))
     }
     @Test fun diagnosticsSayWhichCoresTheTestRanOnAndHowFast() {
         assertEquals("cpu 6-7 at 1.20 GHz–4.32 GHz", coresSummary(mapOf(6 to listOf(1_200_000L), 7 to listOf(4_320_000L, 3_000_000L))))

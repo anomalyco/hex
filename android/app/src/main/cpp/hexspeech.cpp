@@ -4,6 +4,7 @@
 #ifndef NDEBUG
 #include <android/log.h>
 #endif
+#include <ggml-cpu.h>
 #include <whisper.h>
 
 #include <algorithm>
@@ -13,11 +14,28 @@
 #include <cstring>
 #include <iterator>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // The model stays loaded between dictations (SpeechModel.kt owns it and frees it when idle), so a
-// dictation pays only for its own audio. Load, decode and free are called under one lock.
+// dictation pays only for its own audio. Load, decode, threadPool and free are called under one lock.
+
+// A model's thread pool (Whisper.threadPool): ggml's worker threads made once and reused for every graph, where by
+// default ggml starts and joins a new pool for each one, every encoder pass and every decoded token. Only Labs ›
+// Diagnostics' speed test asks for one today. A pool lives with its model and is freed with it.
+struct Pool { ggml_threadpool *threads; int count; };
+static std::mutex pools_lock;
+static std::unordered_map<whisper_context *, Pool> pools;
+
+static void drop_pool(whisper_context *ctx) {
+    std::lock_guard<std::mutex> hold(pools_lock);
+    auto found = pools.find(ctx);
+    if (found == pools.end()) return;
+    ggml_threadpool_free(found->second.threads);
+    pools.erase(found);
+}
 extern "C" JNIEXPORT jlong JNICALL
 Java_ly_anoma_hex_speech_Whisper_load(JNIEnv *env, jobject, jobject assets, jstring file) {
 #ifdef NDEBUG
@@ -55,6 +73,7 @@ Java_ly_anoma_hex_speech_Whisper_load(JNIEnv *env, jobject, jobject assets, jstr
 
 extern "C" JNIEXPORT void JNICALL
 Java_ly_anoma_hex_speech_Whisper_free(JNIEnv *, jobject, jlong ctx) {
+    drop_pool(reinterpret_cast<whisper_context *>(ctx));
     whisper_free(reinterpret_cast<whisper_context *>(ctx));
 #ifndef NDEBUG
     __android_log_print(ANDROID_LOG_DEBUG, "HexSpeech", "model freed");
@@ -68,6 +87,27 @@ static std::atomic<jlong> abandoned{0};
 
 extern "C" JNIEXPORT void JNICALL
 Java_ly_anoma_hex_speech_Whisper_abort(JNIEnv *, jobject, jlong job) { abandoned.store(job); }
+
+// Keeps a pool of [threads] worker threads with the model for its decodes, or none (0), ggml's default. A pool of
+// another size is replaced. ggml's default pool parameters, as its per-graph pools use: only reuse differs.
+extern "C" JNIEXPORT jboolean JNICALL
+Java_ly_anoma_hex_speech_Whisper_threadPool(JNIEnv *, jobject, jlong handle, jint threads) {
+    auto ctx = reinterpret_cast<whisper_context *>(handle);
+    if (!ctx) return false;
+    {
+        std::lock_guard<std::mutex> hold(pools_lock);
+        auto found = pools.find(ctx);
+        if (found != pools.end() && found->second.count == threads) return true;
+    }
+    drop_pool(ctx);
+    if (threads <= 0) return true;
+    auto params = ggml_threadpool_params_default(threads);
+    auto pool = ggml_threadpool_new(&params);
+    if (!pool) return false;
+    std::lock_guard<std::mutex> hold(pools_lock);
+    pools[ctx] = {pool, threads};
+    return true;
+}
 
 // The last decode's timings, for Labs › Diagnostics: microseconds spent sampling, in the encoder, decoding one token at a
 // time, decoding in batches and on the prompt, then the encoder window (0: the full 30 s) and the thread count. Written
@@ -105,7 +145,8 @@ Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jlong handle, jboo
         for (int j = 0; j < n; ++j) pcm[i + j] = page[j] / 32768.0f;
     }
     auto params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-    params.n_threads = std::clamp<int>(threads, 1, 4);
+    // Dictation asks for at most 4; Labs › Diagnostics also tries 6.
+    params.n_threads = std::clamp<int>(threads, 1, 8);
     const char *code = env->GetStringUTFChars(language, nullptr);
     if (!code) return nullptr;
     std::string lang(code);
@@ -152,10 +193,21 @@ Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jlong handle, jboo
     // still reads, so a short dictation after a long one could come out differently (even in another language).
     std::unique_ptr<whisper_state, decltype(&whisper_free_state)> state(whisper_init_state(ctx), whisper_free_state);
     if (!state) return nullptr;
+    ggml_threadpool *pool = nullptr;
+    {
+        std::lock_guard<std::mutex> hold(pools_lock);
+        auto found = pools.find(ctx);
+        if (found != pools.end()) { pool = found->second.threads; params.n_threads = std::min(params.n_threads, found->second.count); }
+    }
+    // The pool outlives the state, which never frees it. A decode stopped by abort ends between graphs, so the pool is
+    // idle and the next graph resets its abort flag.
+    if (pool) hex_whisper_state_set_threadpool(state.get(), pool);
 #ifndef NDEBUG
     const auto started = std::chrono::steady_clock::now();
 #endif
     const int status = whisper_full_with_state(ctx, state.get(), params, pcm.data(), count);
+    // Paused workers wait on a condition variable until the next graph instead of polling.
+    if (pool) ggml_threadpool_pause(pool);
     whisper_timings spent{};
     hex_whisper_state_timings(state.get(), &spent);
     const jlong now[7] = {static_cast<jlong>(spent.sample_ms * 1000), static_cast<jlong>(spent.encode_ms * 1000),
