@@ -91,6 +91,10 @@ internal class KeyboardEngine(
     private var word: TypingWord? = null
     private var editor: EditorInfo? = null
     private var ordinaryField = false
+    // A field that asks not to be learned from (IME_FLAG_NO_PERSONALIZED_LEARNING): suggestions stay, but
+    // nothing typed there is remembered (an undone correction, an emoji pick).
+    var learnsTyping = true
+        private set
     private var prefix = ""
     private var expectedCaret = -1
     private data class Undo(val language: String, val original: String, val replacement: String)
@@ -136,19 +140,10 @@ internal class KeyboardEngine(
     fun startInput(attribute: EditorInfo) {
         edited()
         editor = attribute
-        val kind = attribute.inputType and InputType.TYPE_MASK_CLASS
-        val variation = attribute.inputType and InputType.TYPE_MASK_VARIATION
-        secure = when (kind) {
-            InputType.TYPE_CLASS_TEXT -> variation in setOf(InputType.TYPE_TEXT_VARIATION_PASSWORD,
-                InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD, InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD)
-            InputType.TYPE_CLASS_NUMBER -> variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD
-            else -> false
-        }
-        ordinaryField = kind == InputType.TYPE_CLASS_TEXT && !secure &&
-            attribute.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING == 0 &&
-            variation !in setOf(InputType.TYPE_TEXT_VARIATION_URI, InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
-                InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_FILTER) &&
-            attribute.inputType and (InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_FLAG_AUTO_COMPLETE) == 0
+        val field = FieldTyping.of(attribute.inputType, attribute.imeOptions)
+        secure = field.secure
+        ordinaryField = field.ordinary
+        learnsTyping = field.learns
         resetTyping(); word = null; clearSpaces(); forgetSwipe()
         pad = Pad.of(attribute.inputType)
         symbols = pad != null
@@ -646,7 +641,8 @@ internal class KeyboardEngine(
     /** Puts back what an autocorrection replaced, with its space, if it is still right before the cursor. */
     private fun revert(last: Undo): Boolean {
         if (!endsWith(last.replacement + " ") || !replace(last.replacement + " ", last.original)) return false
-        feedback.undo(last.language, last.original, last.replacement)
+        // A no-learning field still takes the undo; only the rejection is not remembered for next time.
+        if (learnsTyping) feedback.undo(last.language, last.original, last.replacement)
         val typed = last.original.substringAfterLast(' ')
         prefix = before().dropLast(typed.length).takeLast(40); word?.restored(typed, prefix)
         if (expectedCaret >= 0) expectedCaret += last.original.length - last.replacement.length - 1

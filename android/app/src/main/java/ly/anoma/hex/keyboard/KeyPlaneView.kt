@@ -572,7 +572,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         rows.visibility = VISIBLE; bottom.visibility = VISIBLE
         emojiOpen = false
     }
-    private val recents by lazy { RecentEmoji(context) }
+    private val recents by lazy { RecentEmoji(context) { ime.engine.learnsTyping } }
     private var pickerSized = 0
     /** The picker back at Recently used: its tab for them (the icon's clickable item), tapped. */
     private fun EmojiPickerView.toTop() {
