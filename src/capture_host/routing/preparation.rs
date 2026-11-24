@@ -145,7 +145,7 @@ impl Worker {
             site,
             &live.candidates,
             now_ms(),
-            auto_send_jev(look.router.config()),
+            look.router.config().jev_auto_send(),
         );
         if answered.send.is_none() {
             answered.answer = match ruled.clues.first().map(|c| &c.pointer) {
@@ -237,10 +237,11 @@ impl Worker {
                         smart::Policy::Ladder
                     };
                     let judgement = smart::decide(&evidence, policy);
-                    let refine = !ruled
-                        && look.router.config().jev_routing
-                        && look.router.config().smart_routing
-                        && !jev::settled(&judgement);
+                    // Jev is a hosted call with the capture's transcript and the desktop's
+                    // context: it runs only while `Auto-send with Jev` is on, whatever
+                    // flags an older settings file still holds.
+                    let refine =
+                        !ruled && look.router.config().jev_auto_send() && !jev::settled(&judgement);
                     let _ = updates.send(Update {
                         live: live.clone(),
                         judgement: judgement.clone(),
@@ -348,7 +349,7 @@ impl Worker {
                 site,
                 &update.live.candidates,
                 now_ms(),
-                auto_send_jev(current.router.config()),
+                current.router.config().jev_auto_send(),
             );
             let live_scope = rule_match::rule_match(
                 update.live.url.as_deref(),

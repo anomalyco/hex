@@ -1113,7 +1113,12 @@ Where it goes                            // capture.route; capture.routing's aut
 │   │   stacked rule-type icons + rule count; sheet shows one `Auto-send with Jev`
 │   │   toggle card only when Jev has an active credential (otherwise omitted,
 │   │   leaving Rules + the 3-second Undo hold note), plus CRUD for site/subpath,
-│   │   terminal-folder, and non-general app rules targeting a session or project folder
+│   │   terminal-folder, and non-general app rules targeting a session or project
+│   │   folder. Turning it on sets AutoSend::Confident with jevRouting +
+│   │   smartRouting; turning it off returns autoSend to Rules and clears
+│   │   jevRouting (smartRouting stays: it only weighs evidence locally). The
+│   │   hosted Jev lookup runs only while the switch is on, so a settings file an
+│   │   older build left with jevRouting on and autoSend rules makes no request
 │   ├── Rule -> a saved rule (`routing.sites`, `routing.apps`, `routing.terminals`)
 │   │   or a confident Jev pick when `Auto-send with Jev` (`AutoSend::Confident`)
 │   │   is on: a three-second countdown begins when shown, with `AutoSendBy::Rule`
@@ -1136,9 +1141,10 @@ Where it goes                            // capture.route; capture.routing's aut
 │   │   reason as the row's word ("dev server", "same page", "mentioned"; none
 │   │   for Jev's pick or fallback), then
 │   │   the runners-up and recent sessions; nothing sent until one is picked.
-│   │   The deterministic guess publishes first. Model refinement has one
-│   │   three-second budget including recent messages and credential lookup;
-│   │   a timeout keeps the first guess. A later result cannot override a pick or Undo.
+│   │   The deterministic guess publishes first. With `Auto-send with Jev` on,
+│   │   model refinement has one three-second budget including recent messages and
+│   │   credential lookup; a timeout keeps the first guess. A later result cannot
+│   │   override a pick or Undo.
 │   │   `site` names what a Shift pick (Shift+click, ⇧⏎ in the list,
 │   │   or `send --always`) would save, after which that site's captures are Rules;
 │   │   ⇧⏎ in a Rule's list saves the rule for the session picked instead

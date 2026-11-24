@@ -155,6 +155,12 @@ impl RouterConfig {
         self.smart_routing && self.jev_routing
     }
 
+    /// Whether `Auto-send with Jev` is on: Jev enabled, and its confident picks may send on
+    /// their own. The hosted lookup runs only while it is on.
+    pub fn jev_auto_send(&self) -> bool {
+        self.auto_send == AutoSend::Confident && self.jev_enabled()
+    }
+
     /// `rule add`: this config with `key` → `target` in `sites`, `apps` or `terminals` (a folder, `~` kept, or
     /// a `ses_` ID; a relative folder is made absolute against the working directory). A
     /// refusal of `key` is lifted. The host saves it.
@@ -469,6 +475,19 @@ mod tests {
         assert!(!config.send_captures);
         assert_eq!(config.auto_send, AutoSend::Rules);
         assert_eq!(parse_scrawl_config("not json"), RouterConfig::default());
+    }
+
+    #[test]
+    fn jev_auto_send_needs_confident_and_both_experiments() {
+        let mut config = RouterConfig::default();
+        assert!(!config.jev_auto_send());
+        config.smart_routing = true;
+        config.jev_routing = true;
+        assert!(!config.jev_auto_send(), "Rules never auto-sends with Jev");
+        config.auto_send = AutoSend::Confident;
+        assert!(config.jev_auto_send());
+        config.jev_routing = false;
+        assert!(!config.jev_auto_send());
     }
 
     #[test]
