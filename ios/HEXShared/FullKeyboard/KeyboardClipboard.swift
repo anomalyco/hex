@@ -21,9 +21,33 @@ enum KeyboardClipboardOffer: Equatable {
     /// opens iOS's keyboard list, where a switch to the next keyboard could land elsewhere
     /// (`KeyboardInputModes.route`).
     case code(canPaste: Bool, opensList: Bool = false)
+    /// An empty field iOS marks as a username or password (`KeyboardClipboardTracker.expectsLogin`)
+    /// with Apple's keyboard among the user's keyboards: the Passwords chip takes the person
+    /// there, by Code from Messages' route, since iOS offers saved logins (Passwords, and
+    /// managers' AutoFill extensions) only in Apple's keyboard's bar.
+    case passwords(canPaste: Bool, opensList: Bool = false)
     /// A finished dictation the keyboard didn't insert by itself
     /// (`KeyboardViewModel.offeredDictation`); it never touches the clipboard.
     case dictation
+
+    /// Code from Messages or Passwords: a chip that takes the person to Apple's keyboard.
+    var leadsToAppleKeyboard: Bool { opensList != nil }
+
+    /// Whether that chip opens iOS's keyboard list rather than switching; nil without the chip.
+    var opensList: Bool? {
+        switch self {
+        case .code(_, let list), .passwords(_, let list): list
+        case .paste, .dictation: nil
+        }
+    }
+
+    /// Whether Paste shows: beside Code from Messages or Passwords only with a fresh copy.
+    var canPaste: Bool {
+        switch self {
+        case .code(let paste, _), .passwords(let paste, _): paste
+        case .paste, .dictation: true
+        }
+    }
 }
 
 /// The user's keyboards, from `UITextInputMode.activeInputModes`, which a keyboard extension
@@ -149,7 +173,20 @@ struct KeyboardClipboardTracker {
            let route = appleKeyboardRoute(Self.isNumberPad(keyboardType)) {
             return .code(canPaste: fresh, opensList: route == .list || !canSwitchKeyboard)
         }
+        if Self.expectsLogin(textContentType: textContentType), let route = appleKeyboardRoute(false) {
+            return .passwords(canPaste: fresh, opensList: route == .list || !canSwitchKeyboard)
+        }
         return fresh ? .paste : nil
+    }
+
+    /// A username, password or new-password field. In practice Hex meets only usernames, and
+    /// only on the web (Safari's `autocomplete="username"`, iOS 26.5 and 27.2): iOS brings its own
+    /// keyboard to a native `.username` field and to every secure one. An email field can't be
+    /// told apart from one outside a login form (a keyboard sees only its own field's traits),
+    /// so it gets no chip.
+    static func expectsLogin(textContentType: UITextContentType?) -> Bool {
+        guard let textContentType else { return false }
+        return [.username, .password, .newPassword].contains(textContentType)
     }
 
     /// A `.oneTimeCode` field with a number pad, or with autocorrection set either way: WebKit

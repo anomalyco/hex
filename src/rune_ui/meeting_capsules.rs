@@ -65,6 +65,7 @@ mod presence;
 mod screen;
 mod stage;
 mod state;
+mod stay;
 mod throw;
 mod waveform;
 
@@ -101,8 +102,11 @@ const REST_WIDTH: f32 = 2.0 * REST_PX + waveform::WIDTH + METER_GAP + TIMER_WIDT
 const REST_PX: f32 = PANEL_PAD + ROW_PX;
 /// Between the listening field and the time.
 const METER_GAP: f32 = 6.0;
-/// "00:00" in the timer's 13 pt monospaced digits, at layout resolution.
-const TIMER_WIDTH: f32 = 39.0;
+/// "00:00" in the timer's 13 pt monospaced digits, at layout resolution,
+/// with the recording dot and its gap before it.
+const TIMER_WIDTH: f32 = 39.0 + REC_DOT + METER_GAP;
+/// The recording dot before the elapsed time, a status dot's size.
+const REC_DOT: f32 = 8.0;
 /// The open recording pill and the ready panel.
 const PANEL_WIDTH: f32 = 252.0;
 const PANEL_RADIUS: f32 = 13.0;
@@ -315,6 +319,8 @@ struct Capsule {
     /// The call-ended prompt's Keep recording brings the recording capsule
     /// back.
     keep_recording: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// The ready panel's title opens its meeting in Hex's Meetings pane.
+    open_meeting: Option<OpenMeeting>,
     resize: Option<Resize>,
     /// Windows: the size the recording window was last given, which follows
     /// what it draws (see [`panel::WindowFit`]).
@@ -349,6 +355,8 @@ struct Capsule {
 }
 
 type Choose = Arc<dyn Fn(MeetingProviderChoice) + Send + Sync>;
+/// Opens a finished meeting, by id, in Hex's window.
+type OpenMeeting = Arc<dyn Fn(String) + Send + Sync>;
 /// Sets the capsule window's size in points.
 type Resize = Arc<dyn Fn((f32, f32)) + Send + Sync>;
 type Shift = Arc<dyn Fn(MeetingIndicatorCorner, f32, f32) + Send + Sync>;
@@ -393,6 +401,7 @@ impl Capsule {
                     recording: next,
                     hovered: false,
                     stopping: false,
+                    confirming: false,
                 };
             }
         }
@@ -409,35 +418,41 @@ impl Capsule {
             return;
         }
         match &mut self.state {
-            State::Recording { hovered, .. } => {
+            State::Recording {
+                hovered,
+                confirming,
+                ..
+            } => {
                 *hovered = inside;
+                // Leaving answers the question with Keep.
+                if !inside {
+                    *confirming = false;
+                }
                 #[cfg(target_os = "windows")]
                 self.fit_recording_window();
             }
             State::Finalizing { hovered, .. } => {
                 *hovered = inside;
             }
-            State::Ready { hover, .. } => match (inside, *hover) {
-                (true, ReadyHover::Idle) => *hover = ReadyHover::Hovered,
-                (true, ReadyHover::Hovered | ReadyHover::ExpiredWhileHovered) => {}
-                (false, ReadyHover::Hovered) => *hover = ReadyHover::Idle,
-                (false, ReadyHover::Idle) => {}
-                (false, ReadyHover::ExpiredWhileHovered) => self.close(),
-            },
+            State::Ready { hover, stay, .. } => {
+                // The stay holds while the pointer is inside and runs on from
+                // where it was when it leaves; its ring closes the panel.
+                if inside {
+                    stay.pause();
+                } else {
+                    stay.resume();
+                }
+                match (inside, *hover) {
+                    (true, ReadyHover::Idle) => *hover = ReadyHover::Hovered,
+                    (true, ReadyHover::Hovered | ReadyHover::ExpiredWhileHovered) => {}
+                    (false, ReadyHover::Hovered | ReadyHover::ExpiredWhileHovered) => {
+                        *hover = ReadyHover::Idle;
+                    }
+                    (false, ReadyHover::Idle) => {}
+                }
+            }
             _ => {}
         }
-    }
-
-    /// Handles a panel timeout: a hovered Ready panel waits until the pointer
-    /// leaves; everything else closes at once.
-    fn expire_panel(&mut self) {
-        if let State::Ready { hover, .. } = &mut self.state
-            && *hover != ReadyHover::Idle
-        {
-            *hover = ReadyHover::ExpiredWhileHovered;
-            return;
-        }
-        self.close();
     }
 
     /// Saves the offered provider's choice; returns whether there was one.
@@ -550,6 +565,7 @@ impl Capsule {
                 recording: shown,
                 hovered,
                 stopping,
+                ..
             } => recording_window_size(*hovered || *stopping, Some(shown)),
             State::Ready { manifest, .. } => ready_window_size(manifest),
             State::Offer { .. } => self.presentation.window(),
@@ -714,8 +730,10 @@ impl MeetingCapsules {
         commands: SyncSender<ControllerCommand>,
         choose: impl Fn(MeetingProviderChoice) + Send + Sync + 'static,
         save_anchor: impl Fn(MeetingIndicatorCorner, Option<&str>) + Send + Sync + 'static,
+        open_meeting: impl Fn(String) + Send + Sync + 'static,
     ) -> Self {
         let choose: Choose = Arc::new(choose);
+        let open_meeting: OpenMeeting = Arc::new(open_meeting);
         let save_anchor: SaveAnchor = Arc::new(save_anchor);
         let overlay = |app: &mut rune::App<S>, name, size: (f32, f32), recording: bool| {
             let spec = OverlaySpec {
@@ -747,6 +765,7 @@ impl MeetingCapsules {
                     hide: None,
                     show: None,
                     keep_recording: None,
+                    open_meeting: Some(open_meeting.clone()),
                     resize: None,
                     #[cfg(target_os = "windows")]
                     recording_window: Default::default(),
@@ -1181,6 +1200,10 @@ fn poll(capsule: &mut Capsule, now: f64, tx: &mut Tx) -> bool {
     if !staged {
         capsule.settle_recording_window();
     }
+    if capsule.stay_over() {
+        capsule.stir(tx);
+        changed = true;
+    }
     if !capsule.throw.gliding() {
         return changed;
     }
@@ -1225,7 +1248,19 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
             recording: shown,
             hovered,
             stopping,
-        } => return recording(p, capsule, shown, *hovered, *stopping),
+            confirming,
+        } => {
+            return recording(
+                p,
+                capsule,
+                shown,
+                panel::Open {
+                    hovered: *hovered,
+                    stopping: *stopping,
+                    confirming: *confirming,
+                },
+            );
+        }
         State::Finalizing { duration_ms, .. } => {
             return panel::finalizing(p, capsule, *duration_ms);
         }
@@ -1564,6 +1599,7 @@ mod tests {
             hide: None,
             show: None,
             keep_recording: None,
+            open_meeting: None,
             resize: None,
             #[cfg(target_os = "windows")]
             recording_window: Default::default(),
@@ -2288,7 +2324,9 @@ mod tests {
             }));
         });
         rt.frame(0.0);
-        let (x, y) = rt.find("meta").unwrap();
+        // The panel's own margin, clear of its link and copies.
+        let [px, py, _, _] = laid_out(&rt, "pill");
+        let (x, y) = (px + 2.0, py + 2.0);
         rt.pointer_move(x, y);
         rt.pointer_down(x, y);
         rt.pointer_move(x - 20.0, y + 30.0);
@@ -2384,7 +2422,7 @@ mod tests {
         for expected in [
             "Lantern design sync",
             "08:56",
-            "Copy all",
+            "Copy transcript",
             "Copy agent prompt",
         ] {
             assert!(shown.contains(&expected.to_string()), "{shown:?}");
@@ -2491,15 +2529,33 @@ mod tests {
         assert!(!ready.state.is_shown());
     }
 
+    /// Gives a shown ready panel a stay that ends almost at once.
+    fn nearly_over(capsule: &mut Capsule) {
+        if let State::Ready { stay, .. } = &mut capsule.state {
+            *stay = stay::Stay::new(Duration::from_millis(5));
+        }
+    }
+
     #[test]
-    fn a_ready_panel_whose_time_ran_out_closes_when_the_pointer_leaves() {
+    fn a_ready_panels_stay_holds_under_the_pointer_and_runs_out_after_it_leaves() {
         let (mut rt, _, _) = runtime(ready_transcript(), false, true, ready_size());
         rt.update(|capsule, _| {
+            nearly_over(capsule);
             capsule.set_hovered(true);
+            std::thread::sleep(Duration::from_millis(20));
+            // Held: the timer firing under the pointer closes nothing, and
+            // neither does the frame hook.
             capsule.expire_panel();
+            assert!(!capsule.stay_over());
         });
         assert!(rt.state.is_shown());
-        rt.update(|capsule, _| capsule.set_hovered(false));
+        rt.update(|capsule, _| {
+            capsule.set_hovered(false);
+            // It runs on from where it was held, not from the start.
+            assert!(capsule.is_shown());
+            std::thread::sleep(Duration::from_millis(20));
+            assert!(capsule.stay_over());
+        });
         assert!(!rt.state.is_shown());
     }
 
@@ -2524,10 +2580,12 @@ mod tests {
                 }
             ));
             assert!(!c.stopping() && !c.open());
+            nearly_over(c);
             c.expire_panel();
             assert!(c.is_shown());
             c.set_hovered(false);
-            assert!(!c.is_shown());
+            std::thread::sleep(Duration::from_millis(20));
+            assert!(c.stay_over() && !c.is_shown());
         });
     }
 
@@ -2994,6 +3052,144 @@ mod tests {
                 rune::render::write_png(&path, w, h, &pixels).unwrap();
             }
         }
+    }
+
+    /// Review stills of the recording pill, its discard question, and the
+    /// ready panel, into `HEX_CAPSULE_SNAPS` as `capsule-*`; a no-op without
+    /// that variable or a GPU.
+    #[test]
+    fn capsule_stills() {
+        use rune::render::Gpu;
+        let Some(folder) = std::env::var_os("HEX_CAPSULE_SNAPS") else {
+            return;
+        };
+        let Ok(gpu) = Gpu::try_new(Gpu::instance(), None) else {
+            return;
+        };
+        let folder = std::path::PathBuf::from(folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        // Name, capsule, size, open, asking to discard, title hovered.
+        type Still = (&'static str, Kind, (f32, f32), bool, bool, bool);
+        let states: [Still; 5] = [
+            (
+                "recording-rest",
+                live_recording("fixture"),
+                RECORDING,
+                false,
+                false,
+                false,
+            ),
+            (
+                "recording-open",
+                live_recording("fixture"),
+                RECORDING,
+                true,
+                false,
+                false,
+            ),
+            (
+                "recording-discard",
+                live_recording("fixture"),
+                RECORDING,
+                true,
+                true,
+                false,
+            ),
+            (
+                "ready",
+                ready_summarized(),
+                ready_size_of(&ready_summarized()),
+                false,
+                false,
+                false,
+            ),
+            (
+                "ready-hover",
+                ready_summarized(),
+                ready_size_of(&ready_summarized()),
+                false,
+                false,
+                true,
+            ),
+        ];
+        for (name, kind, size, open, discard, title_hover) in states {
+            for dark in [false, true] {
+                let size = (size.0 + 64.0, size.1.max(RECORDING.1) + 160.0);
+                let (mut rt, _, _) = runtime(kind.clone(), false, dark, size);
+                rt.update(move |c, _| {
+                    if let State::Recording {
+                        recording: shown,
+                        hovered,
+                        confirming,
+                        ..
+                    } = &mut c.state
+                    {
+                        shown.started = Instant::now() - Duration::from_secs(258);
+                        *hovered = open;
+                        *confirming = discard;
+                    }
+                    fixture_scope(c);
+                    c.live.entries = call();
+                });
+                if title_hover {
+                    rt.frame(0.0);
+                    if let Some((x, y)) = rt.find("open-meeting") {
+                        rt.pointer_move(x, y);
+                    }
+                    rt.update(|_, _| {});
+                }
+                let (w, h, pixels) = render(&gpu, &mut rt, size);
+                let theme = if dark { "dark" } else { "light" };
+                let full = (size.0 - 1.0, size.1 - 1.0);
+                let bounds = rt
+                    .elements()
+                    .into_iter()
+                    .filter(|e| !e.exiting && e.opacity > 0.01)
+                    .filter(|e| e.fill.a > 0.01 || e.text.is_some())
+                    .filter(|e| !(e.rect[2] >= full.0 && e.rect[3] >= full.1))
+                    .fold(None::<[f32; 4]>, |acc, e| {
+                        let [x, y, w, h] = e.rect;
+                        Some(match acc {
+                            None => [x, y, x + w, y + h],
+                            Some([a, b, c, d]) => [a.min(x), b.min(y), c.max(x + w), d.max(y + h)],
+                        })
+                    })
+                    .expect("no capsule drawn");
+                let (w, h, pixels) = framed(w, h, &pixels, bounds, &format!("{name}-{theme}"));
+                let path = folder.join(format!("capsule-{name}-{theme}.png"));
+                rune::render::write_png(&path, w, h, &pixels).unwrap();
+            }
+        }
+    }
+
+    /// Crops a still to the capsule's bounds (points) with an
+    /// even margin on black, and fails when the capsule leaves the canvas.
+    fn framed(w: u32, h: u32, px: &[u8], bounds: [f32; 4], name: &str) -> (u32, u32, Vec<u8>) {
+        let (w, h) = (w as isize, h as isize);
+        let [x0, y0, x1, y1] = bounds.map(|v| (v * 2.0).round() as isize);
+        eprintln!("still {name}: canvas {w}x{h} capsule x {x0}..{x1} y {y0}..{y1}");
+        assert!(
+            x0 >= 0 && y0 >= 0 && x1 <= w && y1 <= h,
+            "{name}: leaves the canvas"
+        );
+        const MARGIN: isize = 48;
+        let (cw, ch) = (x1 - x0 + 2 * MARGIN, y1 - y0 + 2 * MARGIN);
+        let mut out = vec![0u8; (cw * ch * 4) as usize];
+        for y in 0..ch {
+            for x in 0..cw {
+                let o = ((y * cw + x) * 4) as usize;
+                let (sx, sy) = (x + x0 - MARGIN, y + y0 - MARGIN);
+                if sx >= 0 && sy >= 0 && sx < w && sy < h {
+                    let i = ((sy * w + sx) * 4) as usize;
+                    let a = px[i + 3] as f32 / 255.0;
+                    for c in 0..3 {
+                        out[o + c] = (px[i + c] as f32 * a).round() as u8;
+                    }
+                }
+                out[o + 3] = 255;
+            }
+        }
+        (cw as u32, ch as u32, out)
     }
 
     fn render(

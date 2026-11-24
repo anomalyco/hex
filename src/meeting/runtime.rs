@@ -56,6 +56,7 @@ impl Meetings {
         let mut capsules = {
             let chosen = window.clone();
             let moved = window.clone();
+            let opened = window.clone();
             crate::rune_ui::meeting_capsules::MeetingCapsules::install(
                 app,
                 commands,
@@ -66,6 +67,12 @@ impl Meetings {
                 move |corner, display| {
                     crate::app_settings::save_meeting_indicator_anchor(corner, display);
                     moved.update(move |ui, _| crate::rune_ui::meeting_settings_saved(ui));
+                },
+                move |id| {
+                    opened.update(move |ui, tx| {
+                        crate::rune_ui::show(ui, Destination::Meetings(Some(id)), tx);
+                    });
+                    opened.open();
                 },
             )
         };

@@ -225,7 +225,7 @@ export function renderPrivacy(origin: string): string {
 <li>Hex's version, your phone's model, its system version and language, which screen of Hex you opened the form from, and the language and speech model Hex dictates with.</li>
 <li>Your email, only if you type one in, so Anomaly can reply. Nothing is emailed when you send: if Anomaly replies, you'll get an email and confirm your address once. With an email, Hex also sends a random install ID, made the first time you send feedback with one, so your reports can be kept together. It isn't tied to your phone or your Apple or Google account, and deleting Hex deletes it.</li>
 </ul>
-<p>Without an email, your feedback is anonymous: Hex sends no email and no install ID, so it can't be answered. Feedback never includes your dictations, what you type, your vocabulary, what Hex learned about your typing, typing logs, or recordings, and Hex Keyboard never sends it. Anomaly uses feedback only to answer you and improve Hex. Like any request, the server sees your IP address.</p>
+<p>Without an email, your feedback is anonymous: Hex sends no email and no install ID, so it can't be answered. Feedback never includes your dictations, what you type, your vocabulary, what Hex learned about your typing, typing logs, or recordings, and Hex Keyboard never sends it. Anomaly uses feedback only to answer you and fix what you report. Like any request, the server sees your IP address.</p>
 </section>
 <section>
 <h2>Downloads</h2>

@@ -44,12 +44,44 @@
         }
       }
     },
+    "Color" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Color"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "颜色"
+          }
+        }
+      }
+    },
     "Couldn't translate the last dictation. If it keeps happening, reinstall Apple's Translate app." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "上一次听写未能翻译。如果反复出现，请重新安装 Apple 的“翻译” App。"
+          }
+        }
+      }
+    },
+    "Key colors" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Key colors"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按键颜色"
           }
         }
       }
@@ -806,6 +838,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "蓝牙"
+          }
+        }
+      }
+    },
+    "Burgundy" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Burgundy"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "勃艮第红"
           }
         }
       }
@@ -1707,6 +1755,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "保持原样"
+          }
+        }
+      }
+    },
+    "Key flicks" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按键轻扫"
+          }
+        }
+      }
+    },
+    "Pull a key down to type the character above its letter" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "向下拉按键即可输入其字母上方的字符"
           }
         }
       }
@@ -4303,6 +4371,16 @@
         }
       }
     },
+    "Passwords" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "密码"
+          }
+        }
+      }
+    },
     "The multilingual model's download stopped. Trying again in %lld s." : {
       "localizations" : {
         "zh-Hans" : {
@@ -4527,22 +4605,6 @@
         }
       }
     },
-    "Keyboard themes" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Keyboard themes"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "键盘主题"
-          }
-        }
-      }
-    },
     "Navy" : {
       "localizations" : {
         "en" : {
@@ -4555,22 +4617,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "海军蓝"
-          }
-        }
-      }
-    },
-    "Theme" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Theme"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "主题"
           }
         }
       }
@@ -4667,6 +4713,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已可在键盘中使用"
+          }
+        }
+      }
+    },
+    "Shows your keyboards: pick Apple's, where iOS offers your saved passwords" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示你的键盘：选择 Apple 的键盘，iOS 会在那里提供你存储的密码"
+          }
+        }
+      }
+    },
+    "Switches to the next keyboard, where iOS offers your saved passwords" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换到下一个键盘，iOS 会在那里提供你存储的密码"
           }
         }
       }
@@ -5021,12 +5087,12 @@
         }
       }
     },
-    "Hex sends nothing unless you tap Send in Send feedback. Then it sends your message and the pictures you kept, your email if you add one, and details about Hex and this iPhone to Anomaly's feedback inbox. Your dictations, what you type, and what Hex learned are never included." : {
+    "Hex sends nothing unless you tap Send in Send feedback. Then it sends your message and the pictures you kept, your email if you add one, and details about Hex and this iPhone to Anomaly's feedback inbox. With an email, Hex also sends a random install ID so your reports stay together. Your dictations, what you type, and what Hex learned are never included." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "除非你在“发送反馈”中轻点“发送”，否则 Hex 不会发送任何内容。轻点后，它会把你的留言和保留的图片、你填写的邮箱（如有），以及 Hex 和这台 iPhone 的相关信息发送到 Anomaly 的反馈收件箱。你的听写、输入的内容以及 Hex 学到的内容都不会包含在内。"
+            "value" : "除非你在“发送反馈”中轻点“发送”，否则 Hex 不会发送任何内容。轻点后，它会把你的留言和保留的图片、你填写的邮箱（如有），以及 Hex 和这台 iPhone 的相关信息发送到 Anomaly 的反馈收件箱。填写邮箱时，Hex 还会发送一个随机安装 ID，把你的反馈归在一起。你的听写、输入的内容以及 Hex 学到的内容都不会包含在内。"
           }
         }
       }

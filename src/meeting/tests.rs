@@ -1201,22 +1201,22 @@ fn until_one_is_chosen_only_meetings_recorded_since_the_default_expire() {
     let older = retention_manifest(
         "older",
         MeetingStatus::Complete,
-        now - 3 * day,
-        Some(now - 2 * day),
+        now - 9 * day,
+        Some(now - 8 * day),
     );
     let newer = MeetingManifest {
         retention_applies: true,
         ..retention_manifest(
             "newer",
             MeetingStatus::Complete,
-            now - 3 * day,
-            Some(now - 2 * day),
+            now - 9 * day,
+            Some(now - 8 * day),
         )
     };
     let meetings = [older, newer];
     assert_eq!(expired_meetings(&meetings, None, &[], now), ["newer"]);
     assert_eq!(retention_for(&meetings[0], None), MeetingRetention::Forever);
-    assert_eq!(retention_for(&meetings[1], None), MeetingRetention::Day);
+    assert_eq!(retention_for(&meetings[1], None), MeetingRetention::Week);
     // Choosing a retention covers older meetings too.
     assert_eq!(
         expired_meetings(&meetings, Some(MeetingRetention::Day), &[], now),
@@ -1225,49 +1225,8 @@ fn until_one_is_chosen_only_meetings_recorded_since_the_default_expire() {
 }
 
 #[test]
-fn expiry_leaves_a_markdown_copy_the_user_edited() {
+fn expiry_moves_only_the_recording_folder_never_the_exported_copies() {
     let (base, directory) = finished_meeting("expire", "Design sync");
-    let mut manifest = read_manifest(&directory).unwrap();
-    let export = manifest.export_path.clone().unwrap();
-    manifest.export_sha256 = file_sha256(&export);
-    write_manifest(&directory, &manifest).unwrap();
-    let mut trashed = Vec::new();
-    trash_expired(&directory, |path| {
-        trashed.push(path.to_path_buf());
-        Ok(())
-    })
-    .unwrap();
-    assert_eq!(trashed, [export.clone(), directory.clone()]);
-
-    fs::write(&export, "# Design sync\n\nMy own notes.\n").unwrap();
-    trashed.clear();
-    trash_expired(&directory, |path| {
-        trashed.push(path.to_path_buf());
-        Ok(())
-    })
-    .unwrap();
-    assert_eq!(
-        trashed,
-        std::slice::from_ref(&directory),
-        "the edited Markdown stays"
-    );
-
-    // A Markdown written before Hex recorded its digest is not Hex's to move.
-    manifest.export_sha256 = None;
-    write_manifest(&directory, &manifest).unwrap();
-    trashed.clear();
-    trash_expired(&directory, |path| {
-        trashed.push(path.to_path_buf());
-        Ok(())
-    })
-    .unwrap();
-    assert_eq!(trashed.len(), 1);
-    fs::remove_dir_all(base).unwrap();
-}
-
-#[test]
-fn expiry_trashes_a_notes_file_only_while_its_digest_matches() {
-    let (base, directory) = finished_meeting("expire-notes", "Design sync");
     let mut manifest = read_manifest(&directory).unwrap();
     let export = manifest.export_path.clone().unwrap();
     manifest.export_sha256 = file_sha256(&export);
@@ -1276,35 +1235,16 @@ fn expiry_trashes_a_notes_file_only_while_its_digest_matches() {
     manifest.notes_export_path = Some(notes.clone());
     manifest.notes_export_sha256 = file_sha256(&notes);
     write_manifest(&directory, &manifest).unwrap();
-
     let mut trashed = Vec::new();
     trash_expired(&directory, |path| {
         trashed.push(path.to_path_buf());
         Ok(())
     })
     .unwrap();
-    assert_eq!(trashed, [export.clone(), notes.clone(), directory.clone()]);
-
-    fs::write(&notes, "# My own notes\n").unwrap();
-    trashed.clear();
-    trash_expired(&directory, |path| {
-        trashed.push(path.to_path_buf());
-        Ok(())
-    })
-    .unwrap();
-    assert_eq!(trashed, [export.clone(), directory.clone()]);
-
-    // The transcript's digest still moves it; an older manifest with no
-    // notes digest leaves the notes file alone.
-    manifest.notes_export_sha256 = None;
-    write_manifest(&directory, &manifest).unwrap();
-    trashed.clear();
-    trash_expired(&directory, |path| {
-        trashed.push(path.to_path_buf());
-        Ok(())
-    })
-    .unwrap();
-    assert_eq!(trashed, [export, directory]);
+    // Even Hex's own unedited copies stay: they are the person's files.
+    assert_eq!(trashed, std::slice::from_ref(&directory));
+    assert!(export.exists());
+    assert!(notes.exists());
     fs::remove_dir_all(base).unwrap();
 }
 

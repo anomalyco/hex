@@ -57,19 +57,38 @@ impl PacketSink {
         self.send_samples(sample_rate, samples, pts_us, microphone_muted());
     }
 
+    /// [`Self::send`] for silence a source synthesizes while its chosen
+    /// source isn't there: it holds the track's place on the timeline but is
+    /// no evidence about the stream, so it never feeds the digital-silence
+    /// watch. A source that recorded a call and then went quiet is waiting
+    /// for its app or device, not stalled. Only Linux pads a gap with
+    /// packets; the other sources send nothing, and their tests use this to
+    /// hold the watch still.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub(super) fn send_synthesized_silence(&self, sample_rate: u32, samples: Vec<f32>) {
+        self.deliver(sample_rate, samples, None, microphone_muted(), false);
+    }
+
     /// [`Self::send`] with the microphone's mute given, so a test holds it
     /// without the macOS-only Labs switch.
-    fn send_samples(
+    fn send_samples(&self, sample_rate: u32, samples: Vec<f32>, pts_us: Option<i64>, muted: bool) {
+        self.deliver(sample_rate, samples, pts_us, muted, true);
+    }
+
+    /// Delivers one packet. `observe` says whether it is evidence about the
+    /// stream for the system track's digital-silence watch.
+    fn deliver(
         &self,
         sample_rate: u32,
         mut samples: Vec<f32>,
         pts_us: Option<i64>,
         muted: bool,
+        observe: bool,
     ) {
         if samples.is_empty() {
             return;
         }
-        if let Some(silence) = &self.system_silence {
+        if observe && let Some(silence) = &self.system_silence {
             silence
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
@@ -342,6 +361,60 @@ fn supervise(
             thread::sleep(POLL_INTERVAL);
         }
         delay = delay.saturating_mul(2).min(RETRY_MAX);
+    }
+}
+
+/// When a capture that failed or ended starts again: due after a wait that
+/// starts at [`RETRY_INITIAL`] and doubles to [`RETRY_MAX`] while captures
+/// keep ending right away. The Linux monitors and the Windows app loopback
+/// retry their own captures with it.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(super) struct Restart {
+    /// When the next capture is due, `None` while one runs.
+    due: Option<Instant>,
+    /// The wait before that try.
+    wait: Duration,
+    /// When the capture that ended began, so one that ran a while starts over.
+    started: Option<Instant>,
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+impl Restart {
+    /// The state of a capture that started at `now`.
+    pub(super) fn running(now: Instant) -> Self {
+        Self {
+            due: None,
+            wait: RETRY_INITIAL,
+            started: Some(now),
+        }
+    }
+
+    /// A capture started at `now`, replacing the one that ended.
+    pub(super) fn started(&mut self, now: Instant) {
+        self.due = None;
+        self.started = Some(now);
+    }
+
+    /// The capture ended at `now`: due again after the wait it reached, which
+    /// starts over for one that ran at least a second and doubles for one that
+    /// keeps ending right away.
+    pub(super) fn exited(&mut self, now: Instant) {
+        let ran = self.started.take().map_or(Duration::ZERO, |started| {
+            now.saturating_duration_since(started)
+        });
+        self.wait = retry_delay(self.wait, ran);
+        self.due = Some(now + self.wait);
+        self.wait = self.wait.saturating_mul(2).min(RETRY_MAX);
+    }
+
+    /// Whether the next capture is due at `now`.
+    pub(super) fn is_due(&self, now: Instant) -> bool {
+        self.due.is_some_and(|due| now >= due)
+    }
+
+    /// When the next capture is due, `None` while one runs.
+    pub(super) fn due_at(&self) -> Option<Instant> {
+        self.due
     }
 }
 
@@ -1365,5 +1438,39 @@ mod tests {
         microphone.send(1_000, vec![0.0; 20_000], None);
         assert_eq!(system_silence_stalled(&microphone), None);
         reset_system_silence(&microphone);
+    }
+
+    /// A chosen app or output that played and then went away leaves the
+    /// source recording synthesized silence until it returns. That silence is
+    /// not the stream stalling, so it never trips the watch the way a
+    /// stream's own zeros do.
+    #[test]
+    fn a_chosen_sources_synthesized_silence_is_not_a_stall() {
+        let (sender, _receiver) = std::sync::mpsc::sync_channel(8);
+        let watch = Arc::new(Mutex::new(SystemSilence::default()));
+        let sink = PacketSink {
+            source: MeetingSource::System,
+            sender,
+            drops: Arc::new(AtomicU64::new(0)),
+            clock: Instant::now(),
+            system_silence: Some(watch),
+        };
+        sink.send(1_000, vec![0.25], None);
+        // Fifteen seconds of the chosen source being absent, paced as the
+        // source sends it.
+        for _ in 0..150 {
+            sink.send_synthesized_silence(1_000, vec![0.0; 100]);
+        }
+        assert_eq!(
+            system_silence_stalled(&sink),
+            None,
+            "waiting for the chosen source is not a stalled stream"
+        );
+        // The stream's own zeros, past the timeout, still are.
+        sink.send(1_000, vec![0.0; 15_000], None);
+        assert_eq!(
+            system_silence_stalled(&sink).as_deref(),
+            Some("system audio went digitally silent after carrying sound")
+        );
     }
 }

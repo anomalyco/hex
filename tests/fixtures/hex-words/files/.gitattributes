@@ -1,0 +1,3 @@
+# Byte-exact test inputs, some broken on purpose: never convert line endings
+# or flag their whitespace.
+* -text -whitespace

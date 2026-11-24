@@ -568,7 +568,9 @@ Equatorial Guinea stay on es-ES (`DictationLanguageSwitch.spanishCandidates`,
 itself, so the on-device pick keeps them, then falls through es-US, es-MX and
 Spain's. While
 the keyboard switches between two or more languages, Automatic follows the one
-it shows (Keyboard languages, below). The menu also lists every locale
+it shows only with Settings › Keyboard › Languages › Switch dictation too on (on iOS 26+;
+before iOS 26, where neither that switch nor this menu is offered, it always follows; Keyboard
+languages, below). The menu also lists every locale
 `SpeechTranscriber` or
 `DictationTranscriber` supports, by name. `SpeechTranscriber` is used wherever
 it has the language (as before); `DictationTranscriber` (preset

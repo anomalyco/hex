@@ -1,0 +1,20 @@
+{
+  "format": "hex.words",
+  "version": 1,
+  "vocabulary": [
+    {"term": "Zo\u0065\u0308", "soundsLike": ["zoey"]},
+    {"term": "Müller"},
+    {"term": "東京タワー"},
+    {"term": "İstanbul"},
+    {"term": "ΟΔΟΣ"},
+    {"term": "οδος"},
+    {"term": "می\u200cخواهم"},
+    {"term": "Hex\u00a0Labs"},
+    {"term": "👩\u200d💻 Dev"}
+  ],
+  "replacements": [
+    {"heard": "kafe", "write": "café"},
+    {"heard": "open\tcode", "write": "OpenCode"},
+    {"heard": "thumbs up", "write": "👍🏽"}
+  ]
+}

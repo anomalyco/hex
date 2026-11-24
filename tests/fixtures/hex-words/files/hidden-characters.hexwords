@@ -1,0 +1,17 @@
+{
+  "format": "hex.words",
+  "version": 1,
+  "vocabulary": [
+    {"term": "Open\u200bCode"},
+    {"term": "co\u00adop"},
+    {"term": "Hex\ufeff"},
+    {"term": "Bell\u0007"},
+    {"term": "Kept", "soundsLike": ["ke\u2060pt", "kept it"]}
+  ],
+  "replacements": [
+    {"heard": "nul\u0000l", "write": "x"},
+    {"heard": "bell", "write": "ding\u0007"},
+    {"heard": "flip", "write": "abc\u202edef"},
+    {"heard": "family", "write": "👨\u200d👩\u200d👧"}
+  ]
+}

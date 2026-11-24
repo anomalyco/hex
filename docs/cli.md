@@ -678,9 +678,10 @@ support this lab.
   capture shortcuts need a key, and `capture.enabled on` needs both free; on
   a Mac whose Paste Last is still ⌥⇧V, rebind one of the two first.
 - `meetings.retention` is `day`, `week`, `month`, `forever`, or `none` (the
-  default: meetings recorded since the default began are kept 24 hours, and
+  default: meetings recorded since the default began are kept 7 days, and
   older ones stay until you choose). Hex moves meetings that ended longer
-  ago than that to the Trash at launch and hourly, Meetings on or off, and
+  ago than that to the Trash at launch and hourly (their recording folder; the
+  exported Markdown stays), Meetings on or off, and
   `hex meetings` and `hex mcp` no longer list them.
 - `meetings.audio_retention` is `day`, `week`, `month`, `forever`, or `none`
   (the default; Meetings › Settings › After a meeting › Keep audio). A

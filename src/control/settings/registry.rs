@@ -868,6 +868,16 @@ pub(super) const KEYS: &[Key] = &[
          is on; polished by default",
     ),
     key(
+        "labs.meeting_audio_source",
+        Kind::Bool,
+        "Labs: a meeting's computer audio records one app or one output device instead of every output",
+    ),
+    key(
+        "labs.meeting_audio_source_choice",
+        Kind::Json,
+        "Labs: which source labs.meeting_audio_source records, as \"all\", {\"app\":{id,name}}, or {\"output\":{id,name}}; all by default",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",
@@ -905,7 +915,7 @@ pub(super) const KEYS: &[Key] = &[
     optional(
         "meetings.retention",
         Kind::Choice(&["day", "week", "month", "forever"]),
-        "How long finished meetings are kept before they move to the Trash; none keeps new meetings 24 hours and older ones until you choose",
+        "How long finished meetings are kept before they move to the Trash; none keeps new meetings 7 days and older ones until you choose",
     ),
     optional(
         "meetings.audio_retention",

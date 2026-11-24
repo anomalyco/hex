@@ -364,6 +364,26 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         (undoBox.layoutParams as LinearLayout.LayoutParams).apply {
             if ((weight == 0f) != shared) { width = if (shared) LinearLayout.LayoutParams.WRAP_CONTENT else 0; weight = if (shared) 0f else 1f; undoBox.layoutParams = this }
         }
+        // Beside a note, Undo is its ↶ alone, named for TalkBack, so the note can be read whole (on two lines if it
+        // needs them) at 360 dp and large text; once the note goes, the chip has its words again.
+        val look = undoLook(shared)
+        if (undoChip.text.isEmpty() == look.label) {
+            undoChip.text = if (look.label) context.getString(R.string.keyboard_undo_dictation) else ""
+            undoChip.contentDescription = if (look.label) null else context.getString(R.string.keyboard_undo_dictation)
+            undoChip.compoundDrawablePadding = if (look.label) dp(6) else 0
+            undoChip.setPadding(dp(if (look.label) 12 else 13), 0, dp(if (look.label) 14 else 13), 0)
+        }
+        if (statusText.maxLines != look.noteLines) {
+            // Two lines of 14 sp at font size 1.3 fit the strip's 44 dp only set close together, and Chinese's taller
+            // lines only a little smaller: the note shrinks, down to 10 sp, only as far as it must.
+            statusText.maxLines = look.noteLines
+            statusText.includeFontPadding = look.noteLines == 1
+            statusText.setLineSpacing(0f, if (look.noteLines == 1) 1f else 0.85f)
+            if (look.noteLines == 1) {
+                statusText.setAutoSizeTextTypeWithDefaults(TextView.AUTO_SIZE_TEXT_TYPE_NONE)
+                statusText.textSize = 14f
+            } else statusText.setAutoSizeTextTypeUniformWithConfiguration(10, 14, 1, TypedValue.COMPLEX_UNIT_SP)
+        }
         inlineArea.visibility = if (chips) VISIBLE else GONE
         slotRow.visibility = if (show) VISIBLE else GONE
         toolsRow.visibility = if (tools.isNotEmpty()) VISIBLE else GONE
@@ -477,3 +497,8 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
  * non-linear above a 1.0 font scale, so a cached pixel-per-sp never matches a size set in sp. */
 private fun spToPx(size: Float, metrics: DisplayMetrics): Float =
     TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, size, metrics)
+
+/** How Undo dictation looks beside the hint line: while a dictation's note shares the line ([shared]) the chip is its
+ * ↶ alone and the note may take two lines; otherwise the chip says "Undo dictation" and the line is one. */
+internal data class UndoLook(val label: Boolean, val noteLines: Int)
+internal fun undoLook(shared: Boolean) = if (shared) UndoLook(label = false, noteLines = 2) else UndoLook(label = true, noteLines = 1)

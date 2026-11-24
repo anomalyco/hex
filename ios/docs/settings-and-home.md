@@ -49,9 +49,9 @@ list starts at the top. The pages, one file each in `HEXMobile/Settings/`
   autocorrect below it while it's on), Swipe typing, Suggest swear words and Vocabulary (Hex's
   custom vocabulary list, how many words it holds); under **Feedback**, Key pop-ups (Full
   only), Haptics (the dictation bar uses it too; Strength below it while it's on: Light, the
-  default until you choose, Medium or Strong), Emoji key, Emoji suggestions (Full only; the
-  strip's emoji, with or without the key) and Clear emoji history while either is on, which
-  asks first; and a field to try the keyboard in.
+  default until you choose, Medium or Strong; choosing one plays a key tick at it), Emoji key,
+  Emoji suggestions (Full only; the strip's emoji, with or without the key) and Clear emoji
+  history while either is on, which asks first; and a field to try the keyboard in.
 - **Privacy:** "Everything stays on this iPhone", Learn how I type (what it
   learned below the switch), and under **Advanced**, Record typing logs (off
   by default) with its Typing logs viewer while it's on; last, under **Feedback**, what
@@ -61,7 +61,7 @@ list starts at the top. The pages, one file each in `HEXMobile/Settings/`
   Korean keyboard (두벌식), Swipe typing in more languages and German spatial autocorrect
   (greyed, its value kept, unless Autocorrect and Spatial autocorrect are on); **Keyboard
   layout**: Comma and period keys, Dvorak punctuation keys, Quick accents, ABC under the
-  emoji key, Keyboard themes (its Theme menu below the switch while it's on) and Join the
+  emoji key, Key colors (its Color menu below the switch while it's on) and Join the
   keyboard when unfolded (only on a foldable iPhone, `FullKeyboardView.isFoldable`);
   **Typing**: Adaptive touch (its status and Reset touch learning below the switch),
   Two-thumb selection, Delete swiped words letter by letter, Hide word suggestions, Emoji
@@ -78,10 +78,12 @@ its page's switches to the App Group: off by default, on with `-on`; switches th
 on by default (Spatial autocorrect, Swipe typing, Emoji key, Emoji suggestions) stay on.
 `-end` starts the page scrolled to the bottom. `settings-privacy-confirm`
 opens Record typing logs' consent dialog. `--experiment-keyboard-themes` turns
-Keyboard themes on, and `--keyboard-theme automatic|black|white|navy|forest|ember`
-picks the theme the full keyboard draws;
-the dictation bar keeps the system look, and iOS draws its own strip above or below
-a third-party keyboard, which a theme can't color.
+Key colors on, and `--keyboard-theme automatic|black|white|navy|forest|ember|burgundy`
+picks the theme. A theme colours the keys only (every keycap, special keys included, their
+pressed and held states, the key pop-ups and the labels), the same in light and dark; the
+background stays iOS's glass, matching the band iOS draws above a third-party keyboard and
+the globe row below it, and the strip, emoji panel, menus and dictation bar keep the system
+look.
 
 ## Send feedback (`HEXMobile/Feedback/`)
 

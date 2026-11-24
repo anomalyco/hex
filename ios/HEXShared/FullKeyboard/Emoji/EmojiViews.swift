@@ -62,7 +62,8 @@ final class EmojiCell: UICollectionViewCell {
         glyphLayer.contents = glyph?.image
         glyphLayer.contentsScale = max(1, scale)
         accessibilityLabel = name
-        pressedFill = palette.keyPressedFill
+        // The emoji grid is on iOS's glass, so a pressed emoji takes the system's grey.
+        pressedFill = palette.systemPressedFill
         contentView.backgroundColor = isHighlighted ? pressedFill : .clear
         setNeedsLayout()
     }

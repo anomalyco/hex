@@ -1,0 +1,14 @@
+{
+  "format": "hex.words",
+  "version": 1,
+  "replacements": [
+    {"heard": "um", "write": ""},
+    {"heard": "you know", "write": ""},
+    {"heard": "space bar", "write": " "},
+    {"heard": "new paragraph", "write": "\n\n"},
+    {"heard": "tab key", "write": "\t"},
+    {"heard": "sign off", "write": "Best,\r\nRyan"},
+    {"heard": "old mac", "write": "Best,\rRyan"},
+    {"heard": "  Padded   Phrase  ", "write": "  kept as written  "}
+  ]
+}
