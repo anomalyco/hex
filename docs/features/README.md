@@ -3272,6 +3272,9 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   turned 39/43), letters and hints are the same share of the key everywhere and ignore font
 │   scale; a label shrinks to fit (no "…") and a letter clears its corner hint (KeyRows, KeyLabels).
 │   KeyboardPageTest; emulator screenshots at 360 and 411 dp, font scale 1.0/1.3/2.0.
+├── Keyboard > Height -> Extra short, Short, Mid-short, Normal (default), Mid-tall, Tall, Extra
+│   tall: 0.75 to 1.25 of the screen's row step, the gaps kept (Gboard 15.1's Resize spans
+│   0.69 to 1.62); touch targets, key centres and swipe follow the rows. InsertionTest.
 ├── Symbol pages -> Gboard's ?123 and =< pages (Pixel 8 emulator, API 36), the same on every
 │   layout: ?123 draws 1–0, then @ # $ _ & - + ( ) /, then * " ' : ; ! ? between the page switch
 │   and delete, and =< draws ~ ` | • √ π ÷ × § Δ, then £ ¢ € ¥ ^ ° = { } \, then % © ® ™ ✓ [ ]

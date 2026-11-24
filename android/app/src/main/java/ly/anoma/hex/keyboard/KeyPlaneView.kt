@@ -39,7 +39,7 @@ import kotlin.math.roundToInt
  * point of the area types a key (KeyRowLayout); the bottom row stays mounted across page changes.
  * Keys that type as they lift do so in the order the fingers went down ([Rollover]). */
 internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, private val host: KeyboardView,
-                            private val feedback: LetterFeedback) : LinearLayout(context) {
+                            private val feedback: LetterFeedback, size: KeySize) : LinearLayout(context) {
     private companion object {
         /** How far (key pitches) a swipe may go from where it went down and still be a tap that slid (iPhone Hex). */
         const val SLID_TAP_REACH = 1.6
@@ -53,9 +53,10 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private val modifier = caps.modifier
     private val quiet = context.getColor(R.color.quiet)
     private val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-    // Gboard's rows for this screen ([KeyRows]). Each key's touch target is its row's full height (KeyRowLayout), so
-    // the targets, and the keycap centres the typing model and swipe read (geometry()), follow the rows.
-    private val rowSize = KeyRows.of(resources)
+    // Gboard's rows for this screen ([KeyRows]) at Settings › Keyboard › Height. Each key's touch target is its row's
+    // full height (KeyRowLayout), so the targets, and the keycap centres the typing model and swipe read
+    // (geometry()), follow the rows.
+    private val rowSize = size.rows
     private val rowHeight = px(rowSize.pitch)
     private val keyHeight = px(rowSize.key)
     private val insetTop = (rowHeight - keyHeight) / 2

@@ -83,6 +83,14 @@
     <string name="settings_keyboard_layout">键盘布局</string>
     <string name="settings_layout_follows">跟随听写 · %1$s</string>
     <string name="settings_layout_automatic_detail">跟随你的听写语言</string>
+    <string name="settings_keyboard_height">高度</string>
+    <string name="keyboard_height_extra_short">特矮</string>
+    <string name="keyboard_height_short">矮</string>
+    <string name="keyboard_height_mid_short">中矮</string>
+    <string name="keyboard_height_normal">标准</string>
+    <string name="keyboard_height_mid_tall">中高</string>
+    <string name="keyboard_height_tall">高</string>
+    <string name="keyboard_height_extra_tall">特高</string>
     <string name="settings_autocorrect">自动改正</string>
     <string name="settings_autocorrect_detail">按空格时修正拼写错误</string>
     <string name="settings_spatial">按触点自动改正</string>
