@@ -174,6 +174,7 @@ class DictationTrackerTest {
     @Test fun deletingAndDictatingAgainIsARedictation() {
         dictate("Meet at cloud nine.")
         tracker.observe()
+        tracker.keyboardRemoved() // Hex's Delete key takes the whole dictation out of an empty field
         field.delete(field.text.length)
         tracker.observe()
         now += 5_000
@@ -182,9 +183,119 @@ class DictationTrackerTest {
         assertEquals(listOf("Claude"), results.single().pairs.map { it.meant })
     }
 
+    @Test fun undoingADictationInAnEmptyFieldStillAllowsARedictation() {
+        dictate("Meet at cloud nine.")
+        tracker.observe()
+        field.delete(field.text.length)
+        tracker.undone()
+        tracker.observe()
+        now += 5_000
+        dictate("Meet at Claude nine.")
+        assertEquals(listOf(DictationOutcome.Redictated), outcomes())
+    }
+
+    @Test fun aFieldAnAppClearedIsNotARedictation() {
+        dictate("Meet at cloud nine.")
+        tracker.observe()
+        field.delete(field.text.length) // the app clears the field, as a chat app does on send
+        tracker.observe()
+        now += 5_000
+        dictate("Meet at Claude nine.")
+        assertEquals(listOf(DictationOutcome.Kept), outcomes())
+        assertTrue(results.none { it.outcome == DictationOutcome.Redictated })
+    }
+
+    @Test fun aFieldAnAppClearedKeepsTheFixItSaw() {
+        dictate("Meet at cloud nine.")
+        tracker.observe()
+        field.replace(8, 13, "Claude")
+        tracker.observe()
+        field.setCursor(field.text.length)
+        field.delete(field.text.length) // the app clears the field, as a chat app does on send
+        tracker.observe()
+        tracker.finish()
+        assertEquals(listOf(DictationOutcome.Edited), outcomes())
+        assertEquals(listOf("Claude"), results.single().pairs.map { it.meant })
+    }
+
+    @Test fun aFieldAnAppClearedIsJudgedBeforeTheNextMessage() {
+        dictate("Meet at cloud nine.")
+        tracker.observe()
+        field.replace(8, 13, "Claude")
+        tracker.observe()
+        field.setCursor(field.text.length)
+        field.delete(field.text.length) // the app clears the field, as a chat app does on send
+        tracker.observe()
+        field.insert("ok") // the next message must not be read as this dictation's span
+        tracker.observe()
+        tracker.finish()
+        assertEquals(listOf(DictationOutcome.Edited), outcomes())
+        assertEquals(listOf("Claude"), results.single().pairs.map { it.meant })
+    }
+
+    @Test fun sendingTheFieldIsNoRedictation() {
+        dictate("Meet at cloud nine.")
+        tracker.observe()
+        tracker.sent() // Enter, Send, Go, Done or Next: the field goes on without the dictation
+        assertFalse(tracker.isTracking)
+        now += 5_000
+        dictate("Meet at Claude nine.")
+        assertEquals(listOf(DictationOutcome.Kept), outcomes())
+        assertTrue(results.none { it.outcome == DictationOutcome.Redictated })
+    }
+
+    @Test fun sendingTheFieldKeepsTheFixItSaw() {
+        dictate("Meet at cloud nine.")
+        tracker.observe()
+        field.replace(8, 13, "Claude")
+        tracker.observe()
+        tracker.sent()
+        assertEquals(listOf(DictationOutcome.Edited), outcomes())
+        assertEquals(listOf("Claude"), results.single().pairs.map { it.meant })
+        assertFalse(tracker.isTracking)
+    }
+
+    @Test fun anEditAfterTheMinuteIsNotFoldedIn() {
+        dictate("Meet at cloud nine.")
+        tracker.observe()
+        now += 61_000
+        field.replace(8, 13, "Claude")
+        tracker.observe()
+        assertEquals(listOf(DictationOutcome.Kept), outcomes())
+        assertTrue(results.single().pairs.isEmpty())
+    }
+
+    @Test fun aDictationEmptiedAndRetypedAfterTheMinuteIsNotAnEdit() {
+        dictate("Meet at cloud nine.")
+        tracker.observe()
+        field.delete(field.text.length)
+        now += 61_000
+        field.insert("Meet at Claude nine.")
+        tracker.observe()
+        assertEquals(listOf(DictationOutcome.Kept), outcomes())
+        assertTrue(results.single().pairs.isEmpty())
+    }
+
+    @Test fun aDictationEmptiedBeforeTheMinuteAndRetypedAfterItIsNoEdit() {
+        dictate("Meet at cloud nine.")
+        tracker.observe()
+        now += 50_000
+        tracker.keyboardRemoved()
+        field.delete(field.text.length)
+        tracker.observe()
+        now += 15_000
+        field.insert("Meet at Claude nine.") // re-typed after the window, not the dictation coming back
+        tracker.observe()
+        now += 10_000
+        tracker.observe()
+        assertEquals(listOf(DictationOutcome.Deleted), outcomes())
+        assertTrue(results.none { it.outcome == DictationOutcome.Edited })
+    }
+
     @Test fun aDeletionWithoutADictationAfterItIsReportedDeleted() {
         dictate("Meet at noon.")
         tracker.observe()
+        tracker.keyboardRemoved() // Hex's Delete key took it
         field.delete(field.text.length)
         tracker.observe()
         now += 21_000

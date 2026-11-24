@@ -105,6 +105,23 @@ class DictationLearningTest {
         assertTrue(DictationFixes.learned(listOf(record("cloud", "Claude", count = 3), record("cloud", "crowd"))).isEmpty())
     }
 
+    @Test fun anUntouchedDictationContradictsAFixThatWouldHaveChangedIt() {
+        val fix = DictationEdits.classify("see you there", "See you there.", "See you their.")!!
+        assertEquals(listOf(pair("there", "there", "their")), fix.pairs)
+        var records = DictationFixes.merge(emptyList(), fix, 1)
+
+        // Someone who mostly says "there" right and left it alone says the fix was wrong.
+        val untouched = DictationEdits.classify("they went there", "They went there.", "They went there.")!!
+        assertEquals(DictationOutcome.Kept, untouched.outcome)
+        assertEquals(listOf(listOf("they", "went", "there")), untouched.keptHeard)
+        records = DictationFixes.merge(records, untouched, 2)
+        assertEquals(1, records.single().contradictions)
+
+        records = DictationFixes.merge(records, fix, 3)
+        assertEquals(2, records.single().count)
+        assertTrue("a dictation you left alone is no fix", DictationFixes.learned(records).isEmpty())
+    }
+
     @Test fun aCapitalYouUsedIsKeptAsTheSpelling() {
         val learned = DictationFixes.learned(listOf(record("cloud", "claude"), record("cloud", "Claude")))
         assertEquals("Claude", learned.single().meant)
@@ -131,6 +148,17 @@ class DictationLearningTest {
         val fix = record("cloud", "Claude", count = 2)
         assertEquals(listOf(fix), DictationFixes.active(listOf(fix), emptySet()))
         assertTrue(DictationFixes.active(listOf(fix), setOf(fix.id)).isEmpty())
+    }
+
+    @Test fun aFixSwitchedOffInSettingsTakesNoContradictions() {
+        val fix = record("there", "their", count = 2)
+        val kept = edited(kept = listOf(listOf("there")), words = 4)
+        assertEquals(1, DictationFixes.merge(listOf(fix), kept, 1).single().contradictions)
+        // Off, the fix keeps its counts and stays listed, so untouched dictations never retire it.
+        val off = DictationFixes.merge(listOf(fix), kept, 1, setOf(fix.id))
+        assertEquals(0, off.single().contradictions)
+        assertEquals(2, off.single().count)
+        assertEquals(1, DictationFixes.learned(off).size)
     }
 
     @Test fun mergingCountsPairsAndContradictsFixesYouKeptOrTookBack() {
@@ -245,6 +273,17 @@ class DictationLearningTest {
         assertEquals(listOf("Claude", "Hex"), DictationFixes.hints(emptyList(), fixes))
         assertEquals(listOf("OpenCode"), DictationFixes.hints(listOf("OpenCode"), emptyList()))
         assertEquals(listOf("Hex"), DictationFixes.hints(listOf("H"), listOf(DictationFix("hacks", "Hex", 2, 0))))
+    }
+
+    @Test fun learnedHintsShareTheVocabularyLimits() {
+        val longTerm = "a".repeat(VocabularySpelling.maxTermLength + 1)
+        val fixes = listOf(DictationFix("cloud", longTerm, 2, 0), DictationFix("hacks", "Hex", 2, 0))
+        assertEquals(listOf("OpenCode", "Hex"), DictationFixes.hints(listOf("OpenCode", longTerm), fixes))
+        val hints = DictationFixes.hints((0 until 99).map { "term" + it },
+            listOf(DictationFix("cloud", "Claude", 2, 0)))
+        assertEquals(VocabularySpelling.maxTermCount, hints.size)
+        assertEquals("term0", hints.first())
+        assertEquals("Claude", hints.last())
     }
 
     @Test fun hintsAreCappedAtTheVocabularyLimit() {

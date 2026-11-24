@@ -115,7 +115,7 @@
     <string name="fast_english_no_space">存储空间不足</string>
     <string name="fast_english_in_use">英语使用更快的听写（实验室）。</string>
     <string name="learn_fixes">从我的修改中学习</string>
-    <string name="learn_fixes_detail">学习你听写后随即改正的词。内容只留在这台手机上，且仅记录词对和次数。</string>
+    <string name="learn_fixes_detail">学习你听写后随即改正的词。内容只留在这台手机上，且仅记录词对、次数和每条修正最近一次的时间。</string>
     <string name="learn_fixes_count">已改正 %1$d 次</string>
     <string name="learn_fixes_empty">还没有学到内容。同一处改正两次后，Hex 就会记住。</string>
     <string name="learn_fixes_delete">删除 Hex 学到的内容</string>

@@ -25,6 +25,8 @@ internal class DictationTracker(
         var latest = inserted
         var located = false
         var emptiedAt: Long? = null
+        var cleared = false
+        var byPerson = false
         var undone = false
     }
 
@@ -63,12 +65,19 @@ internal class DictationTracker(
             emitRemoval(pending.first)
         }
         val current = tracked ?: return
-        if (!update(current)) { tracked = null; settle(current, at); return }
-        val emptiedAt = current.emptiedAt
-        when {
-            emptiedAt != null && at - emptiedAt > redictationWindow -> { tracked = null; emitRemoval(current) }
-            emptiedAt == null && at - current.insertedAt >= editWindow -> { tracked = null; settle(current, at) }
+        // The window ends before the text is read again: a dictation is judged by what it looked like while
+        // it was still being followed, never by edits made after its minute.
+        if (current.emptiedAt == null && at - current.insertedAt >= editWindow) {
+            tracked = null
+            settle(current, at)
+            return
         }
+        if (!update(current)) { tracked = null; settle(current, at); return }
+        // An app that cleared the field is judged from the last text it showed now, before the next message
+        // typed into that field can be taken as this dictation's span.
+        if (current.cleared) { tracked = null; settle(current, at); return }
+        val emptiedAt = current.emptiedAt
+        if (emptiedAt != null && at - emptiedAt > redictationWindow) { tracked = null; settle(current, at) }
     }
 
     /** A new dictation is starting: report the one before it from the text as it is now. */
@@ -96,9 +105,31 @@ internal class DictationTracker(
         current.emptiedAt = now()
     }
 
+    /** Hex's own Delete took text (the key, its held repeat, a delete slide or a swipe): the person removed
+     * it, so a field that then empties was deleted by them and the next dictation is a redictation. */
+    fun keyboardRemoved() {
+        tracked?.byPerson = true
+    }
+
+    /** The person sent the field (Enter, Send, Go, Done, Next): the dictation is judged from the last text it
+     * showed, never held for the next dictation to be judged against. */
+    fun sent() {
+        val current = tracked
+        tracked = null
+        removed = null
+        if (current == null || !current.located) return
+        if (DictationText.words(current.latest).isNotEmpty())
+            DictationEdits.classify(current.heard, current.inserted, current.latest, current.undone)?.let(onResult)
+        else emitRemoval(current)
+    }
+
     /** Updates the dictation's place from the text around the cursor; false when it can no longer be followed
      * and had been seen before. Until it is first seen the host may simply be behind, so it keeps waiting. */
     private fun update(current: Tracked): Boolean {
+        // Past its minute the dictation takes no new span: the text there now is not what it was, even when
+        // the field was emptied and filled again since.
+        val expired = now() - current.insertedAt >= editWindow
+        if (expired && current.emptiedAt == null) return true
         // The whole dictation may sit on either side of the cursor, edited a little; read far enough on both
         // sides for its text and anchors, so a cursor inside it never cuts a word at the window's edge.
         val reach = current.inserted.length + anchorLength + 200
@@ -113,8 +144,12 @@ internal class DictationTracker(
         val endEdge = after != null && currentAfter.length < reach
         if (currentBefore.isEmpty() && currentAfter.isEmpty()) {
             if (!current.located) return true
-            current.latest = ""
             current.emptiedAt = current.emptiedAt ?: now()
+            // Hex's own Delete or Undo emptied it, so the person removed it and a redictation may follow. An app
+            // that clears the whole field (its own send button) is no deletion by them: the last text it showed is
+            // still judged when this settles, and no later dictation is compared against it.
+            current.cleared = !current.undone && !current.byPerson
+            if (!current.cleared) current.latest = ""
             return true
         }
         val text = currentBefore + currentAfter
@@ -148,9 +183,13 @@ internal class DictationTracker(
         val span = text.substring(bestStart, bestEnd)
         val hasWords = DictationText.words(span).isNotEmpty()
         if (hasWords) {
+            // Text that appeared after the window is not this dictation coming back.
+            if (expired) return true
             current.latest = span
             current.located = true
             current.emptiedAt = null
+            current.cleared = false
+            current.byPerson = false
             current.undone = false
         } else if (current.located) {
             current.latest = span
@@ -165,6 +204,9 @@ internal class DictationTracker(
             DictationEdits.classify(current.heard, current.inserted, current.latest, current.undone)?.let(onResult)
             return
         }
+        // A field cleared as a whole by something other than the person is no deletion by them, so it is
+        // reported at once and never held for the next dictation to be judged against.
+        if (current.cleared) { emitRemoval(current); return }
         val emptiedAt = current.emptiedAt ?: at
         if (at - emptiedAt > redictationWindow) emitRemoval(current) else removed = current to emptiedAt
     }

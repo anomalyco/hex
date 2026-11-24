@@ -125,9 +125,10 @@
     <string name="fast_english_no_space">Not enough storage</string>
     <!-- Dictation › Speech model, while Faster English dictation is on and downloaded. -->
     <string name="fast_english_in_use">English uses faster dictation (Labs).</string>
-    <!-- Labs › Dictation › Learn from my fixes: word pairs and counts only, never the dictation. -->
+    <!-- Labs › Dictation › Learn from my fixes: word pairs, counts and when each fix was last made, never
+         the dictation. -->
     <string name="learn_fixes">Learn from my fixes</string>
-    <string name="learn_fixes_detail">Learns from words you correct right after dictating. Stays on this phone; only word pairs and counts are kept.</string>
+    <string name="learn_fixes_detail">Learns from words you correct right after dictating. Stays on this phone; only word pairs, counts and when you last made each fix are kept.</string>
     <string name="learn_fixes_count">Corrected %1$d times</string>
     <string name="learn_fixes_empty">Nothing learned yet. Fix the same word twice and Hex remembers it.</string>
     <string name="learn_fixes_delete">Delete what Hex learned</string>
