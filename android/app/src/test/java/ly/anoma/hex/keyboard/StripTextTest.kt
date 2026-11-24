@@ -260,6 +260,23 @@ class StripTextTest {
         assertTrue(lastDictationLines(DictationTimes(DictationPlace.Home, 5_000, 4_800, ModelAtTick.Loaded, 0, true, 20, 25, 2_025,
             2_030, 7_000, timings, RanOn.LowMemory, 4)).contains(
             "4.8 s kept; standard dictation, as the phone was low on memory for faster English dictation; 4 threads kept ready on cpu 4-7, encoder window full;"))
+        // A prompted decode that repeated itself, decoded again without the words: both decodes' times, then the second's.
+        assertEquals("""
+            Last dictation (durations only, held in memory until Hex's process ends; a dictation discarded with ✕ isn't counted; nothing said or typed):
+              in the keyboard, 3.0 s recorded, 2.2 s kept; standard dictation; 4 threads kept ready on any core, encoder window 320; model already loaded
+              after ✓: recording stopped 40 ms, decode started 41 ms, decode finished 3421 ms, text inserted 3433 ms
+              decode 3380 ms; encoder 2150 ms, decoder 1230 ms, prompt 0 ms, other 0 ms; processor 9800 ms, 2.9× the decode's wall time
+              repeated text, decoded again without your words: 1180 ms of the decode
+
+        """.trimIndent(), lastDictationLines(DictationTimes(DictationPlace.Keyboard, 3_000, 2_200, ModelAtTick.Loaded, 0,
+            true, 40, 41, 3_421, 3_433, 9_800, longArrayOf(40_000, 2_150_000, 1_100_000, 90_000, 0, 320, 4, 0, 1_180_000, 1))))
+        // Decoded again as the prompted decode wrote nothing, or only the prompt's words.
+        assertTrue(lastDictationLines(DictationTimes(DictationPlace.Home, 2_000, 1_400, ModelAtTick.Loaded, 0, true, 20, 21, 1_321,
+            1_330, 3_900, longArrayOf(10_000, 1_000_000, 90_000, 20_000, 0, 320, 4, 0, 610_000, 2))).endsWith(
+            "  no text, decoded again without your words: 610 ms of the decode\n"))
+        assertTrue(lastDictationLines(DictationTimes(DictationPlace.Home, 2_000, 1_400, ModelAtTick.Loaded, 0, true, 20, 21, 1_321,
+            1_330, 3_900, longArrayOf(10_000, 1_000_000, 90_000, 20_000, 0, 320, 4, 0, 610_000, 3))).endsWith(
+            "  only your words, decoded again without your words: 610 ms of the decode\n"))
         // Where a dictation's threads were kept, in the words the report uses: no pool, a pool on any core, a pinned one,
         // and a report from a build before that slot existed.
         assertEquals("started for every graph", poolWords(-1))

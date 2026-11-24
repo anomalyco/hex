@@ -1,5 +1,6 @@
 // Android/arm64 benchmark. Corpus labels are used only for choosing the input language.
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -8,6 +9,7 @@
 #include <ctime>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <sys/resource.h>
 #include <vector>
@@ -22,8 +24,37 @@
 static double ms(clockid_t clock) {
     timespec t{}; clock_gettime(clock, &t); return t.tv_sec*1000.0+t.tv_nsec/1e6;
 }
+#if !defined(PARAKEET) && !defined(TRANSCRIBE)
+// hexspeech.cpp's repeated(): no end-of-text, and the last 32 tokens fail Whisper's entropy test.
+static bool repeated(whisper_context *ctx, whisper_state *state, float thold) {
+    std::vector<whisper_token> t;
+    for (int i=0;i<whisper_full_n_segments_from_state(state);i++)
+        for (int j=0;j<whisper_full_n_tokens_from_state(state,i);j++) t.push_back(whisper_full_get_token_id_from_state(state,i,j));
+    if (t.size()<=32 || t.back()==whisper_token_eot(ctx)) return false;
+    std::vector<whisper_token> tail(t.end()-32,t.end()); std::sort(tail.begin(),tail.end());
+    double e=0;
+    for (size_t i=0;i<tail.size();) { size_t j=i; while(j<tail.size()&&tail[j]==tail[i]) j++; double p=double(j-i)/tail.size(); e-=p*std::log(p); i=j; }
+    return e<thold;
+}
+// hexspeech.cpp's spoken() and againWhy(): repeated, no words, or only the prompt's two or more terms.
+static std::string spoken(const std::string &text) {
+    std::string w; bool gap=false;
+    for (const unsigned char c:text) {
+        if (c<0x80 && !std::isalnum(c)) { gap=true; continue; }
+        if (gap && !w.empty()) w+=' ';
+        gap=false; w+=static_cast<char>(c<0x80?std::tolower(c):c);
+    }
+    return w;
+}
+static bool again(whisper_context *ctx, whisper_state *state, const std::string &prompt, float thold) {
+    if (repeated(ctx,state,thold)) return true;
+    std::string text; for (int i=0;i<whisper_full_n_segments_from_state(state);i++) text+=whisper_full_get_segment_text_from_state(state,i);
+    const std::string w=spoken(text);
+    return w.empty() || (prompt.find(',')!=std::string::npos && w==spoken(prompt));
+}
+#endif
 int main(int argc, char **argv) {
-    if (argc != 4) return 2; // model path, thread count, TSV with id + language
+    if (argc != 4) return 2; // model path, thread count, list: id, language and (Whisper) an optional prompt per line
     std::string model=argv[1]; int threads=atoi(argv[2]);
     auto start=ms(CLOCK_MONOTONIC);
 #ifdef PARAKEET
@@ -46,8 +77,13 @@ int main(int argc, char **argv) {
 #endif
     if (!ctx) return 3;
     auto load=ms(CLOCK_MONOTONIC)-start;
-    std::ifstream list(argv[3]); std::string id,lang;
-    while(list>>id>>lang) {
+    std::ifstream list(argv[3]); std::string line;
+    while(std::getline(list,line)) {
+        // The rest of the line after id and language is the prompt, the custom vocabulary or learned words as the app
+        // joins them ("Sarah, stadium"); none on the corpus and long lists.
+        std::istringstream fields(line); std::string id,lang,prompt;
+        if (!(fields>>id>>lang)) continue;
+        std::getline(fields>>std::ws,prompt);
         std::ifstream f("wavs/"+id+".wav",std::ios::binary);
         char hdr[44]; f.read(hdr,44);
         if (!f || std::memcmp(hdr,"RIFF",4) || std::memcmp(hdr+8,"WAVEfmt ",8) ||
@@ -77,6 +113,7 @@ int main(int argc, char **argv) {
         p.n_threads=threads;p.language=lang.c_str();p.no_context=true;p.no_timestamps=true;p.suppress_nst=true;
         if (getenv("HEX_APP") && audio.size()>30*16000) p.no_timestamps=false; // the app's long-audio decode
         p.print_progress=p.print_special=p.print_timestamps=p.print_realtime=false;
+        if (!prompt.empty()) p.initial_prompt=prompt.c_str();
         // HEX_APP: the downloaded model exactly as app/src/main/cpp/hexspeech.cpp decodes it (the window sized to the
         // speech: up to 8 s plus 192 frames, at most 512, longer plus 640 until the full 1500; the token cap, one retry
         // at 0.2, a fresh state per clip). HEX_APP=full keeps Whisper's full window past 8 s, for the long-clip check.
@@ -90,6 +127,12 @@ int main(int argc, char **argv) {
         }
         whisper_state *state=app?whisper_init_state(ctx):nullptr;
         if (app?whisper_full_with_state(ctx,state,p,audio.data(),count)!=0:whisper_full(ctx,p,audio.data(),count)!=0) return 6;
+        // The app decodes a prompted clip up to 30 s that repeated itself, wrote nothing or only the prompt again without the
+        // prompt, in a fresh state, and uses that (hexspeech.cpp); HEX_NO_GUARD=1 is the decode before, which kept them.
+        if (app && p.initial_prompt && p.no_timestamps && !getenv("HEX_NO_GUARD") && again(ctx,state,prompt,p.entropy_thold)) {
+            whisper_free_state(state); state=whisper_init_state(ctx); p.initial_prompt=nullptr;
+            if (!state || whisper_full_with_state(ctx,state,p,audio.data(),count)!=0) return 6;
+        }
         if (app) { for(int i=0;i<whisper_full_n_segments_from_state(state);i++) text+=whisper_full_get_segment_text_from_state(state,i); whisper_free_state(state); }
         else for(int i=0;i<whisper_full_n_segments(ctx);i++) text+=whisper_full_get_segment_text(ctx,i);
 #endif

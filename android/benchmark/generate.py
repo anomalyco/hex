@@ -7,6 +7,9 @@ dest.mkdir(parents=True, exist_ok=True)
 rate = 16000
 with open(Path(__file__).with_name("corpus.tsv"), encoding="utf8") as src:
     rows = list(csv.DictReader(src, delimiter="\t"))
+# score.py's prompted clips (README, A prompt on a short clip), made as the corpus's clean clips are, after them.
+from score import PROMPTED
+rows += [{"id": id, "voice": voice, "wpm": wpm, "snr_db": "clean", "reference": said} for id, _, voice, wpm, said, _ in PROMPTED]
 for row in rows:
     with tempfile.TemporaryDirectory(dir=dest) as tmp:
         aiff = Path(tmp) / "voice.aiff"

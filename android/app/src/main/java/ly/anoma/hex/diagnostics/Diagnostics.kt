@@ -564,6 +564,11 @@ internal fun lastDictationLines(t: DictationTimes?): String = buildString {
     append("; processor ").append(if (t.cpuMs < 0) "not readable" else "${t.cpuMs} ms")
     if (t.cpuMs >= 0 && wall > 0) append(String.format(Locale.ROOT, ", %.1f× the decode's wall time", t.cpuMs.toDouble() / wall))
     append('\n')
+    // hexspeech.cpp decoded it again without the custom vocabulary or learned words (its againWhy).
+    if (timings != null && timings.size >= 10 && timings[8] > 0) {
+        append("  ").append(when (timings[9]) { 1L -> "repeated text"; 2L -> "no text"; 3L -> "only your words"; else -> "text unusable" })
+        append(", decoded again without your words: ${timings[8] / 1000} ms of the decode\n")
+    }
 }
 
 /** The text the page shows and Copy copies. */
