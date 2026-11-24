@@ -367,7 +367,7 @@ final class KeyboardViewModel: ObservableObject {
     var onDismissTranslationNote: (() -> Void)?
     var onPasteDictation: (() -> Void)?
     /// The dictation bar's light haptic for each press; the keyboard allows it with Full
-    /// Access and Experiments › Haptics, as the full keyboard's keys.
+    /// Access and Settings › Keyboard › Haptics, as the full keyboard's keys.
     var onKeyFeedback: (() -> Void)?
     weak var inputViewController: UIInputViewController?
 

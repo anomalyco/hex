@@ -1,7 +1,7 @@
 import PhotosUI
 import SwiftUI
 
-/// Home's and Settings › Experiments' Send feedback row: draws Hex's own window first, then
+/// Home's and Settings › Labs' Send feedback row: draws Hex's own window first, then
 /// opens the form with that picture. Absent in a build without a report key.
 struct FeedbackRow: View {
     /// Where it was opened, for the team (`metadata.screen`).

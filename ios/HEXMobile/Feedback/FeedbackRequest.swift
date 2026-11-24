@@ -103,7 +103,7 @@ nonisolated struct FeedbackContext: Equatable, Sendable {
     var os: String
     var model: String
     var locale: String
-    /// Where the form was opened ("Home", "Settings › Experiments").
+    /// Where the form was opened ("Home", "Settings › Labs").
     var screen: String
     /// For the team, internal names: never shown in the form.
     var dictationLanguage: String?

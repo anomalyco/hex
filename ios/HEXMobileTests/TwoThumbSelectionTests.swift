@@ -2,7 +2,7 @@ import UIKit
 import XCTest
 @testable import HEX
 
-/// Settings › Experiments › Two-thumb selection: while the space bar is the trackpad, a second
+/// Settings › Labs › Two-thumb selection: while the space bar is the trackpad, a second
 /// finger picks a range the strip shows, and Delete, Cut, Copy, Dictate or Cancel act on it.
 /// Off, a second finger is ignored as it always was.
 @MainActor

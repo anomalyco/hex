@@ -113,7 +113,7 @@ targets:
       # the iPhone's language where Hex is translated.
       - HEXMobile/Localizable.xcstrings
     dependencies:
-      # Experiments › Speech model in keyboard: Parakeet in the keyboard (KeyboardParakeet).
+      # Dictation › Speech model in keyboard: Parakeet in the keyboard (KeyboardParakeet).
       - package: FluidAudio
     info:
       path: HEXKeyboard/Info.plist

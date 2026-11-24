@@ -2,7 +2,7 @@ import UIKit
 import XCTest
 @testable import HEX
 
-/// Settings › Experiments › ABC under the emoji key: the emoji panel's ABC takes the emoji
+/// Settings › Labs › ABC under the emoji key: the emoji panel's ABC takes the emoji
 /// key's x and width, in the bar's row, so switching back to the letters needs no thumb move.
 /// Off, and with no emoji key behind the panel, ABC stays at the bar's leading end.
 @MainActor

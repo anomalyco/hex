@@ -322,7 +322,7 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(target.text, "got ")
     }
 
-    /// Settings › Experiments › Join the keyboard when unfolded: on, the Duo unfolded upright
+    /// Settings › Labs › Join the keyboard when unfolded: on, the Duo unfolded upright
     /// rebuilds as one keyboard rather than the split one, and off splits it again.
     func testJoiningTheUnfoldedKeyboardRebuildsOneLayout() {
         engine.posture = .unfoldedWide

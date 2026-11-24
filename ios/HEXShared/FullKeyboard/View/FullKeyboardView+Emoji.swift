@@ -134,7 +134,7 @@ extension FullKeyboardView {
         makeEmojiUsage().record(library.entries[entry].emoji)
     }
 
-    // MARK: - Shortcodes (Settings › Experiments; EmojiShortcode)
+    // MARK: - Shortcodes (Settings › Labs; EmojiShortcode)
 
     /// A shortcode, or a typed word's emoji, works where the finished word's emoji does: a text
     /// field that takes emoji (the emoji key shows), with autocorrect on and no secure entry,

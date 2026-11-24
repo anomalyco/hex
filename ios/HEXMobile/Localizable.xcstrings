@@ -1366,16 +1366,6 @@
         }
       }
     },
-    "Experiments" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "实验"
-          }
-        }
-      }
-    },
     "Failed" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1815,6 +1805,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "键盘  ›  Hex Keyboard  ›  允许完全访问"
+          }
+        }
+      }
+    },
+    "Labs" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实验室"
           }
         }
       }

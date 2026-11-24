@@ -1,6 +1,6 @@
 import Foundation
 
-/// Settings › Experiments › Emoji shortcodes: the token right before the cursor and the emoji
+/// Settings › Labs › Emoji shortcodes: the token right before the cursor and the emoji
 /// it names. A token is a colon and a name (":pizza") after whitespace or at the start of the
 /// field, so a colon inside a word ("abc:pizza") is not one. Matching reads the emoji index's
 /// own words (`EmojiLibrary`, built by scripts/build-emoji-data.py from Unicode's names and

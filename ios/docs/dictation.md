@@ -331,7 +331,7 @@ the App Group, or the keyboard's own Library for an unsigned build) from the fir
 `ParakeetLiveTranscriber` (the audio so far again about once a second, a 20 s window) is
 written for when the speech model's own words should show, and not used yet.
 
-## Apple Intelligence cleanup (Settings › Experiments › Clean up with Apple Intelligence, iOS 26+)
+## Apple Intelligence cleanup (Settings › Labs › Clean up with Apple Intelligence, iOS 26+)
 
 Off by default. For every style but `Verbatim`,
 one on-device FoundationModels pass before formatting fixes clearly
@@ -711,7 +711,7 @@ Spanish, German ones (äh, ähm, öhm) in German, and none elsewhere (Norwegian
 "er" is "is", Portuguese "um" is "a"); translation's source is the dictation
 language rather than a guess. Custom vocabulary works in any language.
 
-## Voice isolation (Settings › Experiments › Voice isolation)
+## Voice isolation (Settings › Labs › Voice isolation)
 
 Off by default
 (`experiments.voiceIsolation`, App Group). While on, the app records in
@@ -724,7 +724,7 @@ profile. With it off, both record exactly as before. Not verified on a
 device: that Control Center actually offers Voice Isolation for Hex, and how
 the mode changes a recording's level.
 
-## Two-language dictation (Settings › Experiments › Two-language dictation, iOS 26+)
+## Two-language dictation (Settings › Labs › Two-language dictation, iOS 26+)
 
 Off by default (`experiments.twoLanguageDictation`, App Group). While on, and while
 dictation uses Apple Speech's `SpeechTranscriber`, one recording is read twice: in the

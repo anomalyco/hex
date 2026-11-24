@@ -1,6 +1,6 @@
 import Foundation
 
-/// Experiments › Greeklish: Greek dictation in Latin letters ("kalimera ti kaneis"), so it reads
+/// Labs › Greeklish: Greek dictation in Latin letters ("kalimera ti kaneis"), so it reads
 /// the way people text Greek. Apple's Greek speech model writes Greek in its own alphabet, so
 /// each Greek word is transliterated by rule: accents and diaeresis go first (\u{0301} tonos,
 /// \u{0308} diaeresis, and the polytonic marks), then the digraphs people write as one sound

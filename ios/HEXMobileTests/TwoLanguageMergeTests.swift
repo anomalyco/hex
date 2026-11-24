@@ -4,7 +4,7 @@ import Speech
 import XCTest
 @testable import HEX
 
-/// Experiments › Two-language dictation's merge: two readings of one recording, the more
+/// Labs › Two-language dictation's merge: two readings of one recording, the more
 /// confident reading for each piece, with a language change costing enough that one doubtful
 /// word never flips it, and the primary's own text whenever the second reading adds nothing.
 final class TwoLanguageMergeTests: XCTestCase {

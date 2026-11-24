@@ -38,7 +38,7 @@ nonisolated enum AccentCatalog {
         return uppercase ? list.map(upper) : list
     }
 
-    /// Settings › Experiments › Quick accents: the accent a held letter picks first, the
+    /// Settings › Labs › Quick accents: the accent a held letter picks first, the
     /// language's most-used one where it has a table for it (`quickAccentPrimaries`, Spanish
     /// "o" → "ó"), else the first variant after the key's own in its list (German "a" → "à").
     /// Capitals use the callout's own mapping, and a preferred accent the key doesn't hold falls

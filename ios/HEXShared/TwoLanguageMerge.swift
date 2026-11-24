@@ -50,7 +50,7 @@ nonisolated struct TwoLanguageMerged: Equatable, Sendable {
     let usedSecondary: Bool
 }
 
-/// Experiments › Two-language dictation's merge: two readings of one recording, piece by
+/// Labs › Two-language dictation's merge: two readings of one recording, piece by
 /// piece, whichever is more confident. Pure and free of Speech so it can be unit-tested;
 /// `AppleSpeechTwoLanguage` extracts the words from Apple Speech's results.
 nonisolated enum TwoLanguageMerger {

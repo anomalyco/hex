@@ -242,7 +242,7 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(engine.shift.state, .locked)
     }
 
-    /// Settings › Experiments › Dvorak punctuation keys: on English's Dvorak letters the three
+    /// Settings › Labs › Dvorak punctuation keys: on English's Dvorak letters the three
     /// keys type `<`, `>` and `:` while shift is on, their keycaps and pop-ups read so, one-shot
     /// shift turns off after one as it does for a letter, and caps lock keeps them shifted.
     func testDvorakPunctuationTypesShiftedSymbols() throws {
@@ -293,7 +293,7 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertNotEqual(try XCTUnwrap(AdaptiveTouchGeometry(layout: engine.layout)).key, punctuation)
     }
 
-    /// Settings › Experiments › Dvorak punctuation keys: a URL or email field already has its own
+    /// Settings › Labs › Dvorak punctuation keys: a URL or email field already has its own
     /// `.` key on the bottom row, so its Dvorak row 1 stays Apple's rather than have two keys
     /// that type the same character, while the semicolon still joins the space bar.
     func testDvorakPunctuationKeepsFieldsOwnPeriodKey() throws {
@@ -312,7 +312,7 @@ final class FullKeyboardEngineTests: XCTestCase {
         }
     }
 
-    /// Settings › Experiments › Dvorak punctuation keys: auto-capitalization's shift types no
+    /// Settings › Labs › Dvorak punctuation keys: auto-capitalization's shift types no
     /// symbols — a comma at a sentence's start stays a comma, and its keycap reads so — while a
     /// shift you press, or caps lock, types `<`, and the semicolon `:`.
     func testDvorakPunctuationFollowsAUserShiftNotAutoCapitalization() throws {
@@ -354,7 +354,7 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(target.text, ",ok. ,<:")
     }
 
-    /// Settings › Experiments › Comma and period keys: the flag rebuilds the layout with a comma
+    /// Settings › Labs › Comma and period keys: the flag rebuilds the layout with a comma
     /// just left of the space bar and a period just right of it, which type themselves (shift
     /// leaves them as they are), and only on an iPhone's letters page in a text field.
     func testCommaAndPeriodKeysTypeByTheSpaceBar() throws {
@@ -614,7 +614,7 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(engine.shift.state, .off)
     }
 
-    /// Settings › Experiments › Quick accents: a held letter's callout opens on its language's
+    /// Settings › Labs › Quick accents: a held letter's callout opens on its language's
     /// preferred accent (Spanish O's ó, though the callout lists ö first), so letting go where
     /// it opened types it, sliding into another cell still picks that one, and another key
     /// going down commits the preselection too. Letting go far below still cancels. Off, the

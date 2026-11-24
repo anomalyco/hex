@@ -9,7 +9,7 @@ import Foundation
 /// where the keyboard can use it (`KeyboardParakeetDownload.hold`).
 nonisolated struct KeyboardParakeetSettings {
     static let enabledKey = "experiments.keyboardParakeet"
-    /// What the keyboard last said about it (`KeyboardState`), for the app's Experiments row.
+    /// What the keyboard last said about it (`KeyboardState`), for the app's Speech model in keyboard row.
     static let keyboardStateKey = "experiments.keyboardParakeet.keyboardState"
     static let keyboardStateAtKey = "experiments.keyboardParakeet.keyboardStateAt"
     /// Whether that state is the multilingual model's (Parakeet Ultra) rather than V2's.

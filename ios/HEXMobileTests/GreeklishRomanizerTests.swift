@@ -1,7 +1,7 @@
 import XCTest
 @testable import HEX
 
-/// Experiments › Greeklish: Greek dictation in Latin letters, by rule rather than a table.
+/// Labs › Greeklish: Greek dictation in Latin letters, by rule rather than a table.
 final class GreeklishRomanizerTests: XCTestCase {
     func testDigraphs() {
         let cases = [

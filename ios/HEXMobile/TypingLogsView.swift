@@ -136,7 +136,7 @@ enum ShareSheet {
     }
 }
 
-/// `--snap-state experiments` (Settings › Experiments) and `--snap-state typing-logs`
+/// `--snap-state experiments` (Settings › Labs) and `--snap-state typing-logs`
 /// (the Typing logs screen) on Simulator; pass `--experiment-typing-logs` to show it on.
 struct ExperimentsSnapshotStage: View {
     let scene: String

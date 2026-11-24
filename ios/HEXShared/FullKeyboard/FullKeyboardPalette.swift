@@ -11,7 +11,7 @@ struct FullKeyboardPalette: Equatable {
     /// Light or dark, as iOS's glass behind the keyboard is: everything drawn on the glass
     /// follows it, with or without a theme.
     let isDark: Bool
-    /// Settings › Experiments › Key colors: the keys' own colours. Automatic keeps
+    /// Settings › Labs › Key colors: the keys' own colours. Automatic keeps
     /// iOS's light or dark keys; a theme changes the keys and nothing on the glass around them.
     let theme: KeyboardTheme
 

@@ -1605,7 +1605,7 @@ final class SpokenCleanupRulesTests: XCTestCase {
     }
 }
 
-/// Experiments › Hinglish: Hindi dictation in Latin letters, as people text it. The Devanagari
+/// Labs › Hinglish: Hindi dictation in Latin letters, as people text it. The Devanagari
 /// inputs are what `DictationTranscriber` wrote for spoken Hinglish (macOS 27.2, Lekha voice);
 /// the Latin ones are `SpeechTranscriber`'s.
 final class HinglishRomanizerTests: XCTestCase {
