@@ -327,12 +327,15 @@ folder while Labs › Install agent skill from Annotate is on.
 A CLI-started meeting is the same recording the menu bar starts: the menu-bar
 state, the recording capsule, and Stop & Transcribe all apply to it.
 `meetings record` replies once the recording has started (or after 8 s), and
-`meetings stop` replies once transcription has begun (or after 8 s). A stop
-leaves the recorder finishing that meeting before it takes another: until
-then `meeting.state` reads `stopping` and `record` is refused with `busy`
-(exit 1) instead of answering "Already recording". Once `meeting.state` is
-`transcribing`, `record` is refused the same way, naming the transcription;
-only `idle` starts a new recording.
+`meetings stop` replies once the recorder is transcribing or has discarded a
+recording with no speech (a failure answers its error); after 8 s it answers
+anyway, and `meeting.state` may still read `stopping`. A stop leaves the
+recorder finishing that meeting before it takes another — including a stop
+asked while it is still starting — so until then `meeting.state` reads
+`stopping` and `record` is refused with `busy` (exit 1), never "Already
+recording" or "already starting". Once `meeting.state` is `transcribing`,
+`record` is refused the same way, naming the transcription; only `idle`
+starts a new recording.
 
 `meetings delete <id>` is the Meetings pane's Delete, carried out by the
 running Hex on every OS: it moves the meeting's exported Markdown, any
@@ -491,8 +494,9 @@ listener.shortcuts  Wayland portal only: [{"name": "Dictation", "trigger": "Supe
 capture.state       idle | recording | transcribing | unknown (the listener didn't answer or stopped)
 capture.recording   dictation | service | null
 meeting.state       idle | starting | recording | stopping | transcribing
-                    (stopping: stop was asked and the recorder is closing that
-                    meeting; a new recording can start once it reads idle)
+                    (stopping: stop was asked and the recorder is finishing that
+                    meeting, or the one it was still starting; a new recording
+                    can start once it reads idle)
 model               the saved selection; installed is about that model
 model.backend       {"kind", "device", "crash_fallback"} for the model actually loaded, or null before a
                     load and once it unloads; kind is cpu, vulkan, cuda, rocm, metal, or another backend's

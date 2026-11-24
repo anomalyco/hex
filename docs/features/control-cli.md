@@ -92,12 +92,15 @@ Agent or terminal                                  // control.cli; every OS
 ├── hex meetings record [--title] | stop | copy-last | delete <id>
 │   ├── Meetings off -> feature-off; recording shows in the menu bar and HUD
 │   │   exactly like a menu-bar recording
-│   ├── record while the last meeting stops -> busy, exit 1: the recorder
-│   │   finishes that one before it takes another, so "Already recording"
-│   │   would hide that nothing started; transcribing answers busy too
+│   ├── record while the last meeting stops (or was still starting) ->
+│   │   busy, exit 1: the recorder finishes that one before it takes
+│   │   another, so "Already recording" would hide that nothing started;
+│   │   transcribing answers busy too
 │   ├── stop while it already stops -> unchanged, exit 0; nothing new starts
-│   ├── stop replies once transcription has begun (or after 8 s), never on
-│   │   the stop request alone; status then reads transcribing
+│   ├── stop replies once the recorder is transcribing, or discarded a
+│   │   recording with no speech (a failure answers its error), never on the
+│   │   stop request alone; after 8 s it answers anyway, and status may
+│   │   still read stopping
 │   ├── No meetings cancel: Hex cannot discard a recording
 │   └── delete -> the pane's Delete for the exact `meetings list --json` id:
 │       Markdown, tracked notes file, then recording folder to the Trash,
@@ -257,7 +260,7 @@ printing start), and runtime `unsupported` replies; `control::meetings::tests`
 cover the record/stop decision from a mirrored state (a recording whose stop
 is under way refuses `record` with `busy` and answers `stop` unchanged, so
 the CLI never reads a refusal as `ok`) and the `stopping` status state;
-`meeting::runtime::tests::a_stop_under_way_holds_the_recording_until_transcribing`
+`meeting::runtime::tests::a_stop_moves_the_mirror_through_stopping_to_idle`
 covers the mirror the tray reads;
 `quit_and_status_use_the_owner_even_without_dictating_log_events` covers SDK
 capture, pending jobs, and an unanswered listener. `dictation::service::tests`

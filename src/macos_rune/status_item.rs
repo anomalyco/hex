@@ -893,8 +893,14 @@ fn meeting_menu(state: &crate::meeting::watcher::MeetingMenuState, enabled: bool
             mute: None,
             sections: Vec::new(),
         },
-        MeetingMenuState::Starting => MeetingMenu {
-            status: Some(tr("Starting meeting recording…").into()),
+        // A stop asked while the recorder starts keeps Record disabled and
+        // says so, exactly as the tray's Stopping item does.
+        MeetingMenuState::Starting { stopping } => MeetingMenu {
+            status: Some(if *stopping {
+                tr("Stopping…").into()
+            } else {
+                tr("Starting meeting recording…").into()
+            }),
             button_title: String::new(),
             recording: true,
             can_start: false,

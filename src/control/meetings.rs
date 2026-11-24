@@ -11,23 +11,25 @@ use crate::meeting::watcher::MeetingMenuState;
 /// there is nothing to ask. Commands are idempotent: one the state already
 /// answers changes nothing.
 ///
-/// A recording whose stop is under way keeps reading as a recording until it
-/// finishes transcribing, so `record` answers `busy` (a non-zero exit)
-/// rather than "Already recording", which would hide that nothing started.
+/// A stop under way keeps the recorder busy until it finishes transcribing,
+/// whether it had a recording or was still starting one, so `record` answers
+/// `busy` (a non-zero exit) rather than "already …", which would hide that
+/// nothing started.
 pub(crate) fn plan(
     state: &MeetingMenuState,
     stop: bool,
     title: Option<String>,
 ) -> Result<MeetingRequest, ControlReply> {
     match (state, stop) {
-        (MeetingMenuState::Recording { stopping: true, .. }, false) => Err(ControlReply::error(
-            "busy",
-            "the last meeting is stopping; a new recording can start once it finishes transcribing",
-        )),
+        (
+            MeetingMenuState::Recording { stopping: true, .. }
+            | MeetingMenuState::Starting { stopping: true },
+            false,
+        ) => Err(stopping_busy()),
         (MeetingMenuState::Recording { title, .. }, false) => Err(ControlReply::unchanged(
             format!("Already recording “{title}”"),
         )),
-        (MeetingMenuState::Starting, false) => Err(ControlReply::unchanged(
+        (MeetingMenuState::Starting { stopping: false }, false) => Err(ControlReply::unchanged(
             "A meeting recording is already starting",
         )),
         (MeetingMenuState::Transcribing, false) => Err(ControlReply::error(
@@ -42,18 +44,29 @@ pub(crate) fn plan(
             "The meeting is already transcribing",
         )),
         // The stop already went to the recorder: asking again starts nothing.
-        (MeetingMenuState::Recording { stopping: true, .. }, true) => {
-            Err(ControlReply::unchanged("The meeting is already stopping"))
-        }
-        (MeetingMenuState::Starting | MeetingMenuState::Recording { .. }, true) => {
+        (
+            MeetingMenuState::Recording { stopping: true, .. }
+            | MeetingMenuState::Starting { stopping: true },
+            true,
+        ) => Err(ControlReply::unchanged("The meeting is already stopping")),
+        (MeetingMenuState::Starting { .. } | MeetingMenuState::Recording { .. }, true) => {
             Ok(MeetingRequest::Stop)
         }
     }
 }
 
-/// The recorder as `hex status` reports it. `stopping` is a recording whose
-/// stop is under way; it turns `transcribing` or `idle` once the recorder
-/// finishes with it, and only then can a new recording start.
+/// `record` while the recorder finishes with the last meeting.
+fn stopping_busy() -> ControlReply {
+    ControlReply::error(
+        "busy",
+        "the last meeting is stopping; a new recording can start once it finishes transcribing",
+    )
+}
+
+/// The recorder as `hex status` reports it. `stopping` is a meeting whose
+/// stop is under way — a recording, or one still starting — and it turns
+/// `transcribing` or `idle` once the recorder finishes with it; only then
+/// can a new recording start.
 pub(crate) fn report(state: &MeetingMenuState) -> MeetingReport {
     let plain = |state: &str| MeetingReport {
         state: state.into(),
@@ -61,7 +74,9 @@ pub(crate) fn report(state: &MeetingMenuState) -> MeetingReport {
     };
     match state {
         MeetingMenuState::Idle => plain("idle"),
-        MeetingMenuState::Starting => plain("starting"),
+        MeetingMenuState::Starting { stopping } => {
+            plain(if *stopping { "stopping" } else { "starting" })
+        }
         MeetingMenuState::Recording {
             started,
             title,
@@ -103,22 +118,28 @@ mod tests {
     }
 
     #[test]
-    fn a_recording_that_is_stopping_refuses_a_new_one_with_busy() {
+    fn a_stop_under_way_refuses_a_new_recording_with_busy() {
         // The bug: this used to say "Already recording" and exit 0, so a
-        // caller couldn't tell its recording never started.
-        let Err(reply) = plan(&recording(true), false, None) else {
-            panic!("a stopping meeting must not start another");
-        };
-        assert_eq!(code(&reply), "busy");
-        assert!(matches!(
-            &reply,
-            ControlReply::Error { message, .. } if message.contains("stopping")
-        ));
-        // Stopping it again is harmless: nothing is asked of the recorder.
-        let Err(reply) = plan(&recording(true), true, None) else {
-            panic!("a stop already under way must not ask again");
-        };
-        assert_eq!(code(&reply), "unchanged");
+        // caller couldn't tell its recording never started. A stop asked
+        // while the recorder started counts too.
+        for state in [
+            recording(true),
+            MeetingMenuState::Starting { stopping: true },
+        ] {
+            let Err(reply) = plan(&state, false, None) else {
+                panic!("a stopping meeting must not start another");
+            };
+            assert_eq!(code(&reply), "busy");
+            assert!(matches!(
+                &reply,
+                ControlReply::Error { message, .. } if message.contains("stopping")
+            ));
+            // Stopping it again is harmless: nothing is asked of the recorder.
+            let Err(reply) = plan(&state, true, None) else {
+                panic!("a stop already under way must not ask again");
+            };
+            assert_eq!(code(&reply), "unchanged");
+        }
         let Err(reply) = plan(&recording(false), false, None) else {
             panic!("a recording must not start another");
         };
@@ -142,7 +163,7 @@ mod tests {
             MeetingRequest::Stop
         );
         assert_eq!(
-            plan(&MeetingMenuState::Starting, true, None).unwrap(),
+            plan(&MeetingMenuState::Starting { stopping: false }, true, None).unwrap(),
             MeetingRequest::Stop
         );
         assert_eq!(
@@ -167,7 +188,14 @@ mod tests {
         assert_eq!(stopping.elapsed_seconds, Some(0));
         assert_eq!(report(&recording(false)).state, "recording");
         assert_eq!(report(&MeetingMenuState::Idle).state, "idle");
-        assert_eq!(report(&MeetingMenuState::Starting).state, "starting");
+        assert_eq!(
+            report(&MeetingMenuState::Starting { stopping: false }).state,
+            "starting"
+        );
+        assert_eq!(
+            report(&MeetingMenuState::Starting { stopping: true }).state,
+            "stopping"
+        );
         assert_eq!(
             report(&MeetingMenuState::Transcribing).state,
             "transcribing"

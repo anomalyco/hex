@@ -216,7 +216,12 @@ mod tray {
                 }));
             }
             menu.push(TrayItem::Separator);
-            let meeting_recording = self.meetings == Some(MeetingTray::Recording);
+            // A stop under way still holds Restart to update: the recorder
+            // is finishing that meeting.
+            let meeting_recording = matches!(
+                self.meetings,
+                Some(MeetingTray::Recording | MeetingTray::Stopping)
+            );
             menu.extend(self.update.as_ref().map(|offer| {
                 // Distinct id while disabled so tray hosts like GNOME's
                 // AppIndicators don't keep it stuck disabled (#1287).
@@ -399,14 +404,23 @@ mod tests {
             assert!(!enabled.contains(&meeting_id(disabled)));
         }
         // Restart to update is dimmed under its own id while a meeting
-        // records; Download update stays enabled.
-        assert!(matches!(
-            meeting.menu().into_iter().find(|item| matches!(
-                item,
-                rune::TrayItem::Action { id, .. } if id == "update-held"
-            )),
-            Some(rune::TrayItem::Action { enabled: false, .. })
-        ));
+        // records or stops; Download update stays enabled.
+        for held in [MeetingTray::Recording, MeetingTray::Stopping] {
+            let held_view = TrayView {
+                meetings: Some(held),
+                ..view.clone()
+            };
+            assert!(
+                matches!(
+                    held_view.menu().into_iter().find(|item| matches!(
+                        item,
+                        rune::TrayItem::Action { id, .. } if id == "update-held"
+                    )),
+                    Some(rune::TrayItem::Action { enabled: false, .. })
+                ),
+                "{held:?} holds Restart to update"
+            );
+        }
         assert_eq!(TrayCommand::from_id("update-held"), None);
         let download_in_meeting = TrayView {
             meetings: Some(MeetingTray::Recording),

@@ -970,9 +970,9 @@ pub fn check_quit(
         return Ok(());
     }
     if meeting.state != "idle" {
-        // A stop under way has nothing to stop: it finishes transcribing
-        // before Hex can quit with it saved.
-        let advice = if meeting.state == "stopping" {
+        // A stop under way has nothing to stop, and a transcription has
+        // already begun: both finish before Hex can quit with them saved.
+        let advice = if matches!(meeting.state.as_str(), "stopping" | "transcribing") {
             "wait for it to finish, or pass --force"
         } else {
             "stop it first (`hex meetings stop`) or pass --force"
@@ -1571,14 +1571,17 @@ mod tests {
             check_quit(&recording, quiet(), false).unwrap_err().code,
             "meeting-active"
         );
-        // A stop under way still holds the recorder.
-        let stopping = MeetingReport {
-            state: "stopping".into(),
-            ..Default::default()
-        };
-        let refusal = check_quit(&stopping, quiet(), false).unwrap_err();
-        assert_eq!(refusal.code, "meeting-active");
-        assert!(refusal.message.contains("wait for it to finish"));
+        // A stop under way still holds the recorder, and a transcription has
+        // nothing left to stop: both wait rather than name a stop.
+        for waiting in ["stopping", "transcribing"] {
+            let state = MeetingReport {
+                state: waiting.into(),
+                ..Default::default()
+            };
+            let refusal = check_quit(&state, quiet(), false).unwrap_err();
+            assert_eq!(refusal.code, "meeting-active");
+            assert!(refusal.message.contains("wait for it to finish"));
+        }
         assert!(check_quit(&recording, quiet(), true).is_ok());
         let busy = CaptureSnapshot {
             recording: None,

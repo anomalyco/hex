@@ -190,7 +190,11 @@ fn flush_withdrawn_offers(detector: &mut MeetingDetector, events: &SyncSender<Co
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MeetingMenuState {
     Idle,
-    Starting,
+    Starting {
+        /// Stop was requested while the recorder was still starting: it
+        /// finishes that meeting before it takes another.
+        stopping: bool,
+    },
     Recording {
         started: Instant,
         id: String,
@@ -213,6 +217,17 @@ impl MeetingMenuState {
     pub(crate) fn source_warning(&mut self, warning: Option<TrackWarning>) {
         if let Self::Recording { warning: shown, .. } = self {
             *shown = warning;
+        }
+    }
+
+    /// A stop was requested for what the recorder is doing now. It finishes
+    /// that meeting before it takes another, so nothing new starts until the
+    /// mirror reads `transcribing` or `idle`. Idle has nothing to stop, and
+    /// a transcribing meeting is already past capture.
+    pub(crate) fn stopping_requested(&mut self) {
+        match self {
+            Self::Starting { stopping } | Self::Recording { stopping, .. } => *stopping = true,
+            Self::Idle | Self::Transcribing => {}
         }
     }
 }

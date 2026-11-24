@@ -1020,7 +1020,8 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   └── title follows the provisional title (see Titles And Summary)
      ├── Stop & Transcribe
      │   └── asked -> the tray, the menu bar, and `hex status` read
-     │      "stopping" until capture ends and "transcribing" takes over;
+     │      "stopping" until capture ends and "transcribing" takes over
+     │      (a stop asked while it is still starting reads so too);
      │      the tray's Record and the menu bar's Record Meeting stay
      │      disabled, and `hex meetings record` answers busy (exit 1), never
      │      "Already recording": the recorder finishes this meeting before

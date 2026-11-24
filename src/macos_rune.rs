@@ -1125,7 +1125,9 @@ impl Pump {
             | ControllerEvent::Reminder { .. }
             | ControllerEvent::ReminderWithdrawn { .. }
             | ControllerEvent::CallEndedWithdrawn => {}
-            ControllerEvent::Starting(_) => self.meeting_state = MeetingMenuState::Starting,
+            ControllerEvent::Starting(_) => {
+                self.meeting_state = MeetingMenuState::Starting { stopping: false }
+            }
             ControllerEvent::RecordingStarted { id, title, .. } => {
                 self.meeting_state = MeetingMenuState::Recording {
                     started: Instant::now(),
@@ -1159,11 +1161,7 @@ impl Pump {
                     tracing::info!(%app, "the call ended; the recording continues until Stop");
                 }
             }
-            ControllerEvent::Stopping => {
-                if let MeetingMenuState::Recording { stopping, .. } = &mut self.meeting_state {
-                    *stopping = true;
-                }
-            }
+            ControllerEvent::Stopping => self.meeting_state.stopping_requested(),
             ControllerEvent::Transcribing => self.meeting_state = MeetingMenuState::Transcribing,
             ControllerEvent::Finished(manifest) => {
                 tracing::info!(id = %manifest.id, "meeting transcript ready");

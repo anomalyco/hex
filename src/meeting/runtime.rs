@@ -123,9 +123,10 @@ pub(crate) fn tray_state() -> Option<MeetingTray> {
     }
     Some(match state() {
         MeetingMenuState::Idle => MeetingTray::Idle,
-        MeetingMenuState::Starting => MeetingTray::Starting,
         // A stop under way takes no new recording, as Starting doesn't; the
         // row says why (see `MeetingTray::Stopping`).
+        MeetingMenuState::Starting { stopping: true } => MeetingTray::Stopping,
+        MeetingMenuState::Starting { .. } => MeetingTray::Starting,
         MeetingMenuState::Recording { stopping: true, .. } => MeetingTray::Stopping,
         MeetingMenuState::Recording { .. } => MeetingTray::Recording,
         MeetingMenuState::Transcribing => MeetingTray::Transcribing,
@@ -231,7 +232,7 @@ fn follow(event: &ControllerEvent, window: &rune::AppHandle<Ui>) {
 /// window's own notices go through [`follow`].
 fn mirror(state: &mut MeetingMenuState, event: &ControllerEvent) {
     match event {
-        ControllerEvent::Starting(_) => *state = MeetingMenuState::Starting,
+        ControllerEvent::Starting(_) => *state = MeetingMenuState::Starting { stopping: false },
         ControllerEvent::RecordingStarted { id, title, .. } => {
             *state = MeetingMenuState::Recording {
                 started: Instant::now(),
@@ -256,12 +257,9 @@ fn mirror(state: &mut MeetingMenuState, event: &ControllerEvent) {
                 shown.clone_from(chapters);
             }
         }
-        // The recorder holds this recording until it finishes transcribing.
-        ControllerEvent::Stopping => {
-            if let MeetingMenuState::Recording { stopping, .. } = state {
-                *stopping = true;
-            }
-        }
+        // The recorder holds this recording until it finishes transcribing;
+        // a recording still starting has no title to keep yet.
+        ControllerEvent::Stopping => state.stopping_requested(),
         ControllerEvent::Transcribing => *state = MeetingMenuState::Transcribing,
         ControllerEvent::Finished(_)
         | ControllerEvent::Discarded(_)
@@ -294,26 +292,81 @@ mod tests {
         }
     }
 
+    /// A manifest the recorder publishes as it finishes; `Finished` only
+    /// reads its id.
+    fn finished() -> Box<crate::meeting::MeetingManifest> {
+        Box::new(
+            serde_json::from_value(serde_json::json!({
+                "schema_version": 1,
+                "id": "1700000000000",
+                "title": "Design sync",
+                "status": "transcribing",
+                "created_at_ms": 0,
+                "ended_at_ms": null,
+                "duration_ms": null,
+                "system": {"file": "system.wav", "sample_rate": 16000,
+                           "first_pts_us": null, "last_pts_us": null,
+                           "first_arrival_us": null, "samples": 0, "dropped_packets": 0},
+                "microphone": {"file": "microphone.wav", "sample_rate": 16000,
+                               "first_pts_us": null, "last_pts_us": null,
+                               "first_arrival_us": null, "samples": 0,
+                               "dropped_packets": 0},
+                "error": null,
+            }))
+            .expect("a valid manifest"),
+        )
+    }
+
     #[test]
-    fn a_stop_under_way_holds_the_recording_until_transcribing() {
+    fn a_stop_moves_the_mirror_through_stopping_to_idle() {
+        // A stop asked while the recorder is still starting: no title to
+        // keep yet, but no new recording either.
+        let mut state = MeetingMenuState::Starting { stopping: false };
+        mirror(&mut state, &ControllerEvent::Stopping);
+        assert_eq!(state, MeetingMenuState::Starting { stopping: true });
+        mirror(&mut state, &ControllerEvent::Transcribing);
+        assert_eq!(state, MeetingMenuState::Transcribing);
+        mirror(&mut state, &ControllerEvent::Finished(finished()));
+        assert_eq!(state, MeetingMenuState::Idle);
+
+        // A recording keeps its title and elapsed time while it stops.
         let mut state = recorded(false);
         mirror(&mut state, &ControllerEvent::Stopping);
         assert!(matches!(
             state,
-            MeetingMenuState::Recording { stopping: true, .. }
-        ));
-        // `hex meetings record` refuses rather than saying it already records:
-        // nothing new started, so the caller must not read exit 0 as success.
-        assert!(matches!(
-            crate::control::meetings::plan(&state, false, None),
-            Err(crate::control::ControlReply::Error { code, .. }) if code == "busy"
-        ));
-        // Stopping again is harmless and asks the recorder for nothing.
-        assert!(matches!(
-            crate::control::meetings::plan(&state, true, None),
-            Err(crate::control::ControlReply::Done { changed: false, .. })
+            MeetingMenuState::Recording {
+                stopping: true,
+                ref title,
+                ..
+            } if title == "Design sync"
         ));
         mirror(&mut state, &ControllerEvent::Transcribing);
+        assert_eq!(state, MeetingMenuState::Transcribing);
+
+        // Every way the recorder finishes ends at Idle, where a new
+        // recording can start.
+        let endings = [
+            ControllerEvent::Finished(finished()),
+            ControllerEvent::Discarded("1700000000000".into()),
+            ControllerEvent::Failed {
+                title: "Design sync".into(),
+                error: "no model".into(),
+            },
+        ];
+        for (index, event) in endings.into_iter().enumerate() {
+            let mut state = recorded(true);
+            mirror(&mut state, &event);
+            assert_eq!(state, MeetingMenuState::Idle, "ending {index}");
+        }
+    }
+
+    #[test]
+    fn a_stop_with_nothing_to_stop_leaves_the_mirror_alone() {
+        let mut state = MeetingMenuState::Idle;
+        mirror(&mut state, &ControllerEvent::Stopping);
+        assert_eq!(state, MeetingMenuState::Idle);
+        let mut state = MeetingMenuState::Transcribing;
+        mirror(&mut state, &ControllerEvent::Stopping);
         assert_eq!(state, MeetingMenuState::Transcribing);
     }
 }
