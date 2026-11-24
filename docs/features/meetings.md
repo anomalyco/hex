@@ -1231,6 +1231,16 @@ meetings.stop_when_call_ends) // meetings.auto-stop
      processes on macOS, an active render session on any output in
      IAudioSessionManager2 on Windows, and a running Stream/Output/Audio
      node in PipeWire's graph on Linux
+     ├── A browser seems to keep its output open after its call while the
+     │   Mac is locked (#2685), so only a browser's playback stops counting
+     │   then: it counts for nothing while the session is locked or the Mac
+     │   is asleep (audio/system_idle.rs), never for a dimmed display, while
+     │   the microphone still counts. A native call app keeps its playback
+     │   (#835), and a muted browser call that drops the microphone while
+     │   locked ends after the 3 s absence and grace like any other call.
+     │   Each locked browser recording logs "the Mac is locked; the
+     │   browser's playback no longer keeps its call present" once. Check:
+     │   `a_locked_mac_stops_only_a_browser_s_playback_counting`
      └── A failed read counts as playing, so it never stops a recording.
          Windows and macOS skip an individual output, session, or process
          that can't be read. On Linux the graph is briefly empty right after
@@ -1241,6 +1251,10 @@ meetings.stop_when_call_ends) // meetings.auto-stop
      the app icon that drains smoothly on the frame clock and fades over its
      last 0.18 s (under Reduce Motion it steps once a second with no head;
      ControllerEvent::CallEnded carries the stop's Instant)
+     ├── CallPresence (meeting/detection.rs) counts the absence from the
+     │   first pass that saw it: a gap between passes (a stalled loop or
+     │   sleep) never restarts its 3 s. Check:
+     │   `a_gap_between_observations_never_restarts_a_call_ended_absence`
      ├── App back on the microphone or output within 30 s -> its stop is
      │   dropped; once no other automatic stop counts the notice is withdrawn
      │   and the recording capsule returns (CallEndedWithdrawn)
