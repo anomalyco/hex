@@ -191,7 +191,7 @@ extension AutocorrectEngine {
                 if best == nil || cost < best!.cost { best = (word, cost) }
             }
             guard let best else { return nil }
-            fixedHead = Self.matchCase(of: head, onto: best.word)
+            fixedHead = matchCase(of: head, onto: best.word)
         }
         var fixedTail = tail
         if let word = ownReplacement(for: tail), word.allSatisfy(\.isLetter) {

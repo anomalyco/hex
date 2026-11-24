@@ -24,6 +24,6 @@ extension AutocorrectEngine {
         guard plain(lower) == lower, let accented = into.checker.guesses(for: lower).first(where: {
             $0 != lower && $0 == $0.lowercased() && plain($0) == lower
         }), into.mayOffer(accented, after: Self.previousWord(before, token: word)) else { return nil }
-        return withoutAddedCapitals(Self.matchCase(of: word, onto: accented), typed: word).map { ($0, into.language) }
+        return withoutAddedCapitals(matchCase(of: word, onto: accented), typed: word).map { ($0, into.language) }
     }
 }

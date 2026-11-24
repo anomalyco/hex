@@ -8,20 +8,27 @@ import Foundation
 extension AutocorrectEngine {
     // MARK: - Case matching & QWERTY distance
 
-    static func matchCase(of typed: String, onto target: String) -> String {
+    /// `matchCase(of:onto:language:)` in this engine's language.
+    func matchCase(of typed: String, onto target: String) -> String {
+        Self.matchCase(of: typed, onto: target, language: language)
+    }
+
+    /// `target` cased as `typed` is, in `language`'s case (`KeyboardLanguage.caseLocale`:
+    /// Turkish's "istanbul" typed "İst…" is "İstanbul", English's "Istanbul").
+    static func matchCase(of typed: String, onto target: String, language: KeyboardLanguage = .english) -> String {
         guard !typed.isEmpty, !target.isEmpty else { return target }
-        if typed.count >= 2 && typed == typed.uppercased() && typed != typed.lowercased() {
-            return target.uppercased()
+        if typed.count >= 2 && typed == language.uppercased(typed) && typed != language.lowercased(typed) {
+            return language.uppercased(target)
         }
         // Preserve intentional casing in `I`, `I'm`, `iPhone`, etc. unless `typed` started capitalized.
-        if target != target.lowercased() {
+        if target != language.lowercased(target) {
             if typed.first?.isUppercase == true, let first = target.first, first.isLowercase {
-                return first.uppercased() + target.dropFirst()
+                return language.capitalizingFirst(target)
             }
             return target
         }
-        if typed.first?.isUppercase == true, let first = target.first {
-            return first.uppercased() + target.dropFirst()
+        if typed.first?.isUppercase == true {
+            return language.capitalizingFirst(target)
         }
         return target
     }
@@ -76,7 +83,7 @@ extension AutocorrectEngine {
         guard language != .german, hasDictionary, typed.first?.isUppercase != true, word.count >= 2,
               let first = word.first, first.isUppercase, !word.dropFirst().contains(where: \.isUppercase),
               !word.contains(" "), !isVocabularySpelling(word) else { return word }
-        let lower = first.lowercased() + word.dropFirst()
+        let lower = language.lowercased(String(first)) + word.dropFirst()
         if language.usesEnglishFixes, lower.hasPrefix("i'") || lower.hasPrefix("i\u{2019}") { return word }
         return checker.isWordValid(lower) ? lower : word
     }
@@ -100,7 +107,7 @@ extension AutocorrectEngine {
     /// spellings; a word that is then what you typed, or twice there, goes.
     func withoutAddedCapitals(_ pool: [String], typed token: String) -> [String] {
         guard !addsCapitals, !token.contains(where: \.isUppercase) else { return pool }
-        return pool.map { isOwnSpelling($0) ? $0 : $0.lowercased() }.reduce(into: []) { kept, item in
+        return pool.map { isOwnSpelling($0) ? $0 : language.lowercased($0) }.reduce(into: []) { kept, item in
             if item != token, !kept.contains(item) { kept.append(item) }
         }
     }

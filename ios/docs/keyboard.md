@@ -588,7 +588,10 @@ AZERTY, QWERTZ; Polski and Română QWERTY, QWERTZ, AZERTY; Čeština "QWERTZ �
 simulator), both its own rows with the ´ and ˇ keys, Z and Y swapped on the second; Magyar
 "QWERTZ – Magyar" and "QWERTY – Magyar", the standard Hungarian QWERTZ with every accented
 vowel on a held key, Z and Y swapped on the second (Apple's own Hungarian layout list wasn't
-read on a simulator for this change); Srpski
+read on a simulator for this change); Türkçe "Türkçe - Q" (its default), "Türkçe - F" and
+"QWERTY – Türkçe", Apple's three in Apple's order (`SWLayouts`: Turkish-Q, Turkish-F,
+QWERTY-Turkish; iOS 26.5 and 27.2 runtimes), F a layout only Türkçe offers
+(`KeyboardLetterLayout.turkishF`, as Dvorak is English's); Srpski
 QWERTZ (Hex's, though Apple now adds it as QWERTY), QWERTY, AZERTY. Norsk, Русский, Українська and Ελληνικά keep their
 one layout (Apple also offers a phonetic "Russian – QWERTY", not built). The plain
 layouts are the same 26 letters in every language, with the language's bottom row and
@@ -683,7 +686,23 @@ pages and their held keys are English's), Magyar (the standard Hungarian QWERTZ,
 `qwertzuiop`, `asdfghjkl`, `yxcvbnm`, on the English keys' QWERTZ; its nine accented vowels
 are all held, á on A, é on E, í on I, ó ö ő on O and ú ü ű on U, the base first and then the
 neighbouring Latin accents, ő and ű the double-acute letters U+0151 and U+0171, and every
-consonant holds nothing; QWERTY is offered too) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
+consonant holds nothing; QWERTY is offered too), Türkçe (Apple's Türkçe - Q, read by the
+capture tool on iOS 26.5 and 27.2, iPhone 17 Pro and iPhone 11: `qwertyuıopğü`, `asdfghjklşi`,
+`zxcvbnmöç`, twelve keys edge to edge, eleven centred, and nine between a shift and delete
+narrowed to fit, as Russian's are, 26.9 and 43.5 pt on a 402 pt iPhone, 27.8 and 45 on 414;
+Türkçe - F the same counts, `fgğıodrnhpqw`, `uieaütkmlyş`, `jövcçzsbx`; QWERTY – Türkçe plain
+QWERTY. Its own letters have keys on Q and F, so A holds â, I î ï ì í į ī, O ô œ ò ó õ ø ō, U û
+ù ú ū, S ß ś š and C ć č, and every other key nothing; on QWERTY – Türkçe each Turkish letter is
+held right after its base, ı on I. Its 123 and #+= pages are English's, the $ key holding the
+lira second (`$ ₺ ¢ € £ ¥ ₩ ₽`). Letters change case by Turkish's rules while Türkçe types
+(`KeyboardLanguage.caseLocale`): shift and caps lock make i İ and ı I, on the keycaps and as
+typed, and so do a capital the sentence adds, a held key's options in capitals, a swiped word's
+capital, text replacements' and vocabulary's case, Add to vocabulary's lowercase first letter and
+a Turkish dictation's Polished, Casual and Notes capitals and Lowercase; English on the same list
+keeps English's ("istanbul" starts "Istanbul"). No dictionary: the iOS 26.5 and 27.2 simulators'
+`tr_TR` takes "merhaba", "kitap" and "teşekkür" for typos ("kitap" → "kitar") while it rejects
+gibberish, so Türkçe types as typed, with no suggestions but your text replacements; F's callouts
+open as Q's do, not in Apple's F arrangement) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
 Serbian Latin keyboard has no keys of its own for č ć đ š ž, they are held on c, d, s
 and z), as Apple's iOS keyboards
 lay them out (`KeyboardLanguage`: letter rows, long-press accents, spelling dictionary).

@@ -35,7 +35,7 @@ nonisolated enum AccentCatalog {
             list.removeAll(where: greekWithoutCapitals.contains)
         }
         guard list.count > 1 else { return nil }
-        return uppercase ? list.map(upper) : list
+        return uppercase ? list.map { upper($0, language: language) } : list
     }
 
     /// Settings › Experiments › Quick accents: the accent a held letter picks first, the
@@ -53,7 +53,7 @@ nonisolated enum AccentCatalog {
             return nil
         }
         if let preferred = language.quickAccentPrimaries[base.lowercased()] {
-            let shown = uppercase ? upper(preferred) : preferred
+            let shown = uppercase ? upper(preferred, language: language) : preferred
             if options.contains(shown) { return shown }
         }
         return options.dropFirst().first
@@ -64,8 +64,10 @@ nonisolated enum AccentCatalog {
     private static let greekWithoutCapitals: Set<String> = ["ς", "ΐ", "ΰ"]
 
     // ẞ, Unicode's capital ß; İ for the dotless ı, as the system keyboard shows it in capitals.
-    private static func upper(_ option: String) -> String {
-        switch option {
+    // Turkish's own: i is İ and ı is I (`KeyboardLanguage.caseLocale`).
+    private static func upper(_ option: String, language: KeyboardLanguage = .english) -> String {
+        if language.caseLocale != nil { return option == "ß" ? "ẞ" : language.uppercased(option) }
+        return switch option {
         case "ß": "ẞ"
         case "ı": "İ"
         default: option.uppercased()
@@ -170,7 +172,7 @@ nonisolated enum AccentCatalog {
         }
         guard let baseRow = rows.firstIndex(where: { $0.contains(key) }),
               let baseColumn = rows[baseRow].firstIndex(of: key) else { return nil }
-        let shown = uppercase ? rows.map { $0.map(upper) } : rows
+        let shown = uppercase ? rows.map { $0.map { upper($0, language: language) } } : rows
         return AccentArrangement(rows: shown, baseRow: baseRow, baseColumn: baseColumn)
     }
 }

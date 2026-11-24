@@ -751,6 +751,7 @@ final class KeyboardLayoutTests: XCTestCase {
             .serbianLatin: ["qwertzuiop", "asdfghjkl", "yxcvbnm"],
             .czech: ["qwertzuiop", "asdfghjkl´", "yxcvbnmˇ"],
             .hungarian: ["qwertzuiop", "asdfghjkl", "yxcvbnm"],
+            .turkish: ["qwertyuıopğü", "asdfghjklşi", "zxcvbnmöç"],
             .korean: ["ㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔ", "ㅁㄴㅇㄹㅎㅗㅓㅏㅣ", "ㅋㅌㅊㅍㅠㅜㅡ"],
         ]
         for (language, expected) in rows {
@@ -784,6 +785,7 @@ final class KeyboardLayoutTests: XCTestCase {
             .greek: [.own],
             .czech: [.own, .qwerty],
             .hungarian: [.own, .qwerty],
+            .turkish: [.own, .turkishF, .qwerty],
             .korean: [.own],
         ]
         for language in KeyboardLanguage.allCases {
@@ -799,6 +801,10 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(KeyboardLanguage.czech.layoutName(.qwerty), "QWERTY – Čeština")
         XCTAssertEqual(KeyboardLanguage.hungarian.layoutName(.own), "QWERTZ – Magyar")
         XCTAssertEqual(KeyboardLanguage.hungarian.layoutName(.qwerty), "QWERTY – Magyar")
+        XCTAssertEqual(KeyboardLanguage.turkish.layoutName(.own), "Türkçe - Q")
+        XCTAssertEqual(KeyboardLanguage.turkish.layoutName(.turkishF), "Türkçe - F")
+        XCTAssertEqual(KeyboardLanguage.turkish.layoutName(.qwerty), "QWERTY – Türkçe")
+        XCTAssertEqual(KeyboardLanguage.english.offered(.turkishF), .qwerty, "only Türkçe offers F")
         XCTAssertEqual(KeyboardLanguage.polish.layoutName(.qwerty), "QWERTY")
     }
 
@@ -813,7 +819,7 @@ final class KeyboardLayoutTests: XCTestCase {
         ]
         for language in KeyboardLanguage.allCases where language != .czech {
             // Each French keyboard's own layout is Apple's "– French" one, with the apostrophe key.
-            for letters in language.letterLayouts where letters != .own && letters != .dvorak && !(language.isFrench && letters == language.defaultLetterLayout) {
+            for letters in language.letterLayouts where letters != .own && letters != .dvorak && letters != .turkishF && !(language.isFrench && letters == language.defaultLetterLayout) {
                 let layout = KeyboardLayout(width: 402, language: language, letters: letters)
                 for row in 0..<3 {
                     XCTAssertEqual(self.letters(layout, row: row).joined(), plain[letters]?[row], "\(language) \(letters) row \(row + 1)")
@@ -1770,6 +1776,70 @@ final class KeyboardLayoutTests: XCTestCase {
         for layer in [KeyboardLayer.numbers, .symbols] {
             XCTAssertEqual(KeyboardLayout(width: 402, layer: layer, language: .hungarian).keys, KeyboardLayout(width: 402, layer: layer).keys)
         }
+    }
+
+    /// Apple's Türkçe layouts, read by the capture tool on iOS 26.5 and 27.2 (iPhone 17 Pro, 402
+    /// pt, and iPhone 11, 414 pt; the same rows and sizes on both): Türkçe - Q, the default, is
+    /// twelve keys (ı ğ ü after P's row), eleven (ş i after L) and nine (ö ç after M) with shift
+    /// and delete narrowed to fit; Türkçe - F the same counts; QWERTY – Türkçe plain QWERTY, its
+    /// Turkish letters held (ı on I, first). Holds are Apple's, the 123 page's $ holds the lira
+    /// second, and every other page and held symbol is English's.
+    @MainActor
+    func testTurkishLayoutsMatchApples() {
+        // Apple's letter and shift widths: 26.7–27 and 43.3–43.7 pt on 402, 27.5–28 and 45 on 414.
+        for (width, letter, shift) in [(CGFloat(402), 26.85, 43.5), (414, 27.75, 45.0)] {
+            for letters in [KeyboardLetterLayout.own, .turkishF] {
+                let layout = KeyboardLayout(width: width, language: .turkish, letters: letters)
+                XCTAssertEqual((0..<3).map { self.letters(layout, row: $0).count }, [12, 11, 9], "\(width) \(letters)")
+                XCTAssertEqual(layout.characterWidth, letter, accuracy: 0.4, "\(width) \(letters)")
+                XCTAssertEqual(layout.key(.shift)!.frame.width, shift, accuracy: 0.4, "\(width) \(letters)")
+                XCTAssertEqual(layout.key(.delete)!.frame.width, shift, accuracy: 0.4, "\(width) \(letters)")
+                XCTAssertEqual(layout.keys.filter { $0.row == 3 }.map(\.frame), KeyboardLayout(width: width).keys.filter { $0.row == 3 }.map(\.frame))
+            }
+        }
+        let f = KeyboardLayout(width: 402, language: .turkish, letters: .turkishF)
+        XCTAssertEqual((0..<3).map { letters(f, row: $0).joined() }, ["fgğıodrnhpqw", "uieaütkmlyş", "jövcçzsbx"])
+        let qwerty = KeyboardLayout(width: 402, language: .turkish, letters: .qwerty)
+        XCTAssertEqual((0..<3).map { letters(qwerty, row: $0).joined() }, ["qwertyuiop", "asdfghjkl", "zxcvbnm"])
+        XCTAssertTrue(AutocorrectEngine.areAdjacentKeys("ğ", "ü", language: .turkish))
+        XCTAssertTrue(AutocorrectEngine.areAdjacentKeys("ş", "i", language: .turkish))
+        // Türkçe - Q and - F hold the same: no Turkish letter, those have keys.
+        for letters in [KeyboardLetterLayout.own, .turkishF] {
+            XCTAssertEqual(AccentCatalog.options(for: "i", uppercase: false, language: .turkish, letters: letters), ["i", "î", "ï", "ì", "í", "į", "ī"])
+            XCTAssertEqual(AccentCatalog.options(for: "o", uppercase: false, language: .turkish, letters: letters), ["o", "ô", "œ", "ò", "ó", "õ", "ø", "ō"])
+            XCTAssertEqual(AccentCatalog.options(for: "a", uppercase: false, language: .turkish, letters: letters), ["a", "â"])
+            XCTAssertNil(AccentCatalog.options(for: "g", uppercase: false, language: .turkish, letters: letters))
+            XCTAssertNil(AccentCatalog.options(for: "ı", uppercase: false, language: .turkish, letters: letters))
+        }
+        // Capitals by Turkish's case: i's options start İ, never the dotless I.
+        XCTAssertEqual(AccentCatalog.options(for: "i", uppercase: true, language: .turkish)?.first, "İ")
+        XCTAssertFalse(AccentCatalog.options(for: "i", uppercase: true, language: .turkish)?.contains("I") == true)
+        // QWERTY – Türkçe: each Turkish letter right after its base, ı on I, as Apple's holds them.
+        XCTAssertEqual(AccentCatalog.options(for: "i", uppercase: false, language: .turkish, letters: .qwerty), ["i", "ı", "î", "ï", "ì", "í", "į", "ī"])
+        XCTAssertEqual(AccentCatalog.options(for: "i", uppercase: true, language: .turkish, letters: .qwerty), ["İ", "I", "Î", "Ï", "Ì", "Í", "Į", "Ī"])
+        XCTAssertEqual(AccentCatalog.options(for: "o", uppercase: false, language: .turkish, letters: .qwerty), ["o", "ö", "ô", "œ", "ò", "ó", "õ", "ø", "ō"])
+        XCTAssertEqual(AccentCatalog.options(for: "u", uppercase: false, language: .turkish, letters: .qwerty), ["u", "ü", "û", "ù", "ú", "ū"])
+        XCTAssertEqual(AccentCatalog.options(for: "s", uppercase: false, language: .turkish, letters: .qwerty), ["s", "ş", "ß", "ś", "š"])
+        XCTAssertEqual(AccentCatalog.options(for: "g", uppercase: false, language: .turkish, letters: .qwerty), ["g", "ğ"])
+        XCTAssertEqual(AccentCatalog.options(for: "c", uppercase: false, language: .turkish, letters: .qwerty), ["c", "ç", "ć", "č"])
+        XCTAssertEqual(AccentCatalog.options(for: "$", uppercase: false, language: .turkish), ["$", "₺", "¢", "€", "£", "¥", "₩", "₽"])
+        for symbol in ["\"", "'", "0", "&", "-", "?"] {
+            XCTAssertEqual(AccentCatalog.options(for: symbol, uppercase: false, language: .turkish), AccentCatalog.options(for: symbol, uppercase: false), symbol)
+        }
+        for layer in [KeyboardLayer.numbers, .symbols] {
+            XCTAssertEqual(KeyboardLayout(width: 402, layer: layer, language: .turkish).keys, KeyboardLayout(width: 402, layer: layer).keys)
+        }
+        // Türkçe: no dictionary, the iPhone's tr_TR included; dictation in tr-TR.
+        XCTAssertEqual(KeyboardLanguage.matching("tr-TR"), .turkish)
+        XCTAssertEqual(KeyboardLanguage.turkish.displayName, "Türkçe")
+        XCTAssertNil(KeyboardLanguage.turkish.spellCheckLanguage(available: ["tr_TR", "tr", "en_US"]))
+        XCTAssertEqual(KeyboardLanguage.turkish.dictationLanguage(supported: ["en-US", "tr-TR"], preferred: ["tr-TR"]), "tr-TR")
+        XCTAssertEqual(KeyboardLanguage.automatic(dictationLanguage: "tr-TR", inputModes: [], preferredLanguages: []), .turkish)
+        // Case: Turkish's own, every other language Swift's.
+        XCTAssertEqual(KeyboardLanguage.turkish.uppercased("iyi ılık"), "İYİ ILIK")
+        XCTAssertEqual(KeyboardLanguage.turkish.lowercased("İYİ ILIK"), "iyi ılık")
+        XCTAssertEqual(KeyboardLanguage.english.uppercased("iyi"), "IYI")
+        XCTAssertEqual(KeyboardLanguage.english.lowercased("İ").unicodeScalars.count, 2, "Swift's: i and a combining dot")
     }
 
     /// Apple's AZERTY on the tester's iPhone 17 Pro (402 pt; their French and English
