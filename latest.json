@@ -1,20 +1,20 @@
 {
-  "versionCode": 2385,
-  "versionName": "0.2.2-preview.2385",
+  "versionCode": 2397,
+  "versionName": "0.2.2-preview.2397",
   "version": "0.2.2",
   "minSdk": 31,
   "published": "2026-11-24",
-  "commit": "b5198054be705bb5dfe8e833bd6767693e960217",
+  "commit": "0d6bddad9d41b1a8c3ae479c86c2907c7191cfc6",
   "apk": {
-    "url": "https://github.com/anomalyco/hex/releases/download/android-preview-2385/HexPreview-0.2.2-preview.2385.apk",
-    "size": 67916763,
-    "sha256": "25e8c2892db58e1baa3d18dc14adbcf16572e088b5217b8880c7aedf1df0f557"
+    "url": "https://github.com/anomalyco/hex/releases/download/android-preview-2397/HexPreview-0.2.2-preview.2397.apk",
+    "size": 68324974,
+    "sha256": "06cf36e3a0da967809796443cfca35d74b93ec1f5964f4d3f8aae173577f2a32"
   },
   "notes": [
-    "Symbols are arranged like Gboard's, and swiping and suggestions now work in the browser's address bar.",
-    "Key haptics should now work on Samsung, realme and other phones where they were silent.",
-    "Autocorrect fixes a word when you add ? or ! from the 123 page.",
-    "Smaller fixes: suggestions stay after backspace, delete in remote-desktop and terminal apps, and the feedback form's Send button.",
-    "New in Hex Preview › Labs: smart quotes, local currency, voice-only mode and password manager suggestions."
+    "Key haptics are fixed on Samsung phones where the keys stayed silent: Hex's own Haptics switch now decides, and a key press plays a firmer click.",
+    "The screen stays on while you dictate, so a short screen timeout no longer cuts a dictation off.",
+    "New in Hex Preview › Labs: Diagnostics, a report with a speed test and test taps that you can copy and send us. Nothing is sent by itself.",
+    "If your keys are still silent or dictation is slow, the Diagnostics report shows us why.",
+    "Updating: if Android asks you to allow your browser to install apps, allow it, go back, and tap the download again."
   ]
 }
