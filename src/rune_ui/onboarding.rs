@@ -79,7 +79,6 @@ pub(super) fn progress(ui: &Ui) -> (bool, ModelProgress) {
     (
         ready,
         ModelProgress {
-            installed: ready,
             downloading,
             failed: downloading.is_none() && transcription.is_some_and(|t| t.error.is_some()),
         },
@@ -351,10 +350,9 @@ mod tests {
     fn mac_stale_fixture_marks_accessibility_stale_and_dispatches_reset() {
         let mut ui = crate::rune_ui::mac_fixture();
         mac_fixture(&mut ui, MacStep::SetupStale);
-        let rows = ui.tour.as_ref().unwrap().flow.view().rows;
-        assert!(
-            rows.iter()
-                .any(|row| row.item == SetupItem::Accessibility && row.status == ItemStatus::Stale)
+        assert_eq!(
+            ui.tour.as_ref().unwrap().flow.view().accessibility,
+            ItemStatus::Stale
         );
         input(&mut ui, Input::Grant(SetupItem::Accessibility));
         assert!(

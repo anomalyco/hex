@@ -29,7 +29,6 @@ impl OutputAdapter for WindowsOutputAdapter<'_> {
     fn insert(&mut self, text: &str, plan: InsertPlan) -> Result<InsertResult, String> {
         let paster = self.paster.as_mut().map_err(|error| format!("{error:#}"))?;
         match plan {
-            InsertPlan::None => Ok(InsertResult::default()),
             InsertPlan::CopyOnly => {
                 paster
                     .copy_only(text)

@@ -80,7 +80,6 @@ impl<F: FnMut(&str, PasteMode) -> Result<String>> OutputAdapter for MacOutputAda
                 send: false,
                 standalone: false,
             } => (PasteMode::Continue, false),
-            InsertPlan::None => return Ok(InsertResult::default()),
         };
         // Labs › Return to app: the app the capture started in comes back
         // first. When it can't, nothing is pasted; the shared delivery policy

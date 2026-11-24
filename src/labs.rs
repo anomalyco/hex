@@ -107,6 +107,16 @@ impl Feature {
     pub fn managed(self) -> Option<crate::policy::Lock> {
         crate::policy::Policy::current().labs_lock(self)
     }
+
+    /// Whether `settings` turn this feature on in this build and OS under
+    /// `policy`, without reading the process's runtime switch bank.
+    pub(crate) fn enabled_under(
+        self,
+        settings: &AppSettings,
+        policy: crate::policy::Policy,
+    ) -> bool {
+        self.on(settings) && self.shipped() && self.on_this_os() && policy.labs_lock(self).is_none()
+    }
 }
 
 /// Number of 64-bit words needed to hold one bit per [`Feature`].

@@ -9,11 +9,8 @@ use super::Model;
 /// valid for it, so a loaded model, a parked selection, a reload failure, and
 /// streaming capability can never disagree.
 pub(super) enum ModelSlot {
-    /// No model is loaded and none is parked to reload.
-    #[allow(dead_code)]
-    Empty,
     /// A model is loaded on the worker thread.
-    Loaded { model: Box<Model>, streams: bool },
+    Loaded(Box<Model>),
     /// Unloaded for idleness (Labs › Free memory when idle) or about to reload
     /// in place: still counts as held so callers never load a second copy, and
     /// reloads before the next command that needs it.
@@ -31,11 +28,7 @@ pub(super) enum ModelSlot {
 
 impl ModelSlot {
     pub(super) fn loaded(model: Model) -> Self {
-        let streams = model.stream_options().is_some();
-        Self::Loaded {
-            model: Box::new(model),
-            streams,
-        }
+        Self::Loaded(Box::new(model))
     }
 
     pub(super) fn parked(selection: TranscriptionSelection) -> Self {
@@ -45,23 +38,15 @@ impl ModelSlot {
 
     pub(super) fn model(&self) -> Option<&Model> {
         match self {
-            Self::Loaded { model, .. } => Some(model.as_ref()),
-            Self::Empty | Self::Parked { .. } | Self::ReloadFailed { .. } => None,
+            Self::Loaded(model) => Some(model.as_ref()),
+            Self::Parked { .. } | Self::ReloadFailed { .. } => None,
         }
     }
 
     pub(super) fn model_mut(&mut self) -> Option<&mut Model> {
         match self {
-            Self::Loaded { model, .. } => Some(model.as_mut()),
-            Self::Empty | Self::Parked { .. } | Self::ReloadFailed { .. } => None,
-        }
-    }
-
-    /// Re-reads streaming capability from the loaded model after an in-place
-    /// activation, model switch, or stream refresh.
-    pub(super) fn sync_streams(&mut self) {
-        if let Self::Loaded { model, streams } = self {
-            *streams = model.stream_options().is_some();
+            Self::Loaded(model) => Some(model.as_mut()),
+            Self::Parked { .. } | Self::ReloadFailed { .. } => None,
         }
     }
 
@@ -69,11 +54,11 @@ impl ModelSlot {
     /// selection and streaming capability to reload. Apple Speech stays loaded
     /// because it holds no model weights of Hex's.
     pub(super) fn park(&mut self) -> Option<TranscriptionSelection> {
-        let Self::Loaded { model, streams } = self else {
+        let Self::Loaded(model) = self else {
             return None;
         };
         let selection = model.gguf_selection()?.clone();
-        let streams = *streams;
+        let streams = model.stream_options().is_some();
         *self = Self::Parked {
             selection: selection.clone(),
             streams,
@@ -87,21 +72,20 @@ impl ModelSlot {
             Self::Parked { selection, .. } | Self::ReloadFailed { selection, .. } => {
                 Some(selection.clone())
             }
-            Self::Empty | Self::Loaded { .. } => None,
+            Self::Loaded(_) => None,
         }
     }
 
     pub(super) fn reload_error(&self) -> Option<&str> {
         match self {
             Self::ReloadFailed { error, .. } => Some(error.as_str()),
-            Self::Empty | Self::Loaded { .. } | Self::Parked { .. } => None,
+            Self::Loaded(_) | Self::Parked { .. } => None,
         }
     }
 
     pub(super) fn snapshot(&self) -> HeldState {
         match self {
-            Self::Empty => HeldState::Empty,
-            Self::Loaded { model, streams } => {
+            Self::Loaded(model) => {
                 #[cfg(not(target_os = "macos"))]
                 let backend = Some(model.backend().clone());
                 #[cfg(target_os = "macos")]
@@ -109,16 +93,14 @@ impl ModelSlot {
                 HeldState::Loaded {
                     selection: model.gguf_selection().cloned(),
                     backend,
-                    streams: *streams,
+                    streams: model.stream_options().is_some(),
                 }
             }
             Self::Parked { selection, streams } => HeldState::Parked {
                 selection: selection.clone(),
                 streams: *streams,
             },
-            Self::ReloadFailed { selection, .. } => HeldState::ReloadFailed {
-                selection: selection.clone(),
-            },
+            Self::ReloadFailed { .. } => HeldState::Empty,
         }
     }
 }
@@ -141,18 +123,13 @@ pub(super) enum HeldState {
         selection: TranscriptionSelection,
         streams: bool,
     },
-    /// Reloading `selection` failed: never counts as held and cannot stream.
-    ReloadFailed {
-        #[allow(dead_code)]
-        selection: TranscriptionSelection,
-    },
 }
 
 impl HeldState {
     pub(super) fn streams(&self) -> bool {
         match self {
             Self::Loaded { streams, .. } | Self::Parked { streams, .. } => *streams,
-            Self::Empty | Self::ReloadFailed { .. } => false,
+            Self::Empty => false,
         }
     }
 
@@ -168,8 +145,7 @@ impl HeldState {
             Self::Empty
             | Self::Loaded {
                 selection: None, ..
-            }
-            | Self::ReloadFailed { .. } => false,
+            } => false,
         }
     }
 
@@ -177,14 +153,14 @@ impl HeldState {
         match self {
             Self::Loaded { selection, .. } => selection.clone(),
             Self::Parked { selection, .. } => Some(selection.clone()),
-            Self::Empty | Self::ReloadFailed { .. } => None,
+            Self::Empty => None,
         }
     }
 
     pub(super) fn backend(&self) -> Option<SpeechBackend> {
         match self {
             Self::Loaded { backend, .. } => backend.clone(),
-            Self::Empty | Self::Parked { .. } | Self::ReloadFailed { .. } => None,
+            Self::Empty | Self::Parked { .. } => None,
         }
     }
 

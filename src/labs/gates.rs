@@ -123,13 +123,8 @@ pub(crate) fn copy_dictation_audio_enabled_under(
     settings: &AppSettings,
     policy: crate::policy::Policy,
 ) -> bool {
-    let on = |feature: Feature| {
-        feature.on(settings)
-            && feature.shipped()
-            && feature.on_this_os()
-            && policy.labs_lock(feature).is_none()
-    };
-    on(Feature::CopyDictationAudio) && on(Feature::KeepRecordings)
+    Feature::CopyDictationAudio.enabled_under(settings, policy)
+        && Feature::KeepRecordings.enabled_under(settings, policy)
 }
 
 /// A pasted dictation stays on the clipboard rather than the previous
@@ -252,13 +247,8 @@ pub(crate) fn history_stats_strip_enabled_under(
     settings: &AppSettings,
     policy: crate::policy::Policy,
 ) -> bool {
-    let on = |feature: Feature| {
-        feature.on(settings)
-            && feature.shipped()
-            && feature.on_this_os()
-            && policy.labs_lock(feature).is_none()
-    };
-    on(Feature::HistoryStatsStrip) && on(Feature::HistoryStats)
+    Feature::HistoryStatsStrip.enabled_under(settings, policy)
+        && Feature::HistoryStats.enabled_under(settings, policy)
 }
 
 /// The menu bar's Copy Recent Dictation submenu (macOS; read each time the

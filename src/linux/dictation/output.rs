@@ -56,10 +56,6 @@ impl OutputAdapter for LinuxOutputAdapter<'_, '_> {
 
     fn insert(&mut self, text: &str, plan: InsertPlan) -> Result<InsertResult, String> {
         match plan {
-            InsertPlan::None => {
-                self.cancel_pending();
-                Ok(InsertResult::default())
-            }
             InsertPlan::CopyOnly => {
                 self.cancel_pending();
                 let Some(insert) = self.insert.as_mut() else {

@@ -517,7 +517,10 @@ fn failed_startup_retry_keeps_backoff_without_an_open_stream() {
             .should_attempt(started + Duration::from_millis(250))
     );
     let (sender, receiver) = mpsc::channel();
-    input.replacement = Some(receiver);
+    input.replacement = Some(PendingReplacement {
+        receiver,
+        voice_isolation_skipped: false,
+    });
     sender.send((3, Err("device unavailable".into()))).unwrap();
 
     let before = Instant::now();
@@ -561,7 +564,10 @@ fn only_the_listeners_current_input_feeds_hex_microphone() {
     assert!(!meeting.hex_microphone.is_on());
 
     let (sender, receiver) = mpsc::channel();
-    input.replacement = Some(receiver);
+    input.replacement = Some(PendingReplacement {
+        receiver,
+        voice_isolation_skipped: false,
+    });
     sender
         .send((3, Ok(Opened::Input(Box::new(replacement)))))
         .unwrap();
@@ -581,7 +587,10 @@ fn startup_retry_recovers_metadata_and_audio_without_restarting() {
     let mut input = RecoveringAudioInput::closed(None, 3, Some("Test microphone"));
     input.finish_initial_open(Err(eyre!("device unavailable")), Instant::now());
     let (sender, receiver) = mpsc::channel();
-    input.replacement = Some(receiver);
+    input.replacement = Some(PendingReplacement {
+        receiver,
+        voice_isolation_skipped: false,
+    });
     let (opened, samples) = AudioInput::channel_for_test();
     sender
         .send((3, Ok(Opened::Input(Box::new(opened)))))
@@ -634,7 +643,10 @@ fn startup_recovery_opens_even_when_a_capture_is_pending() {
 fn failed_on_demand_open_does_not_retry_while_idle() {
     let mut input = RecoveringAudioInput::closed(None, 3, None);
     let (sender, receiver) = mpsc::channel();
-    input.replacement = Some(receiver);
+    input.replacement = Some(PendingReplacement {
+        receiver,
+        voice_isolation_skipped: false,
+    });
     sender.send((3, Err("device unavailable".into()))).unwrap();
 
     assert!(matches!(
@@ -696,7 +708,10 @@ fn audio_service_restart_interrupts_stream_and_recovers() {
     assert!(input.is_recovering());
 
     let (sender, receiver) = mpsc::channel();
-    input.replacement = Some(receiver);
+    input.replacement = Some(PendingReplacement {
+        receiver,
+        voice_isolation_skipped: false,
+    });
     let (reopened, samples_after) = AudioInput::channel_for_test();
     sender
         .send((1, Ok(Opened::Input(Box::new(reopened)))))

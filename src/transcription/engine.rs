@@ -1221,7 +1221,6 @@ impl Worker {
             if next.is_empty() && !recording() {
                 self.refresh_stream();
             }
-            self.slot.sync_streams();
             self.publish_slot();
             self.idle_since = Instant::now();
         }
@@ -1524,7 +1523,6 @@ impl Worker {
             finish_ms: started.elapsed().as_millis() as u64,
         });
         // An offline run may switch the model (macOS activates a selection).
-        self.slot.sync_streams();
         self.publish_slot();
         job.finish(result);
     }
