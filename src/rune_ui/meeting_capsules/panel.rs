@@ -257,16 +257,17 @@ fn replace(c: &Capsule) -> Transition {
     look.springs(SpringPair::new(enter, exit))
 }
 
-/// The finished meeting stays where its pill was; other panels take the saved corner.
-pub(super) fn show_corner(
+/// The finished meeting stays where its pill was, on that display too; other
+/// panels take the saved corner.
+pub(super) fn show_anchor(
     kind: &Kind,
-    last: Option<&(String, MeetingIndicatorCorner)>,
-    saved: impl FnOnce() -> MeetingIndicatorCorner,
-) -> MeetingIndicatorCorner {
+    last: Option<&(String, screen::Anchor)>,
+    saved: impl FnOnce() -> screen::Anchor,
+) -> screen::Anchor {
     if let Kind::Ready(manifest) = kind {
         return last
             .filter(|(id, _)| *id == manifest.id)
-            .map(|(_, corner)| *corner)
+            .map(|(_, anchor)| anchor.clone())
             .unwrap_or_else(saved);
     }
     saved()

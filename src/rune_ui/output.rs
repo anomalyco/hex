@@ -26,6 +26,9 @@ mod examples;
 
 /// The agent card's spark, this many points square.
 const SPARK: f32 = 30.0;
+/// The narrowest the agent card's lead (spark and copy) gets before its
+/// actions wrap below it.
+const AGENT_TEXT_MIN: f32 = 160.0;
 /// Each app rule's folding steps, by its place in the list.
 const RULE_STEPS: [&str; 8] = [
     "rule0-steps",
@@ -257,8 +260,8 @@ fn agent_card(ui: &Ui, p: Paint, reduced: bool) -> El {
             .child(
                 row()
                     .key("lead")
-                    .w(200.0)
                     .grow(1.0)
+                    .min_w(AGENT_TEXT_MIN)
                     .gap(12.0)
                     .center_y()
                     .child(mark)
@@ -269,6 +272,11 @@ fn agent_card(ui: &Ui, p: Paint, reduced: bool) -> El {
                     .key("actions")
                     .gap(4.0)
                     .center_y()
+                    // Below the window's usual minimum width the two labels
+                    // no longer fit side by side; stack them instead of
+                    // running past the card.
+                    .shrink()
+                    .flex_wrap()
                     .child(open)
                     .child(edit),
             ),

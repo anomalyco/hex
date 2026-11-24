@@ -78,6 +78,9 @@ static MEETING_SUMMARIES: AtomicU8 = AtomicU8::new(MeetingSummaries::platform_de
 static MEETING_INDICATOR_ENABLED: AtomicBool =
     AtomicBool::new(meetings::DEFAULT_SHOW_RECORDING_INDICATOR);
 static MEETING_INDICATOR_CORNER: AtomicU8 = AtomicU8::new(MeetingIndicatorCorner::TopRight as u8);
+/// The display the recording capsule rests on (Labs › Indicator on any
+/// display): the OS's own name for it, `None` for the primary display.
+static MEETING_INDICATOR_DISPLAY: OnceLock<RwLock<Option<String>>> = OnceLock::new();
 /// [`MeetingRetention::encode`]d; [`RETENTION_UNSET`] until settings apply.
 static MEETING_RETENTION: AtomicU8 = AtomicU8::new(RETENTION_UNSET);
 /// [`MeetingRetention::encode`]d; [`RETENTION_UNSET`] until settings apply.
@@ -870,6 +873,11 @@ impl AppSettings {
             self.meetings.recording_indicator_corner as u8,
             Ordering::Release,
         );
+        *MEETING_INDICATOR_DISPLAY
+            .get_or_init(Default::default)
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) =
+            self.meetings.recording_indicator_display.clone();
         MEETING_RETENTION.store(
             MeetingRetention::encode(self.meetings.retention),
             Ordering::Release,

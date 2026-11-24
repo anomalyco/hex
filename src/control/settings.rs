@@ -793,6 +793,7 @@ mod tests {
                 retention: Some(crate::app_settings::MeetingRetention::Day),
                 audio_retention: Some(crate::app_settings::MeetingRetention::Day),
                 opencode_model: Some("anthropic/claude-haiku".into()),
+                recording_indicator_display: Some(r"\\.\DISPLAY2".into()),
                 ..Default::default()
             },
             ..Default::default()

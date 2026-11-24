@@ -157,7 +157,7 @@ impl Capsule {
         &mut self,
         kind: Kind,
         presentation: offer_surface::Presentation,
-        corner: MeetingIndicatorCorner,
+        anchor: screen::Anchor,
         timer: Option<offer::After>,
         tx: &mut Tx,
     ) {
@@ -167,7 +167,8 @@ impl Capsule {
         self.arm_offer_timeout();
         self.live = Live::default();
         self.waveform = None;
-        self.corner = corner;
+        self.corner = anchor.corner;
+        self.display = anchor.display;
         self.throw.stop();
         // Nothing in it mounts with an entrance of its own.
         tx.instant();

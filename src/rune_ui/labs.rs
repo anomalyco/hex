@@ -724,6 +724,11 @@ fn rows(ui: &Ui) -> Vec<Row> {
         if Feature::MeetingImport.on_this_os() {
             rows.push(row(Feature::MeetingImport, None));
         }
+        // macOS and Windows place a capsule on a native display; a native
+        // Wayland capsule has no display to measure at all.
+        if Feature::MeetingIndicatorDisplay.on_this_os() {
+            rows.push(row(Feature::MeetingIndicatorDisplay, None));
+        }
         rows.push(row(Feature::TranscriptEdits, None));
     }
     rows.push(row(Feature::VocabularyFiles, Some(&BOOK)));
@@ -1122,6 +1127,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::StopAnyCallRecording => "lab-stop-any-call-recording",
         Feature::ClipboardPhrase => "lab-clipboard-phrase",
         Feature::MeetingMicrophoneMute => "lab-meeting-microphone-mute",
+        Feature::MeetingIndicatorDisplay => "lab-meeting-indicator-display",
     }
 }
 

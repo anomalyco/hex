@@ -73,7 +73,7 @@ pub(crate) fn pointer_screen(
 /// `NativeDisplayId::MacOS` matches: winit reports a monitor's native id
 /// the same way (`CGDisplayGetDisplayIDFromUUID`), so a measured notch can
 /// pin the panel to the display it was read on.
-fn screen_number(screen: &NSScreen) -> Option<u32> {
+pub(crate) fn screen_number(screen: &NSScreen) -> Option<u32> {
     let description = screen.deviceDescription();
     let key = NSString::from_str("NSScreenNumber");
     let number = description.objectForKey(&key)?;

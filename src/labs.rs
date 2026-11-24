@@ -594,6 +594,25 @@ mod tests {
     }
 
     #[test]
+    fn the_meeting_indicator_display_lab_is_a_desktop_meetings_lab_off_by_default() {
+        let feature = Feature::MeetingIndicatorDisplay;
+        assert_eq!(feature.name(), "meeting-indicator-display");
+        assert_eq!(feature.group(), Group::Meetings);
+        assert_eq!(feature.audience(), Audience::Everyone);
+        assert_eq!(feature.oses(), &[Os::Macos, Os::Windows]);
+        assert_eq!(feature.added(), 20261124);
+        assert!(!feature.on(&AppSettings::default()));
+        assert_eq!(
+            feature.on_this_os(),
+            cfg!(any(target_os = "macos", target_os = "windows"))
+        );
+        assert_eq!(
+            Feature::from_name("meeting-indicator-display"),
+            Some(feature)
+        );
+    }
+
+    #[test]
     fn the_stop_any_call_recording_lab_ships_on_every_os_and_is_off_by_default() {
         let feature = Feature::StopAnyCallRecording;
         assert_eq!(feature.name(), "stop-any-call-recording");

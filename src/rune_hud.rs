@@ -18,7 +18,7 @@ pub(crate) mod hud_placement;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
-pub(crate) use macos::{activation_policy_changed, pointer_screen};
+pub(crate) use macos::{activation_policy_changed, pointer_screen, screen_number};
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod rehome;
 pub(crate) mod spring;
