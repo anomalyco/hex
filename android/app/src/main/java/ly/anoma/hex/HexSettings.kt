@@ -114,6 +114,11 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     var vocabularyDraft by remember { mutableStateOf(speech.vocabularyTerms.joinToString("\n")) }
     val signature = remember(revision) { speech.signature }
     val fastEnglish = remember(revision) { speech.fastEnglish }
+    val learnFixes = remember(revision) { speech.learnFixes }
+    val fixStore = remember(context) { DictationFixStore(context) }
+    val learnedFixes = remember(revision, learnFixes) { if (learnFixes) fixStore.learned() else emptyList() }
+    val disabledFixes = remember(revision, learnFixes) { if (learnFixes) fixStore.disabled() else emptySet() }
+    var forgetting by remember { mutableStateOf(false) }
     val english = ModelStore.english.state.collectAsState().value
     var signatureDraft by remember { mutableStateOf(speech.signatureText) }
     val emojiSuggestions = remember(revision) { typing.emojiSuggestions }
@@ -124,6 +129,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val voiceOnly = remember(revision) { typing.voiceOnly }
     // A hidden field or leaving Labs shows the saved line again, never an unsaved draft.
     LaunchedEffect(page, signature) { if (page != Page.Labs || !signature) signatureDraft = speech.signatureText }
+    LaunchedEffect(page, learnFixes) { if (page != Page.Labs || !learnFixes) forgetting = false }
     val autoCapitalize = remember(revision) { typing.autoCapitalize }
     val autocorrect = remember(revision) { typing.autocorrect }
     val swearWords = remember(revision) { typing.suggestSwearWords }
@@ -351,6 +357,43 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                         ModelStore.State.Ready -> Entry(stringResource(R.string.fast_english_ready, size),
                                             value = stringResource(R.string.fast_english_delete),
                                             action = { ModelStore.english.delete(context); speech.fastEnglish = false })
+                                    }
+                                }
+                                Rule()
+                                // Labs › Learn from my fixes: off, the keyboard tracks nothing, applies nothing and
+                                // offers no hints; on, the learned word pairs are listed with a switch each.
+                                Toggle(stringResource(R.string.learn_fixes), stringResource(R.string.learn_fixes_detail),
+                                    learnFixes, noteLines = Int.MAX_VALUE) {
+                                    speech.learnFixes = it
+                                    if (!it) forgetting = false
+                                }
+                                if (learnFixes) {
+                                    if (learnedFixes.isEmpty()) {
+                                        Rule()
+                                        Label(stringResource(R.string.learn_fixes_empty), muted = true, size = 13,
+                                            lines = Int.MAX_VALUE, mod = Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+                                    } else {
+                                        learnedFixes.forEach { fix ->
+                                            Rule()
+                                            Toggle(fix.heard + " → " + fix.meant,
+                                                stringResource(R.string.learn_fixes_count, fix.count),
+                                                fix.id !in disabledFixes) { on -> fixStore.disable(fix.id, !on) }
+                                        }
+                                    }
+                                    Rule()
+                                    if (forgetting) {
+                                        Row(Modifier.fillMaxWidth().heightIn(min = 52.dp)
+                                            .padding(start = 16.dp, end = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically) {
+                                            Label(stringResource(R.string.learn_fixes_delete_confirm), size = 14,
+                                                lines = 2, mod = Modifier.weight(1f))
+                                            Action(stringResource(R.string.learn_fixes_cancel)) { forgetting = false }
+                                            Action(stringResource(R.string.learn_fixes_delete_action)) {
+                                                fixStore.clear(); forgetting = false
+                                            }
+                                        }
+                                    } else {
+                                        Entry(stringResource(R.string.learn_fixes_delete), action = { forgetting = true })
                                     }
                                 }
                             }

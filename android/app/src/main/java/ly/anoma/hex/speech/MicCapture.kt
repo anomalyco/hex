@@ -98,7 +98,7 @@ internal class MicCapture(
     private val place: DictationPlace,
     private val update: (SpeechPhase, String?) -> Unit,
     private val meter: (Float) -> Unit,
-    private val insert: (String, SpeechOptions) -> Unit,
+    private val insert: (String, String, SpeechOptions) -> Unit,
 ) {
     private class Ticket(val options: SpeechOptions) {
         val job = jobs.incrementAndGet()
@@ -107,6 +107,8 @@ internal class MicCapture(
         var done = false
         var note: String? = null
         var text: String? = null
+        /** What the model heard, before formatting: Labs › Learn from my fixes follows the raw words. */
+        var heard: String? = null
         // Labs › Diagnostics' last dictation: System.nanoTime of each step (0: not reached) and sample counts.
         @Volatile var tickAt = 0L
         var preparedAt = 0L
@@ -195,16 +197,16 @@ internal class MicCapture(
     }
 
     /** A dictation ends: recording stopped with nothing to transcribe, or its text is ready. */
-    private fun complete(ticket: Ticket, note: String? = null, text: String? = null) = main.post {
+    private fun complete(ticket: Ticket, note: String? = null, text: String? = null, heard: String? = null) = main.post {
         if (active === ticket) active = null
         if (ticket.cancelled) { publish(current()); return@post }
-        ticket.done = true; ticket.note = note; ticket.text = text
+        ticket.done = true; ticket.note = note; ticket.text = text; ticket.heard = heard
         if (ticket !in queue) queue.addLast(ticket)
         var shown: String? = null
         while (queue.firstOrNull()?.done == true) {
             val next = queue.removeFirst()
             shown = next.note ?: shown
-            next.text?.let { insert(it, next.options) }
+            next.text?.let { insert(it, next.heard ?: it, next.options) }
             next.spent?.let { lastDictation.value = durations(next, it, if (next.text != null) System.nanoTime() else 0L) }
         }
         publish(current(), shown)
@@ -239,7 +241,7 @@ internal class MicCapture(
                 when (val text = heard.text?.let { SpokenText.format(it, options) }) {
                     null -> complete(ticket, "Couldn’t transcribe. Try again.")
                     "" -> complete(ticket, "No speech heard")
-                    else -> complete(ticket, dictationNote(note, heard.note), text)
+                    else -> complete(ticket, dictationNote(note, heard.note), text, heard.text)
                 }
             } catch (_: UnsatisfiedLinkError) {
                 complete(ticket, "Speech model unavailable")

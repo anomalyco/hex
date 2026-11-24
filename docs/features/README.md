@@ -3416,7 +3416,7 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
     the chip sizes), on 2026-11-24 on OpenJDK 21 (Arch Linux 21.0.13) and
     Android SDK 36 (platform 36, build-tools 35.0.0, NDK 27.2.12479018) with compileSdk 36 and
     minSdk 31; the repo has no Android CI, and nothing was tried on a device or emulator.
-└── Labs > Keyboard > Voice-only mode (off) -> a "Voice only" subtype of Hex, registered at runtime
+├── Labs > Keyboard > Voice-only mode (off) -> a "Voice only" subtype of Hex, registered at runtime
     with `InputMethodManager.setAdditionalInputMethodSubtypes` (never in input_method.xml), that
     replaces the keyboard with one compact dictation bar: the strip's dot waveform and a status
     line, ✓ to finish (or to start again after a blocked or failed start) and ✕ to cancel. Showing
@@ -3445,6 +3445,40 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
     build-tools 36.0.0, NDK 27.2.12479018); `VoiceOnlyTest` covers the bar-or-keyboard and restart
     decisions, `python3 scripts/code-shape.py --check` and `git diff --check` pass, and the repo has
     no Android CI; nothing was tried on a device or emulator.
+└── Labs > Dictation > Learn from my fixes (off) -> an Android-only port of iPhone Hex's dictation
+    correction learning, with no typing side. Off, the keyboard tracks nothing, applies nothing and
+    adds no hints. On, each keyboard dictation in a non-secure words field that the field lets Hex
+    learn from (`FieldTyping.learns`, not a `TYPE_NULL` field) and that wasn't translated, up to 400
+    words, is remembered with 32-character anchors before and after; its text stays in memory,
+    never on disk, and it is found again by those anchors, never by position, on each selection
+    update. It settles after 60 seconds, when the field changes or the keyboard leaves, or when
+    another dictation starts; a span the field never showed reports nothing. A dictation deleted and
+    dictated again within 20 seconds is compared with the new one as a redictation. Inference is a
+    whole-word LCS diff of the inserted and current text (apostrophes inside words): no change is
+    kept, more than max(1, words/2) changed words is a rewrite with no pairs, and pair hunks need at
+    most three words a side and a letters-only Levenshtein distance within max(2, longest/2); a
+    sentence-start capital on the meant side is dropped. Raw words the person kept in a corrected
+    dictation contradict any fix that would have changed them. A heard -> meant pair is applied
+    after two sightings with no contradiction and no second meaning for those heard words; fixing
+    an applied fix to something else, or fixing it back, contradicts it, and each listed fix has a
+    switch. Applied fixes run on the raw transcript before custom vocabulary, whole words and
+    phrases only, never inside a longer token, keeping the original's case unless the fix carries
+    capitals. The meant words join the custom vocabulary as recognition hints for both Whisper's
+    prompt and Parakeet's vocabulary (vocabulary first, deduplicated, at least two characters, capped
+    at the existing 100), and either source works without the other. Settings > Labs > Dictation
+    lists each learned pair with a switch and a confirmed Delete; the fixes live in the same
+    `speech` SharedPreferences as one escaped line per fix, capped at 1,000 records (the least used
+    and oldest drop first), and turning the lab off neither learns nor applies anything. Checks:
+    `DictationLearningTest` (22: kept, rewrite, plausible and implausible substitutions, the
+    three-word pair limit, sentence-start capitals, redictations, the two-sighting, contradiction and
+    one-meaning thresholds, a switched-off fix, merging, the 1,000-record cap, whole-word and phrase
+    application, fixes before vocabulary, hints and their cap, and the persistence round-trip) and
+    `DictationTrackerTest` (7: kept at the minute, an edit at the window's end, a new dictation
+    settling the last, redictation, deletion, a span the field never showed, and Undo) in
+    android/app/src/test, plus
+    `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin -x prepareSpeechModel` passing 266
+    tests on 2026-11-24 on OpenJDK 21 and Android SDK 36 (offline); the repo has no Android CI, and
+    nothing was tried on a device or emulator.
 Unmerged Windows / deferred features -> Not part of this map
 ```
 

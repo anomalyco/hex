@@ -53,9 +53,14 @@ internal fun typingLayout(pinned: Spoken?, spoken: DictationLanguage): Spoken? =
 internal data class SpeechOptions(val style: Style, val spoken: DictationLanguage, val clean: Boolean, val translate: Boolean,
                                    val lowercase: Boolean = false, val endWithPeriod: Boolean = true,
                                    val formatLists: Boolean = false, val spokenPunctuation: Boolean = false,
-                                   val vocabulary: List<String> = emptyList(), val fastEnglish: Boolean = false)
-internal class SpeechPreferences(context: Context) {
+                                   val vocabulary: List<String> = emptyList(), val fastEnglish: Boolean = false,
+                                   /** Labs › Learn from my fixes' active fixes, applied to the raw transcript. */
+                                   val fixes: List<DictationFix> = emptyList(),
+                                   /** Whether the lab was on when the dictation started; its tracking is keyboard-only. */
+                                   val learnFixes: Boolean = false)
+internal class SpeechPreferences(private val context: Context) {
     private val prefs = context.getSharedPreferences("speech", Context.MODE_PRIVATE)
+    private val fixes by lazy { DictationFixStore(context) }
     var style: Style
         get() = Style.entries.firstOrNull { it.name == prefs.getString("style", null) } ?: Style.Polished
         set(value) { prefs.edit().putString("style", value.name).apply() }
@@ -102,6 +107,10 @@ internal class SpeechPreferences(context: Context) {
     var fastEnglish: Boolean
         get() = prefs.getBoolean("fastEnglish", false)
         set(value) { prefs.edit().putBoolean("fastEnglish", value).apply() }
+    // Labs › Learn from my fixes: learn from dictation edits and apply what was learned, off by default.
+    var learnFixes: Boolean
+        get() = prefs.getBoolean("learnFixes", false)
+        set(value) { prefs.edit().putBoolean("learnFixes", value).apply() }
     // Labs › Signature: the line added to each keyboard dictation, off by default.
     var signature: Boolean
         get() = prefs.getBoolean("signature", false)
@@ -110,7 +119,13 @@ internal class SpeechPreferences(context: Context) {
         get() = prefs.getString("signatureText", Signature.DEFAULT_TEXT)
             ?.takeIf { Signature.textProblem(it) == null }?.trim() ?: Signature.DEFAULT_TEXT
         set(value) { prefs.edit().putString("signatureText", value).apply() }
-    fun options(nextEnglish: Boolean?) = SpeechOptions(style, spoken, clean,
-        translation && spoken == DictationLanguage.Spanish && (nextEnglish ?: true), lowercase, endWithPeriod, formatLists, spokenPunctuation,
-        if (customVocabulary) vocabularyTerms else emptyList(), fastEnglish)
+    fun options(nextEnglish: Boolean?): SpeechOptions {
+        val learned = if (learnFixes) fixes.active() else emptyList()
+        val terms = if (customVocabulary) vocabularyTerms else emptyList()
+        // Off, the terms pass through exactly as they always have; on, the learned spellings join them.
+        val hints = if (learnFixes) DictationFixes.hints(terms, learned) else terms
+        return SpeechOptions(style, spoken, clean,
+            translation && spoken == DictationLanguage.Spanish && (nextEnglish ?: true), lowercase, endWithPeriod, formatLists,
+            spokenPunctuation, hints, fastEnglish, learned, learnFixes)
+    }
 }
