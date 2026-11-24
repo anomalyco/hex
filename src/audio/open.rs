@@ -225,15 +225,15 @@ pub(super) fn input_devices_of(host: &cpal::Host) -> Result<(Vec<Device>, Vec<St
 }
 
 /// The system default input with its name, or `None` when there is none or
-/// its name cannot be read. Windows opens the endpoint as one of the listed
-/// devices, because cpal's default-input handle registers a monitor whose
-/// callbacks leave the process's thread-pool threads STA
-/// (`super::default_endpoint`); only when that resolution fails does it fall
-/// back to cpal's handle.
+/// its name cannot be read. Windows resolves the endpoint to one of the
+/// listed devices, because cpal's default-input handle registers a monitor
+/// whose callbacks leave the process's thread-pool threads STA
+/// (`super::default_endpoint`). When that resolution fails it returns `None`
+/// and the open's bounded recovery retries; it never falls back to the
+/// default-input handle.
 pub(super) fn default_input_of(host: &cpal::Host) -> Option<(Device, String)> {
     #[cfg(target_os = "windows")]
-    let device =
-        super::default_endpoint::default_input(host).or_else(|| host.default_input_device());
+    let device = super::default_endpoint::default_input(host)?;
     #[cfg(not(target_os = "windows"))]
     let device = host.default_input_device()?;
     let name = device_name(&device)?;
@@ -336,10 +336,14 @@ pub(super) fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
                 "the saved microphone is off while the lid is closed; using the system default"
             ),
         }
+        // Only a stream built on cpal's default-input handle gets the
+        // handle's default-change report. Windows resolves System default to
+        // a listed device, never that handle.
+        let on_default_handle = follows_default && !cfg!(target_os = "windows");
         let mut input = AudioInput::open_device(
             device,
             name,
-            follows_default,
+            on_default_handle,
             request.renegotiate_rate,
             request.voice_processing,
             request.voice_processing_fallback,

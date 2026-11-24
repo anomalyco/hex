@@ -2499,8 +2499,8 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │   │   cpal's default handle: its monitor leaves thread-pool threads STA, which
 │   │   then fails ActivateAudioInterfaceAsync (RPC_E_CHANGED_MODE)
 │   ├── Windows default input changes -> Switch once capture is idle // endpoint
-│   │   notification client bumps the input route; cpal's default-device report stays
-│   │   for a default-handle stream resolution had to fall back to
+│   │   notification client bumps the input route; Windows never opens a default
+│   │   handle, so cpal's default-change report never applies
 │   └── Windows default input reports no default format -> Hex's own WASAPI paths
 │       (the endpoint by id, as when picked by name), then other formats it lists;
 │       the read error keeps its cause (#1845, unverified on real Windows)

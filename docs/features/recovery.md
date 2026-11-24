@@ -298,11 +298,14 @@ device reports no default format at all               // #1845, Windows default 
   -> none opens -> the read error, with its cause, and the direct path's
      failure, go to recovery
 Windows System default input or output                       // audio::default_endpoint
-  -> resolve the default endpoint id on one MTA thread       // no Hex thread inits COM
+  -> resolve the default endpoint id on one MTA thread       // the endpoint thread
+     initializes MTA; callers need no COM of their own
   -> open the listed cpal device with that id                // never cpal's default handle:
      cpal's default-handle monitor initializes COM as STA on Windows thread-pool
      threads, so ActivateAudioInterfaceAsync later fails with RPC_E_CHANGED_MODE
-  ├── no listed device matches -> cpal's default handle      // fallback, as before
+  ├── input: no listed device matches -> the open fails      // bounded recovery retries
+  ├── output: a listed device will not open -> try the next listed output
+  │   -> none opens -> the tone is dropped                   // never the default handle
   └── default endpoint changes -> an IMMNotificationClient bumps the input or
       output route generation                                // no COM calls in the callback
       -> input switches once capture is idle; a warm feedback output reopens
