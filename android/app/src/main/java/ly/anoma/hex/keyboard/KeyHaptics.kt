@@ -1,15 +1,12 @@
 package ly.anoma.hex.keyboard
 
-import android.annotation.SuppressLint
 import android.content.Context
-import android.content.res.Resources
 import android.media.AudioAttributes
 import android.os.Build
 import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
-import android.provider.Settings
 import java.util.concurrent.atomic.AtomicInteger
 
 /** Hex's taps, Android's own keyboard pair (HapticFeedbackVibrationProvider: a key press is EFFECT_CLICK, a
@@ -45,22 +42,10 @@ internal sealed interface TapPlay {
     data class Pulse(val millis: Long, val amplitude: Int, val missing: Int) : TapPlay
 }
 
-/** Hex's Haptics setting on, and the system's Keyboard vibration switch too where the phone has one. */
-internal fun vibrates(context: Context, haptics: Boolean) =
-    haptics && keyboardVibrationAllows(keyboardVibrationSupported,
-        Settings.System.getInt(context.contentResolver, "keyboard_vibration_enabled", 1))
-
-/** Android's own rule (VibrationSettings): the stored Keyboard vibration value counts only on a phone that
- * declares the setting; elsewhere keyboard taps follow touch feedback, whatever value is stored. */
-internal fun keyboardVibrationAllows(supported: Boolean, stored: Int) = !supported || stored != 0
-
-/** Whether the phone declares Android's Keyboard vibration setting (Pixel does); a phone without the
- * resource doesn't. */
-private val keyboardVibrationSupported: Boolean by lazy @SuppressLint("DiscouragedApi") {
-    val system = Resources.getSystem()
-    val id = system.getIdentifier("config_keyboardVibrationSettingsSupported", "bool", "android")
-    id != 0 && system.getBoolean(id)
-}
+/** Hex asks for a tap whenever its own Haptics switch is on. It doesn't read Android's Keyboard vibration
+ * value: a Galaxy S23 (One UI 9) stores 0 there with touch vibration on, which silenced Hex. The phone's touch
+ * feedback setting, strength and Do Not Disturb still apply, through the taps' touch usage. */
+internal fun vibrates(haptics: Boolean) = haptics
 
 /** Plays [tap] on the vibrator itself rather than through View.performHapticFeedback, whose keyboard
  * effects each phone maker may tie to its own keyboard's settings (One UI does), so the Haptics switch is
@@ -68,7 +53,7 @@ private val keyboardVibrationSupported: Boolean by lazy @SuppressLint("Discourag
  * (USAGE_TOUCH; before Android 13, sonification audio attributes, which Android maps to it), so the
  * system's touch vibration setting and Do Not Disturb apply to them as to Android's own. */
 internal fun tap(context: Context, haptics: Boolean, tap: Tap) {
-    if (!vibrates(context, haptics)) { TapCounts.stopped.incrementAndGet(); return }
+    if (!vibrates(haptics)) { TapCounts.stopped.incrementAndGet(); return }
     val vibrator = context.getSystemService(VibratorManager::class.java)?.defaultVibrator ?: return
     if (!vibrator.hasVibrator()) return
     val effect = tap.effect(vibrator)
