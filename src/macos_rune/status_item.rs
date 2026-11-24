@@ -1412,16 +1412,17 @@ mod tests {
         assert!(idle.can_start && !idle.can_stop && idle.status.is_none());
         assert!(!meeting_menu(&MeetingMenuState::Idle, false).can_start);
         let started = std::time::Instant::now() - std::time::Duration::from_secs(754);
-        let recording_state = |title: &str, chapters, warning| MeetingMenuState::Recording {
-            started,
-            id: "1".into(),
-            title: title.into(),
-            chapters,
-            warning,
-            stopping: false,
-        };
+        let recording_state =
+            |title: &str, chapters, warning, stopping| MeetingMenuState::Recording {
+                started,
+                id: "1".into(),
+                title: title.into(),
+                chapters,
+                warning,
+                stopping,
+            };
         let recording = meeting_menu(
-            &recording_state("Zoom call — 2:30 PM", Vec::new(), None),
+            &recording_state("Zoom call — 2:30 PM", Vec::new(), None, false),
             false,
         );
         assert_eq!(
@@ -1433,6 +1434,7 @@ mod tests {
                 "A very long provisional title that keeps going past the limit",
                 Vec::new(),
                 None,
+                false,
             ),
             false,
         );
@@ -1448,6 +1450,7 @@ mod tests {
                 "Team sync",
                 Vec::new(),
                 Some(crate::meeting::TrackWarning::DigitalSilence),
+                false,
             ),
             false,
         );
@@ -1465,6 +1468,7 @@ mod tests {
                 "Team sync",
                 vec![chapter("Image storage", 0), chapter("Motion lint", 190_000)],
                 None,
+                false,
             ),
             false,
         );
@@ -1480,13 +1484,7 @@ mod tests {
         );
         // A stop under way keeps the recording visible with no Record and no
         // Stop until the transcription row takes over.
-        let stopping = meeting_menu(
-            &MeetingMenuState::Recording {
-                stopping: true,
-                ..recording_state("Team sync", Vec::new(), None)
-            },
-            true,
-        );
+        let stopping = meeting_menu(&recording_state("Team sync", Vec::new(), None, true), true);
         assert!(!stopping.can_start && !stopping.can_stop);
         assert!(stopping.recording);
         assert_eq!(stopping.status.as_deref(), Some("Stopping…"));
