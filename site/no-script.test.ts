@@ -40,3 +40,15 @@ test("every class the swap names is on the page", () => {
   }
   for (const name of ["hero__device", "hero__any"]) expect(app).toContain(name)
 })
+
+test("mobile platform lands on the mobile tab with iOS and Android links", async () => {
+  const { osOf } = await import("./src/Download")
+  expect(osOf("mobile")).toBe("mobile")
+  const { render } = await import("./src/prerender")
+  const rendered = render()
+  expect(rendered).toContain('id="install-tab-mobile"')
+  expect(rendered).toContain('id="install-panel-mobile"')
+  expect(rendered).toContain('id="install-plain-mobile"')
+  expect(rendered).toContain('href="/hex/ios"')
+  expect(rendered).toContain('href="/hex/android"')
+})

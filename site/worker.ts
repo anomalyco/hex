@@ -8,7 +8,7 @@
 // Hex for iPhone on the App Store. Other hosts and
 // plain HTTP redirect to the canonical host. `cf dev` with ANY_HOST set turns
 // the redirect off for local testing.
-import { ANDROID_DOWNLOAD_PATH, ANDROID_PREVIEW_URL, BASE_PATH, DEV_DOWNLOAD_PATH, DEV_NOTES_PATH, DEV_NOTES_URL, DOWNLOAD_PATH, FILES_PATH, RELEASE_SERVICE, stripBase, withBase } from "./src/base"
+import { ANDROID_DOWNLOAD_PATH, ANDROID_PREVIEW_URL, BASE_PATH, DEV_DOWNLOAD_PATH, DEV_NOTES_PATH, DEV_NOTES_URL, DOWNLOAD_PATH, FILES_PATH, IOS_PATH, RELEASE_SERVICE, stripBase, withBase } from "./src/base"
 import { parseDevNotes, renderDevNotes } from "./src/dev-notes"
 
 type Env = {
@@ -66,7 +66,6 @@ export default {
 }
 
 // /hex/ios, the short link to Hex for iPhone on the App Store.
-const IOS_PATH = withBase("/ios")
 const APP_STORE_URL = "https://apps.apple.com/us/app/hex-voice-dictation-keyboard/id6836837368"
 
 const DOCS = new Map([

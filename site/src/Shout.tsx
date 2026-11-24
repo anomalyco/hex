@@ -138,9 +138,9 @@ export function OptionKey({
   onIntent,
   onPress,
 }: {
-  // The hero's key names the selected OS's shortcut: Option on the Mac, Alt
-  // on Windows, and Alt+Space on Linux, which binds no modifier alone.
-  os: "mac" | "windows" | "linux"
+  // The hero's key names the selected OS's shortcut: Option on the Mac (and
+  // Mobile), Alt on Windows, and Alt+Space on Linux, which binds no modifier alone.
+  os: "mac" | "windows" | "linux" | "mobile"
   phase: Phase
   onStart(el?: HTMLElement | null): void
   onIntent(): void
@@ -230,7 +230,7 @@ export function OptionKey({
       <span className="keycap__well" aria-hidden="true" />
       <span className="keycap__cap" aria-hidden="true">
         <span className="keycap__dish">
-          {os === "mac" && (
+          {(os === "mac" || os === "mobile") && (
             <svg viewBox="0 0 24 18" className="keycap__glyph">
               <path d="M2.5 3.5h5.2l6.2 11h7.6M14.2 3.5h7.3" />
             </svg>
