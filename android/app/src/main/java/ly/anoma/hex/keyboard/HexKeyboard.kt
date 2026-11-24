@@ -6,16 +6,28 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.database.ContentObserver
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.UserDictionary
 import java.util.concurrent.Executors
 import android.inputmethodservice.InputMethodService
+import android.util.Size
+import android.util.TypedValue
 import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InlineSuggestionsRequest
+import android.view.inputmethod.InlineSuggestionsResponse
 import android.view.inputmethod.InputMethodManager
 import android.view.inputmethod.InputMethodSubtype
+import android.widget.inline.InlinePresentationSpec
+import androidx.autofill.inline.UiVersions
+import androidx.autofill.inline.common.TextViewStyle
+import androidx.autofill.inline.v1.InlineSuggestionUi
+import kotlin.math.roundToInt
 import ly.anoma.hex.MainActivity
 import ly.anoma.hex.R
 import ly.anoma.hex.speech.LocalSpeech
@@ -92,6 +104,7 @@ class HexKeyboard : InputMethodService() {
         if (key == TypingPreferences.EMOJI_SUGGESTIONS) engine.emojiSuggestionsChanged()
         if (key == TypingPreferences.KEYBOARD_TOOLS) { engine.keyboardToolsChanged(); watchClipboard() }
         if (key == TypingPreferences.VOICE_ONLY) modeChanged()
+        if (key == TypingPreferences.PASSWORD_MANAGER_SUGGESTIONS) clearInline()
     }
     // The strip's Paste tool comes and goes with the clipboard (Labs › Keyboard › Keyboard tools): the
     // listener exists only while the lab is on and the input view is shown.
@@ -198,6 +211,67 @@ class HexKeyboard : InputMethodService() {
                                    candidatesStart: Int, candidatesEnd: Int) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         engine.updateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd)
+    }
+
+    // Android 11's inline autofill suggestions (Labs › Keyboard › Password manager suggestions): the
+    // service builds the chips and fills the field when one is tapped; Hex asks for them and lays
+    // them out, and never reads one. Off, no request is made, so the system's own autofill dropdown
+    // is exactly as before.
+    /** A response's inflation still running when the strip moves on is dropped, not shown late. */
+    private var inlineGeneration = 0
+    /** The strip's inline chips go: a new field, the keyboard hiding, or the lab turning off. */
+    private fun clearInline() {
+        inlineGeneration++
+        view?.inlineSuggestions(emptyList(), emptyList())
+    }
+    override fun onCreateInlineSuggestionsRequest(uiExtras: Bundle): InlineSuggestionsRequest? {
+        // The voice-only bar has no strip to show chips in: asking would put Android in inline mode
+        // where nothing shows them, so the system's own autofill UI would never appear either.
+        if (!feedback.passwordManagerSuggestions || voiceOnly()) return null
+        val density = resources.displayMetrics.density
+        val strip = (if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
+            KeyboardMetrics.STRIP_LANDSCAPE else KeyboardMetrics.STRIP) * density
+        val height = InlineAutofill.chipHeight(strip.roundToInt(), density)
+        val widths = InlineAutofill.chipWidths(density)
+        // Password managers draw their own chip only when the style bundle carries the androidx
+        // UiVersions they know; its text follows the strip's.
+        val style = InlineSuggestionUi.newStyleBuilder()
+            .setTitleStyle(TextViewStyle.Builder().setTextColor(getColor(R.color.ink))
+                .setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f).build())
+            .setSubtitleStyle(TextViewStyle.Builder().setTextColor(getColor(R.color.quiet))
+                .setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f).build())
+            .build()
+        val spec = InlinePresentationSpec.Builder(Size(widths.first, height), Size(widths.last, height))
+            .setStyle(UiVersions.newStylesBuilder().addStyle(style).build())
+            .build()
+        return InlineSuggestionsRequest.Builder(listOf(spec))
+            .setMaxSuggestionCount(InlineAutofill.MAX)
+            .build()
+    }
+    /** The service's answer. A tap lets Android fill the field; Hex never reads a login, a code or
+     * a card. The unpinned chips fill the scrolling row and the pinned ones sit at its edge. */
+    override fun onInlineSuggestionsResponse(response: InlineSuggestionsResponse): Boolean {
+        if (!feedback.passwordManagerSuggestions || voiceOnly()) return false
+        val strip = view ?: return false
+        val suggestions = response.inlineSuggestions
+        val split = InlineAutofill.split(suggestions.map { it.info.isPinned })
+        // A new answer replaces the old row at once, then each chip appears as its inflation
+        // lands: one that never does cannot keep stale chips up or hold back the rest.
+        val generation = ++inlineGeneration
+        strip.inlineSuggestions(emptyList(), emptyList())
+        if (suggestions.isEmpty()) return true
+        val views = arrayOfNulls<View>(suggestions.size)
+        for (index in suggestions.indices) {
+            val suggestion = suggestions[index]
+            suggestion.inflate(this, Size(ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT), mainExecutor) { content ->
+                if (generation != inlineGeneration || view !== strip) return@inflate
+                views[index] = content
+                strip.inlineSuggestions(
+                    split.unpinned.mapNotNull { views[it] }, split.pinned.mapNotNull { views[it] })
+            }
+        }
+        return true
     }
 
     /** The strip's Paste tool: the editor's own paste, so Hex never reads the clipboard itself. */
@@ -314,7 +388,7 @@ class HexKeyboard : InputMethodService() {
     private fun leaveEditor() {
         bar?.removeCallbacks(pendingLeave)
         viewing = false; watchClipboard()
-        view?.reset(); view?.cancelGestures(); engine.leave(); nextEnglish = null; capture.cancel()
+        clearInline(); view?.reset(); view?.cancelGestures(); engine.leave(); nextEnglish = null; capture.cancel()
     }
     override fun onFinishInputView(finishingInput: Boolean) { leaveEditor(); super.onFinishInputView(finishingInput) }
     override fun onFinishInput() { leaveEditor(); super.onFinishInput() }

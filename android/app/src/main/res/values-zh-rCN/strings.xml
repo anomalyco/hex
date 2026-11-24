@@ -121,6 +121,8 @@
     <string name="keyboard_tools_detail">在建议栏中显示表情、粘贴、设置和撤销</string>
     <string name="smart_quotes">智能引号</string>
     <string name="smart_quotes_detail">用 ’ ‘ “ ” 代替 \' 和 \"</string>
+    <string name="password_manager_suggestions">密码管理器建议</string>
+    <string name="password_manager_suggestions_detail">在建议栏中显示自动填充服务提供的登录信息、验证码和卡片</string>
     <string name="voice_only_mode">仅语音模式</string>
     <string name="voice_only_detail">让你从其他键盘切换到 Hex 只做听写，说完再切换回去</string>
 </resources>

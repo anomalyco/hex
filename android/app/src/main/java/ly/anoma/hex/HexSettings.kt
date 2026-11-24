@@ -111,6 +111,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val emojiSuggestions = remember(revision) { typing.emojiSuggestions }
     val keyboardTools = remember(revision) { typing.keyboardTools }
     val smartQuotes = remember(revision) { typing.smartQuotes }
+    val passwordManager = remember(revision) { typing.passwordManagerSuggestions }
     val voiceOnly = remember(revision) { typing.voiceOnly }
     // A hidden field or leaving Labs shows the saved line again, never an unsaved draft.
     LaunchedEffect(page, signature) { if (page != Page.Labs || !signature) signatureDraft = speech.signatureText }
@@ -356,6 +357,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 Rule()
                                 Toggle(stringResource(R.string.smart_quotes), stringResource(R.string.smart_quotes_detail),
                                     smartQuotes) { typing.smartQuotes = it }
+                                Rule()
+                                Toggle(stringResource(R.string.password_manager_suggestions),
+                                    stringResource(R.string.password_manager_suggestions_detail),
+                                    passwordManager) { typing.passwordManagerSuggestions = it }
                                 Rule()
                                 Toggle(stringResource(R.string.voice_only_mode), stringResource(R.string.voice_only_detail),
                                     voiceOnly) { typing.voiceOnly = it; VoiceOnly.setEnabledFromSettings(context, it) }
