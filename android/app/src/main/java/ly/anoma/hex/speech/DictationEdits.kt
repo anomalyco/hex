@@ -132,13 +132,17 @@ internal object DictationEdits {
         // Words typed before or after the dictation are new writing, not a fix of it (iOS trims these edges).
         val hunks = all.filterNot { it.old.isEmpty() && !it.new.isEmpty() &&
             (it.old.first == 0 || it.old.first == insertedWords.size) }
-        if (hunks.isEmpty()) return DictationEdit(DictationOutcome.Kept, wordCount = ins.size)
+        val heardWords = heard?.let { DictationText.words(it).map(::wordText) }.orEmpty().ifEmpty { insertedWords }
+        // The kept words are judged even when nothing changed, so a fix that would have changed them is
+        // contradicted by every dictation the person left alone.
+        if (hunks.isEmpty())
+            return DictationEdit(DictationOutcome.Kept, wordCount = ins.size,
+                keptHeard = HeardAlignment(heardWords, insertedWords).keptRuns(hunks, ins.size))
 
         val changed = hunks.sumOf { maxOf(it.oldCount, it.newCount) }
         if (changed > maxOf(1, ins.size / 2))
             return DictationEdit(DictationOutcome.Rewritten, wordCount = ins.size, changedWords = changed)
 
-        val heardWords = heard?.let { DictationText.words(it).map(::wordText) }.orEmpty().ifEmpty { insertedWords }
         val alignment = HeardAlignment(heardWords, insertedWords)
         val startsSentence = insertedWords.firstOrNull()?.firstOrNull()?.isUpperCase() == true
         val pairs = ArrayList<DictationEditPair>()

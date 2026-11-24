@@ -576,6 +576,8 @@ internal class KeyboardEngine(
     }
     fun delete() {
         if (!target.connected) return
+        // Hex's own Delete is the person removing text, so a field that then empties was cleared by them.
+        tracker.keyboardRemoved()
         // A TYPE_NULL field's text can't be read back, and its editor takes no surrounding-text delete: a
         // delete is the key press itself, one per call, and a held key repeats the call as Gboard's does.
         if (keyEventEditor) {
@@ -620,11 +622,10 @@ internal class KeyboardEngine(
         resetTyping(); clearSpaces(); surface?.suggestions(emptyList())
         val info = editor
         if (info?.actionLabel != null && (info.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION) == 0 &&
-            target.performEditorAction(info.actionId)) return
-        if (!target.defaultEditorAction()) {
-            if (keyEventEditor) target.sendKey(KeyEvent.KEYCODE_ENTER)
-            else type("\n")
-        }
+            target.performEditorAction(info.actionId)) { tracker.sent(); return }
+        if (target.defaultEditorAction()) { tracker.sent(); return }
+        if (keyEventEditor) target.sendKey(KeyEvent.KEYCODE_ENTER)
+        else type("\n")
     }
 
     /** A space-bar slide starts moving the cursor: the word in progress stays as typed. A field whose text
@@ -645,6 +646,7 @@ internal class KeyboardEngine(
     /** The delete slide lifted with words selected: they go. */
     fun deleteSelection() {
         if (!target.connected) return
+        tracker.keyboardRemoved()
         edited()
         target.commit(""); resetTyping(); surface?.suggestions(emptyList())
     }

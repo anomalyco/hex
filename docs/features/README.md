@@ -3490,39 +3490,51 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
     its anchors, so a cursor moved inside it never cuts a word at the window's edge, and an empty
     anchor only counts as the field's edge when the read reached that edge. It settles after 60
     seconds, when the field changes or the keyboard leaves, or when another dictation starts; a span
-    the field never showed reports nothing. A dictation deleted and dictated again within 20 seconds
-    is compared with the new one as a redictation. Inference is a whole-word LCS diff of the inserted
-    and current text (apostrophes inside words): no change is
-    kept, more than max(1, words/2) changed words is a rewrite with no pairs, and pair hunks need at
-    most three words a side and a letters-only Levenshtein distance within max(2, longest/2); a
-    sentence-start capital on the meant side is dropped. Raw words the person kept in a corrected
-    dictation contradict any fix that would have changed them. A heard -> meant pair is applied
-    after two sightings with no contradiction and no second meaning for those heard words; fixing
-    an applied fix to something else, or fixing it back, contradicts it, and each listed fix has a
-    switch. Applied fixes run on the raw transcript before custom vocabulary, whole words and
-    phrases only, never inside a longer token, keeping the original's case unless the fix carries
-    capitals. The meant words are recognition hints, kept apart from the custom vocabulary's forced
-    spellings (a learned word with a capital keeps its spelling too): both Whisper's prompt and
-    Parakeet's vocabulary get the vocabulary first, then the learned words, deduplicated, at least
-    two characters, capped at the existing 100, and either source works without the other. A
-    translated dictation gets neither fixes nor learned hints. Settings > Labs > Dictation
-    lists each learned pair with a switch and a confirmed Delete; the Delete stays reachable while
-    the lab is off, since the records on the phone remain. The fixes live in the same
-    `speech` SharedPreferences as one escaped line per fix, capped at 1,000 records (the least used
-    and oldest drop first), and turning the lab off neither learns nor applies anything. Checks:
-    `DictationLearningTest` (29: kept, rewrite, plausible and implausible substitutions, the
+    the field never showed reports nothing, and text read after the minute is never taken as the
+    dictation, even when the field was emptied and filled again since. A dictation the person removed
+    with Hex's own Delete (the key and its held repeat, a delete slide's selected words, or a swipe)
+    or by Undo, and dictated again within 20 seconds, is compared with the new one as a redictation.
+    A field sent with Enter, Send, Go, Done or Next, or emptied by the app, is judged from the text
+    the dictation last showed and is never held for a redictation, so a fix made just before is
+    still learned. Inference is a whole-word LCS diff of the inserted and current text
+    (apostrophes inside words): no change is kept, more than max(1, words/2) changed words is a
+    rewrite with no pairs, and pair hunks need at most three words a side and a letters-only
+    Levenshtein distance within max(2, longest/2); a sentence-start capital on the meant side is
+    dropped. Raw words the person kept, in a corrected dictation or one left untouched, contradict
+    any fix that would have changed them. A heard -> meant pair is applied after two sightings with
+    no contradiction and no second meaning for those heard words; fixing an applied fix to something
+    else, or fixing it back, contradicts it, and
+    each listed fix has a switch. Applied fixes run on the raw transcript before custom vocabulary,
+    whole words and phrases only, never inside a longer token, keeping the original's case unless
+    the fix carries capitals. The meant words are recognition hints, kept apart from the custom
+    vocabulary's forced spellings (a learned word with a capital keeps its spelling too): both
+    Whisper's prompt and Parakeet's vocabulary get the vocabulary first, then the learned words,
+    under the vocabulary's own rules (trimmed, at least two characters, at most 64, deduplicated,
+    capped at the existing 100), and either source works without the other. A translated dictation
+    gets neither fixes nor learned hints. Settings > Labs > Dictation lists each learned pair with a
+    switch and a confirmed Delete; a fix switched off keeps its counts and takes no contradiction,
+    and the Delete stays reachable while the lab is off, since the records on the phone remain. The
+    fixes live in the same `speech` SharedPreferences as one escaped line per fix (the heard and
+    meant words, count, contradictions, and when it was last made), capped at 1,000 records (the
+    least used and oldest drop first), and turning the lab off neither learns nor applies anything.
+    Checks:
+    `DictationLearningTest` (32: kept, rewrite, plausible and implausible substitutions, the
     three-word pair limit, sentence-start capitals, redictations, a folded spoken number, the
-    two-sighting, contradiction and one-meaning thresholds, a switched-off fix, case-insensitive
-    merging, merging's word limit, the 1,000-record cap, whole-word and phrase application, fixes
-    before vocabulary, combining marks, hints kept apart from forced spellings, the sentence-start
-    case, hints off and translated, learned capitals, hints and their cap, and the persistence
-    round-trip) and `DictationTrackerTest` (13: kept at the minute, edits found with and without
-    text after, a new dictation settling the last, typing after a dictation at the field start, a
-    cursor inside a long dictation, repeated short and newline after-anchors, redictation, deletion,
-    a span the field never showed, and Undo) in android/app/src/test, plus
-    `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin -x prepareSpeechModel` passing 279
-    tests on 2026-11-24 on OpenJDK 21 and Android SDK 36 (offline); the repo has no Android CI, and
-    nothing was tried on a device or emulator.
+    two-sighting, contradiction and one-meaning thresholds (including kept words in a dictation left
+    untouched), a switched-off fix and its silence under contradiction, case-insensitive merging,
+    merging's word limit, the 1,000-record cap, whole-word and phrase application, fixes before
+    vocabulary, combining marks, hints kept apart from forced spellings, the sentence-start case,
+    hints off and translated, learned capitals, hints and their cap and the vocabulary's limits, and
+    the persistence round-trip) and `DictationTrackerTest` (22: kept at the minute, edits found with
+    and without text after, edits after the minute left out, a dictation emptied and retyped after
+    the minute, one emptied before it and retyped after it, a new dictation settling the last,
+    typing after a dictation at the field start, a cursor inside a long dictation, repeated short and
+    newline after-anchors, redictation, redictation after Undo in an empty field, an app-cleared
+    field judged from its last text before the next message, sending the field and keeping its fix,
+    deletion, a span the field never showed, and Undo) in android/app/src/test, plus `./gradlew
+    --offline :app:testDebugUnitTest --rerun -x prepareSpeechModel` passing 291 tests on 2026-11-24
+    on OpenJDK 21 and Android SDK 36; the repo has no Android CI, and nothing was tried on a device
+    or emulator.
 Unmerged Windows / deferred features -> Not part of this map
 ```
 

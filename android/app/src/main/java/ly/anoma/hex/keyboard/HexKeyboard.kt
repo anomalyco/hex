@@ -85,7 +85,8 @@ class HexKeyboard : InputMethodService() {
         feedback.voiceOnly && VoiceOnly.shows(true, subtype?.mode ?: subtypeMode())
     private lateinit var capture: MicCapture
     internal val preferences by lazy { SpeechPreferences(this) }
-    /** Labs › Learn from my fixes: the word pairs and counts this phone keeps, and the tracker's reports. */
+    /** Labs › Learn from my fixes: the word pairs, their counts and when each was last made, and the
+     * tracker's reports. */
     private val fixes by lazy { DictationFixStore(this) }
     internal var nextEnglish: Boolean? = null
     /** The options the dictation in flight started with: its language decides mid-sentence case. */

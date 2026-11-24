@@ -20,8 +20,9 @@ internal object DictationFixes {
     fun id(heard: String, meant: String) = DictationText.phraseKey(heard) + " → " + DictationText.phraseKey(meant)
 
     /** Folds one dictation into the records: a count for each plausible fix, then a contradiction for every fix
-     * whose heard words were kept, changed to something else, or fixed the other way round. */
-    fun merge(records: List<DictationFix>, edit: DictationEdit, at: Long): List<DictationFix> {
+     * whose heard words were kept, changed to something else, or fixed the other way round. [disabled] fixes
+     * are switched off in Settings and take no contradiction, so untouched dictations never retire them. */
+    fun merge(records: List<DictationFix>, edit: DictationEdit, at: Long, disabled: Set<String> = emptySet()): List<DictationFix> {
         val out = records.toMutableList()
         for (pair in edit.pairs) {
             val heardKey = DictationText.phraseKey(pair.heard)
@@ -45,6 +46,7 @@ internal object DictationFixes {
         }
         for (index in out.indices) {
             val fix = out[index]
+            if (fix.id in disabled) continue
             if (contradicts(edit, fix)) out[index] = DictationFix(fix.heard, fix.meant, fix.count, fix.contradictions + 1, fix.lastAt)
         }
         if (out.size > maxRecords) {
@@ -126,20 +128,11 @@ internal object DictationFixes {
         return out.append(text, copied, text.length).toString()
     }
 
-    /** The custom vocabulary first, then the meant words of learned fixes, deduplicated and within the
-     * vocabulary's 100-term limit. Either list alone still gives hints. */
-    fun hints(vocabulary: List<String>, fixes: List<DictationFix>): List<String> {
-        val seen = HashSet<String>()
-        val hints = ArrayList<String>()
-        for (term in vocabulary + fixes.map { it.meant }) {
-            val trimmed = term.trim()
-            val key = VocabularySpelling.normalizedKey(trimmed)
-            if (key.length < 2 || !seen.add(key)) continue
-            hints += trimmed
-            if (hints.size == VocabularySpelling.maxTermCount) break
-        }
-        return hints
-    }
+    /** The custom vocabulary first, then the meant words of learned fixes, under the vocabulary's own rules:
+     * trimmed, at least two characters, at most 64, deduplicated and capped at 100. Either list alone still
+     * gives hints. */
+    fun hints(vocabulary: List<String>, fixes: List<DictationFix>) =
+        VocabularySpelling.sanitize(vocabulary + fixes.map { it.meant })
 
     /** One fix a line, tab-separated: heard, meant, count, contradictions, lastAt. Backslashes, tabs and newlines
      * in a word are escaped, so the list survives a SharedPreferences string. */
@@ -253,7 +246,7 @@ internal class DictationFixStore(context: Context) {
     fun active() = DictationFixes.active(learned(), disabled())
 
     fun record(edit: DictationEdit) {
-        val merged = DictationFixes.merge(records, edit, System.currentTimeMillis())
+        val merged = DictationFixes.merge(records, edit, System.currentTimeMillis(), disabled())
         prefs.edit().putString(FIXES, DictationFixes.encode(merged)).apply()
     }
 
