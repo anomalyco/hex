@@ -174,6 +174,13 @@ pub(super) fn capsule(
     {
         root = root.child(list_view(p, list, x, w, reduced));
     }
+    if let Pres::Done(Done {
+        always_popover: Some(config),
+        ..
+    }) = &surface.pres
+    {
+        root = root.child(always_view::always_view(p, config, reduced));
+    }
     root
 }
 
@@ -381,9 +388,14 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 Pres::Done(done) => done.lead,
                 _ => Lead::Check,
             };
-            let ink = match tuning::get().top_line {
-                tuning::TopLine::Quiet => p.muted(),
-                tuning::TopLine::Icons => p.text(),
+            let strong = matches!(&surface.pres, Pres::Done(done) if done.strong_text);
+            let ink = if strong {
+                p.text()
+            } else {
+                match tuning::get().top_line {
+                    tuning::TopLine::Quiet => p.muted(),
+                    tuning::TopLine::Icons => p.text(),
+                }
             };
             let mut done = placed(el(), shown).trace_name("done").child(glyph(
                 p,
@@ -458,6 +470,89 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             ))
             .role("button")
             .label(surface::undo_label())
+            .hit()
+            .on_press_tx(press(id))
+        }
+        // Unified destination split chip: one fill, no vertical divider,
+        // each half its own clickable target.
+        Id::Split => {
+            let queued = shown.active;
+            let help = match &surface.pres {
+                Pres::Done(Done {
+                    split: Some(split), ..
+                }) => split.help.clone(),
+                _ => None,
+            };
+            let glyph = if queued {
+                &crate::rune_ui::icons::CLOCK
+            } else {
+                &rune_theme_opencode::icons::ARROW_RIGHT
+            };
+            let send_w = surface::split_send_width(&shown.ident);
+            let inner_w = send_w + surface::CHEVRON_W;
+            let mut left = row()
+                .key("send")
+                .size(send_w, BUTTON_H)
+                .pl(8.0)
+                .gap(5.0)
+                .center_y()
+                .radius(ICON_BUTTON_RADIUS)
+                .hover(c.hover)
+                .press(c.pressed)
+                .role("button")
+                .label(if queued {
+                    tr_fill("Queued for {}", &shown.ident)
+                } else {
+                    tr_fill("Send to {}", &shown.ident)
+                })
+                .hit()
+                .on_press_tx(press(if queued { Id::More } else { Id::QuickSend }))
+                .child(rune::icon(glyph, surface::SEND_ICON).color(p.muted()))
+                .child(label(&shown.ident, medium(), p.text()));
+            if let Some(tip) = help {
+                left = left.help(tip);
+            }
+            let more = row()
+                .key("more")
+                .size(surface::CHEVRON_W, BUTTON_H)
+                .center()
+                .radius(ICON_BUTTON_RADIUS)
+                .hover(c.hover)
+                .press(c.pressed)
+                .role("button")
+                .label(tr("Send to…"))
+                .help(tr("Choose another session"))
+                .hit()
+                .on_press_tx(press(Id::More))
+                .child(
+                    rune::icon(&rune_theme_opencode::icons::CHEVRON_DOWN, 14.0).color(p.muted()),
+                );
+            base.child(
+                row()
+                    .key("split-fill")
+                    .size(inner_w, BUTTON_H)
+                    .radius(ICON_BUTTON_RADIUS)
+                    .fill(c.layer_02)
+                    .child(left)
+                    .child(more),
+            )
+        }
+        // Post-send `Always…` button beside Undo: quiet at rest, filled while open.
+        Id::Always => {
+            let bw = shown.rect[2] - 2.0 * surface::BUTTON_INSET;
+            let lit = shown.active;
+            let mut box_el = button_box(p, bw);
+            if lit {
+                box_el = box_el.fill(c.layer_02);
+            }
+            base.child(box_el.child(label(
+                &shown.ident,
+                medium(),
+                if lit { p.text() } else { p.muted() },
+            )))
+            .role("button")
+            .label(shown.ident.clone())
+            .checked(lit)
             .hit()
             .on_press_tx(press(id))
         }
@@ -558,8 +653,16 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 text
             }
         }
-        // Rows live in the list, never in the capsule.
-        Id::Row(_) => base,
+        // Rows and popover actions live outside the capsule bar.
+        Id::Row(_)
+        | Id::QuickSend
+        | Id::More
+        | Id::AlwaysScopeNarrow
+        | Id::AlwaysScopeWide
+        | Id::AlwaysToSession
+        | Id::AlwaysToProject
+        | Id::AlwaysSave
+        | Id::OpenRules => base,
     }
 }
 

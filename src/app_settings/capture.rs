@@ -121,6 +121,13 @@ impl CaptureRouting {
     pub fn config(&self) -> &scrawl_capture::RouterConfig {
         &self.0
     }
+
+    /// Updates the router configuration in place while preserving the invariant
+    /// that `capture.routing` never persists a Jev API key.
+    pub fn update(&mut self, edit: impl FnOnce(&mut scrawl_capture::RouterConfig)) {
+        edit(&mut self.0);
+        self.0.jev_api_key = None;
+    }
 }
 
 #[cfg(hex_capture)]

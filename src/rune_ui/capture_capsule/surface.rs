@@ -77,6 +77,9 @@ pub(crate) const SEG_ICON_GAP: f32 = 5.0;
 const SEG_PX: f32 = 10.0;
 /// Between a chip's label and its shortcut.
 pub(crate) const HINT_GAP: f32 = 6.0;
+/// The split destination chip's leading icon and trailing `⌄` half.
+pub(crate) const SEND_ICON: f32 = 14.0;
+pub(crate) const CHEVRON_W: f32 = 24.0;
 
 /// The open capsule is as wide as the list under it; its field takes what
 /// the rest leaves.
@@ -226,6 +229,22 @@ pub(crate) enum Id {
     Why,
     /// The Undo chip, while a send can be taken back.
     Undo,
+    /// The unified split destination chip (`[→ ACME ⌄]` or `[⏱ ACME ⌄]`).
+    Split,
+    /// Left half of the split chip: sends immediately to the top suggestion.
+    QuickSend,
+    /// Right `⌄` half of the split chip: opens the Send-to list.
+    More,
+    /// Post-send `Always…` button beside Undo.
+    Always,
+    /// Options inside the inline `Always…` configurator popover.
+    AlwaysScopeNarrow,
+    AlwaysScopeWide,
+    AlwaysToSession,
+    AlwaysToProject,
+    AlwaysSave,
+    /// Opens Hex's Settings window directly to `Modal::RoutingRules`.
+    OpenRules,
     /// Pastes the capture.
     Paste,
     /// The Send to… chip.
@@ -268,6 +287,16 @@ impl Id {
             Id::Done => "done",
             Id::Why => "why",
             Id::Undo => "undo",
+            Id::Split => "split",
+            Id::QuickSend => "quick-send",
+            Id::More => "more",
+            Id::Always => "always",
+            Id::AlwaysScopeNarrow => "always-scope-narrow",
+            Id::AlwaysScopeWide => "always-scope-wide",
+            Id::AlwaysToSession => "always-to-session",
+            Id::AlwaysToProject => "always-to-project",
+            Id::AlwaysSave => "always-save",
+            Id::OpenRules => "open-rules",
             Id::Paste => "paste",
             Id::Ask => "ask",
             Id::Search => "search",
@@ -297,8 +326,10 @@ impl Id {
     /// `self_active` / `next_active` distinguish a filled pill `Id::Ask`
     /// (Allow, Restart Hex, Try again) from plain text asks.
     fn gap_before(self, self_active: bool, next: Id, next_active: bool) -> f32 {
-        let next_button = matches!(next, Id::Paste | Id::Undo) || (next == Id::Ask && next_active);
-        let self_button = matches!(self, Id::Paste | Id::Undo) || (self == Id::Ask && self_active);
+        let next_button = matches!(next, Id::Paste | Id::Undo | Id::Split | Id::Always)
+            || (next == Id::Ask && next_active);
+        let self_button = matches!(self, Id::Paste | Id::Undo | Id::Split | Id::Always)
+            || (self == Id::Ask && self_active);
         match (self, next) {
             (Id::Done, Id::Why) => CHIP_GAP,
             // The field's well starts the label's trail after it: 12 pt,
@@ -344,9 +375,19 @@ impl Id {
             Id::Cancel | Id::Keep => 9,
             Id::Finish | Id::Discard => 10,
             Id::Field => 11,
-            Id::Undo => 12,
-            Id::Paste => 13,
-            Id::Inspect => 14,
+            Id::Always => 12,
+            Id::Undo => 13,
+            Id::Split => 14,
+            Id::Paste => 14,
+            Id::Inspect => 15,
+            Id::QuickSend
+            | Id::More
+            | Id::AlwaysScopeNarrow
+            | Id::AlwaysScopeWide
+            | Id::AlwaysToSession
+            | Id::AlwaysToProject
+            | Id::AlwaysSave
+            | Id::OpenRules => 22,
             Id::Next => 15,
             Id::Pick(row) => 16 + row.min(1) as u8,
             Id::Ask | Id::Search => 18,
@@ -410,6 +451,16 @@ pub(crate) fn keycaps_chip_width(label: &str, style: TextStyle) -> f32 {
         + KEYCAPS_GAP
         + super::super::controls::keycaps_width(&shortcut_keycaps(), measure)
         + keycaps_inset()
+}
+
+/// Width of the left send/queued half inside the split destination chip.
+pub(crate) fn split_send_width(name: &str) -> f32 {
+    8.0 + SEND_ICON + 5.0 + measure(name, medium()) + 4.0
+}
+
+/// Total chip width of the split destination chip (one fill, no divider).
+pub(crate) fn split_width(name: &str) -> f32 {
+    split_send_width(name) + CHEVRON_W + 2.0 * BUTTON_INSET
 }
 
 /// A chip's label, then its shortcut in quiet text, or a plain chip
@@ -512,12 +563,29 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
             ));
         }
     }
+    if let Some(lit) = done.always_button {
+        let label = tr("Always…");
+        raw.push((
+            Id::Always,
+            label.into(),
+            keyed_width(&[], label, medium()),
+            lit,
+        ));
+    }
     if done.undo {
         raw.push((
             Id::Undo,
             String::new(),
             keyed_width(&[], undo_label(), medium()),
             false,
+        ));
+    } else if let Some(split) = &done.split {
+        let name = ellipsize(&split.name, medium(), cap);
+        raw.push((
+            Id::Split,
+            name.clone(),
+            split_width(&name),
+            split.kind == super::flow::SplitKind::Queued,
         ));
     } else {
         if done.paste {
@@ -1225,6 +1293,7 @@ mod tests {
                     target: Some(0),
                     footer: Footer::Search { remember: false },
                     always: None,
+                    queued: false,
                 },
             )),
             ..Done::plain(Lead::Check, "")

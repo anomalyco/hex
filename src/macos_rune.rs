@@ -863,6 +863,11 @@ pub(crate) fn open_paste_history() {
     });
 }
 
+#[cfg(hex_capture)]
+pub(crate) fn open_routing_rules() {
+    with_window(|window| show(window, Destination::RoutingRules));
+}
+
 fn bring_forward(window: &rune::AppHandle<Ui>) {
     // An open window always shows the Dock icon: hiding it
     // would deactivate Hex and drop the window behind other apps.

@@ -25,6 +25,7 @@ mod menu;
 pub(crate) mod numbers;
 mod onboarding;
 mod portuguese;
+mod routing;
 mod russian;
 mod screenshots;
 mod signature;
@@ -402,6 +403,7 @@ pub(super) fn all_translations() -> impl Iterator<Item = &'static (&'static str,
         .chain(menu::TRANSLATIONS)
         .chain(history::TRANSLATIONS)
         .chain(screenshots::TRANSLATIONS)
+        .chain(routing::TRANSLATIONS)
 }
 
 #[cfg(test)]
