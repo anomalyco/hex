@@ -1,16 +1,13 @@
 package ly.anoma.hex.updates
 
 import android.content.Context
-import android.content.pm.PackageManager
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
-import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
-import java.security.MessageDigest
 import javax.net.ssl.HttpsURLConnection
 import ly.anoma.hex.R
 
@@ -35,7 +32,8 @@ internal data class Release(val code: Long, val name: String, val version: Strin
     }
 }
 
-/** What Hex Preview fetches: latest.json from its channel and the APK it names, only from GitHub over HTTPS.
+/** What Hex Preview fetches: latest.json from its channel, only from GitHub over HTTPS (the browser downloads the
+ * APK it names).
  * The requests carry nothing about the person: no identifiers, no settings, a fixed user agent. */
 internal object Channel {
     class Failure(val problem: Updates.Problem) : Exception()
@@ -46,71 +44,6 @@ internal object Channel {
         }
         return Release.parse(text) ?: throw Failure(Updates.Problem.Server)
     }
-
-    /** Downloads [release] into the cache, checking its size and SHA-256 as it arrives; anything else is deleted. */
-    fun download(context: Context, release: Release, progress: (Int) -> Unit): File {
-        val dir = File(context.cacheDir, "updates").apply { mkdirs() }
-        val done = File(dir, "${release.code}.apk")
-        dir.listFiles()?.forEach { if (it != done) it.delete() }
-        if (done.length() == release.size && sha256(done) == release.sha256) return done
-        val part = File(dir, "${release.code}.part")
-        try {
-            if (dir.usableSpace < release.size + 20_000_000) throw Failure(Updates.Problem.Space)
-            val digest = MessageDigest.getInstance("SHA-256")
-            var total = 0L
-            open(URL(release.url)).use { http ->
-                http.inputStream.use { input ->
-                    part.outputStream().use { out ->
-                        val buffer = ByteArray(128 * 1024)
-                        while (true) {
-                            val n = input.read(buffer)
-                            if (n < 0) break
-                            total += n
-                            if (total > release.size) throw Failure(Updates.Problem.Mismatch)
-                            digest.update(buffer, 0, n); out.write(buffer, 0, n)
-                            progress((total * 100 / release.size).toInt())
-                        }
-                        out.fd.sync()
-                    }
-                }
-            }
-            if (total != release.size || hex(digest.digest()) != release.sha256) throw Failure(Updates.Problem.Mismatch)
-            if (!part.renameTo(done)) throw Failure(Updates.Problem.Space)
-            return done
-        } catch (e: Failure) { part.delete(); throw e
-        } catch (e: IOException) { part.delete(); throw Failure(Updates.Problem.Connection) }
-    }
-
-    /** The file [download] left for [release], if its size and SHA-256 still match; null if it's gone or changed. */
-    fun downloaded(context: Context, release: Release): File? =
-        File(File(context.cacheDir, "updates"), "${release.code}.apk").takeIf { it.length() == release.size && sha256(it) == release.sha256 }
-
-    /** The APK must be Hex Preview itself, the build latest.json named, newer than what runs, and signed with
-     * exactly the running app's key. */
-    fun verify(context: Context, file: File, release: Release) {
-        val pm = context.packageManager
-        val flags = PackageManager.GET_SIGNING_CERTIFICATES
-        val archive = pm.getPackageArchiveInfo(file.path, flags) ?: throw Failure(Updates.Problem.Mismatch)
-        val running = pm.getPackageInfo(context.packageName, flags)
-        if (archive.packageName != context.packageName || archive.longVersionCode != release.code ||
-            archive.longVersionCode <= running.longVersionCode) throw Failure(Updates.Problem.Mismatch)
-        val theirs = signers(archive.signingInfo)
-        if (theirs.isEmpty() || theirs != signers(running.signingInfo)) throw Failure(Updates.Problem.Signature)
-    }
-
-    private fun signers(info: android.content.pm.SigningInfo?): Set<String> {
-        info ?: return emptySet()
-        val certs = if (info.hasMultipleSigners()) info.apkContentsSigners.toList() else info.signingCertificateHistory.orEmpty().takeLast(1)
-        return certs.map { hex(MessageDigest.getInstance("SHA-256").digest(it.toByteArray())) }.toSet()
-    }
-
-    private fun sha256(file: File): String = file.inputStream().use { input ->
-        val digest = MessageDigest.getInstance("SHA-256")
-        val buffer = ByteArray(128 * 1024)
-        while (true) { val n = input.read(buffer); if (n < 0) break; digest.update(buffer, 0, n) }
-        hex(digest.digest())
-    }
-    private fun hex(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it) }
 
     private fun open(start: URL): HttpsURLConnection {
         var target = start
