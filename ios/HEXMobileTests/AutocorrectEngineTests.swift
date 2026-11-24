@@ -700,6 +700,32 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertNil(fix(hungarian, "koszonom"), "three accents are three edits on another layout")
     }
 
+    /// Dutch types with iOS's nl dictionary, no typing model of its own: a missing diaeresis or
+    /// acute is the cheapest fix there is ("ideeen" -> "ideeën", "Belgie" -> "België",
+    /// "geinteresseerd" -> "geïnteresseerd"), and a word the dictionary knows stays ("een",
+    /// "zee"). The fixes run against a stub dictionary answering as an iPhone's would.
+    func testDutchRestoresAMissingDiaeresis() {
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "ideeen", to: "ideeën", language: .dutch)!, 0.15, accuracy: 0.001)
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "geinteresseerd", to: "geïnteresseerd", language: .dutch)!, 0.15, accuracy: 0.001)
+        engine.language = .dutch
+        XCTAssertEqual(engine.autocorrect.language, .dutch)
+        XCTAssertNil(engine.autocorrect.decoder, "no Dutch typing model")
+        XCTAssertEqual(AutocorrectEngine.sentenceStarters(.dutch).count, 3)
+        XCTAssertEqual(AutocorrectEngine.clauseStarters(.dutch).count, 3)
+        XCTAssertEqual(AutocorrectEngine.commonWords(.dutch).count, 6)
+
+        let dutch = stubbed {
+            $0.valid = ["ideeën", "België", "geïnteresseerd", "een", "zee", "zeeën"]
+            $0.guessTable = ["ideeen": ["ideeën"], "belgie": ["België"], "geinteresseerd": ["geïnteresseerd"], "zee": ["zeeën"]]
+        }
+        dutch.setLanguage(.dutch, available: ["nl", "en_US"])
+        XCTAssertEqual(fix(dutch, "ideeen"), "ideeën")
+        XCTAssertEqual(fix(dutch, "Belgie"), "België")
+        XCTAssertEqual(fix(dutch, "geinteresseerd"), "geïnteresseerd")
+        XCTAssertNil(fix(dutch, "een"), "a word stays")
+        XCTAssertNil(fix(dutch, "zee"), "zee is a word: never zeeën")
+    }
+
     /// TestFlight (build 56): "Autocomplete suggests English words in Czech too." With Czech
     /// and English chosen, a sentence the words before show is Czech (`languageLean`) gets
     /// Czech completions only, none of English's even where Czech has none, and an English

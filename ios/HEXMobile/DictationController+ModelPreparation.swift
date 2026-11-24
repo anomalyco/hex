@@ -1,16 +1,16 @@
 import Foundation
 
-/// Getting the engine Hex dictates with ready: `prepareModel`, and Experiments ›
-/// Multilingual model (Parakeet) downloading and loading beside the engine that dictates
+/// Getting the engine Hex dictates with ready: `prepareModel`, and Settings › Dictation ›
+/// Model: Multilingual (Parakeet Ultra) downloading and loading beside the engine that dictates
 /// meanwhile, including what the app does with it in the background.
 extension DictationController {
     // MARK: - Model Preparation
 
-    /// Experiments › Multilingual model (Parakeet) turned on or off. On, the engine Hex
-    /// dictates with stays while Parakeet Ultra downloads and loads beside it; a load that
-    /// ended Hex gets another try. Off, the download stops and is deleted, and Hex prepares
-    /// the engine it picks without it if Ultra was the one dictating (now, or once the
-    /// dictation in flight is done).
+    /// Settings › Dictation › Model set to Multilingual or English. Multilingual: the engine
+    /// Hex dictates with stays while Parakeet Ultra downloads and loads beside it; a load that
+    /// ended Hex gets another try. English: the download stops (deleted unless complete, so a
+    /// switch back needs none), and Hex prepares the engine it picks without it if Ultra was
+    /// the one dictating (now, or once the dictation in flight is done).
     func multilingualParakeetChanged() {
         let settings = MultilingualParakeetSettings()
         if settings.isEnabled {
@@ -21,12 +21,11 @@ extension DictationController {
                 return
             }
         } else {
-            settings.isModelReady = false
             let download = multilingualDownload
             Task {
                 // Nothing writes to the folder any more once `stop` returns.
                 await download.stop()
-                ParakeetUltraModel.remove()
+                ParakeetUltraModel.removeUnlessComplete()
             }
             if engine != .parakeetUltra, isModelReady, phase != .preparingModel {
                 // Ultra wasn't dictating: drop a load of it beside the engine that is.
@@ -242,6 +241,7 @@ extension DictationController {
         isInBackground = false
         refreshWarmDuration()
         multilingualDownload.appBecameActive()
+        keepOnlyThePickedSpeechModel()
         guard preparationFailedInBackground else { return }
         preparationFailedInBackground = false
         if case .failed = phase, !isModelReady {

@@ -118,6 +118,10 @@ final class KeyboardKeyPlaneView: UIView {
             let labelFrame = key.row == 3
                 ? CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height + layout.metrics.bottomRowTrim)
                 : frame
+            if layout.isNumberPad, key.kind != .hex, key.kind != .globe {
+                drawNumberPadKey(key, in: frame, pressed: pressed.contains(key.kind), landscape: layout.orientation == .landscape, context: context, radius: radius, showGlyphs: showGlyphs)
+                continue
+            }
             switch key.kind {
             case .hex:
                 continue
@@ -132,6 +136,10 @@ final class KeyboardKeyPlaneView: UIView {
                     let half = labelFrame.height / 2
                     drawText(upper, in: CGRect(x: labelFrame.minX, y: labelFrame.minY + 0.2 * half, width: labelFrame.width, height: half), font: font, color: palette.textBase)
                     drawText(lower, in: CGRect(x: labelFrame.minX, y: labelFrame.midY - 0.2 * half, width: labelFrame.width, height: half), font: font, color: palette.textBase)
+                    continue
+                }
+                if KeyboardFlicks.isEnabled, let flick = key.flick, layout.metrics.pad?.isDocked == true {
+                    drawFlickKey(key, flick: flick, in: labelFrame)
                     continue
                 }
                 var label = Self.keycapLabel(engine.keycapLabel(for: key))
@@ -243,6 +251,59 @@ final class KeyboardKeyPlaneView: UIView {
         }
     }
 
+    /// A key of Hex's number pad (`KeyboardNumberPad`), as Apple's draws it (iOS 27.2 and 26.5):
+    /// a digit in 22 pt type, its centre 19 pt below a 48 pt keycap's top, and upright the
+    /// letters under it in 10 pt semibold capitals spaced apart, centred 38.5 pt down; turned,
+    /// the digit centred and the letters right of it. Delete and the decimal separator stand
+    /// on the backdrop without a keycap; a press greys the keycap and raises no pop-up.
+    private func drawNumberPadKey(
+        _ key: KeyboardKey,
+        in frame: CGRect,
+        pressed: Bool,
+        landscape: Bool,
+        context: CGContext,
+        radius: CGFloat,
+        showGlyphs: () -> Bool
+    ) {
+        let digit = key.character.map { KeyboardNumberPad.letters(for: $0) != nil || $0.first?.isNumber == true } ?? false
+        if digit || pressed {
+            context.fillKeycap(frame, fill: pressed ? palette.keyHeldFill : palette.keyFill, shadow: digit ? palette.keyShadow : .clear, radius: radius)
+        }
+        guard showGlyphs() else { return }
+        if key.kind == .delete {
+            drawSymbol(pressed ? "delete.left.fill" : "delete.left", in: frame, color: palette.textBase, pointSize: 20)
+            return
+        }
+        guard let text = key.character else { return }
+        let digitFont = UIFont.systemFont(ofSize: 22, weight: .regular)
+        let scale = frame.height / 48
+        let letters = KeyboardNumberPad.letters(for: text)
+        let lettersAttributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 10, weight: .semibold), .kern: 2.0, .foregroundColor: palette.textBase,
+        ]
+        if landscape {
+            let digitSize = (text as NSString).size(withAttributes: [.font: digitFont])
+            drawText(text, in: frame, font: digitFont, color: palette.textBase)
+            if let letters {
+                let size = (letters as NSString).size(withAttributes: lettersAttributes)
+                (letters as NSString).draw(
+                    at: CGPoint(x: frame.midX + digitSize.width / 2 + 8, y: frame.midY - size.height / 2),
+                    withAttributes: lettersAttributes
+                )
+            }
+            return
+        }
+        let digitFrame = CGRect(x: frame.minX, y: frame.minY + 19 * scale - frame.height / 2, width: frame.width, height: frame.height)
+        drawText(text, in: digitFrame, font: digitFont, color: palette.textBase)
+        guard let letters else { return }
+        let size = (letters as NSString).size(withAttributes: lettersAttributes)
+        // Kern adds space after the last letter too: centre the ink, not the advance.
+        (letters as NSString).draw(
+            at: CGPoint(x: frame.midX - (size.width - 2) / 2, y: frame.minY + 38.5 * scale - size.height / 2),
+            withAttributes: lettersAttributes
+        )
+    }
+
     /// `rect` with its edges on this screen's pixel grid.
     private func pixelAligned(_ rect: CGRect) -> CGRect {
         let scale = max(1, traitCollection.displayScale)
@@ -251,6 +312,28 @@ final class KeyboardKeyPlaneView: UIView {
         let y0 = (rect.minY * scale).rounded() / scale
         let y1 = (rect.maxY * scale).rounded() / scale
         return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
+    }
+
+    /// A docked iPad key with a flick (`KeyboardFlicks`), as Apple's draws it (iPad mini, iPadOS
+    /// 27.2): the flick character about 12.5 pt high, grey, centred 14.5 pt below a 55.5 pt
+    /// keycap's top, and the label 11 pt below the middle. Pulled, the character slides to the
+    /// middle at the label's size, darkening as the label fades (both by half way); with Reduce Motion it
+    /// takes the label's place at once, half way.
+    private func drawFlickKey(_ key: KeyboardKey, flick: String, in frame: CGRect) {
+        let pulled = engine.touches.values.first { $0.key.kind == key.kind && $0.flick != nil }?.flick ?? 0
+        let p = UIAccessibility.isReduceMotionEnabled ? (pulled >= KeyboardFlicks.commitProgress ? 1 : 0) : pulled
+        let scale = frame.height / 55.5
+        let labelText = Self.keycapLabel(engine.keycapLabel(for: key))
+        let labelFont = UIFont.systemFont(ofSize: 21 * scale, weight: .regular)
+        if p < 1 {
+            let labelFrame = frame.offsetBy(dx: 0, dy: (11 + 8 * p) * scale)
+            drawText(labelText, in: labelFrame, font: labelFont, color: palette.textBase.withAlphaComponent(max(0, 1 - 2 * p)))
+        }
+        let size = (13 + 8 * p) * scale
+        let centre = frame.minY + (14.5 + (frame.height / scale / 2 - 14.5) * p) * scale
+        let flickFrame = CGRect(x: frame.minX, y: centre - frame.height / 2, width: frame.width, height: frame.height)
+        let color = palette.textBase.withAlphaComponent(0.45 + 0.55 * min(1, 2 * p))
+        drawText(flick, in: flickFrame, font: UIFont.systemFont(ofSize: size, weight: .regular), color: color)
     }
 
     private func drawText(_ text: String, in frame: CGRect, font: UIFont, color: UIColor, yOffset: CGFloat = 0) {
@@ -560,6 +643,8 @@ final class KeyboardKeyPlaneView: UIView {
         engine.touchMoved(id: id, to: sample.point, time: sample.timestamp)
         let current = engine.touches[id]?.key
         typingLog?.touch(.moved, id: id, sample: sample, key: current, under: engine.layout.hitTest(sample.point))
+        // A pulled key flicks: its hold opens no accents.
+        if engine.touches[id]?.flick != nil { cancelAccentTimer(for: id) }
         if current?.kind != previousKey {
             cancelAccentTimer(for: id)
             if case .character = current?.kind {
@@ -700,6 +785,8 @@ final class KeyboardKeyPlaneView: UIView {
 
     private func armAccentTimer(for id: Int) {
         cancelAccentTimer(for: id)
+        // Apple's number pad holds nothing.
+        guard !engine.layout.isNumberPad else { return }
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }

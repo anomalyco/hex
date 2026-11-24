@@ -301,7 +301,8 @@ enum SettingsSnapshotFixture {
         keyboard.suggestSwearWords = on
         keyboard.keyPopups = true
         keyboard.haptics = true
-        keyboard.emoji = true
+        keyboard.emojiKey = true
+        keyboard.emojiSuggestions = true
         keyboard.swipeTyping = true
         keyboard.swipeMoreLanguages = on
         let emojiUsage = EmojiUsageStore()

@@ -520,6 +520,18 @@ pub fn clipboard_phrase_text() -> String {
         .clone()
 }
 
+/// Labs › Choose meeting audio: the app or output a meeting's computer
+/// audio records, or None while the lab is off (every OS; read by each
+/// system capture source as it opens and on its route check).
+pub fn meeting_audio_source() -> Option<crate::meeting::audio_source::SourceChoice> {
+    feature_on(Feature::MeetingAudioSource).then(|| {
+        MEETING_AUDIO_SOURCE_CHOICE
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    })
+}
+
 /// Labs › Dictation style: the style each normal dictation is written as,
 /// or None while the lab is off (every OS; read once as each dictation's
 /// processing starts).

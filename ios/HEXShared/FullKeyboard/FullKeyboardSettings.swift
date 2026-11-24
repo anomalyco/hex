@@ -85,6 +85,7 @@ struct FullKeyboardSettings {
         static let hapticStrength = "settings.keyboardHapticStrength"
         static let suggestSwearWords = "settings.keyboardSuggestSwearWords"
         static let emoji = "experiments.emoji"
+        static let emojiSuggestions = "settings.keyboardEmojiSuggestions"
         static let emojiLettersUnderEmojiKey = "experiments.emojiLettersUnderEmojiKey"
         static let keyboardThemes = "experiments.keyboardThemes"
         static let keyboardTheme = "settings.keyboardTheme"
@@ -95,6 +96,7 @@ struct FullKeyboardSettings {
         static let hideWordSuggestions = "experiments.hideWordSuggestions"
         static let hexKeyOnLeft = "settings.keyboardHexKeyLeft"
         static let numberRow = "settings.keyboardNumberRow"
+        static let keyFlicks = "settings.keyboardKeyFlicks"
         static let dictationBarAutoStart = "settings.dictationBarAutoStart"
         static let joinKeyboardWhenUnfolded = "experiments.joinKeyboardWhenUnfolded"
         static let dvorakPunctuation = "experiments.dvorakPunctuation"
@@ -211,14 +213,32 @@ struct FullKeyboardSettings {
         nonmutating set { defaults?.set(newValue.rawValue, forKey: Key.hapticStrength) }
     }
 
-    /// Settings › Keyboard › Emoji: an emoji key whose panel suggests emoji for what you just
-    /// typed, from what the words mean and what you use. On by default. Stored as
-    /// `experiments.emoji`, from when it was an experiment (off by default) that only its
-    /// switch ever wrote: unset or true is on and false off, so testers who turned it off
-    /// keep it off.
-    var emoji: Bool {
+    /// Settings › Keyboard › Emoji key: the emoji key on the full keyboard and the dictation
+    /// bar, whose panel suggests emoji for what you just typed, from what the words mean and
+    /// what you use. On by default. Stored as `experiments.emoji`, from when it was an
+    /// experiment (off by default) that only its switch ever wrote: unset or true is on and
+    /// false off, so testers who turned it off keep it off. It used to be the strip's emoji
+    /// suggestions too (`emojiSuggestions`), which follow it until they are set.
+    var emojiKey: Bool {
         get { defaults?.object(forKey: Key.emoji) as? Bool ?? true }
-        nonmutating set { defaults?.set(newValue, forKey: Key.emoji) }
+        nonmutating set {
+            // Suggestions never set keep the value they had from this switch, so turning the
+            // key off leaves them as they were.
+            if defaults?.object(forKey: Key.emojiSuggestions) == nil {
+                defaults?.set(emojiKey, forKey: Key.emojiSuggestions)
+            }
+            defaults?.set(newValue, forKey: Key.emoji)
+        }
+    }
+
+    /// Settings › Keyboard › Emoji suggestions: the strip's emoji for the word typed ("cry"
+    /// offers 😭) and just finished, and Emoji shortcodes' while that experiment is on, with
+    /// or without the emoji key. Unset, it follows `emojiKey`, the one switch both used to
+    /// be, so whoever had emoji on or off keeps both as they were, in the app
+    /// and the keyboard alike, whichever runs first.
+    var emojiSuggestions: Bool {
+        get { defaults?.object(forKey: Key.emojiSuggestions) as? Bool ?? emojiKey }
+        nonmutating set { defaults?.set(newValue, forKey: Key.emojiSuggestions) }
     }
 
     /// Settings › Experiments › ABC under the emoji key: the emoji panel's ABC sits where the
@@ -324,6 +344,14 @@ struct FullKeyboardSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.numberRow) }
     }
 
+    /// Settings › Keyboard › Key flicks (iPad): pulling a docked iPad key down types the
+    /// character over its letter, as Apple's keyboard does (`KeyboardFlicks`). On by default, as
+    /// Apple's Enable Key Flicks is; a keyboard extension can't read that one.
+    var keyFlicks: Bool {
+        get { defaults?.object(forKey: Key.keyFlicks) as? Bool ?? true }
+        nonmutating set { defaults?.set(newValue, forKey: Key.keyFlicks) }
+    }
+
     /// Settings › Experiments › Join the keyboard when unfolded: on the Duo unfolded and held
     /// upright, Hex normally splits its keyboard as Apple's does there, since an extension
     /// can't read Apple's Split Keyboard preference. On, it draws the joined keyboard instead,
@@ -410,7 +438,8 @@ struct FullKeyboardSettings {
             }
         }
         if arguments.contains(Self.emojiLaunchArgument) {
-            emoji = true
+            emojiKey = true
+            emojiSuggestions = true
         }
         if arguments.contains(Self.emojiLettersLaunchArgument) {
             emojiLettersUnderEmojiKey = true

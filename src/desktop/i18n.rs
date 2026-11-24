@@ -22,6 +22,7 @@ mod history;
 mod hud_height;
 mod hungarian;
 mod labs;
+mod meeting_audio_source;
 mod meeting_mute;
 mod meetings;
 mod menu;
@@ -404,6 +405,7 @@ pub(super) fn all_translations() -> impl Iterator<Item = &'static (&'static str,
         .iter()
         .chain(meetings::TRANSLATIONS)
         .chain(labs::TRANSLATIONS)
+        .chain(meeting_audio_source::TRANSLATIONS)
         .chain(meeting_mute::TRANSLATIONS)
         .chain(style::TRANSLATIONS)
         .chain(signature::TRANSLATIONS)
