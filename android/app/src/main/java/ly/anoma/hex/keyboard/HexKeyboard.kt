@@ -52,7 +52,7 @@ class HexKeyboard : InputMethodService() {
     private var bar: VoiceBarView? = null
     /** The subtype the system last announced; a fresh bind may announce none, so [subtypeMode] asks the manager. */
     private var currentSubtype: InputMethodSubtype? = null
-    /** This dictation already asked to go back: nothing, its note included, switches away twice for it. */
+    /** The bar asked to go back for this dictation: its note won't ask again, and only ✕ forces a retry. */
     private var left = false
     /** Posted after a failed dictation's note, so the note is read before the keyboard comes back. */
     private val pendingLeave = Runnable { leaveVoiceOnly() }
@@ -176,7 +176,14 @@ class HexKeyboard : InputMethodService() {
         // A subtype or lab change may have arrived while no view existed: it shows the right one.
         val voice = voiceOnly()
         if (voice != (bar != null) || (!voice && view == null)) setInputView(inputView())
-        if (bar != null) { beginVoice(); viewing = true; return }
+        if (bar != null) {
+            // A restart after the bar asked to leave (text inserted, or Android's picker standing in for a
+            // switch) keeps it idle instead of recording the same field again.
+            if (VoiceOnly.startsOnShow(restarting, left)) beginVoice()
+            else bar?.status(SpeechPhase.Idle, getString(R.string.voice_only_hint))
+            viewing = true
+            return
+        }
         view?.cancelGestures()
         // Another type in the same box: back to its keys, as a new field opens (configureTyping draws them).
         if (typeChanged) view?.closeMenu(configure = false)
@@ -259,9 +266,14 @@ class HexKeyboard : InputMethodService() {
             SpeechPhase.Transcribing -> Unit
         }
     }
-    /** The bar's ✕: the dictation is discarded and the keyboard that opened the bar comes back. */
-    private fun cancelVoiceOnly() { cancelSpeech(); leaveVoiceOnly() }
-    /** The bar is done: back to the keyboard that opened it, or Android's picker when there is none. */
+    /** The bar's ✕: always leaves, even when an automatic leave only opened Android's picker. */
+    private fun cancelVoiceOnly() {
+        cancelSpeech()
+        left = false
+        leaveVoiceOnly()
+    }
+    /** The bar is done: back to the keyboard that opened it, or Android's picker when there is none. A picker
+     * is not a leave (Hex is still up), so only ✕ asks again; its note never does. */
     private fun leaveVoiceOnly() {
         if (left || bar == null || !isInputViewShown) return
         left = true

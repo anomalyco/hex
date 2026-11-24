@@ -14,6 +14,13 @@ class VoiceOnlyTest {
         assertTrue(VoiceOnly.shows(lab = true, subtypeMode = VoiceOnly.MODE))
     }
 
+    @Test fun aRestartAfterALeaveKeepsTheBarIdle() {
+        assertTrue(VoiceOnly.startsOnShow(restarting = false, left = false))
+        assertTrue(VoiceOnly.startsOnShow(restarting = true, left = false))
+        assertTrue(VoiceOnly.startsOnShow(restarting = false, left = true))
+        assertFalse(VoiceOnly.startsOnShow(restarting = true, left = true))
+    }
+
     @Test fun theFullKeyboardSubtypeKeepsTheKeys() {
         assertFalse(VoiceOnly.shows(lab = true, subtypeMode = "keyboard"))
         assertFalse(VoiceOnly.shows(lab = true, subtypeMode = null))

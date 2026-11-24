@@ -22,30 +22,46 @@ internal object VoiceOnly {
     /** Whether the bar replaces the keyboard: the lab is on and the current subtype is the voice one. */
     fun shows(lab: Boolean, subtypeMode: String?) = lab && subtypeMode == MODE
 
-    /** The Labs toggle: registers or clears the subtype and, where Android can't enable it, opens its screen. */
+    /** Whether showing the bar records: a restart after a leave was asked for keeps it idle instead. */
+    fun startsOnShow(restarting: Boolean, left: Boolean) = !restarting || !left
+
+    /** The Labs toggle: registers or clears the subtype and, where Android needs a hand, enables it. */
     fun setEnabledFromSettings(context: Context, enabled: Boolean) {
         setEnabled(context, enabled)
-        if (enabled && Build.VERSION.SDK_INT < 34) openSubtypeSettings(context)
+        if (Build.VERSION.SDK_INT >= 34) setExplicitlyEnabled(context, enabled)
+        else if (enabled) openSubtypeSettings(context)
     }
 
     /**
-     * Registers the voice subtype, or clears it when the lab goes off. An added subtype is not enabled by
-     * itself (it has no locale and is auxiliary), so Android 14 and later enables it explicitly; Android 12
-     * and 13 have no such API and use [openSubtypeSettings] instead.
+     * Registers the voice subtype, or clears it when the lab goes off. It is not enabled here: Android 14's
+     * explicit list is set from the Labs toggle alone, so unticking "Voice only" in system settings stays
+     * unticked while the lab is on, and an IME start only restores the subtype itself.
      */
-    @Suppress("DEPRECATION") // Dynamic subtypes have no replacement; setExplicitlyEnabled… needs Android 14.
+    @Suppress("DEPRECATION") // Dynamic subtypes have no replacement.
     fun setEnabled(context: Context, enabled: Boolean) {
         val manager = context.getSystemService(InputMethodManager::class.java) ?: return
         val subtypes: Array<InputMethodSubtype> = if (enabled) arrayOf(subtype(context)) else emptyArray()
         try {
             manager.setAdditionalInputMethodSubtypes(imeId(context), subtypes)
-            if (Build.VERSION.SDK_INT >= 34) {
-                val hashes = if (enabled) enabledSubtypes(manager, context) else intArrayOf()
-                if (hashes != null) manager.setExplicitlyEnabledInputMethodSubtypes(imeId(context), hashes)
-            }
         } catch (_: RuntimeException) {
             // The system may not list the IME yet (a fresh install); a later registration or the subtype
             // screen fixes it.
+        }
+    }
+
+    /** Android 14's explicit list: Hex's full keyboard subtype and the voice subtype, or the implicit set. */
+    private fun setExplicitlyEnabled(context: Context, enabled: Boolean) {
+        if (!enabled) { setExplicit(context, intArrayOf()); return }
+        val manager = context.getSystemService(InputMethodManager::class.java) ?: return
+        setExplicit(context, enabledSubtypes(manager, context) ?: return)
+    }
+
+    private fun setExplicit(context: Context, hashes: IntArray) {
+        val manager = context.getSystemService(InputMethodManager::class.java) ?: return
+        try {
+            manager.setExplicitlyEnabledInputMethodSubtypes(imeId(context), hashes)
+        } catch (_: RuntimeException) {
+            // The IME may not be listed yet; the Labs toggle retries it.
         }
     }
 

@@ -130,5 +130,5 @@
     <string name="smart_quotes">Smart quotes</string>
     <string name="smart_quotes_detail">Types ’ ‘ “ ” for \' and \"</string>
     <string name="voice_only_mode">Voice-only mode</string>
-    <string name="voice_only_detail">Lets you switch to Hex just to dictate from another keyboard, then switches back.</string>
+    <string name="voice_only_detail">Lets you switch to Hex just to dictate from another keyboard, then switches back</string>
 </resources>
