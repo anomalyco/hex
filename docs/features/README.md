@@ -3310,7 +3310,9 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
     the Delete right after an autocorrection still undoes it when they do). A field with no text
     before the cursor and none after it shows them in the sentence starters' place, so they are
     there when an empty field opens; typing anything fills the strip with predictions as before.
-    Changing the toggle redraws a visible strip at once; off, the strip is unchanged.
+    Changing the toggle redraws a visible strip at once, starters and tools swapping in an open
+    empty field; a word being typed, a swipe's readings and a word Delete took back keep their
+    line, and off, the strip is unchanged.
     Checks: `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` (includes
     `KeyboardToolsTest`) and `python3 scripts/code-shape.py --check`; the repo has no
     Android CI. Not tried on a device or emulator.

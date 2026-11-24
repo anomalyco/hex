@@ -205,8 +205,19 @@ internal class KeyboardEngine(
      * reading the bundled list then if it was never read. */
     fun emojiSuggestionsChanged() { word?.let { showSuggestions(it) } }
 
-    /** Labs › Keyboard › Keyboard tools changed: the strip follows at once. */
-    fun keyboardToolsChanged() { surface?.toolsChanged() }
+    /** Labs › Keyboard › Keyboard tools changed: the strip's tools follow at once, and a field with
+     * nothing before the cursor asks for its predictions again because its sentence starters depend
+     * on the lab. A word being typed, a swipe's readings and a word Delete took back own the strip,
+     * so they are left alone. */
+    fun keyboardToolsChanged() {
+        val w = word
+        if (w != null && w.token.isEmpty() && !secure && !symbols && !swiping &&
+            swiped == null && takenBack == null && selStart == selEnd) {
+            val b = before()
+            if (b.isEmpty()) showPredictions(b)
+        }
+        surface?.toolsChanged()
+    }
 
     /** The clipboard changed: the strip's Paste tool comes or goes at once. */
     fun clipboardChanged() { surface?.toolsChanged() }
