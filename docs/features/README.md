@@ -3329,7 +3329,7 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
     arming again, the leave only when idle, the write only when Android's list disagrees, and
     the subtype locale), and
     `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin :app:assembleDebug` passed with
-    168 tests (VoiceInputTest 6/6) in https://github.com/anomalyco/hex/actions/runs/45375325357,
+    168 tests (VoiceInputTest 6/6) in https://github.com/anomalyco/hex/actions/runs/45377020426,
     a one-off GitHub-hosted run on Temurin JDK 21 and Android SDK 36 with NDK 27.2.12479018; the
     repo has no Android CI, nothing was tried on a device or emulator (still to check there: the
     switcher's rows under both language settings, a keyboard's mic key, a package update on
