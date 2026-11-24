@@ -72,7 +72,19 @@ beside Hex, it switches to the next keyboard; elsewhere (Emoji or another
 third-party keyboard on, where that switch lands on them about half the
 time) a tap opens iOS's keyboard list, as the globe's hold does, to pick
 Apple's. Where Apple's keyboard is split (the Duo unfolded and upright, where the
-switch can end the app) it always opens the list. It needs no Full Access, which only Paste does. When iOS prompts
+switch can end the app) it always opens the list. It needs no Full Access, which only Paste does.
+**Passwords** (a key, and the word) shows the same way in an empty field iOS marks as a username,
+password or new password, by the same route: iOS offers saved logins (Passwords, and password
+managers' AutoFill extensions such as Bitwarden's) only in Apple's keyboard's bar. In practice
+Hex sees only web usernames (Safari's `autocomplete="username"`, iOS 26.5 and 27.2 simulators):
+iOS brings its own keyboard, with its Passwords bar, to a native `.username` field and to every
+secure field, and comes back to Hex in the next ordinary field. Under Hex, Safari's own sign-in
+sheet (Fill Password) still covers the keyboard as it does Apple's, and the field's menu offers
+AutoFill › Passwords (on the simulator that item showed no list under either keyboard). An
+email field gets no chip: a keyboard sees only its own field's traits and can't tell a login
+form's from any other. With only Hex (or Hex and Emoji) there is nothing to switch to and no
+chip. Deciding reads only whether the field is empty, as Paste does; nothing in these fields
+is typed, read or logged beyond what Hex already skipped. When iOS prompts
 Allow Paste (read ≥ 0.3 s) or refuses a paste read, the strip shows a
 tappable two-line notice (`Paste without asking` / `Paste from Other Apps ›
 Allow` with a **Settings** chip that routes through
@@ -844,7 +856,8 @@ Spatial autocorrect, next-letter touch help or Swipe typing (a drag from a digit
 swipe), and a word holding digits is never corrected. Where iOS gives less height, the
 number row shrinks with the others (`KeyboardMetrics.fitted`). The iPad keeps Apple's rows
 for now: its docked keyboards would need Apple's own number row on the 13-inch and room
-above the strip on the others.
+above the strip on the others. There the switch is hidden (Hex is an iPhone app, so the page
+reads the device's model, not its idiom), and Key flicks takes its place.
 
 ## Web search fields (full keyboard)
 
@@ -865,6 +878,44 @@ else. Holding the `.` offers `.` and `…` (the symbol pages' list); Apple's off
 `.us .edu .com .net .org` there and in email fields, which Hex doesn't yet. Unit tests
 (`KeyboardLayoutTests`, `FullKeyboardEngineTests`, `ShiftStateMachineTests`) and simulator
 screenshots beside Apple's in Safari; no physical iPhone run checks it.
+
+## Number pads (full keyboard, iPhone)
+
+A field that asks for `.numberPad`, `.asciiCapableNumberPad` or `.decimalPad` (in Safari,
+`inputmode="numeric"` and `"decimal"`) gets Hex's own pad (`KeyboardNumberPad`), drawn on
+Apple's (iPhone 17 Pro and SE, iOS 26.5 and 27.2 simulators, 2026-11-23): 1 2 3 / 4 5 6 /
+7 8 9 / a blank corner, 0 and delete, the phone letters under 2 to 9 (ABC … WXYZ), Apple's
+columns to the point (4.67, 126.33, 6, 126.67, 6, 126.33, 6 pt across a 402 pt iPhone; 4.5,
+117.5 pt keys with 6 pt gaps on the 375 pt SE; turned, 137.33 pt keys centred, the letters
+right of the digit), 6 pt between rows. The decimal pad's separator is the region's (`,` in
+Germany), in the corner without a keycap, as Apple's; delete has none either. A pressed
+digit greys and raises no pop-up, and nothing holds (Apple's pad offers no long presses).
+Taps type on release with rollover, delete repeats, and clicks and haptics are the letter
+keys', so the palette and themes follow. Hex keeps its strip above the pad (the Hex key,
+Paste and Code from Messages), where Apple's pad has no bar: the pad fills the letter keys'
+band, so the keyboard is the same height in a text field and a number field beside it
+(Apple's own grows: 48 pt keys on a 54 pt pitch, its panel 26 pt lower than its letters' on
+a 17 Pro). Hex's keys are 45.75 pt there (26.5: 46.75; SE 46.5). With Settings › Keyboard
+› Number row on, the pad takes that band too. On a Home-button iPhone, where iOS draws no
+globe, Hex's globe takes the blank corner (beside the separator on the decimal pad), as it does
+on the Duo. On the Duo folded the pad spans the letter keys' edges with 7 pt gaps, as Apple's
+does beside its own letters; unfolded and upright Apple's pad is its split keyboard's right
+half (101.33 pt keys, 7 pt apart, ending 80 pt from the right edge, iOS 27.2) and Hex's sits
+there too, a third of a point off on the first two columns; unfolded and turned, unmeasured,
+it takes the letter keys' edges. An iPad keeps the 123 page (not measured beside Apple's).
+
+Nothing hands a number field to the next keyboard any more: before, where iOS asked Hex for a
+globe (Home-button iPhones, the Duo), a number pad switched to Apple's keyboard by itself, and
+elsewhere it got Hex's 123 page. The way to Apple's keyboard stays the globe, and Code from
+Messages in an empty one-time-code field, by its usual route. iOS never gives a third-party
+keyboard a `.phonePad` (`inputmode="tel"`, `type="tel"`) or `.namePhonePad` field or a
+secure one (a PIN): it brings its own keyboard there, as it always did. `type="number"`
+asks for `.numbersAndPunctuation` and keeps the 123 page. The pad is a field kind of its own
+(`KeyboardFieldKind.numberPad`, `.decimalPad`) that takes no words: no suggestions,
+autocorrect, swipe, Learn how I type or Adaptive touch, and typing logs name the field as such.
+Hex's keys have no VoiceOver elements anywhere yet, the pad's included. Unit tests
+(`KeyboardLayoutTests`, `FullKeyboardEngineTests`, `ShiftStateMachineTests`) and simulator
+screenshots beside Apple's; no physical iPhone run checks it.
 
 ## Comma and period keys (full keyboard, iPhone)
 
@@ -974,7 +1025,28 @@ two-symbol keys (§ | ~ … \ < > ! ? on #+=), and row 4 as the letters' with AB
 undo or redo key there, so ABC takes the room of Apple's undo and second ABC.
 German is QWERTZ without ü, ö and ä as Apple's iPad German is, holding them on u, o and a.
 Measured against Apple's iPad mini in English, German and French (every key within a point);
-the other languages' rows follow the same rule unmeasured. Docked, a held key's accents open
+the other languages' rows follow the same rule unmeasured. **Key flicks** (Settings ›
+Keyboard › Key flicks, on by default, shown only on an iPad; `settings.keyboardKeyFlicks`,
+App Group): as on Apple's mini and 11-inch keyboards, every docked letter key carries a small
+grey character over its letter, and pulling the key down types it (`KeyboardFlicks`): 1 to 0
+over row 1, @ # $ & * ( ) ' " over row 2 and % - + = / ; : over row 3 in English and German,
+AZERTY's own (@ # & " $ ( ! ) - *, % _ + = / ;) in French, and on the 123 page the #+= page's
+character over each symbol (€ over @, § over %); the two-symbol keys and the digits keep
+none. Other languages get the digits over a ten-letter row 1, and rows 2 and 3 only with
+English's nine and seven letters (Apple's own for them unmeasured). Drawn as Apple's (iPad
+mini, iPadOS 27.2): the character about 12.5 pt high and grey, 14.5 pt below the keycap's
+top, the letter 11 pt below the middle. Once the finger has gone down more than across, the
+key keeps the touch: no slide onto the key below and no swipe (a swipe still starts any other
+way); from 8 pt down the character slides to the middle, growing and darkening as the letter
+fades, all the way by 26 pt; let go past half way (17 pt) and it goes in as a typed character
+(a mark after a word corrects it, as a slide from 123 does; a digit is just a digit), short
+of it or pulled back, the letter. A rollover commits it the same way. With Reduce Motion the
+character takes the letter's place at once, half way. Holding first opens the key's accents,
+as before, and the pull then moves through them. Apple's own switch (Settings › General ›
+Keyboard › Enable Key Flicks) can't be read by a keyboard extension, hence Hex's. Typing
+logs mark it `ui flick` and `insert` `src: flick`. On the simulator Apple's keys animate
+the pull the same way but synthetic touches never made one type its character, so where it
+commits is Hex's choice, not a measurement. Never on the floating keyboard or an iPhone. Docked, a held key's accents open
 in Apple's iPad cells (below). The sizes are Apple's iPad key sizes (`KeyboardPadSize`,
 `KeyboardPadPlacement`, `KeyboardMetrics.pad`), measured beside Apple's keyboard in the iPadOS 27.2 simulator:
 docked, Apple's key heights, row pitch, gaps and side inset for the iPad mini (under 800 pt
