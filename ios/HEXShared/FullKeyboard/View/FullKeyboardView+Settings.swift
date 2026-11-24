@@ -19,8 +19,13 @@ extension FullKeyboardView {
     }
 
     /// Settings › Keyboard › Number row: the keyboard grows by the row, so the host is asked
-    /// for the new height.
+    /// for the new height. Settings › Keyboard › Key flicks (iPad) is read here too.
     func syncNumberRow() {
+        let flicks = FullKeyboardSettings().keyFlicks
+        if KeyboardFlicks.isEnabled != flicks {
+            KeyboardFlicks.isEnabled = flicks
+            plane.setNeedsDisplay()
+        }
         let shows = FullKeyboardSettings().numberRow
         guard engine.showsNumberRow != shows else { return }
         plane.cancelAllTouches()

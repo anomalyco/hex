@@ -546,7 +546,9 @@ substitute for source inspection or a second roadmap.
   audio sources (macOS: Core Audio process tap, ScreenCaptureKit fallback;
   Linux: one `pw-record` per hardware sink's monitor, mixed; Windows: WASAPI
   loopback); one failing never stops the other, and resumed audio is padded
-  onto the timeline.
+  onto the timeline. With Labs › Choose meeting audio on, the system source
+  records one output device or one app instead, records silence while it is
+  missing and reattaches when it returns, and never widens to every output.
 - `meeting/runtime`: the Linux and Windows apps' meeting controller thread,
   capsules, recording state, and tray items (macOS runs the same controller
   from `macos_rune`).
@@ -1223,9 +1225,13 @@ CoreAudio formats, AppleScript details, or event serialization.
   Recording consent), never requiring a display; ScreenCaptureKit is only the
   fallback. Linux records every hardware output's PipeWire monitor through one
   `pw-record` each, mixed, and Windows its WASAPI loopback; neither asks for
-  consent. Losing either source never stops the other or the meeting: it
-  retries until Stop, and resumed audio is padded with silence so WAV
-  positions stay on the shared capture clock.
+  consent. With Labs › Choose meeting audio on, all of them record one output
+  device or one app instead, record silence while it is missing and reattach
+  when it returns, and never widen to every output; a chosen source needs the
+  same System Audio Recording consent on macOS even when Screen Recording is
+  granted. A choice applies mid-recording. Losing either source never stops
+  the other or the meeting: it retries until Stop, and resumed audio is padded
+  with silence so WAV positions stay on the shared capture clock.
 - Meeting recording prevents idle sleep but does not apply dictation mute or
   pause-media behavior.
 - Meeting notes (Apple Intelligence, or OpenCode only once the user turns on
@@ -1394,12 +1400,12 @@ CoreAudio formats, AppleScript details, or event serialization.
   never overwriting.
 - Meeting data is a liability: until the user chooses a `meetings.retention`,
   meetings recorded since the default began (manifest `retention_applies`)
-  are kept 24 hours and older ones stay; a chosen retention covers every
+  are kept 7 days and older ones stay; a chosen retention covers every
   finished meeting. The meeting controller expires them at launch and hourly,
-  Meetings on or off, measured from when they ended: the recording folder
-  moves to the Trash (never `rm`), and the exported Markdown only while it
-  still matches the SHA-256 of the copy Hex last wrote (`export_sha256`), so
-  an edited copy stays. Recording, transcribing, writing-notes, and
+  Meetings on or off, measured from when they ended: only the recording folder
+  in Application Support moves to the Trash (never `rm`). Expiry never moves
+  the exported Markdown or notes file in the meetings folder; only an explicit
+  Delete trashes those. Recording, transcribing, writing-notes, and
   final.pending meetings wait. Queries, `hex meetings`, `hex mcp`, and the
   pane never return an expired meeting.
 - Visible state remains `Transcribing` until every accepted transcription or

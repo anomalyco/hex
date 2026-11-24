@@ -498,6 +498,45 @@ fn an_invalid_dictation_style_choice_resets_only_that_field() {
     assert!(file.backups().is_empty());
 }
 
+/// Labs › Choose meeting audio's saved source is hand-editable, so a broken
+/// or unknown value keeps every other setting and loads as all computer
+/// audio instead of refusing the file.
+#[test]
+fn an_invalid_meeting_audio_source_choice_loads_all_computer_audio() {
+    let original = br#"{"labs":{"meeting_audio_source":true,"meeting_audio_source_choice":{"app":{"id":7}},"live_text":true}}"#;
+    let file = SettingsFile::new(original);
+    let settings = AppSettings::load_from(&file.path).unwrap();
+    assert!(settings.labs.meeting_audio_source);
+    assert_eq!(
+        settings.labs.meeting_audio_source_choice,
+        crate::meeting::audio_source::SourceChoice::All
+    );
+    assert!(settings.labs.live_text);
+    assert_eq!(fs::read(&file.path).unwrap(), original);
+    assert!(file.backups().is_empty());
+}
+
+/// A saved choice survives a save and load, so the app or output a person
+/// picked is still chosen after a restart.
+#[test]
+fn a_meeting_audio_source_choice_round_trips_through_settings() {
+    let file = SettingsFile::new(b"{}");
+    let mut settings = AppSettings::load_from(&file.path).unwrap();
+    settings.labs.meeting_audio_source = true;
+    settings.labs.meeting_audio_source_choice =
+        crate::meeting::audio_source::SourceChoice::Output {
+            id: "alsa_output.pci-0000_00_1f.3.analog-stereo".into(),
+            name: "Built-in Audio".into(),
+        };
+    settings.write_to(&file.path).unwrap();
+    let reloaded = AppSettings::load_from(&file.path).unwrap();
+    assert_eq!(
+        reloaded.labs.meeting_audio_source_choice,
+        settings.labs.meeting_audio_source_choice
+    );
+    assert!(reloaded.labs.meeting_audio_source);
+}
+
 #[test]
 fn a_microphone_linger_window_outside_the_choices_loads_the_default() {
     let original = br#"{"labs":{"keep_microphone_open":true,"keep_microphone_open_seconds":45,"live_text":true}}"#;

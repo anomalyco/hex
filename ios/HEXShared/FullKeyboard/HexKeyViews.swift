@@ -151,28 +151,32 @@ final class HexKeyControl: UIControl {
                 radius: cornerRadius
             )
         } else if isHighlighted {
-            palette.keyPressedFill.setFill()
+            // In the strip the chip is on iOS's glass, not a key: the system's pressed grey.
+            palette.systemPressedFill.setFill()
             let chip = CGRect(x: cap.minX, y: markMidY - room / 2, width: cap.width, height: room)
             UIBezierPath(roundedRect: chip, cornerRadius: room / 2).fill()
         }
         let markSize: CGFloat = inStrip ? min(19, room) : min(19, cap.height * 0.56)
         let markRect = CGRect(x: cap.midX - markSize / 2, y: markMidY - markSize / 2, width: markSize, height: markSize)
         if isWarm {
-            HexMarkPath.draw(in: context, rect: markRect, color: palette.textBase, coreColor: palette.warmCore)
+            HexMarkPath.draw(in: context, rect: markRect, color: ink, coreColor: palette.warmCore)
         } else {
             // A tap dictates inside the keyboard now, so no ↗ "opens Hex" badge.
-            HexMarkPath.draw(in: context, rect: markRect, color: palette.textBase, coreColor: nil)
+            HexMarkPath.draw(in: context, rect: markRect, color: ink, coreColor: nil)
         }
         if let translatingTo {
             drawTranslationBadge(TranslationPasteChoice.badge(target: translatingTo), keycap: cap, mark: markRect)
         }
     }
 
+    /// The mark's colour: a key's label on its keycap, the glass's ink in the strip.
+    private var ink: UIColor { inStrip ? palette.textBase : palette.keyText }
+
     /// "EN" in a small capsule at the keycap's top trailing corner, over the mark's edge.
     private func drawTranslationBadge(_ code: String, keycap cap: CGRect, mark: CGRect) {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: UIFont.systemFont(ofSize: 8.5, weight: .bold),
-            .foregroundColor: palette.isDark ? UIColor.black : UIColor.white,
+            .foregroundColor: (inStrip ? palette.isDark : palette.keysAreDark) ? UIColor.black : UIColor.white,
         ]
         let size = (code as NSString).size(withAttributes: attributes)
         let height: CGFloat = 12
@@ -181,7 +185,7 @@ final class HexKeyControl: UIControl {
         let x = inStrip ? mark.maxX - width / 2 : min(cap.maxX - width - 2, mark.maxX - 3)
         let y = inStrip ? mark.minY - height / 2 : cap.minY + 2
         let badge = CGRect(x: x, y: y, width: width, height: height)
-        palette.textBase.setFill()
+        ink.setFill()
         UIBezierPath(roundedRect: badge, cornerRadius: height / 2).fill()
         (code as NSString).draw(
             at: CGPoint(x: badge.midX - size.width / 2, y: badge.midY - size.height / 2),
@@ -299,7 +303,7 @@ final class HexKeyRecordingPanel: UIView {
         doneButton.addTarget(self, action: #selector(done), for: .touchUpInside)
 
         doneSpinner.hidesWhenStopped = true
-        doneSpinner.color = palette.textBase
+        doneSpinner.color = palette.keyText
         doneSpinner.isUserInteractionEnabled = false
         for view in [styleButton, well, cancelButton, doneButton, doneSpinner] {
             addSubview(view)
@@ -424,7 +428,8 @@ final class HexKeyRecordingPanel: UIView {
         scope.isDark = palette.isDark
         cancelButton.palette = palette
         doneButton.palette = palette
-        doneSpinner.color = palette.textBase
+        // On the Done key, in a key's label colour.
+        doneSpinner.color = palette.keyText
     }
 
     override func layoutSubviews() {
@@ -529,11 +534,17 @@ final class PanelKeyButton: UIControl {
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
         if isHighlighted {
-            context.fillKeycap(bounds, fill: palette.keyPressedFill, radius: cornerRadius)
+            // A plain one (the emoji panel's ABC and delete) is on the glass, not a key.
+            context.fillKeycap(bounds, fill: isPlain ? palette.systemPressedFill : palette.keyPressedFill, radius: cornerRadius)
         } else if !isPlain {
             context.fillKeycap(bounds, fill: isPrimary ? palette.keyFill : palette.functionFill, radius: cornerRadius)
         }
-        let ink = isEnabled ? palette.textBase : palette.textMuted
+        // A label on a key's own fill takes the keys' label colour; on the glass, or the
+        // secondary fill over it, the glass's ink.
+        let onKey = !isPlain && (isHighlighted || isPrimary)
+        let ink = isEnabled
+            ? (onKey ? palette.keyText : palette.textBase)
+            : (onKey ? palette.keyTextMuted : palette.textMuted)
         if let symbol {
             let config = drawsLikeKeys
                 ? UIImage.SymbolConfiguration(pointSize: bounds.height < 34 ? 16 : 18, weight: .regular)
@@ -931,7 +942,8 @@ final class HexStyleMenuView: UIView {
             let activeHover = isHighlighted || isSlideHovered
             let lit = isChosen || activeHover
             if lit {
-                let fill = activeHover ? palette.keyPressedFill : palette.selectFill
+                // The menu is on the system look, so its pressed row is the system's grey.
+                let fill = activeHover ? palette.systemPressedFill : palette.selectFill
                 fill.setFill()
                 UIBezierPath(roundedRect: bounds, cornerRadius: 8.5).fill()
             }

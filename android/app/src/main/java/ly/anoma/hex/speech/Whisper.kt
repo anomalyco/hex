@@ -28,7 +28,7 @@ internal interface Recognizer {
 }
 
 /** Shown when a shortage of memory sent an English dictation to today's model; at most once a day. */
-internal const val LOW_MEMORY_NOTE = "Phone was low on memory, so this one used standard dictation."
+internal const val LOW_MEMORY_NOTE = "Low on memory: used standard dictation."
 
 internal class LocalSpeech(private val app: Context) : Recognizer {
     override fun prepare(options: SpeechOptions) = SpeechModel.prepare(app, engineFor(options))

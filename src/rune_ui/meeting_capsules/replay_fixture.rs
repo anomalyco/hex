@@ -879,7 +879,9 @@ fn stop_says_stopping_in_place_and_the_field_cools() {
     assert_eq!(shots[460].presence[3], 0.0);
     // The meter is one thing from its first frame to the finished meeting:
     // the drafts mounted it again at each change of state, and it dipped.
-    for (frame, shot) in shots.iter().enumerate().skip(130) {
+    // Published, the length moves under the title of the link.
+    let finished = |shot: &&Shot| !matches!(shot.phase, "published" | "summary");
+    for (frame, shot) in shots.iter().enumerate().skip(130).take_while(|(_, s)| finished(s)) {
         assert!(shot.shown.0 > 0.999, "f{frame}: the time at {}", shot.shown.0);
         if frame < 425 {
             assert!(shot.shown.1 > 0.999, "f{frame}: the field at {}", shot.shown.1);
@@ -887,7 +889,7 @@ fn stop_says_stopping_in_place_and_the_field_cools() {
     }
     // The time never moves through any of it.
     let clock = shots[400].elapsed.unwrap();
-    for (frame, shot) in shots.iter().enumerate().skip(400) {
+    for (frame, shot) in shots.iter().enumerate().skip(400).take_while(|(_, s)| finished(s)) {
         let now = shot.elapsed.unwrap();
         assert!(
             (now[0] - clock[0]).abs() < 0.03 && (now[1] - clock[1]).abs() < 0.03,
@@ -945,7 +947,8 @@ fn reduced_motion_lands_the_surface_and_only_fades() {
         let (Some(a), Some(b)) = (pair[0].pill, pair[1].pill) else {
             continue;
         };
-        if pair[1].phase == "summary" || pair[1].phase == "offer" {
+        // Published, the finished meeting is its own rest.
+        if matches!(pair[1].phase, "published" | "summary" | "offer") {
             continue;
         }
         // The outline is either where it was or where it is going.
