@@ -115,7 +115,7 @@ latest = {"versionCode": $build, "versionName": "$name", "version": "$version", 
           "apk": {"url": "$url", "size": $size, "sha256": "$sha"}, "notes": notes}
 open(sys.argv[2] + "/latest.json", "w").write(json.dumps(latest, indent=2, ensure_ascii=False) + "\n")
 tick = chr(96)  # a literal backtick: this heredoc is expanded by bash
-body = "\n".join("- " + n for n in notes) + "\n\nHex Preview for Android, built from ${commit:0:12}. Install it outside Google Play; it updates itself from [the channel](https://github.com/$repo/tree/$channel).\n\nAPK SHA-256: " + tick + "$sha" + tick + "  \nSigning certificate SHA-256: " + tick + "$fingerprint" + tick + "\n"
+body = "\n".join("- " + n for n in notes) + "\n\nHex Preview for Android, built from ${commit:0:12}. Install it outside Google Play; it finds updates on [the channel](https://github.com/$repo/tree/$channel).\n\nAPK SHA-256: " + tick + "$sha" + tick + "  \nSigning certificate SHA-256: " + tick + "$fingerprint" + tick + "\n"
 open(sys.argv[2] + "/release.md", "w").write(body)
 PY
 
@@ -125,7 +125,7 @@ cat > "$out/README.md" <<MD
 
 **[Download Hex Preview $version (build $build)]($url)** · $(( size / 1000000 )) MB · Android 12 or later · $(date -u +%Y-%m-%d)
 
-Hex Preview is the [Hex keyboard](https://anoma.ly/hex) for Android, before it reaches Google Play. It installs as its own app beside Hex from Google Play, and it updates itself: it checks this page's \`latest.json\` when you open it and at most once a day from the keyboard, shows what changed, and installs a new build only when you tap Update.
+Hex Preview is the [Hex keyboard](https://anoma.ly/hex) for Android, before it reaches Google Play. It installs as its own app beside Hex from Google Play, and it finds its own updates: it checks this page's \`latest.json\` when you open it and at most once a day from the keyboard, shows what changed, and **Download update** opens the new build in your browser.
 
 ## Install
 
@@ -133,7 +133,7 @@ Hex Preview is the [Hex keyboard](https://anoma.ly/hex) for Android, before it r
 2. Open it. Android asks whether your browser or Files app may install apps: tap **Settings**, turn on **Allow from this source**, then go back and tap **Install**.
 3. Open Hex Preview and follow its setup: the microphone, Hex Preview as your keyboard, and the 190 MB speech model.
 
-The first update asks the same once for Hex Preview itself.
+Updates install the same way: open the APK that Download update downloads and tap **Update** when Android asks.
 
 ## Check a download
 
