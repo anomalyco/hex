@@ -35,6 +35,7 @@ const ISSUES = "https://github.com/anomalyco/hex/issues"
 // Each Hex Preview build's SHA-256 and signing certificate, beside its download.
 const ANDROID_BUILDS = "https://github.com/anomalyco/hex/blob/android-preview/README.md"
 const SECURITY = "https://github.com/anomalyco/hex/security/advisories/new"
+const SOURCE = "https://github.com/anomalyco/hex/tree/dev/android"
 
 const IPHONE = { crumb: { href: IPHONE_PATH, label: "iPhone" } }
 const ANDROID = { crumb: { href: ANDROID_PATH, label: "Android" } }
@@ -125,6 +126,7 @@ export function renderAndroid(origin: string): string {
 <p class="summary">Dictate right inside the keyboard, in any app. Free, private, and on your phone.</p>
 <div class="actions"><a class="button button--primary" href="${ANDROID_DOWNLOAD_PATH}">Download Hex Preview</a></div>
 <p class="note">An APK for Android 12 or later, about 70 MB. Hex Preview is Hex for Android before it reaches Google Play. It installs as its own app and updates itself.</p>
+<p class="note">Google Play Protect may flag Hex Preview as harmful. Nothing in it is. <a href="#play-protect">Why it happens, and what to do</a>.</p>
 <p class="note">On a computer? Open ${address} on your Android phone.</p>
 <div class="prose">
 <section>
@@ -132,6 +134,7 @@ export function renderAndroid(origin: string): string {
 <ol>
 <li>On your phone, tap <strong>Download Hex Preview</strong> above and open the file when it has downloaded.</li>
 <li>Android asks whether your browser or Files app may install apps. Tap <strong>Settings</strong>, turn on <strong>Allow from this source</strong>, then go back and tap <strong>Install</strong>.</li>
+<li>If Google Play Protect says <strong>Harmful app blocked</strong>, tap <strong>More details</strong>, then <strong>Install anyway</strong>.</li>
 <li>Open Hex Preview and tap <strong>Get started</strong>.</li>
 <li>Allow the microphone, then turn on <strong>Hex Preview</strong> in Android's keyboard list and choose it as your keyboard. Hex downloads its speech model (190 MB) once.</li>
 <li>Try it: tap a text field, hold the Hex key, say a few words, then let go.</li>
@@ -150,6 +153,9 @@ export function renderAndroid(origin: string): string {
 <p>Yes. No subscription, no ads, and nothing to buy in the app.</p>
 <h3>Why does Android warn me before installing?</h3>
 <p>Android asks before installing any app that doesn't come from an app store. Anomaly builds and signs Hex Preview, and each build's SHA-256 is <a href="${ANDROID_BUILDS}">listed on GitHub</a> if you want to check a download.</p>
+<h3 id="play-protect">Why does Google Play Protect say Hex Preview is harmful?</h3>
+<p>Hex Preview is new, comes from outside Google Play, and is a keyboard that uses the microphone and installs its own updates. Play Protect's automatic checks are wary of apps like that, so it may block the install or, later, show <strong>Harmful app found</strong>.</p>
+<p>Nothing in Hex Preview is harmful. It has no ads, no analytics, and no tracking, it turns speech into text on your phone, and <a href="${SOURCE}">its code is public</a>. To install it, tap <strong>More details</strong>, then <strong>Install anyway</strong>. We're working on clearing the warning.</p>
 <h3>Can I keep Hex from Google Play too?</h3>
 <p>Yes. Hex Preview is its own app, with its own keyboard, settings, and speech model, so the two sit side by side.</p>
 <h3>What does Hex Preview send when it looks for an update?</h3>
