@@ -332,12 +332,17 @@ fn default_rows(ui: &Ui, p: Paint, menus: &mut Vec<El>) -> Vec<CardRow> {
     let mut rows: Vec<CardRow> =
         vec![setting_row(p, "calls-default", tr("When a call starts"), None, select).into()];
     if records {
+        let grace = crate::meeting::detection::AUTO_STOP_GRACE.as_secs();
+        let after = tr_fill(
+            "{} seconds after the call app leaves the microphone",
+            &grace.to_string(),
+        );
         rows.push(
             toggle_row(
                 p,
                 "meeting-stop-when-call-ends",
                 tr("Stop when the call ends"),
-                None,
+                after.as_str(),
                 meetings.stop_when_call_ends,
                 |ui: &mut Ui| {
                     let on = !ui.settings.meetings.stop_when_call_ends;

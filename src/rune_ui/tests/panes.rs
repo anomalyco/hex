@@ -1356,7 +1356,7 @@ fn the_meetings_switch_stays_put_and_a_swap_drops_pending_edits() {
             .unwrap()
     };
     let recordings = switch(&rt);
-    tap(&mut rt, "meeting-rename");
+    rename(&mut rt);
     assert!(rt.state.meetings.renaming.is_some());
     rt.state.meetings.delete_armed = Some("preview-notes".into());
     tap(&mut rt, "meetings-view/segment1");
@@ -1439,7 +1439,7 @@ fn meetings_off_offers_the_opt_in_and_keeps_the_pane() {
     let mut rt = runtime("meetings-off", true, PANE_SIZE);
     assert!(rt.find("meetings-view").is_none());
     assert!(rt.find("start-meeting").is_none());
-    tap(&mut rt, "meetings-enabled");
+    tap(&mut rt, "meetings-turn-on");
     assert!(rt.state.settings.meetings.enabled);
     refresh(&mut rt);
     assert!(
@@ -1507,7 +1507,7 @@ fn meetings_settings_save_and_ask_for_system_audio() {
     assert!(!rt.state.settings.meetings.enabled);
     assert!(rt.find("meeting-folder").is_none());
     assert!(rt.find("calls").is_none());
-    assert!(rt.find("meetings-enabled").is_some(), "the opt-in remains");
+    assert!(rt.find("meetings-turn-on").is_some(), "the opt-in remains");
 }
 
 /// The Calls row opens the sheet; its radios set the answer every call
@@ -1531,7 +1531,7 @@ fn the_calls_sheet_saves_the_default_and_each_answer() {
     assert_eq!(policy(&rt, "example.com"), MeetingPolicy::Ask);
     assert!(rt.find("call4").is_some(), "a saved answer stays listed");
     // A new default carries the calls that followed the old one.
-    tap(&mut rt, "default-never");
+    pick(&mut rt, "calls-default", 2);
     let meetings = &rt.state.settings.meetings;
     assert_eq!(meetings.default_policy, MeetingPolicy::NeverOffer);
     assert_eq!(policy(&rt, "meet.google.com"), MeetingPolicy::NeverOffer);
@@ -1718,10 +1718,17 @@ fn recording_starts_and_stops_from_the_header() {
     );
 }
 
+/// Rename is in the detail's ⋯ menu.
+fn rename(rt: &mut Runtime<Ui>) {
+    tap(rt, "meeting-more");
+    let rename = menu_item(rt, "meeting-actions", "Rename…");
+    tap(rt, &rename);
+}
+
 #[test]
 fn meetings_rename_from_the_title_field() {
     let mut rt = runtime("meetings", true, PANE_SIZE);
-    tap(&mut rt, "meeting-rename");
+    rename(&mut rt);
     assert_eq!(rt.state.meetings.renaming.as_deref(), Some("preview-notes"));
     rt.state.meetings.rename = TextEdit::new("Arcade launch");
     refresh(&mut rt);
@@ -2557,8 +2564,12 @@ fn labs_lists_every_toggle_off_by_default() {
     rt.state.settings.experimental.hex_microphone = false;
     rt.state.platform.hex_microphone = None;
     refresh(&mut rt);
+    // On a Mac, Meetings stays in the sidebar while off, to offer itself.
+    assert!(
+        rt.find("nav-meetings").is_some(),
+        "Meetings left the sidebar"
+    );
     for hidden in [
-        "nav-meetings",
         "nav-annotate",
         "nav-voice-filter",
         "nav-playground",
