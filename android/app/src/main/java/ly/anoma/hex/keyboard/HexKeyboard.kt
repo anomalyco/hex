@@ -15,6 +15,7 @@ import android.inputmethodservice.InputMethodService
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.view.inputmethod.InputMethodSubtype
 import ly.anoma.hex.MainActivity
 import ly.anoma.hex.R
 import ly.anoma.hex.speech.LocalSpeech
@@ -47,6 +48,17 @@ internal fun Context.speechNote(note: String?) = when (note) {
 
 class HexKeyboard : InputMethodService() {
     private var view: KeyboardView? = null
+    /** Labs › Keyboard › Voice-only mode's bar, in place of the keyboard while the voice subtype is current. */
+    private var bar: VoiceBarView? = null
+    /** The subtype the system last announced; a fresh bind may announce none, so [subtypeMode] asks the manager. */
+    private var currentSubtype: InputMethodSubtype? = null
+    /** The current subtype's mode, "voice" for Labs › Keyboard › Voice-only mode's subtype. */
+    private fun subtypeMode(): String? {
+        val manager = getSystemService(InputMethodManager::class.java).currentInputMethodSubtype
+        if (manager != null) currentSubtype = manager
+        return (manager ?: currentSubtype)?.mode
+    }
+    private fun voiceOnly() = VoiceOnly.shows(feedback.voiceOnly, subtypeMode())
     private lateinit var capture: MicCapture
     internal val preferences by lazy { SpeechPreferences(this) }
     internal var nextEnglish: Boolean? = null
@@ -73,6 +85,7 @@ class HexKeyboard : InputMethodService() {
         if (key == TypingPreferences.LOCAL_CURRENCY) engine.localCurrencyChanged()
         if (key == TypingPreferences.EMOJI_SUGGESTIONS) engine.emojiSuggestionsChanged()
         if (key == TypingPreferences.KEYBOARD_TOOLS) { engine.keyboardToolsChanged(); watchClipboard() }
+        if (key == TypingPreferences.VOICE_ONLY) modeChanged()
     }
     // The strip's Paste tool comes and goes with the clipboard (Labs › Keyboard › Keyboard tools): the
     // listener exists only while the lab is on and the input view is shown.
@@ -81,7 +94,7 @@ class HexKeyboard : InputMethodService() {
     private var viewing = false
     private var watchingClipboard = false
     private fun watchClipboard() {
-        val watch = viewing && feedback.keyboardTools
+        val watch = viewing && feedback.keyboardTools && bar == null
         if (watch == watchingClipboard) return
         watchingClipboard = watch
         if (watch) clipboard.addPrimaryClipChangedListener(clipboardChanged)
@@ -94,17 +107,42 @@ class HexKeyboard : InputMethodService() {
         super.onCreate()
         getSharedPreferences("typing", MODE_PRIVATE).registerOnSharedPreferenceChangeListener(typingChanged)
         contentResolver.registerContentObserver(UserDictionary.Words.CONTENT_URI, true, dictionaryChanged)
-        capture = MicCapture(LocalSpeech(applicationContext),
-            update = { phase, note -> view?.status(phase, speechNote(note) ?: idleHint(), note != null) },
-            meter = { view?.setLevel(it) }, insert = ::commitSpeech)
+        capture = MicCapture(LocalSpeech(applicationContext), update = ::showStatus, meter = ::showLevel,
+            insert = ::commitSpeech)
+        VoiceOnly.setEnabled(this, feedback.voiceOnly)
     }
     override fun onEvaluateFullscreenMode() = false
-    override fun onCreateInputView(): View = KeyboardView(this, this).also {
-        it.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
-            override fun onViewAttachedToWindow(v: View) = Unit
-            override fun onViewDetachedFromWindow(v: View) { viewing = false; watchClipboard() }
-        })
-        view = it; engine.surface = it
+    override fun onCreateInputView(): View = inputView()
+
+    /** The bar for the voice subtype with the lab on, else the full keyboard. */
+    private fun inputView(): View {
+        if (voiceOnly()) {
+            view = null; engine.surface = null
+            return VoiceBarView(this, ::finishSpeech, ::cancelVoiceOnly).also { bar = it }
+        }
+        bar = null
+        return KeyboardView(this, this).also {
+            it.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(v: View) = Unit
+                override fun onViewDetachedFromWindow(v: View) { viewing = false; watchClipboard() }
+            })
+            view = it; engine.surface = it
+        }
+    }
+
+    /** The voice subtype, or its lab, changed under a shown or remembered view: swap it and start dictation. */
+    private fun modeChanged() {
+        if (voiceOnly() == (bar != null)) return
+        if (view == null && bar == null) return // Nothing shown yet: onCreateInputView picks the mode.
+        capture.cancel() // Neither mode inherits a dictation started in the other.
+        setInputView(inputView())
+        if (!isInputViewShown) return
+        if (bar != null) beginVoice() else { engine.configureTyping(); view?.status(capture.phase, idleHint()) }
+    }
+    override fun onCurrentInputMethodSubtypeChanged(newSubtype: InputMethodSubtype) {
+        super.onCurrentInputMethodSubtypeChanged(newSubtype)
+        currentSubtype = newSubtype
+        modeChanged()
     }
 
     /** The field's type as Hex last started in it: an app can change it in place (restarting the same box). */
@@ -120,6 +158,10 @@ class HexKeyboard : InputMethodService() {
     }
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        // A subtype or lab change may have arrived while no view existed: it shows the right one.
+        val voice = voiceOnly()
+        if (voice != (bar != null) || (!voice && view == null)) setInputView(inputView())
+        if (bar != null) { beginVoice(); viewing = true; return }
         view?.cancelGestures()
         // Another type in the same box: back to its keys, as a new field opens (configureTyping draws them).
         if (typeChanged) view?.closeMenu(configure = false)
@@ -173,13 +215,57 @@ class HexKeyboard : InputMethodService() {
         if (capture.phase == SpeechPhase.Listening || capture.phase == SpeechPhase.Opening) capture.finish()
     }
     internal fun cancelSpeech() = capture.cancelLatest()
+
+    /** The bar records as it appears, with [beginSpeech]'s guards: a field or microphone that can't dictate
+     * says why in the bar, which keeps its ✕ to go back. */
+    private fun beginVoice() {
+        val voice = bar ?: return
+        val blocked = when {
+            engine.secure -> getString(R.string.keyboard_hint_password)
+            currentInputConnection == null -> getString(R.string.voice_only_unavailable)
+            !capture.canStart -> getString(R.string.keyboard_note_microphone)
+            checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ->
+                getString(R.string.keyboard_hint_microphone)
+            else -> null
+        }
+        if (blocked != null) { voice.status(SpeechPhase.Idle, blocked); return }
+        engine.clearForDictation()
+        capture.start(preferences.options(nextEnglish))
+        nextEnglish = null
+    }
+    /** The bar's ✕: the dictation is discarded and the keyboard that opened the bar comes back. */
+    private fun cancelVoiceOnly() { cancelSpeech(); leaveVoiceOnly() }
+    /** The bar is done: back to the keyboard that opened it, or Android's picker when there is none. */
+    private fun leaveVoiceOnly() {
+        if (bar == null || !isInputViewShown) return
+        if (!switchToPreviousInputMethod()) getSystemService(InputMethodManager::class.java).showInputMethodPicker()
+    }
+    private fun showStatus(phase: SpeechPhase, note: String?) {
+        val spoken = speechNote(note)
+        val voice = bar
+        if (voice != null) {
+            voice.status(phase, spoken ?: getString(when (phase) {
+                SpeechPhase.Opening, SpeechPhase.Listening -> R.string.voice_only_listening
+                SpeechPhase.Transcribing -> R.string.keyboard_transcribing
+                SpeechPhase.Idle -> R.string.voice_only_hint
+            }))
+            // A failed dictation says so for a moment before the keyboard comes back.
+            if (spoken != null && phase == SpeechPhase.Idle) voice.postDelayed({ leaveVoiceOnly() }, VOICE_NOTE_MS)
+            return
+        }
+        view?.status(phase, spoken ?: idleHint(), note != null)
+    }
+    private fun showLevel(level: Float) {
+        bar?.setLevel(level); view?.setLevel(level)
+    }
     private fun commitSpeech(text: String, options: SpeechOptions) {
-        if (currentInputConnection == null || engine.secure || !isInputViewShown) return
+        if (currentInputConnection == null || engine.secure || !isInputViewShown) { leaveVoiceOnly(); return }
         // Read now, so a toggle or text changed while it transcribed applies to this dictation. Hex's own
         // fields, such as Settings' practice box, never get the signature.
         val own = currentInputEditorInfo?.packageName == packageName
         val signed = if (own) null else Signature.append(text, preferences.signatureText, preferences.signature)
         engine.insertDictation(signed ?: text, if (options.translate) "en" else options.spoken.code, signed != null)
+        leaveVoiceOnly()
     }
     private fun leaveEditor() {
         viewing = false; watchClipboard()
@@ -198,6 +284,11 @@ class HexKeyboard : InputMethodService() {
         getSharedPreferences("typing", MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(typingChanged)
         contentResolver.unregisterContentObserver(dictionaryChanged); words.shutdownNow()
         viewing = false; watchClipboard()
-        view?.cancelGestures(); view = null; engine.surface = null; capture.close(); super.onDestroy()
+        view?.cancelGestures(); view = null; bar = null; engine.surface = null; capture.close(); super.onDestroy()
+    }
+
+    private companion object {
+        /** A failed voice-only dictation's note stays this long before the keyboard comes back. */
+        const val VOICE_NOTE_MS = 1_200L
     }
 }

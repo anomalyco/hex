@@ -3273,7 +3273,7 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
     Checks: `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` (includes
     `KeyboardToolsTest`) and `python3 scripts/code-shape.py --check`; the repo has no
     Android CI. Not tried on a device or emulator.
-└── Labs > Keyboard > Smart quotes (off) -> in a plain-text field (not a password, email or URL
+├── Labs > Keyboard > Smart quotes (off) -> in a plain-text field (not a password, email or URL
     field, or a TYPE_NULL field such as a terminal), the ' and " keys type ’ ‘ “ ”: an opening
     quote — ‘ or “ — at the start, after whitespace, or after an opening bracket or quote, and
     the closing quote or apostrophe — ’ or ” — after anything else. A word a suggestion,
@@ -3288,6 +3288,27 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
     `SmartQuotesTest`'s 12) on 2026-11-24, on Temurin JDK 21 and Android SDK 36 (platform 36,
     build-tools 35/36, NDK 27.2.12479018); the repo has no Android CI, and nothing was tried on a
     device or emulator. `python3 scripts/code-shape.py --check` passes.
+└── Labs > Keyboard > Voice-only mode (off) -> a "Voice only" subtype of Hex, registered at runtime
+    with `InputMethodManager.setAdditionalInputMethodSubtypes` (never in input_method.xml), that
+    replaces the keyboard with one compact dictation bar: the strip's dot waveform and a status
+    line, ✓ to finish and ✕ to cancel. Showing it starts dictation at once, with the keyboard's
+    guards: a password field, no text field, a microphone another dictation holds, or a missing
+    microphone permission shows the reason in the bar, whose ✕ goes back. ✓ transcribes through the
+    same MicCapture queue and model as the keyboard and inserts the text at the cursor with the same
+    signature and continuation rules (commitSpeech). After the insertion, after ✕, and after a
+    failed dictation (its note shows for 1.2 s) Hex calls `switchToPreviousInputMethod()`, opening
+    Android's keyboard picker when it returns false. Reach it from another keyboard: a voice-input
+    mic key that lists IME subtypes opens it directly, and on Gboard and Samsung the keyboard
+    switcher does. The Labs toggle registers the subtype and clears it when turned off, and
+    the IME re-applies the saved state in onCreate, so it survives an update. Off, no subtype is
+    registered and Hex is exactly the keyboard it was; a voice subtype that is somehow current shows
+    the full keyboard. Checks: `python3 scripts/code-shape.py --check` and `git diff --check` pass.
+    A cached Temurin JDK 21 and Android SDK 36 built `./gradlew :app:compileDebugKotlin` (with
+    build-tools 36.0.0, since the default 35.0.0 was not installed, and `-x prepareSpeechModel`);
+    `VoiceOnlyTest`'s 3 cases were compiled and run on their own with the cached Kotlin compiler and
+    passed. The shared JDK and SDK were deleted by another process mid-run, so
+    `:app:testDebugUnitTest` never ran, and nothing was tried on a device or emulator. The repo has
+    no Android CI.
 Unmerged Windows / deferred features -> Not part of this map
 ```
 

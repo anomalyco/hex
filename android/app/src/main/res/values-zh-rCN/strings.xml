@@ -2,6 +2,7 @@
     <!-- 简体中文。与 iPhone 版 Hex 相同的句子沿用其 Localizable.xcstrings 的译文；Android 自有的用语（如“应用”“复制”“点按”“个人字典”）按 Android 的习惯。 -->
     <string name="back">返回</string>
     <string name="full_keyboard">全键盘</string>
+    <string name="voice_only">仅语音</string>
 
     <string name="setup_step">第 %1$d 步，共 %2$d 步</string>
     <string name="setup_on_device" formatted="false">100% 设备端处理</string>
@@ -120,4 +121,6 @@
     <string name="keyboard_tools_detail">在建议栏中显示表情、粘贴、设置和撤销</string>
     <string name="smart_quotes">智能引号</string>
     <string name="smart_quotes_detail">用 ’ ‘ “ ” 代替 \' 和 \"</string>
+    <string name="voice_only_mode">仅语音模式</string>
+    <string name="voice_only_detail">添加一个可从其他键盘切换到的 Hex 语音输入。它录音、输入你说的话，然后切换回去。</string>
 </resources>
