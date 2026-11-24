@@ -229,6 +229,7 @@ define_features! {
     VoiceIsolation => labs(voice_isolation), "voice-isolation", Dictation, Everyone, MACOS, 20261122;
     DictateWhileAnnotating => labs(dictate_while_annotating), "dictate-while-annotating", Annotate, Everyone, EVERY, 20261122;
     StopAnyCallRecording => labs(stop_any_call_recording), "stop-any-call-recording", Meetings, Everyone, EVERY, 20261123;
+    ClipboardPhrase => labs(clipboard_phrase), "clipboard-phrase", Output, Everyone, EVERY, 20261124, extra: ["labs.clipboard_phrase_text"];
 }
 
 impl Feature {

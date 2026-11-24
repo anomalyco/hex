@@ -14,6 +14,7 @@ use strings::TRANSLATIONS;
 mod agents;
 mod annotate_dictation;
 mod calls;
+mod clipboard_phrase;
 mod clock;
 mod failures;
 mod french;
@@ -395,6 +396,7 @@ pub(super) fn all_translations() -> impl Iterator<Item = &'static (&'static str,
         .chain(labs::TRANSLATIONS)
         .chain(style::TRANSLATIONS)
         .chain(signature::TRANSLATIONS)
+        .chain(clipboard_phrase::TRANSLATIONS)
         .chain(annotate_dictation::TRANSLATIONS)
         .chain(agents::TRANSLATIONS)
         .chain(failures::TRANSLATIONS)
@@ -606,6 +608,7 @@ mod tests {
         include_str!("../rune_ui/hud_lab.rs"),
         include_str!("../rune_ui/labs.rs"),
         include_str!("../rune_ui/labs/group.rs"),
+        include_str!("../rune_ui/labs/clipboard_phrase.rs"),
         include_str!("../rune_ui/labs/hud_height.rs"),
         include_str!("../rune_ui/labs/screenshots.rs"),
         include_str!("../rune_ui/labs/signature.rs"),

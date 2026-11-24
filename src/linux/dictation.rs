@@ -342,6 +342,7 @@ pub(crate) fn run(
                     }
                     PreparedTranscript::Ready(text) => text,
                 };
+                let clipboard = paster.as_ref().ok().map(LinuxPaster::clipboard);
                 let mut insert = |text: &str, plan: InsertPlan| -> Result<InsertResult> {
                     let paster = paster.as_mut().map_err(|error| eyre!("{error:#}"))?;
                     match plan {
@@ -373,6 +374,7 @@ pub(crate) fn run(
                     target,
                     &job.language,
                     (!target.is_print()).then_some(&mut insert as output::Insert<'_>),
+                    clipboard,
                     &mut last_dictation,
                     job.audio_ms,
                     inference_ms,
@@ -1997,6 +1999,7 @@ mod tests {
             OutputTarget::Paste,
             "en",
             Some(&mut paste),
+            None,
             &mut last_dictation,
             2_000,
             0,

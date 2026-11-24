@@ -1029,6 +1029,52 @@ mod tests {
     }
 
     #[test]
+    fn a_clipboard_phrase_needs_two_words_and_six_letters() {
+        let change = apply(
+            &AppSettings::default(),
+            "labs.clipboard_phrase",
+            "on",
+            &rules(),
+        )
+        .unwrap();
+        assert!(change.settings.labs.clipboard_phrase);
+        assert_eq!(
+            change.settings.labs.clipboard_phrase_text,
+            crate::dictation::clipboard_phrase::DEFAULT_PHRASE
+        );
+        let change = apply(
+            &change.settings,
+            "labs.clipboard_phrase_text",
+            "  what I copied ",
+            &rules(),
+        )
+        .unwrap();
+        assert_eq!(
+            change.settings.labs.clipboard_phrase_text, "what I copied",
+            "a saved phrase is trimmed"
+        );
+        for (raw, reason) in [
+            ("clipboard", "two words"),
+            ("a clip", "six letters"),
+            ("", "two words"),
+        ] {
+            let error = apply(
+                &change.settings,
+                "labs.clipboard_phrase_text",
+                raw,
+                &rules(),
+            )
+            .unwrap_err();
+            assert_eq!(error.code, "invalid-value", "{raw}");
+            assert!(error.message.contains(reason), "{raw}: {}", error.message);
+        }
+        assert_eq!(
+            change.settings.labs.clipboard_phrase_text, "what I copied",
+            "a refused draft leaves the saved phrase"
+        );
+    }
+
+    #[test]
     fn a_stop_phrase_needs_two_words_and_six_letters() {
         let change = apply(&AppSettings::default(), "labs.stop_phrase", "on", &rules()).unwrap();
         assert!(change.settings.labs.stop_phrase);

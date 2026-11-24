@@ -99,6 +99,10 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        every normal dictation pastes with the signature on its own line at the end, and
 │                                        History and Paste Last keep that same text; not added to an empty transcript, one
 │                                        that already ends with it as its own line, raw, printed, or API output
+├── Clipboard phrase no   labs.clipboard_phrase + labs.clipboard_phrase_text ("my clipboard", every OS)
+│                                        each whole-word phrase in a normal or printed dictation becomes the clipboard's
+│                                        text in double quotes after processing and before the signature and paste;
+│                                        History and Paste Last keep that text; an empty clipboard leaves the words
 ├── Copy dictation only no labs.copy_only (macOS, Windows)    a dictation goes to the clipboard and is never pasted; Paste last dictation still pastes (#629)
 ├── YOLO mode no labs.yolo_mode (every OS) press Return after pasting a shortcut dictation in a chosen app (none chosen = everywhere); Escape after release skips Return on macOS
 ├── Return to app   no    labs.return_to_app           (macOS)   a dictation pastes into the app it started in, switching back to it first when another app came forward
@@ -1334,6 +1338,52 @@ pastes into a real app here; the three call sites are gated by the same pure
 rule and their platform tests, and CI's clippy builds compile macOS and
 Windows. Not yet observed: a real dictation with the lab on, and the next
 dictation's continuation after a signed paste.
+
+Clipboard phrase (`clipboard-phrase`, every OS): while on, each whole-word
+`labs.clipboard_phrase_text` ("my clipboard" by default) in a normal,
+copy-only, or printed dictation becomes the clipboard's text, trimmed, in
+straight double quotes. It runs in the shared delivery policy,
+`dictation::modes::output::deliver`, after the Output pane's processing (so
+corrections, rewrites, and transformations never touch what was copied) and
+before Signature, so History and Paste last dictation keep exactly what was
+inserted. The clipboard is read only when the phrase is there, through each
+OS's `OutputAdapter::clipboard_text`: `arboard` on macOS and Windows, and the
+session's selection (`linux::clipboard::Selection::text`, Wayland or X11) on
+Linux. Every read happens before Hex's own paste puts the dictation on the
+clipboard. Raw dictations and the local API are left alone. Matching reuses
+`dictation::voice_prompt::words`, so it ignores case and the punctuation
+around the words, and the punctuation stays: "My clipboard." becomes
+`"copied".`. A saved phrase follows Rewrite by voice's rules (at least two
+words and six letters); an invalid one is refused and loads as the default.
+While on, its card shows Phrase, which behaves like Stop phrase's.
+
+```ts
+Dictate "fix my clipboard please"            // labs.clipboard_phrase + labs.clipboard_phrase_text
+├── Off -> pasted exactly as spoken; the clipboard is never read
+├── On, clipboard "index out of range" -> pasted `fix "index out of range" please`
+│   -> History and Paste Last hold the same text; Signature appends after it
+├── The phrase twice -> both are replaced
+├── "my clipboards", "my-clipboard" -> not whole words, left alone
+├── Clipboard empty, not text, or unreadable -> the words stay as spoken
+└── Raw (Dictate without processing), API, meeting, Annotate -> unaffected
+```
+
+With Keep dictation on clipboard on, the clipboard holds the previous
+dictation unless something else was copied since, and that is what the phrase
+reads.
+
+Checks: the tests in
+[dictation/clipboard_phrase.rs](../../src/dictation/clipboard_phrase.rs)
+(whole-word matching, every occurrence, trimming, reading the clipboard only
+when the phrase is there); `clipboard_phrase_quotes_the_clipboard_before_signing_and_skips_raw`,
+`clipboard_phrase_off_or_absent_never_reads_the_clipboard`, and
+`an_empty_clipboard_leaves_the_phrase_as_spoken` in
+[dictation/modes/output.rs](../../src/dictation/modes/output.rs);
+`a_clipboard_phrase_needs_two_words_and_six_letters` in
+[control/settings.rs](../../src/control/settings.rs); and
+`an_invalid_clipboard_phrase_loads_the_default_and_keeps_its_switch` in
+[persistence/tests.rs](../../src/app_settings/persistence/tests.rs). Not yet
+observed: a real dictation with the lab on, on any OS.
 
 Spoken formatting (`spoken-formatting`, issue 630, every OS): while on,
 `Profiles::process_cancellable` in

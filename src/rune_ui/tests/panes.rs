@@ -2749,6 +2749,63 @@ fn stop_phrase_shows_its_phrase_on_its_card_while_on() {
 }
 
 #[test]
+fn clipboard_phrase_shows_its_phrase_on_its_card_while_on() {
+    use crate::labs::Feature;
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    rt.update(|ui, _| ui.lab_store.group = Some(Feature::ClipboardPhrase.group()));
+    settle(&mut rt);
+    assert!(
+        rt.find("clipboard-phrase-text").is_none(),
+        "hidden while off"
+    );
+    tap(&mut rt, "lab-clipboard-phrase");
+    assert!(rt.state.settings.labs.clipboard_phrase);
+    assert!(rt.find("clipboard-phrase-text").is_some());
+    assert_eq!(
+        rt.state.lab_store.clipboard_phrase.text,
+        crate::dictation::clipboard_phrase::DEFAULT_PHRASE,
+        "the field starts at the saved phrase"
+    );
+
+    // A draft that fails validation stays in the field, says why, and leaves
+    // the saved phrase working.
+    rt.update(|ui, _| {
+        ui.lab_store.clipboard_phrase = rune::TextEdit::new("clipboard".to_string());
+    });
+    rt.state.flush_drafts();
+    assert_eq!(
+        rt.state.settings.labs.clipboard_phrase_text,
+        crate::dictation::clipboard_phrase::DEFAULT_PHRASE
+    );
+    refresh(&mut rt);
+    assert!(rt.find("clipboard-phrase-text-error").is_some());
+
+    // A valid draft saves.
+    rt.update(|ui, _| {
+        ui.lab_store.clipboard_phrase = rune::TextEdit::new("what I copied".to_string());
+    });
+    rt.state.flush_drafts();
+    assert_eq!(
+        rt.state.settings.labs.clipboard_phrase_text,
+        "what I copied"
+    );
+    refresh(&mut rt);
+    assert!(rt.find("clipboard-phrase-text-error").is_none());
+
+    // A phrase saved elsewhere updates the field.
+    let mut external = rt.state.settings.clone();
+    external.labs.clipboard_phrase_text = "the clipboard".to_string();
+    assert!(rt.state.adopt(external));
+    refresh(&mut rt);
+    assert_eq!(rt.state.lab_store.clipboard_phrase.text, "the clipboard");
+
+    // The field leaves with its lab.
+    tap(&mut rt, "lab-clipboard-phrase");
+    assert!(!rt.state.settings.labs.clipboard_phrase);
+    assert!(rt.find("clipboard-phrase-text").is_none());
+}
+
+#[test]
 fn signature_shows_its_line_on_its_card_while_on() {
     use crate::labs::Feature;
     let mut rt = runtime("mac-labs", true, (980.0, 4000.0));

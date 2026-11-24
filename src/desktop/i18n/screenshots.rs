@@ -18,48 +18,62 @@ pub(super) fn merged(
     table: &[(&'static str, &'static str)],
     language: Language,
 ) -> HashMap<&'static str, &'static str> {
-    let (extra, agents, signature, style, hud_height, voice_isolation, annotate, calls, edits) =
-        match language {
-            Language::French => (
-                FRENCH,
-                super::agents::FRENCH,
-                super::signature::FRENCH,
-                super::style::FRENCH,
-                super::hud_height::FRENCH,
-                super::voice_isolation::FRENCH,
-                super::annotate_dictation::FRENCH,
-                super::calls::FRENCH,
-                super::transcript_edits::FRENCH,
-            ),
-            Language::Portuguese => (
-                PORTUGUESE,
-                super::agents::PORTUGUESE,
-                super::signature::PORTUGUESE,
-                super::style::PORTUGUESE,
-                super::hud_height::PORTUGUESE,
-                super::voice_isolation::PORTUGUESE,
-                super::annotate_dictation::PORTUGUESE,
-                super::calls::PORTUGUESE,
-                super::transcript_edits::PORTUGUESE,
-            ),
-            Language::Russian => (
-                RUSSIAN,
-                super::agents::RUSSIAN,
-                super::signature::RUSSIAN,
-                super::style::RUSSIAN,
-                super::hud_height::RUSSIAN,
-                super::voice_isolation::RUSSIAN,
-                super::annotate_dictation::RUSSIAN,
-                super::calls::RUSSIAN,
-                super::transcript_edits::RUSSIAN,
-            ),
-        };
+    let (
+        extra,
+        agents,
+        signature,
+        clipboard,
+        style,
+        hud_height,
+        voice_isolation,
+        annotate,
+        calls,
+        edits,
+    ) = match language {
+        Language::French => (
+            FRENCH,
+            super::agents::FRENCH,
+            super::signature::FRENCH,
+            super::clipboard_phrase::FRENCH,
+            super::style::FRENCH,
+            super::hud_height::FRENCH,
+            super::voice_isolation::FRENCH,
+            super::annotate_dictation::FRENCH,
+            super::calls::FRENCH,
+            super::transcript_edits::FRENCH,
+        ),
+        Language::Portuguese => (
+            PORTUGUESE,
+            super::agents::PORTUGUESE,
+            super::signature::PORTUGUESE,
+            super::clipboard_phrase::PORTUGUESE,
+            super::style::PORTUGUESE,
+            super::hud_height::PORTUGUESE,
+            super::voice_isolation::PORTUGUESE,
+            super::annotate_dictation::PORTUGUESE,
+            super::calls::PORTUGUESE,
+            super::transcript_edits::PORTUGUESE,
+        ),
+        Language::Russian => (
+            RUSSIAN,
+            super::agents::RUSSIAN,
+            super::signature::RUSSIAN,
+            super::clipboard_phrase::RUSSIAN,
+            super::style::RUSSIAN,
+            super::hud_height::RUSSIAN,
+            super::voice_isolation::RUSSIAN,
+            super::annotate_dictation::RUSSIAN,
+            super::calls::RUSSIAN,
+            super::transcript_edits::RUSSIAN,
+        ),
+    };
 
     table
         .iter()
         .chain(extra)
         .chain(agents)
         .chain(signature)
+        .chain(clipboard)
         .chain(style)
         .chain(hud_height)
         .chain(voice_isolation)

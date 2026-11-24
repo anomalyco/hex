@@ -5,7 +5,7 @@
 //! Owns the single source of truth for:
 //! - target classification (`OutputTarget`) and its exhaustive `HistoryKind` mapping,
 //! - stop-phrase stripping and empty-transcript classification,
-//! - Labs › Signature gating and ordering,
+//! - Labs › Clipboard phrase and Labs › Signature gating and ordering,
 //! - Labs › Copy dictation only vs Labs › YOLO mode precedence (`InsertPlan`),
 //! - Paste Last recovery on failure and update after insertion,
 //! - dictation History recording.
@@ -73,6 +73,12 @@ impl OutputTarget {
     /// runs on this target.
     pub const fn processes(self) -> bool {
         matches!(self, Self::Paste | Self::CopyOnlyPaste | Self::Print)
+    }
+
+    /// Whether Labs › Clipboard phrase replaces its phrase in this target:
+    /// every target the Output pane processes.
+    pub const fn quotes_clipboard(self) -> bool {
+        self.processes()
     }
 
     /// Whether Labs › Signature appends to this target.
@@ -147,6 +153,26 @@ pub(crate) fn prepare_transcript(
         return PreparedTranscript::Empty;
     }
     PreparedTranscript::Ready(stripped.trim().to_string())
+}
+
+/// Replaces each spoken clipboard phrase with the clipboard's text in quotes
+/// when `target` allows it and `phrase` is set (Labs › Clipboard phrase is
+/// on). The clipboard is read through `adapter` only when the phrase is
+/// there.
+pub(crate) fn quote_clipboard_for_target(
+    target: OutputTarget,
+    text: &mut String,
+    phrase: Option<&str>,
+    adapter: &mut impl OutputAdapter,
+) {
+    let Some(phrase) = phrase.filter(|_| target.quotes_clipboard()) else {
+        return;
+    };
+    if let Some(quoted) =
+        crate::dictation::clipboard_phrase::replace(text, phrase, || adapter.clipboard_text())
+    {
+        *text = quoted;
+    }
 }
 
 /// Appends the saved signature line when `target` allows signing and the lab
@@ -228,6 +254,10 @@ pub(crate) trait OutputAdapter {
     /// inserting (e.g. Linux live typing on empty/print/voice-prompt-nothing).
     fn cancel_pending(&mut self) {}
 
+    /// The clipboard's text before this dictation is inserted, for Labs ›
+    /// Clipboard phrase; `None` when it holds none or can't be read.
+    fn clipboard_text(&mut self) -> Option<String>;
+
     /// Executes [`InsertPlan::CopyOnly`] or [`InsertPlan::Paste`].
     fn insert(&mut self, text: &str, plan: InsertPlan) -> Result<InsertResult, String>;
 
@@ -278,7 +308,8 @@ pub(crate) enum DeliveryOutcome {
 }
 
 /// Runs the canonical finished-dictation delivery policy using live Labs
-/// settings: voice-prompt-nothing check, empty-output check, signature,
+/// settings: voice-prompt-nothing check, empty-output check, clipboard
+/// phrase, signature,
 /// `InsertPlan`, insertion (with Paste Last recovery on error), History
 /// recording, and Paste Last update.
 pub(crate) fn deliver(
@@ -286,10 +317,12 @@ pub(crate) fn deliver(
     history: Option<&History>,
     adapter: &mut impl OutputAdapter,
 ) -> Result<DeliveryOutcome, String> {
+    let clipboard_phrase = crate::labs::clipboard_phrase().then(crate::labs::clipboard_phrase_text);
     deliver_with_flags(
         input,
         history,
         adapter,
+        clipboard_phrase.as_deref(),
         &crate::labs::signature_text(),
         crate::labs::signature(),
         crate::labs::copy_only(),
@@ -298,10 +331,12 @@ pub(crate) fn deliver(
 }
 
 /// Same as [`deliver`], with explicit feature flags for deterministic tests.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn deliver_with_flags(
     mut input: DeliveryInput,
     history: Option<&History>,
     adapter: &mut impl OutputAdapter,
+    clipboard_phrase: Option<&str>,
     signature_text: &str,
     signature_enabled: bool,
     copy_only_lab: bool,
@@ -316,6 +351,7 @@ pub(crate) fn deliver_with_flags(
         return Ok(DeliveryOutcome::EmptyOutput);
     }
 
+    quote_clipboard_for_target(input.target, &mut input.text, clipboard_phrase, adapter);
     let signed = sign_for_target(
         input.target,
         &mut input.text,
@@ -413,11 +449,18 @@ mod tests {
         remembered: Vec<(LastDictation, bool)>,
         fail_with: Option<&'static str>,
         result: InsertResult,
+        clipboard: Option<&'static str>,
+        clipboard_reads: usize,
     }
 
     impl OutputAdapter for MockAdapter {
         fn cancel_pending(&mut self) {
             self.cancelled = true;
+        }
+
+        fn clipboard_text(&mut self) -> Option<String> {
+            self.clipboard_reads += 1;
+            self.clipboard.map(str::to_owned)
         }
 
         fn insert(&mut self, text: &str, plan: InsertPlan) -> Result<InsertResult, String> {
@@ -603,6 +646,7 @@ mod tests {
             input(OutputTarget::Paste, "   \t "),
             None,
             &mut adapter,
+            None,
             "Sent from Hex",
             true,
             false,
@@ -627,6 +671,7 @@ mod tests {
             req,
             Some(&history),
             &mut adapter,
+            None,
             "Sent from Hex",
             true,
             false,
@@ -676,6 +721,7 @@ mod tests {
                 input(target, "ship it"),
                 None,
                 &mut adapter,
+                None,
                 "Sent from Hex",
                 true,
                 false,
@@ -711,6 +757,102 @@ mod tests {
     }
 
     #[test]
+    fn clipboard_phrase_quotes_the_clipboard_before_signing_and_skips_raw() {
+        for (target, expected_text, reads) in [
+            (
+                OutputTarget::Paste,
+                "fix \"panic at main.rs:4\" now\nSent from Hex",
+                1,
+            ),
+            (
+                OutputTarget::CopyOnlyPaste,
+                "fix \"panic at main.rs:4\" now\nSent from Hex",
+                1,
+            ),
+            (OutputTarget::Print, "fix \"panic at main.rs:4\" now", 1),
+            (OutputTarget::RawPaste, "fix my clipboard now", 0),
+            (OutputTarget::RawPrint, "fix my clipboard now", 0),
+        ] {
+            let mut adapter = MockAdapter {
+                clipboard: Some("panic at main.rs:4\n"),
+                ..Default::default()
+            };
+            let outcome = deliver_with_flags(
+                input(target, "fix my clipboard now"),
+                None,
+                &mut adapter,
+                Some(crate::dictation::clipboard_phrase::DEFAULT_PHRASE),
+                "Sent from Hex",
+                true,
+                false,
+                |_, _| false,
+            )
+            .unwrap();
+            let DeliveryOutcome::Delivered { text, .. } = outcome else {
+                panic!("{target:?} delivered nothing");
+            };
+            assert_eq!(text, expected_text, "{target:?}");
+            assert_eq!(adapter.clipboard_reads, reads, "{target:?}");
+            if target.inserts() {
+                assert_eq!(adapter.calls[0].0, expected_text, "{target:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn clipboard_phrase_off_or_absent_never_reads_the_clipboard() {
+        for (phrase, text) in [
+            (None, "fix my clipboard now"),
+            (
+                Some(crate::dictation::clipboard_phrase::DEFAULT_PHRASE),
+                "fix it now",
+            ),
+        ] {
+            let mut adapter = MockAdapter {
+                clipboard: Some("copied"),
+                ..Default::default()
+            };
+            let outcome = deliver_with_flags(
+                input(OutputTarget::Paste, text),
+                None,
+                &mut adapter,
+                phrase,
+                "",
+                false,
+                false,
+                |_, _| false,
+            )
+            .unwrap();
+            let DeliveryOutcome::Delivered { text: pasted, .. } = outcome else {
+                panic!("nothing delivered");
+            };
+            assert_eq!(pasted, text);
+            assert_eq!(adapter.clipboard_reads, 0);
+        }
+    }
+
+    #[test]
+    fn an_empty_clipboard_leaves_the_phrase_as_spoken() {
+        let mut adapter = MockAdapter::default();
+        let outcome = deliver_with_flags(
+            input(OutputTarget::Paste, "fix my clipboard now"),
+            None,
+            &mut adapter,
+            Some(crate::dictation::clipboard_phrase::DEFAULT_PHRASE),
+            "",
+            false,
+            false,
+            |_, _| false,
+        )
+        .unwrap();
+        let DeliveryOutcome::Delivered { text, .. } = outcome else {
+            panic!("nothing delivered");
+        };
+        assert_eq!(text, "fix my clipboard now");
+        assert_eq!(adapter.clipboard_reads, 1);
+    }
+
+    #[test]
     fn failed_insert_remembers_signed_text_for_paste_last_and_skips_history() {
         let (history, dir) = temp_history("failed-insert");
         let mut adapter = MockAdapter {
@@ -722,6 +864,7 @@ mod tests {
             input(OutputTarget::Paste, "keep this"),
             Some(&history),
             &mut adapter,
+            None,
             "Sent from Hex",
             true,
             false,
@@ -750,6 +893,7 @@ mod tests {
             input(OutputTarget::Paste, "sent"),
             Some(&history),
             &mut adapter,
+            None,
             "",
             false,
             true, // CopyOnly enabled, but YOLO overrides it
@@ -770,6 +914,7 @@ mod tests {
             input(OutputTarget::Print, "printed"),
             Some(&history),
             &mut print_adapter,
+            None,
             "",
             false,
             false,

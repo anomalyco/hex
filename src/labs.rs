@@ -193,6 +193,11 @@ static STOP_PHRASE_TEXT: LazyLock<RwLock<String>> =
 static SIGNATURE_TEXT: LazyLock<RwLock<String>> =
     LazyLock::new(|| RwLock::new(crate::dictation::signature::DEFAULT_TEXT.to_owned()));
 
+/// The words Labs › Clipboard phrase replaces with the clipboard. An invalid
+/// saved phrase reads as the default.
+static CLIPBOARD_PHRASE_TEXT: LazyLock<RwLock<String>> =
+    LazyLock::new(|| RwLock::new(crate::dictation::clipboard_phrase::DEFAULT_PHRASE.to_owned()));
+
 /// The style each normal dictation is written as, read only while
 /// `Feature::DictationStyle` is on.
 static DICTATION_STYLE_CHOICE: LazyLock<RwLock<DictationStyle>> =
@@ -274,6 +279,18 @@ fn store_signature_text(signature: &str) {
         .unwrap_or_else(|error| error.into_inner()) = accepted.to_owned();
 }
 
+/// Records the words replaced with the clipboard; an invalid value never
+/// turns matching off.
+fn store_clipboard_phrase_text(phrase: &str) {
+    *CLIPBOARD_PHRASE_TEXT
+        .write()
+        .unwrap_or_else(|error| error.into_inner()) =
+        crate::dictation::voice_prompt::accepted_phrase_or(
+            phrase,
+            crate::dictation::clipboard_phrase::DEFAULT_PHRASE,
+        );
+}
+
 /// Records the style each normal dictation is written as. An unknown value
 /// never reaches here (serde rejects it on load).
 fn store_dictation_style_choice(style: DictationStyle) {
@@ -304,6 +321,7 @@ fn store_all(settings: &LabsSettings) {
     store_voice_prompt_phrase(&settings.voice_prompt_phrase);
     store_stop_phrase_text(&settings.stop_phrase_text);
     store_signature_text(&settings.signature_text);
+    store_clipboard_phrase_text(&settings.clipboard_phrase_text);
     store_dictation_style_choice(settings.dictation_style_choice);
     for (slot, word) in BANK.iter().zip(bank.0) {
         slot.store(word, Ordering::Release);
@@ -721,6 +739,10 @@ mod tests {
         assert_eq!(
             labs.signature_text,
             crate::dictation::signature::DEFAULT_TEXT
+        );
+        assert_eq!(
+            labs.clipboard_phrase_text,
+            crate::dictation::clipboard_phrase::DEFAULT_PHRASE
         );
     }
 }

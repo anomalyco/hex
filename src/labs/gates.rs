@@ -484,6 +484,24 @@ pub fn signature_text() -> String {
         .clone()
 }
 
+/// Labs › Clipboard phrase: a spoken phrase inside a normal dictation becomes
+/// the clipboard's text in double quotes before it is pasted, kept in
+/// History, and remembered for Paste Last (every OS; read as each output
+/// commits).
+pub fn clipboard_phrase() -> bool {
+    feature_on(Feature::ClipboardPhrase)
+}
+
+/// The words replaced with the clipboard while [`clipboard_phrase`] is on
+/// (read as each output commits, only while the gate is on).
+pub fn clipboard_phrase_text() -> String {
+    ensure_loaded();
+    CLIPBOARD_PHRASE_TEXT
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
 /// Labs › Dictation style: the style each normal dictation is written as,
 /// or None while the lab is off (every OS; read once as each dictation's
 /// processing starts).
