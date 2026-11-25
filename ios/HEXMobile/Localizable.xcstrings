@@ -389,6 +389,16 @@
         }
       }
     },
+    "%@ isn't available on this iPhone yet." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPhone 暂不支持%@。"
+          }
+        }
+      }
+    },
     "%@ isn't available on this iPhone yet. Using %@." : {
       "localizations" : {
         "en" : {

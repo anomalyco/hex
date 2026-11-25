@@ -163,6 +163,9 @@ final class DictationController {
     var languageNotice: String?
     /// The language to offer (BCP 47) when the one chosen can't be dictated here yet.
     var languageOffer: String?
+    /// What Home says beside the offer's Use <language> button
+    /// (`SpeechModelUnavailable.lineBesideOffer`).
+    var languageOfferLine: String?
     private let languageSettings: LanguageSettings
     var modelPreparation = ModelPreparationProgress(
         fractionCompleted: 0,

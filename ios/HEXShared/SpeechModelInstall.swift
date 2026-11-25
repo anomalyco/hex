@@ -48,6 +48,11 @@ nonisolated struct SpeechModelUnavailable: HexDescribedError, Equatable {
         }
     }
 
+    /// Beside Home's Use <language> button, which says the rest: without "Try English."
+    var lineBesideOffer: String {
+        String(localized: "\(Self.interfaceName(language)) isn't available on this iPhone yet.")
+    }
+
     /// "Russian", "Norwegian Bokmål": the language alone, in Hex's interface language.
     static func interfaceName(_ identifier: String) -> String {
         let code = Locale(identifier: identifier).language.languageCode?.identifier ?? identifier
