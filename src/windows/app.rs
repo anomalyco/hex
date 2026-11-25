@@ -1075,8 +1075,9 @@ pub(crate) fn foreground_other_process_stem() -> Option<String> {
 }
 
 /// The newest foreground window another process owns, polled with the
-/// runtime's refresh. The desktop and taskbars are skipped: a paste there is
-/// lost, so bringing one forward is never what Paste Last wants.
+/// runtime's refresh. The desktop, taskbars, and the taskbar's overflow
+/// flyout are skipped: a paste there is lost, so bringing one forward is
+/// never what Paste Last wants.
 #[derive(Default)]
 struct ForeignWindow(Option<isize>);
 

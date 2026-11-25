@@ -331,7 +331,7 @@ the App Group, or the keyboard's own Library for an unsigned build) from the fir
 `ParakeetLiveTranscriber` (the audio so far again about once a second, a 20 s window) is
 written for when the speech model's own words should show, and not used yet.
 
-## Apple Intelligence cleanup (Settings › Experiments › Clean up with Apple Intelligence, iOS 26+)
+## Apple Intelligence cleanup (Settings › Labs › Clean up with Apple Intelligence, iOS 26+)
 
 Off by default. For every style but `Verbatim`,
 one on-device FoundationModels pass before formatting fixes clearly
@@ -347,7 +347,7 @@ until Multilingual is picked, on iPhones with 6 GB or more (under that the switc
 says it needs 6 GB, and the row doesn't show). It moved there from Experiments on
 2026-11-24. Each choice says what it means before anything downloads: English, "For
 English. A 464.4 MB download on Wi-Fi."; Multilingual, its 25 languages by name, "A 632.2 MB
-download as soon as you pick it. Hex dictates them with it too."; both, that other languages
+download on Wi-Fi. Hex dictates them with it too."; both, that other languages
 use Apple's speech recognition and that only the picked model stays on the iPhone. Only the
 picked one is kept, but the other goes only once the picked one is downloaded and has loaded
 once, in Hex or the keyboard (`SpeechModelChoice.unpicked`, checked whenever Hex comes to the
@@ -425,7 +425,19 @@ when the keyboard reports its limit. Turned on by hand (a stored true, including
 the builds where it was off by default) it downloads at once on any connection. Until
 then the row says what it waits for: "Downloads after you first use the Hex keyboard",
 "Downloads on Wi-Fi", "Downloads once the iPhone has 2 GB free", "Only for English
-dictation". Home shows the same status under "New: Hex's own speech model" wherever the
+dictation".
+
+Both of Model's downloads follow one rule (`SpeechModelDownloadNetwork`, TestFlight build
+151: Multilingual started 632 MB over mobile data the moment it was picked, while English
+waited for Wi-Fi): on Wi-Fi a picked model downloads as before; off Wi-Fi it waits, its line
+says "Downloads on Wi-Fi." and **Use mobile data** beside it starts it now. Wi-Fi coming back
+starts a waiting download by itself, and a download Hex started on Wi-Fi stops where it is
+(its files resume) when Wi-Fi goes, as English's always did. Use mobile data is one
+decision for that model's download, kept in the App Group (`settings.speechModel.mobileData`)
+until it is on the iPhone: a stop, a Try again or the next launch carries on over any
+connection. Picking the other model forgets it, so that model's download asks again. Home's
+multilingual line has the same action; Home's English card opens Settings instead.
+`--simulate-cellular` makes the simulator read as off Wi-Fi. Home shows the same status under "New: Hex's own speech model" wherever the
 keyboard would use it (`SpeechModelHomeCard`: the switch on, an iPhone that fits, English
 and no other engine); once it's ready in the keyboard the card can be dismissed, for good. The keyboard's own dictation transcribes with Parakeet in
 the keyboard's process (`HEXKeyboard/KeyboardParakeet.swift`), with the app closed:
@@ -551,6 +563,63 @@ in-keyboard dictation (through build 130 the keyboard sent only Learn how I
 type's words: #2103 added the list's rewrite there but not its hint);
 Parakeet's batch path gets no hint.
 
+## Word replacements and Hex words files (Settings › Dictation › Custom vocabulary)
+
+While Custom vocabulary is on, its card adds two rows under the list (`HexWordsRows`), and
+**Undo last import** shows there whenever an import can still be undone. Off, nothing applies.
+The words are Android's (`words_*` strings), with "phone" as "iPhone".
+
+**Word replacements** (`WordReplacementsPage`; `WordReplacementsSettings`, App Group key
+`wordReplacements.entries`) is a list of up to 1,000 heard words → what to write. Each entry
+keeps the words file's limits (heard: letters or digits, at most 128 characters and 8 words;
+write: at most 1,000 characters), and an empty or blank output isn't allowed on the iPhone yet.
+They apply wherever Hex dictates (`DictationPipeline`, so the app and in-keyboard dictation
+alike) right before the learned dictation fixes, with `DictationCorrections.apply`'s whole-word,
+case-following matching, allowing up to 8 words. A replacement wins over a learned fix with the
+same heard words; learned fixes themselves never change. They never touch a translated
+dictation: while Translate what I say would translate one they wait, and apply only if it goes
+in as spoken (a failed or skipped translation).
+
+**Words file** (`WordsFilePage`) has **Open a words file…** (the Files picker), **Export** with
+**Include fixes Hex learned** (off by default, shown only while a learned fix is in use) and
+**Share…**, the share sheet with `hex-words.hexwords` (`HexWordsWriter`; its Save to Files is
+where Android's Save to… goes), written atomically to a temporary folder that is deleted once
+sharing ends. The line under it then says what was exported and what was left out and why. It
+writes Custom vocabulary's terms, Word replacements and, with the switch on, the learned
+dictation fixes in use (applied and not switched off in Typing insights) marked `learned`; a
+learned fix for words a replacement already covers is left out. `madeBy.version` is the app's
+`CFBundleShortVersionString` (`MARKETING_VERSION`).
+
+**Opening a file** (`.hexwords`, `docs/specs/hex-words.md`, code in `HEXShared/HexWords/`).
+Hex declares `anomaly.hex.words` (conforming to `public.json`, extension `hexwords`, MIME type
+`application/vnd.anomaly.hex-words+json`) and owns it as a document type that is copied in
+(`LSSupportsOpeningDocumentsInPlace` NO), so AirDrop, Files and Open in Hex all arrive in
+`onOpenURL` as a copy iOS makes in Hex's container (`Documents/Inbox`, or `tmp/<bundle id>-Inbox`
+on iOS 27); Open a words file… arrives the same way.
+`HexInbox` copies the file to a private temporary folder under a name Hex picks, reads it there
+(the spec's check pass, then `JSONSerialization`), shows the review sheet over whatever is on
+screen and deletes both copies when the sheet closes: after Add, Cancel or a refusal (a launch
+also clears copies a sheet never got to delete; Inbox copies only once an hour old). It logs
+counts and reasons only. A refused file shows one sentence and Done, and so does one that can't
+be opened at all ("Hex couldn’t open that file."). Otherwise the sheet
+(`HexWordsReviewSheet`) shows the file's claimed maker, a Vocabulary and a Word replacements
+switch with what each adds, what's already there and what differs from yours, each clash with
+Keep mine (the default) or Use this one, what can't be used on this iPhone grouped by reason
+with examples, and what the file skipped. Every string from the file is shown verbatim
+(`Text(verbatim:)`), each in its own direction-isolated run, and cut at 64 characters. While
+Custom vocabulary is off the sheet offers to turn it on; Add still adds the words, unused until
+it's on. Add merges by the spec's phone column (`HexWordsMerge`): new terms are added without
+spellings, each spelling becomes a replacement to its term after the file's own replacements,
+`learned` is dropped, nothing is removed. The sheet then reads **Words added**, one line of what
+happened, Undo and Done.
+
+**Undo** (`HexWordsImport`, App Group key `hexWords.undo`) keeps both lists from before the
+import and whether the sheet turned Custom vocabulary on. It is offered after Add and as
+**Undo last import** while both lists are still exactly as the import left them, so editing
+either list (Word replacements, the vocabulary list, Keyboard › Vocabulary, or the keyboard's Add
+to vocabulary) or importing again ends it. It survives a restart and never holds the file.
+`HexWordsSharedCasesTests` runs the spec's shared cases from `tests/fixtures/hex-words/`.
+
 ## Dictation language (Settings › Dictation › Dictation language, iOS 26+)
 
 Automatic by
@@ -654,7 +723,7 @@ Spanish, German ones (äh, ähm, öhm) in German, and none elsewhere (Norwegian
 "er" is "is", Portuguese "um" is "a"); translation's source is the dictation
 language rather than a guess. Custom vocabulary works in any language.
 
-## Voice isolation (Settings › Experiments › Voice isolation)
+## Voice isolation (Settings › Labs › Voice isolation)
 
 Off by default
 (`experiments.voiceIsolation`, App Group). While on, the app records in
@@ -667,7 +736,7 @@ profile. With it off, both record exactly as before. Not verified on a
 device: that Control Center actually offers Voice Isolation for Hex, and how
 the mode changes a recording's level.
 
-## Two-language dictation (Settings › Experiments › Two-language dictation, iOS 26+)
+## Two-language dictation (Settings › Labs › Two-language dictation, iOS 26+)
 
 Off by default (`experiments.twoLanguageDictation`, App Group). While on, and while
 dictation uses Apple Speech's `SpeechTranscriber`, one recording is read twice: in the
@@ -738,7 +807,7 @@ not only when the row
 appears. A long press on a language (a chip, or a row on the Hex key menu's Language
 page) shows **Remove**, which takes it off (`settings.dictationLanguage.removed`, so one
 of the iPhone's own languages stays off too) and puts the one set back on Automatic;
-Settings › Dictation language's **Remove from keyboard** does the same (TestFlight build
+Settings › Dictation language's **Remove a quick-switch language** does the same (TestFlight build
 56: a language couldn't be removed, and one could only be added in Hex). **More
 languages…** lists every other language Apple Speech has, the iPhone's own first, and
 picking one there adds it (in the dictation bar the list takes the keys' place). Removing

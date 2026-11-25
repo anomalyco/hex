@@ -27,7 +27,7 @@ extension FullKeyboardEngine {
     /// swipe there types its next reading instead, and the strip may still offer them (Record
     /// typing logs: "two" swiped three times running for "yep", with "yep" in the strip). Taken
     /// back: delete took the whole word back, or deletes took out all its letters (Settings ›
-    /// Experiments › Delete swiped words letter by letter), with nothing else typed since the
+    /// Labs › Delete swiped words letter by letter), with nothing else typed since the
     /// swipe. One place: the text before it is the same, trailing spaces aside, in the same
     /// field. Every word taken back there in a row counts. Any other edit (a letter, a space,
     /// punctuation, a pick from the strip), a swipe somewhere else or another field forgets

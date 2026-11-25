@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 @testable import HEX
 
-/// Emoji shortcodes (Settings › Experiments): the ":name" before the cursor, the emoji the
+/// Emoji shortcodes (Settings › Labs): the ":name" before the cursor, the emoji the
 /// bundled index names, the closing ":" of an exact name, and the cases that must not fire.
 @MainActor
 final class EmojiShortcodeTests: XCTestCase {

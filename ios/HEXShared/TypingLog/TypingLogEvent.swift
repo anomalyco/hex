@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// Record typing logs (Experiments): one JSON object per line. The schema is in
+/// Record typing logs (Privacy › Advanced): one JSON object per line. The schema is in
 /// `ios/docs/typing-logs.md`; bump `version` when a field changes meaning.
 nonisolated enum TypingLogSchema {
     static let version = 1

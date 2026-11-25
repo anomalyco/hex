@@ -219,6 +219,9 @@ impl Feature {
             Self::StopPhrase => {
                 "Say a phrase at the end of a hands-free dictation to finish it; the phrase never reaches the pasted text"
             }
+            Self::ConfirmLongCancels => {
+                "Once a dictation has recorded for 10 seconds, the first press of its cancel shortcut keeps recording and asks, beside the HUD, for a second press; a second press within 3 seconds throws the dictation away. A shorter dictation still cancels at once"
+            }
             Self::HoldThroughKeys if cfg!(target_os = "windows") => {
                 "If a shortcut is made only of Ctrl, Alt, Shift, or the Windows key, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish. Before that first second a chord still ends it, and a shortcut with a key is unchanged"
             }
@@ -248,6 +251,9 @@ impl Feature {
             }
             Self::HudHeight => {
                 "Choose how high the dictation HUD sits above the Dock or the screen's bottom edge when its position is Bottom (labs.hud_bottom_gap, macOS)"
+            }
+            Self::IndicatorFollowsMouse => {
+                "While a dictation records and processes, the recording indicator follows the mouse pointer: just below it, above it near the screen's bottom, kept inside the screen's visible area, with live text beside it; Hidden still hides it, and turning it off restores the Top or Bottom position (macOS)"
             }
             Self::VoiceIsolation => {
                 "Open dictation's microphone through Apple's voice processing, so Control Center's Mic Mode can offer Voice Isolation and background noise is reduced (macOS; falls back to normal capture when voice processing won't start, and may lower other audio)"

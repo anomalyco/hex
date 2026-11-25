@@ -93,6 +93,55 @@ On 24 Nov 2026 (Apple M5 host, armv8-a kernels, four threads; 34 of the 40 WAVs 
 
 **Past 30 s** Whisper needs more than one 30 s window. Four of the clips (en30s3k12, es30l0m0m0, de30x3, no30x3: 35–47 s, sentences repeating as people repeat themselves) check that every utterance comes out. The app decodes audio past 30 s with timestamps, so each window ends at the last sentence it finished and the next starts there. Without them whisper.cpp moves on a whole 30 s at a time, cutting mid-sentence. On 24 Nov 2026 the decode before that change lost 7 of the 15 German utterances (score.py exited 1); with it every utterance came out (59 errors on 1,263 words against 108).
 
+## A prompt on a short clip
+
+The app gives Whisper the custom vocabulary, and with Labs › Learn from my fixes the words you meant, as its initial prompt, joined with ", ". In front of a short clip a prompt can make the model write the clip's sentence again and again until its token limit: "Sarah is at the station." (macOS Samantha, 1.6 s), prompted "stadium", came out as "Sarah is at the station" ten times, and its retry at 0.2 keeps the prompt and repeats too. Cut a little differently, it wrote the sentence exactly twice and stopped. So a prompted decode up to 30 s is decoded once more without the prompt, and that text is used, when it ends without end-of-text and its last 32 tokens fail Whisper's own repetition test (entropy under 2.4); when it is one phrase of three or more words written two or more times and nothing else, with more than 4 words a second of the audio; or when it writes nothing, or only the prompt's two or more terms ([hexspeech.cpp](../app/src/main/cpp/hexspeech.cpp)). score.py's `PROMPTED` lists the clips and prompts; generate.py writes the clips after the corpus.
+
+1. `python3 benchmark/score.py --prompted-list > prompted.list` (id, language, prompt per line; [native.cpp](native.cpp) reads the rest of a line as the prompt).
+2. `HEX_APP=1 ./whisperbench models/small.bin 4 prompted.list > results/prompted-app.tsv`; `HEX_NO_GUARD=1` decodes as the app did before the guard.
+3. `python3 benchmark/score.py results` exits with status 1, naming them, if any prompted clip comes out with more than 1.5 times its words.
+
+On 24 Nov 2026 (Apple M5 Studio host, armv8-a kernels, four threads) the decode before the guard wrote the sentence ten times for all three prompts and score.py exited 1; with it each came out "Sarah is at the station." The corpus and long-clip texts stayed byte for byte the same, as none has a prompt. The same decode on `sarah.wav` from file, its start and end cut 20–40 ms apart (−100 to 600 ms before the speech, 200 to 800 ms after): with no prompt 0 of 468 cuts repeated; "stadium" 193 of 288; "Sarah, stadium" 8 of 72; "Sarah, stadium, Hex, OpenCode" 53 of 72; "stadium.", with its period, 0 of 72. On 150 clips of 1.2–7 s that each say a name (macOS Samantha and Daniel, three cuts), a prompt repeated only up to 2.4 s (at most 4 of 30 per prompt), never wrote nothing or only itself, and got the name right far more often at every length: with the one name as the prompt, 50%, 30%, 67%, 60% and 43% from the shortest to the longest group, against 10%, 0%, 0%, 10% and 10% with none. So there is no length below which the prompt is left out. A one-word clip can repeat with no prompt too ("Jackson" a dozen times, 3 of 30 at 1.2–1.8 s); with no prompt to leave out, the guard leaves those alone.
+
+## Automatic listens for the language
+
+With Labs › Automatic listens for the language on, Automatic chooses among up to three languages: the keyboard's first, then the phone's other languages Hex dictates, then the last one picked by hand. [hexspeech.cpp](../app/src/main/cpp/hexspeech.cpp) hands them to [whisper-language-choice.patch](../app/src/main/cpp/whisper-language-choice.patch). The patch runs whisper.cpp's detection step (the start token alone through the decoder) on the first window the decode encodes anyway, at the app's window, and takes a softmax over the candidates only. It keeps the keyboard's language unless another reaches **0.99 under 4 s of audio, or 0.95 from 4 s**. Bokmål counts Whisper's Nynorsk with it. whisper.cpp's own detection ("auto") encodes a second, full 30 s window first: 1,964 ms at 3 s on the host, against 3 ms here, and no more accurate.
+
+**The guard.** With `HEX_LANGS`, native.cpp decodes each clip once per other language listed, with Automatic choosing between the clip's own language (the keyboard's) and that one, as the app does. It stops at the first token, since the language is chosen before it. `score.py` exits 1, naming the pair, if any clip changes language. From the folder holding `wavs/`, with `all.list` the corpus's and long.tsv's two-column lists together:
+
+    HEX_APP=1 HEX_LANGS=en,es,de,no,fr,it,nl,pt,pl,ru ./whisperbench models/small.bin 4 all.list > results/switch.tsv
+    python3 benchmark/score.py results
+
+On 24 Nov 2026 (Apple M5 host, armv8-a kernels, four threads, nice 19), 630 of 630 pairs kept the clip's language: the 40 clips and the 30 long ones, each against the nine other languages. The highest probability another language reached was 0.62 (clip 38, Norwegian, against German). With one language, the same build decodes byte for byte as one without the patch: the 70 clips at the app's window and the 30 long ones at the full window.
+
+**With a prompt.** `HEX_CANDIDATES=es` (with `HEX_APP`) decodes each clip as the app does with the lab on, choosing among the clip's own language and those listed, including the decode again without the prompt (A prompt on a short clip): it chooses the same way, since the choice reads only the audio. Run the prompted list with it, and score.py's prompted check must still pass.
+
+**How the threshold was chosen.** The test set was 2,466 cuts of synthetic macOS voices in 14 languages:
+- the same ten everyday sentences in Spanish, German, Norwegian, Italian, Portuguese, Dutch and French, two voices each where macOS has two;
+- the 40 clips' English, Spanish, German and Norwegian;
+- the earlier Portuguese, Czech, Danish, Polish, Russian, Swedish and Ukrainian corpora;
+- English and Dutch voices, and 66 Dutch sentences full of English words.
+
+Each cut starts at a sentence, runs on through the next ones and stops at 1.5, 2, 3, 4, 5 or 10 s. These clips aren't in the repository. For every pair and every triple of Hex's ten languages, each cut was taken once with its own language as the keyboard's (a pick of any other is a wrong switch) and once with each other candidate as the keyboard's (a pick of its own language is a right switch). The probabilities came from this library, built from the repository's patch files, through the patch's own API. The two-candidate table reproduced the prototype's exactly.
+
+| Speech | Window | Choice step, median / p95 | Wrong switches, 2 / 3 candidates | Right switches, 2 / 3 | Spanish, Italian, Portuguese pairs: wrong, right | Highest wrong-language probability |
+|---|---|---|---|---|---|---|
+| 1.5 s | 320 | 3.0 / 4.9 ms | 0 of 2,745 / 0 of 10,980 | 76.5% / 62.0% | 0 of 182, 63.2% | 0.982 |
+| 2 s | 320 | 2.9 / 5.8 ms | 0 / 0 | 84.3% / 73.9% | 0, 75.3% | 0.975 |
+| 3 s | 384 | 2.9 / 5.9 ms | 0 / 0 | 87.7% / 78.5% | 0, 79.7% | 0.953 |
+| 4 s | 448 | 3.0 / 5.0 ms | 0 / 0 | 97.6% / 95.4% | 0, 93.4% | 0.900 |
+| 5 s | 448 | 2.8 / 6.1 ms | 0 / 0 | 99.1% / 97.9% | 0, 93.4% | 0.561 |
+| 10 s | 1152 | 3.7 / 8.1 ms | 0 / 0 | 99.5% / 99.0% | 0, 96.7% | 0.221 |
+
+The thresholds sit above the highest wrong-language probability at each length.
+- **Hardest to catch short:** Norwegian (51% at 2 s, 100% from 5 s), then German, Dutch and Portuguese (75–77% at 2 s).
+- **Hardest pair:** a Spanish keyboard with Portuguese speech.
+- **Bokmål:** without the Nynorsk merge, 8 of 25 two-second Norwegian dictations on a Norwegian keyboard went to English at 0.9. With it, all 25 stay Norwegian against each of the nine others, at every length. Whisper's own unrestricted detection called only 7 to 9 of 25 three-second Norwegian clips Norwegian, mostly Nynorsk.
+- **Danish and Swedish** are never candidates; their speech went to Norwegian for an English keyboard in 0 to 1 of 20 cuts.
+- **Dutch full of English words:** a Dutch keyboard never switched to English.
+
+These are synthetic voices, so the lab stays off by default until real dictations and Diagnostics' Last dictation lines confirm them.
+
 ## Sources and licences
 
 - OpenAI’s [multilingual Whisper weights](https://github.com/openai/whisper#license), **MIT**; Q5_1 files from [ggerganov/whisper.cpp at 5359861…](https://huggingface.co/ggerganov/whisper.cpp/tree/5359861c739e955e79d9a303bcbc70fb988958b1). SHA-256: tiny `818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7`; base `422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898`; small `ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb`. [whisper.cpp/ggml v1.9.5](https://github.com/ggml-org/whisper.cpp/tree/d1be6fde11ac6e0407606b4e42fe72d34add8037) **MIT**.

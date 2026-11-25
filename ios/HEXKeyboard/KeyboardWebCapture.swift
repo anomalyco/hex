@@ -155,7 +155,7 @@ final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDelegate, WK
 
     /// Records from the input labelled `microphone` (`KeyboardLocalDictation.microphone(for:)`),
     /// else, with `builtInFallback`, the iPhone's own microphone, else WebKit's default.
-    /// With `voiceIsolation` (Experiments › Voice isolation) the page asks WebKit for echo
+    /// With `voiceIsolation` (Labs › Voice isolation) the page asks WebKit for echo
     /// cancellation and noise suppression, as iOS's voice processing does; off it asks for
     /// neither, exactly as before.
     func start(microphone: String?, builtInFallback: Bool, voiceIsolation: Bool) {
@@ -285,7 +285,7 @@ final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDelegate, WK
       if (c) c.close().catch(() => {});
     };
     const base = { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false };
-    // Experiments › Voice isolation: WebKit's own voice processing, like iOS's voice modes.
+    // Labs › Voice isolation: WebKit's own voice processing, like iOS's voice modes.
     const isolated = { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: false };
     // The input named `label`, else (with `builtIn`) the iPhone's own. Labels stay empty
     // until this page has had the microphone once.

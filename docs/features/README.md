@@ -116,6 +116,7 @@ Download Hex                              // setup.download-recovery
 Install on Windows                        // setup.windows-installer
 ├── Setup.exe, per user, no admin -> managed versions\<version>\hex.exe
 │   ├── x64 without a Vulkan 1.2 driver -> installs; speech on the CPU + Settings note (#1240)
+│   ├── OBS Studio installed -> Hex skips OBS's Vulkan hook, so OBS updates while Hex runs (#2818)
 │   ├── another version installed (e.g. self-updated) -> install this one over it
 │   ├── the setup engine is signed -> Smart App Control runs the copy extracted to %TEMP%
 │   │   (unsigned, it blocks setup: "Unable to execute file in the temporary directory", error 4551)
@@ -1172,7 +1173,10 @@ Pause media + Also pause the browser     // browser_media
 ├── No browser process has its audio output open -> leave it alone (no tap)
 ├── Listen to those processes' own output (private process tap), 3 windows of 100 ms
 │   └── Any window at or below -60 dBFS, or no level -> leave it alone
-├── Send the system pause command (MediaRemote 1; never the toggle)
+├── Send pause (MediaRemote 1; never the toggle) to each browser with open output, by bundle ID
+│   ├── Not the Now Playing app: that is whichever app started last, often a player Hex resumed (#2825)
+│   ├── This macOS cannot send by name, or the playing browsers cannot be listed -> the system pause command
+│   └── No browser took it by name (an error, no answer in 500 ms, or no handler status 0) -> the system pause command
 ├── Poll 5 windows of 100 ms
 │   ├── 2 windows in a row below -90 dBFS -> Hex paused it
 │   └── Otherwise (another tab, a sound that ended later, or the pause went elsewhere) -> no play later
@@ -1181,7 +1185,7 @@ Pause media + Also pause the browser     // browser_media
     ├── No level, a browser runs and every one has closed its output -> still paused: play
     │   (a pause longer than about 10 s closes the output; a tap on it delivers nothing)
     ├── No level otherwise (browser quit, tap failed) -> no play
-    └── Otherwise -> send the system play command (MediaRemote 0), then poll 20 windows of 100 ms
+    └── Otherwise -> send play (MediaRemote 0) only to the browsers Hex paused (the system play only when this macOS cannot send by name or none was recorded; a play no browser took by name goes nowhere), then poll 20 windows of 100 ms
         ├── A window above -60 dBFS -> resumed
         ├── No level before the first level (the output is opening again) -> keep polling
         ├── No level after a level -> stop listening
@@ -3280,6 +3284,20 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   `:app:assembleDebug` built the arm64 libraries (the native import check included) on 2026-11-24 on
 │   OpenJDK 21 and Android SDK 36 (NDK 27.2.12479018); the repo has no Android CI, and nothing was tried
 │   on a device or emulator.
+├── Key rows and labels -> Gboard 15.1's (Pixel 8 emulator, 13 screen sizes): rows follow the
+│   smallest width only (46.9 dp keys every 59 dp from 400 dp, 40.3/50.3 from 360, 37.7/48 below;
+│   turned 39/43), letters and hints are the same share of the key everywhere and ignore font
+│   scale; a label shrinks to fit (no "…") and a letter clears its corner hint (KeyRows, KeyLabels).
+│   The strip's words are in dp too, as Gboard's suggestions ignore font scale (StripView).
+│   KeyboardPageTest; emulator screenshots at 360 and 411 dp, font scale 1.0/1.3/2.0.
+├── Keyboard > Height -> Extra short, Short, Mid-short, Normal (default), Mid-tall, Tall, Extra
+│   tall: 0.75 to 1.25 of the screen's row step, the gaps kept (Gboard 15.1's Resize spans
+│   0.69 to 1.62); touch targets, key centres and swipe follow the rows. InsertionTest.
+├── Labs › Keyboard › Hex key on the left (off, #2800) -> the strip's Hex key, ✕ and recording well
+│   mirror to its left end (`StripView.placeHexKey`, `TypingPreferences.hexKeyLeft`); hold, tap and
+│   slide work as on the right, the well grows rightwards out of ✓, and the idle row keeps its order.
+│   Off, the strip is laid out exactly as before. Checks: none automated; it was not compiled here (no
+│   Android SDK) and nothing was tried on a device or emulator. The repo has no Android CI.
 ├── Symbol pages -> Gboard's ?123 and =< pages (Pixel 8 emulator, API 36), the same on every
 │   layout: ?123 draws 1–0, then @ # $ _ & - + ( ) /, then * " ' : ; ! ? between the page switch
 │   and delete, and =< draws ~ ` | • √ π ÷ × § Δ, then £ ¢ € ¥ ^ ° = { } \, then % © ® ™ ✓ [ ]
@@ -3292,13 +3310,16 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   drawn twice on a page) and `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` passed
 │   175 tests on 2026-11-24 on OpenJDK 21 and Android SDK 36 (offline, `-x prepareSpeechModel`);
 │   the repo has no Android CI, and nothing was tried on a device or emulator.
-├── Português, Nederlands, Polski or Русский with no pinned layout -> English's keys and
+├── Nederlands, Polski or Русский with no pinned layout -> English's keys and
 │   accents (DictationLanguage.layout is null), with English's word list only standing in for
 │   the keys' geometry: the strip keeps what was typed and your own dictionary words as
 │   completions, and text shortcuts, double-space period, capitals and the literal chip stay.
 │   No English completions, next words, autocorrection, tap correction, swipe typing or emoji
-│   keywords. A layout pinned in Keyboard > Keyboard layout brings that layout's model.
-│   Checks: `aDictationLanguageWithoutItsOwnLayoutHasNoTypingModel` in InsertionTest.kt and
+│   keywords. A swipe types nothing; the first in a field puts "Swipe typing isn't available
+│   in <language> yet" in the strip until typing, a tap or its ✕. A layout pinned in Keyboard >
+│   Keyboard layout brings that layout's model.
+│   Checks: `aDictationLanguageWithoutItsOwnLayoutHasNoTypingModel` and
+│   `aSwipeNamesTheDictationLanguageWithoutATypingModel` in InsertionTest.kt and
 │   `standInOffersYourWordsAndShortcutsButNoEnglishCompletionsOrNextWords` /
 │   `standInTurnsOffAutocorrectButKeepsYourTextReplacements` in StandInTypingTest.kt; not
 │   tried on a device.
@@ -3392,9 +3413,13 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   corner digits and digit-first hold are hidden while it shows; accents on hold stay, and
 │   the Symbols on letter keys hints and holds still work: row 1's first ten letters show a
 │   symbol instead of the digit, Gboard's such as q for % and p for }, or its own home- or
-│   bottom-row symbol where it has one, like AZERTY a for @. The keyboard is one row taller
-│   and the Hex menu matches that height; ?123, the symbols pages and the pads keep their keys
-│   and are a row shorter than the letters while it is on. Off, the page is unchanged.
+│   bottom-row symbol where it has one, like AZERTY a for @. The keyboard grows as Gboard's
+│   does (letters close up to 0.956 of their step, digits every 0.892 of it, 0.814 turned):
+│   45 dp on a Pixel 8, 30 dp turned, not a whole row (KeyRows.withNumberRow). ?123, =< and
+│   the symbol pad stretch their three rows over the same height, so the keyboard never
+│   changes height between pages; the Hex menu and emoji panel match it; a number or phone
+│   field's pad keeps its own. Off, the page is unchanged. Emulator: before, letters 395 dp
+│   and ?123 336 dp; after, both the same height.
 │   KeyboardPageTest covers it, including the top row's symbols, and passed in
 │   https://github.com/anomalyco/hex/actions/runs/45450568457 (testDebugUnitTest + compileDebugKotlin,
 │   GitHub-hosted); not tried on a device. The repo has no Android CI.
@@ -3479,6 +3504,68 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
     than the next reading, and what's left is ordinary text. Held, Delete repeats letter by letter
     from the first; its slide still selects whole words. Off, Delete takes the word back as before
     (`SwipeText.takesBack`).
+├── Labs > Keyboard > Punctuation after autocorrect (off, #2813) -> a clause mark (, . ! ? ; : ))
+    typed right after an autocorrection on space, or one of your text replacements on space, takes
+    the space it typed ("keyboadr", space, "." -> "keyboard."), as one already did after a picked
+    suggestion (`KeyboardEngine.fixedAnchor`, `SpaceRules.takesPickedSpace`, read through
+    `TypingPreferences.marksTakeFixSpace`). A space you typed after a word left as it was keeps the
+    mark apart, and any other key, Delete or a cursor move in between cancels it. Off, the anchor is
+    never set, so a mark after an autocorrection goes after its space as before ("keyboard ."). Picks
+    already took their space, and swipes never type one after the word. Checks: none automated (no
+    test drives `KeyboardEngine`'s typing); it was not compiled here (no Android SDK) and nothing was
+    tried on a device or emulator. The repo has no Android CI.
+├── Labs > Keyboard > Adaptive touch (off) -> iPhone Hex's experiment (#2146) on Android: the keyboard
+    learns where you land on each letter key, on this phone, and the decoder reads your taps with
+    those centres once it has 400 labelled taps over three sessions and they fit your recent taps
+    better than the drawn ones (`typing/AdaptiveTouch.kt`). Keycaps, touch areas, the likelier next
+    letter and swipes never move. A tap teaches only when the words around it show the letter meant:
+    a word left as typed (only letters the key under the finger typed), a pick of the same length, a
+    word kept over an autocorrection by undoing it or tapping it, a letter erased and retyped as a
+    neighbour. Never an autocorrection, a swipe, a slide, a held accent, or a field that takes no
+    corrections or asks not to be learned from, and only with Autocorrect and Spatial autocorrect on
+    and the layout's own model. Space corrects a word only when the drawn centres would correct it too
+    (`TypingWord.guarded`, stricter than iPhone's), and joins read the drawn taps. Each key plane (the
+    keyboard's width in 10 dp steps, orientation, the number row, the letters) learns apart, and a fit
+    check goes back to the drawn centres at once when the grip changes, keeping two grips per plane.
+    It keeps sums per key, no letters, words, times or order of taps: a 23,588-byte table, one Base64
+    value in the private `adaptiveTouch` SharedPreferences (never backed up), saved every 400 labels
+    and when the keyboard hides. The row shows "Learning: n of 400 taps" or "Active", and a confirmed
+    Reset touch learning while anything is stored, lab on or off; Delete what Hex learned clears it
+    too. Off, the keyboard makes no learner and types exactly as before.
+    Checks: `./gradlew --no-daemon :app:testDebugUnitTest -x prepareSpeechModel` passed 310 tests,
+    `AdaptiveTouchTest`'s 11 among them, on 2026-11-24; `android/benchmark/typing/quality-gate.py all
+    --adaptive` (README > Adaptive touch): identical before it learns, 1-4% fewer word errors for
+    typists who aim off the centres, never more correct words changed. On the Studio's API 35 Pixel 8
+    emulator (2026-11-24, reading the table back through run-as after each step): words left as typed,
+    a strip pick of the same length, what was typed tapped over the fix, an undone fix and a letter
+    retyped as a neighbour each teach as above; password and no-suggestion fields teach nothing; the
+    table is saved when the keyboard hides and gone after Reset touch learning and after Delete what
+    Hex learned; landscape, the number row and AZERTY each learn their own key plane, and portrait
+    takes its own back; with the switch off nothing learns and the table stays. To reach Active, the
+    table was seeded through run-as as the unit tests seed it. With it on, English, French and
+    Portuguese text typed off the centres came out as with it off. Not tried on a real device; the
+    time per letter is not yet measured.
+├── Labs > Keyboard > SwiftKey words (off) -> #2802: Import words... (`ACTION_OPEN_DOCUMENT`, `*/*`,
+    read on a background thread, at most 16 MiB) takes SwiftKey's data portal export (View data >
+    Export all: the ZIP, whose `services/sync_words.json` is `{"terms": [...]}`, or that JSON alone)
+    or any plain list of words, whose other columns (counts) drop out. A ZIP's other entries, and a
+    ZIP inside one, give no words. Only
+    single words are kept (letters and apostrophes, 2 to 32 letters, ’ made '), so numbers, links,
+    addresses and phrases are left out. They merge into Hex's own list (`typing/ImportedWords.kt`,
+    `imported-words.txt` in the app's files, at most 50,000): what is there stays, each word is kept
+    once whatever its case (a lowercase spelling preferred among the new ones), the same file twice
+    adds nothing, and the row says how many new words were added, how many were already there and
+    how many a full list left out. With the toggle on the keyboard reads them after Android's
+    personal dictionary (every layout, each keeping only the words in its alphabet, and none the
+    layout's model already has), so they complete, swipe and are read from taps as your own words
+    are; an import or the toggle reads them again at once. Remove imported words (confirmed) shows
+    while any are kept, toggle on or off. Off, the keyboard reads the personal dictionary alone, as
+    before. Checks: `ImportedWordsTest` (android/app/src/test) covers the JSON, ZIP and plain
+    lists, a ZIP inside the export, the merge, a 10,043-word list, the limit and the model's words.
+    The count Settings shows is saved with the list (`importedWordsCount` in the `typing` prefs), so
+    it never reads the list. `./gradlew --no-daemon :app:testDebugUnitTest -x prepareSpeechModel`
+    passed 331 tests, `ImportedWordsTest`'s 9 among them, on 2026-11-25 (Temurin JDK 21, Android SDK
+    36). Not tried on a device or emulator, and not tried with a real SwiftKey export.
 ├── Labs > Keyboard > Password manager suggestions (off) -> while Android's autofill service —
     Bitwarden, 1Password or Google Password Manager, which must itself support Android 11's inline
     suggestions — offers logins, one-time codes or cards for the focused field, its own chips take
@@ -3521,6 +3608,98 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
     build-tools 36.0.0, NDK 27.2.12479018); `VoiceOnlyTest` covers the bar-or-keyboard and restart
     decisions, `python3 scripts/code-shape.py --check` and `git diff --check` pass, and the repo has
     no Android CI; nothing was tried on a device or emulator.
+├── Labs > Keyboard > Test keyboard on Home (off, #2801) -> Keyboard's Test keyboard… field moves to
+    Home, below the Dictate bar and its result, so tapping it brings up the Hex keyboard there with
+    the current settings; the Keyboard page no longer shows it while the lab is on. Both places share
+    one field's text for the session. Home's Send feedback picture paints that field over too while
+    it holds text, as it does the dictation result. Off, Home and Keyboard are exactly as before.
+    Checks: none run; no Android SDK was available, so it is not compiled, and nothing was tried on
+    a device or emulator.
+├── Dictation > Custom vocabulary (off) > Word replacements and Words file -> the Android side of
+│   Hex words files (`.hexwords`, [docs/specs/hex-words.md](../specs/hex-words.md)). Everything sits
+│   behind the existing Custom vocabulary switch: off, dictation, Settings and the keyboard are as
+│   before, and only a file that arrives from another app reaches the review sheet, which then offers
+│   its own Turn on Custom vocabulary switch (off until tapped). Word replacements are a list the
+│   person edits (heard words -> what to write, at most 1,000, the file's limits, no empty or blank
+│   outputs yet), kept in the `speech` preferences as one escaped line each and applied to
+│   dictations before learned fixes with `DictationFixes`' whole-word, case-following rules and up to
+│   8 heard words; a learned fix for the same heard words is left out, and learned fixes themselves are
+│   never changed. A translated dictation gets neither. `ly.anoma.hex.words` holds a strict JSON
+│   parser of its own (the check pass and parser in one walk), the reader, the phone merge and the
+│   writer. `WordsActivity` (exported, Android's VIEW filter on `content` and its SEND filter, the
+│   spec's three MIME types, no BROWSABLE, no new permission) and Settings > Custom vocabulary > Words
+│   file > Open a words file... (`ACTION_OPEN_DOCUMENT`, `*/*`) read a content address only, through
+│   a private copy in the cache (at most 8 MiB + 1 byte) deleted after Add, Cancel or a refusal, with
+│   no persistable permission. The sheet shows the file's claimed maker, what each part adds and
+│   already has, each clash (Keep mine by default, Use this one), what this phone can't use by reason
+│   and what the file skipped by reason, a switch per part, and a refusal as one sentence; file text
+│   is plain, shortened to 64 characters and direction-isolated. Add saves an Undo copy of both lists
+│   and the switch in the preferences, offered in the confirmation and as Undo last import until either
+│   list is edited or another file is imported. Export (Share... through a `FileProvider` on
+│   `cache/words-out`, and Save to... with `ACTION_CREATE_DOCUMENT`) writes `hex-words.hexwords`:
+│   the terms, the Word replacements and, with Include fixes Hex learned (off; shown only while
+│   Labs > Learn from my fixes has fixes in use), the fixes in use marked `learned`. Checks:
+│   `HexWordsCasesTest` runs the shared cases from `tests/fixtures/hex-words` (a test resource
+│   folder): all 54 read cases, the 11 phone merge cases with an Undo round trip, and the 2 phone
+│   write cases with a schema check; the desktop merge and write cases don't apply to a phone.
+│   `DictationLearningTest` covers Word replacements' order, matching and limits. `./gradlew
+│   --no-daemon --offline :app:testDebugUnitTest -x prepareSpeechModel` passed 299 tests on
+│   2026-11-24 on anomastudio (OpenJDK 21, Android SDK 36). Nothing was tried on a device or emulator
+│   yet; the repo has no Android CI.
+├── Labs > Dictation > Automatic listens for the language (off) -> with Dictation language on
+│   Automatic, the dictation is written in the language spoken, chosen among up to three: the
+│   keyboard's language (Automatic's own pick, kept unless the speech is clearly another), then the
+│   phone's other languages Hex dictates, then the last one picked by hand. Bokmål and Nynorsk count
+│   as one; Danish and Swedish never count. whisper-language-choice.patch reads the language from
+│   the first window the decode encodes anyway (one decoder step, about 3 ms on the host), and a
+│   switch takes 0.99 among the candidates under 4 s of audio, 0.95 from 4 s. The text is formatted
+│   and inserted in the language chosen. Translate what I say is offered while Spanish is a candidate,
+│   and only Spanish heard is translated. Faster English dictation is not used while Automatic
+│   chooses among several languages, and Dictation stops saying English uses it. With one language,
+│   or the lab off, nothing is chosen and dictation is unchanged. The Hex menu and Settings then say
+│   "Automatic", and its entry in the list names the candidates ("Automatic · English, Español").
+│   Diagnostics' Last dictation adds the language, kept or switched, each candidate's probability and
+│   the choice's time. When the loop guard decodes a prompted dictation again without its prompt,
+│   that decode chooses the same way (the choice reads only the audio). Checks: on 2026-11-24 on
+│   anomastudio (OpenJDK 21, NDK 27.2.12479018), `./gradlew --no-daemon :app:testDebugUnitTest
+│   :app:assembleDebug` passed 321 tests (InsertionTest's candidates, SignatureTest's engine and
+│   written language, StripTextTest's Diagnostics line). Host builds of the app's whisper.cpp: with
+│   one language the patch's build decoded the benchmark's 70 clips, 30 long ones and 4 prompted
+│   ones byte for byte as one without it; the `HEX_LANGS` guard kept the clip's language in 630 of
+│   630 pairs; with the lab on (English and Español), every prompted clip still came out "Sarah is at
+│   the station." (without the loop guard, all four repeated). The 2,466-cut table, from the built
+│   library, had no wrong switch (android/benchmark/README.md, Automatic listens for the language).
+│   Emulator (API 36, hex-detect-vogel), the lab on with English and Español: Spanish and English
+│   dictations of 2, 5 and 12 s in the keyboard each came out in their own language, Last dictation
+│   naming it ("Español, switched from English; English 0.2%, Español 99.8%"); twenty in a row
+│   alternating, 20 of 20 in their own language, one process, no crash; ✕ while recording and while
+│   transcribing left the field empty; custom vocabulary "stadium" on a 1.6 s clip was decoded again
+│   without it and stayed English. All voices are synthetic.
+├── Labs > Dictation > Pick the English model for this phone (off, L135) -> Hex times English
+│   dictations on the standard model and chooses faster English dictation where they are slow.
+│   It measures only while faster English dictation is off, with the dictation's own durations
+│   (`MicCapture` hands them to `Recognizer.timed`): a dictation that went in and would go to the
+│   faster model were it on (English, not translated, Automatic with one candidate), with at least
+│   6 s kept, the model loaded before ✓ (already loaded, or loaded while the person spoke) and no
+│   second decode without the custom words, counts its decode's wall time per second kept. Once the
+│   median of the last 5 is at least 0.5 and the last 20 dictations would all have gone English,
+│   `ModelChoice.after` records the choice and its date, once. The keyboard only records: the next
+│   time Hex opens (`MainActivity.onResume`, `ModelChoice.whenOpened`) it turns faster English
+│   dictation on and starts its 135 MB download, which, like the first model's, waits for Wi-Fi on a
+│   metered network (a hand tap too: "135 MB. Starts by itself on Wi-Fi." with Use mobile data).
+│   Dictation's speech model card says what is true: waiting, downloading with its percentage,
+│   stopped, or "English uses faster dictation, chosen for this phone." Turning faster English
+│   dictation off by hand, or Delete download, sets `fastEnglishOffByHand`, and the rule never turns
+│   it on again; turning the lab on, a new request, clears an earlier one. Kept: the private `modelChoice` preferences (last 5 ratios, English dictations in
+│   a row up to 20, counts by reason, the choice's date and median); turning the lab off deletes the
+│   file and leaves a setting or download it made. Diagnostics' "Model choice:" line gives the
+│   median and the ratios it is taken over, the threshold, the decision and date, "N of 20 English dictations
+│   in a row", and the counts not counted by reason. Debug builds only: `setprop
+│   log.tag.HexDecodeScale DEBUG` (×10) or `VERBOSE` (×0.5) scales the measured time; the minified
+│   release and preview dex don't contain the tag. Checks: `ModelChoiceTest` in SignatureTest.kt
+│   (20 tests: the OnePlus 12's two reports, the OnePlus 13's range and the emulator's speed as
+│   dictation sequences, each thing it must never do); emulator results are in
+│   the pull request.
 └── Labs > Dictation > Learn from my fixes (off) -> an Android-only port of iPhone Hex's dictation
     correction learning, with no typing side. Off, the keyboard tracks nothing, applies nothing and
     adds no hints. On, each keyboard dictation in a non-secure words field that the field lets Hex

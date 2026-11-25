@@ -1119,7 +1119,7 @@ pub fn eval(since: Duration, limit: usize, lines: bool, screen: bool) -> Result<
         .with_context(|| format!("couldn't read {}", captures.display()))?
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|e| e == "scrawl") && p.join(super::RECORD).is_file())
+        .filter(|p| crate::bundle::manifest_name(p).is_some() && p.join(super::RECORD).is_file())
         .filter_map(|p| {
             let (_, bundle) = crate::bundle::load_bundle(&p).ok()?;
             (bundle.created_at_ms >= cutoff).then_some((bundle.created_at_ms, p))
@@ -1326,7 +1326,7 @@ fn sweep(samples: &[Sample], thresholds: &Thresholds) -> String {
         (
             "confidence",
             thresholds.send,
-            &[0.6, 0.7, 0.8, 0.85, 0.9, 0.95],
+            &[0.6, 0.7, 0.8, 0.85, 0.88, 0.9, 0.95],
         ),
         ("margin", thresholds.margin, &[0.0, 0.1, 0.2, 0.3, 0.4, 0.5]),
     ];
@@ -1580,6 +1580,7 @@ fn short(dir: &std::path::Path) -> String {
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
         .trim_start_matches("scrawl-")
         .trim_end_matches(".scrawl")
+        .trim_end_matches(".hexannotation")
         .to_owned()
 }
 
@@ -1619,8 +1620,12 @@ fn report(
         jev::cost(tokens)
     );
     println!(
-        "Thresholds: send ≥ {} with margin ≥ {}, offer ≥ {} (HOME instead when fits < {}), low below that",
-        thresholds.send, thresholds.margin, thresholds.offer, thresholds.no_fit
+        "Thresholds: send ≥ {} with margin ≥ {} and fits ≥ {}, offer ≥ {} (HOME instead when fits < {}), low below that",
+        thresholds.send,
+        thresholds.margin,
+        thresholds.send_fits,
+        thresholds.offer,
+        thresholds.no_fit
     );
     let right = |o: &Outcome, truth: &str| o.pick.as_deref() == Some(truth);
     let top = results.iter().filter(|(c, o)| right(o, &c.truth)).count();
@@ -1879,7 +1884,7 @@ mod tests {
         assert_eq!(out["decision"], "send", "{out}");
         let asked = ASKED.with(|a| a.borrow().clone()).unwrap();
         let screen = &asked["state"]["screen"];
-        assert_eq!(screen["windows"][1]["app"], "Chat");
+        assert_eq!(screen["nearby_windows"][1]["app"], "Chat");
         assert_eq!(screen["focused"]["value_excerpt"], "the margin is");
         assert!(screen["visible_text"].as_str().unwrap().chars().count() <= 1501);
         assert_eq!(screen["opencode_tab"], "HEX");
@@ -2002,13 +2007,13 @@ mod tests {
         // ses_old isn't among the recent sessions; pinning reads it anyway.
         let out = run(json!({"item": {"text": "x"}, "pinned": ["ses_old"]}), sure);
         let asked = ASKED.with(|a| a.borrow().clone()).unwrap();
-        let titles: Vec<&str> = asked["state"]["targets"]
+        let targets: Vec<&str> = asked["state"]["targets"]
             .as_object()
             .unwrap()
             .values()
-            .map(|t| t["title"].as_str().unwrap())
+            .map(|t| t.as_str().unwrap())
             .collect();
-        assert!(titles.contains(&"OLD"), "{titles:?}");
+        assert!(targets.iter().any(|t| t.starts_with("OLD ")), "{targets:?}");
         assert_eq!(out["target"]["id"], "ses_hex", "Jev still decides");
     }
 

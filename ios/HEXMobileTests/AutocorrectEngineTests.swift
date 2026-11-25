@@ -1412,7 +1412,7 @@ final class AutocorrectEngineTests: XCTestCase {
         }
     }
 
-    /// Settings › Experiments › German spatial autocorrect, off by default, gates German alone.
+    /// Settings › Labs › German spatial autocorrect, off by default, gates German alone.
     /// Without it the Deutsch layout keeps the dictionary engine exactly as before: no word
     /// list either, so no letter odds, no model completions in the strip, and no partner model.
     /// English and Spanish never wait on the experiment.
@@ -1465,7 +1465,7 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(settings.typingModel(for: .spanish)?.language, "es")
     }
 
-    /// Settings › Experiments › Swipe typing in more languages (off by default): English and
+    /// Settings › Labs › Swipe typing in more languages (off by default): English and
     /// Spanish swipe as ever, and on every other language with a typing model swipes too.
     /// German still waits on its own model (Spatial autocorrect and the German experiment),
     /// and a language without one keeps a drag as a slide to another key.

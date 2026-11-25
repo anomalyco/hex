@@ -232,6 +232,11 @@ pub struct LabsSettings {
     /// The gap in points above the Dock while `hud_height` is on; a saved
     /// value above [`HUD_BOTTOM_GAP_MAX`] is clamped at placement.
     pub hud_bottom_gap: u16,
+    /// While a dictation records and processes, the HUD sits just below the
+    /// pointer (above it near the screen's bottom), on the pointer's screen
+    /// and inside its visible frame, instead of at the Top or Bottom position;
+    /// Hidden still hides it (macOS, Labs › Indicator follows mouse).
+    pub indicator_follows_mouse: bool,
     /// Dictation's microphone opens through Apple's voice processing, so
     /// Control Center's Mic Mode can offer Voice Isolation (macOS, Labs ›
     /// Voice isolation).
@@ -353,6 +358,9 @@ pub struct LabsSettings {
     /// field returns to its default.
     #[serde(deserialize_with = "deserialize_phrase")]
     pub stop_phrase_text: String,
+    /// Once a dictation has recorded for 10 seconds, its cancel shortcut asks
+    /// for a second press before it throws the recording away (#2837).
+    pub confirm_long_cancels: bool,
     /// Every normal dictation is signed with `signature_text` on its own line
     /// at the end (every OS).
     pub signature: bool,
@@ -555,6 +563,7 @@ impl Default for LabsSettings {
             notch_indicator: false,
             hud_height: false,
             hud_bottom_gap: HUD_BOTTOM_GAP_DEFAULT,
+            indicator_follows_mouse: false,
             voice_isolation: false,
             annotate_replay: false,
             opencode_in_wsl: false,
@@ -581,6 +590,7 @@ impl Default for LabsSettings {
             dictation_style_choice: DictationStyle::Polished,
             stop_phrase: false,
             stop_phrase_text: crate::dictation::stop_phrase::DEFAULT_PHRASE.to_owned(),
+            confirm_long_cancels: false,
             signature: false,
             signature_text: crate::dictation::signature::DEFAULT_TEXT.to_owned(),
             clipboard_phrase: false,

@@ -38,7 +38,7 @@ nonisolated struct DictationPeriodSettings {
     }
 }
 
-/// Experiments › Hinglish (Hindi in Latin letters), in the shared App Group so in-keyboard
+/// Labs › Hinglish (Hindi in Latin letters), in the shared App Group so in-keyboard
 /// dictation reads it too. Off by default. While it is on, Hindi dictation is written in Latin
 /// letters (`HinglishRomanizer`) and Hindi is called Hinglish in the language menus.
 nonisolated struct HinglishSettings {
@@ -78,7 +78,7 @@ nonisolated struct HinglishSettings {
     }
 }
 
-/// Experiments › Greeklish (Greek in Latin letters), in the shared App Group so in-keyboard
+/// Labs › Greeklish (Greek in Latin letters), in the shared App Group so in-keyboard
 /// dictation reads it too. Off by default. While it is on, Greek dictation is written in Latin
 /// letters (`GreeklishRomanizer`) and Greek is called Greeklish in the language menus.
 nonisolated struct GreeklishSettings {
@@ -124,7 +124,7 @@ nonisolated struct GreeklishSettings {
 /// (`KeyboardLocalDictation`), so a style and Lowercase apply on every path.
 ///
 /// In order: Hinglish (Hindi in Latin letters, while that experiment is on) or Greeklish
-/// (Greek in Latin letters, while that one is on), learned fixes, custom vocabulary, Numbers as
+/// (Greek in Latin letters, while that one is on), Word replacements, learned fixes, custom vocabulary, Numbers as
 /// digits and Clean up what I say (`CleanupTagger.cleanIfEnabled`, which guards its own memory
 /// in the keyboard),
 /// `refine` (Clean up with Apple Intelligence, only in the app), translation, the style
@@ -141,6 +141,8 @@ nonisolated struct DictationPipeline: Sendable {
     var vocabulary: [String] = []
     /// Learn how I type's dictation fixes; empty while it is off.
     var corrections: [DictationCorrection] = []
+    /// Word replacements, before the learned fixes; empty while Custom vocabulary is off.
+    var replacements: [DictationCorrection] = []
     var lowercase = false
     /// Settings › Dictation › Format lists (`SpokenLists`), inside the style.
     var formatLists = false
@@ -149,10 +151,10 @@ nonisolated struct DictationPipeline: Sendable {
     /// Settings › Dictation › Numbers as digits (`SpokenNumbers`), before Clean up what I say's
     /// tagger, in every style but Verbatim.
     var numbersAsDigits = false
-    /// Experiments › Hinglish: Hindi is written in Latin letters before every other step, so
+    /// Labs › Hinglish: Hindi is written in Latin letters before every other step, so
     /// learned fixes, vocabulary and the style see the Latin words.
     var hinglish = false
-    /// Experiments › Greeklish: Greek is written in Latin letters there too.
+    /// Labs › Greeklish: Greek is written in Latin letters there too.
     var greeklish = false
     /// Settings › Dictation › End with a period; off, no line ends with a full stop.
     var endsWithPeriod = true
@@ -165,6 +167,7 @@ nonisolated struct DictationPipeline: Sendable {
         var style: DictationStyle
         var vocabulary: [String] = []
         var corrections: [DictationCorrection] = []
+        var replacements: [DictationCorrection] = []
         var lowercase = false
         var formatLists = false
         var spokenPunctuation = false
@@ -182,6 +185,7 @@ nonisolated struct DictationPipeline: Sendable {
             style: DictationStyle,
             vocabulary: CustomVocabularySettings = CustomVocabularySettings(),
             corrections: [DictationCorrection] = [],
+            replacements: WordReplacementsSettings = WordReplacementsSettings(),
             lowercase: DictationLowercaseSettings = DictationLowercaseSettings(),
             lists: DictationListSettings = DictationListSettings(),
             punctuation: DictationPunctuationSettings = DictationPunctuationSettings(),
@@ -194,6 +198,7 @@ nonisolated struct DictationPipeline: Sendable {
                 style: style,
                 vocabulary: vocabulary.activeTerms,
                 corrections: corrections,
+                replacements: replacements.activeCorrections,
                 lowercase: lowercase.isEnabled,
                 formatLists: lists.isEnabled,
                 spokenPunctuation: punctuation.isEnabled,
@@ -210,6 +215,7 @@ nonisolated struct DictationPipeline: Sendable {
         language: String,
         vocabulary: [String] = [],
         corrections: [DictationCorrection] = [],
+        replacements: [DictationCorrection] = [],
         lowercase: Bool = false,
         formatLists: Bool = false,
         spokenPunctuation: Bool = false,
@@ -223,6 +229,7 @@ nonisolated struct DictationPipeline: Sendable {
         self.language = language
         self.vocabulary = vocabulary
         self.corrections = corrections
+        self.replacements = replacements
         self.lowercase = lowercase
         self.formatLists = formatLists
         self.spokenPunctuation = spokenPunctuation
@@ -243,6 +250,7 @@ nonisolated struct DictationPipeline: Sendable {
             language: language,
             vocabulary: preferences.vocabulary,
             corrections: preferences.corrections,
+            replacements: preferences.replacements,
             lowercase: preferences.lowercase,
             formatLists: preferences.formatLists,
             spokenPunctuation: preferences.spokenPunctuation,
@@ -259,7 +267,7 @@ nonisolated struct DictationPipeline: Sendable {
         /// What the speech model heard, in Latin letters for Hinglish or Greeklish: what
         /// learning compares the inserted text with.
         var heard: String
-        /// After learned fixes.
+        /// After Word replacements and learned fixes.
         var fixed: String
         /// After custom vocabulary.
         var spelled: String
@@ -295,7 +303,23 @@ nonisolated struct DictationPipeline: Sendable {
         let heard = romanizesHindi ? HinglishRomanizer.romanize(spoken)
             : romanizesGreek ? GreeklishRomanizer.romanize(spoken)
             : spoken
-        let fixed = DictationCorrections.apply(corrections, to: translatesLatin ? spoken : heard)
+        // Word replacements never touch a dictation that is translated: while Translate what I
+        // say would translate this one they wait, and apply only if it goes in as spoken. A Word
+        // replacement wins over a learned fix with the same heard words.
+        let source = translationSource ?? Locale(identifier: language).language
+        let mayTranslate = translation.isEnabled
+            && source.languageCode != Locale.Language(identifier: translation.targetLanguage).languageCode
+        let replacements = mayTranslate ? [] : self.replacements
+        let replacedKeys = Set(replacements.map { DictationText.phraseKey($0.heard) })
+        let replaced = DictationCorrections.apply(
+            replacements,
+            to: translatesLatin ? spoken : heard,
+            maxWords: WordReplacementsSettings.maxWords
+        )
+        let fixed = DictationCorrections.apply(
+            corrections.filter { !replacedKeys.contains(DictationText.phraseKey($0.heard)) },
+            to: replaced
+        )
         let spelled = SoundAlikeSpelling.apply(vocabulary, to: VocabularySpelling.apply(vocabulary, to: fixed), language: language)
         let tagged = await CleanupTagger.cleanIfEnabled(
             spelled,
@@ -307,14 +331,17 @@ nonisolated struct DictationPipeline: Sendable {
         let refined = await refine?(tagged) ?? tagged
         let outcome = await DictationTranslator.translate(
             refined,
-            source: translationSource ?? Locale(identifier: language).language,
+            source: source,
             settings: translation,
             engine: translationEngine
         )
         let translated = outcome.text
-        let cleaned = translatesLatin && translated == nil
+        let romanized = translatesLatin && translated == nil
             ? (romanizesGreek ? GreeklishRomanizer.romanize(refined) : HinglishRomanizer.romanize(refined))
             : refined
+        let cleaned = mayTranslate && translated == nil
+            ? DictationCorrections.apply(self.replacements, to: romanized, maxWords: WordReplacementsSettings.maxWords)
+            : romanized
         // A translation is formatted in the language it is now in.
         let formatLanguage = translated == nil ? language : translation.targetLanguage
         return Stages(

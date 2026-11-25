@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 import QuartzCore
 
-/// Settings › Experiments › Adaptive touch, off by default. In the App Group so the app and
+/// Settings › Labs › Adaptive touch, off by default. In the App Group so the app and
 /// the keyboard both see the switch and the reset; what the keyboard learned is not here.
 struct AdaptiveTouchSettings {
     fileprivate enum Key {

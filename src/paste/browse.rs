@@ -3,7 +3,7 @@
 //! Its rows are read from the press, so the picker opens the moment the hold
 //! passes, and once open it stays open until a choice, Escape, or a click
 //! outside it.
-use super::recent::{Id, Row};
+use super::recent::{Entry, Id};
 use std::sync::{
     Arc, Mutex, OnceLock,
     atomic::{AtomicU8, Ordering},
@@ -13,7 +13,7 @@ use std::sync::{
 pub(crate) struct View {
     pub epoch: u64,
     pub revision: u64,
-    pub rows: Arc<[Row]>,
+    pub rows: Arc<[Entry]>,
     pub cursor: usize,
     pub open: bool,
 }
@@ -23,13 +23,15 @@ struct State {
     outcome: Option<Choice>,
     armed: bool,
     /// Rows read before the hold passed, shown once it does.
-    staged: Option<Vec<Row>>,
+    staged: Option<Vec<Entry>>,
     /// The hold passed: rows open as soon as they are read.
     due: bool,
 }
 pub(crate) enum Choice {
     Cancel,
     Item(Id),
+    /// A capture to open in the editor. Nothing is pasted.
+    Open(Id),
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Nav {
@@ -53,7 +55,7 @@ impl State {
     fn current(&self, epoch: u64) -> bool {
         self.armed && self.view.epoch == epoch && self.outcome.is_none()
     }
-    fn show(&mut self, epoch: u64, rows: Vec<Row>) {
+    fn show(&mut self, epoch: u64, rows: Vec<Entry>) {
         if !self.current(epoch) {
             return;
         }
@@ -72,13 +74,13 @@ impl State {
             self.open(rows);
         }
     }
-    fn open(&mut self, rows: Vec<Row>) {
+    fn open(&mut self, rows: Vec<Entry>) {
         self.view.rows = rows.into();
         self.view.cursor = self
             .view
             .rows
             .iter()
-            .position(|r| !r.cancelled)
+            .position(|r| !r.row.cancelled)
             .unwrap_or(self.view.rows.len());
         self.view.open = true;
     }
@@ -126,7 +128,7 @@ impl State {
                     .view
                     .rows
                     .get(self.view.cursor)
-                    .map(|r| Choice::Item(r.id.clone()))
+                    .map(|r| Choice::Item(r.row.id.clone()))
                     .unwrap_or(Choice::Cancel);
                 self.finish(choice);
             }
@@ -134,9 +136,29 @@ impl State {
         }
         true
     }
+    fn position(&self, epoch: u64, id: &Id) -> Option<usize> {
+        (self.view.open && self.view.epoch == epoch)
+            .then(|| self.view.rows.iter().position(|r| &r.row.id == id))
+            .flatten()
+    }
     fn pick(&mut self, epoch: u64, id: Id) {
-        if self.view.open && self.view.epoch == epoch && self.view.rows.iter().any(|r| r.id == id) {
+        if self.position(epoch, &id).is_some() {
             self.finish(Choice::Item(id));
+        }
+    }
+    /// A click on a row: it becomes the selection, and a click on the
+    /// selection pastes it, so a double click pastes any row.
+    fn select(&mut self, epoch: u64, id: Id) {
+        match self.position(epoch, &id) {
+            Some(at) if at == self.view.cursor => self.finish(Choice::Item(id)),
+            Some(at) => self.view.cursor = at,
+            None => {}
+        }
+    }
+    /// Open in Editor: a capture leaves for its editor, and nothing pastes.
+    fn open_capture(&mut self, epoch: u64, id: Id) {
+        if matches!(id, Id::Capture(_)) && self.position(epoch, &id).is_some() {
+            self.finish(Choice::Open(id));
         }
     }
 }
@@ -173,7 +195,7 @@ pub(crate) fn available() -> bool {
 pub(crate) fn tap(epoch: u64) -> bool {
     update(|s| s.tap(epoch))
 }
-pub(crate) fn show(epoch: u64, rows: Vec<Row>) {
+pub(crate) fn show(epoch: u64, rows: Vec<Entry>) {
     update(|s| s.show(epoch, rows));
 }
 /// The hold passed: open now if the rows are read, else when they are.
@@ -189,8 +211,15 @@ pub(crate) fn open() -> bool {
 pub(crate) fn nav(key: Nav) -> bool {
     active() && update(|s| s.navigate(key))
 }
+/// Pastes row `id`: the preview's Paste.
 pub(crate) fn click(epoch: u64, id: Id) {
     update(|s| s.pick(epoch, id));
+}
+pub(crate) fn select(epoch: u64, id: Id) {
+    update(|s| s.select(epoch, id));
+}
+pub(crate) fn open_capture(epoch: u64, id: Id) {
+    update(|s| s.open_capture(epoch, id));
 }
 /// Closes the open picker without a paste: a click outside it, or Show all
 /// History, which consumes this invocation before activating the window.
@@ -249,13 +278,50 @@ pub(crate) fn take(epoch: u64) -> Option<Choice> {
 mod tests {
     use super::*;
     use crate::history::paste_source;
-    fn row(id: u64) -> Row {
+    use crate::paste::recent::Row;
+    fn row(id: u64) -> Entry {
         Row {
             cancelled: false,
             id: Id::Dictation(paste_source::Id::Retained(id)),
             preview: format!("note {id}"),
             ready_at: id,
         }
+        .into()
+    }
+    fn capture(at: u64) -> Entry {
+        Row {
+            cancelled: false,
+            id: Id::Capture(crate::capture_host::paste_source::Id::fixture(at)),
+            preview: "over the chart".into(),
+            ready_at: at,
+        }
+        .into()
+    }
+
+    /// A click selects and a click on the selection pastes; Open in Editor
+    /// sends a capture to its editor without pasting, and does nothing for
+    /// a dictation.
+    #[test]
+    fn a_click_selects_a_second_pastes_and_a_capture_opens_in_its_editor() {
+        let mut s = State::default();
+        let epoch = s.begin();
+        s.reveal(epoch);
+        s.show(epoch, vec![row(3), capture(2), row(1)]);
+        s.select(epoch, row(1).row.id);
+        assert_eq!(s.view.cursor, 2);
+        assert!(s.outcome.is_none() && s.view.open);
+        s.select(epoch, row(1).row.id);
+        assert!(matches!(s.outcome.take(), Some(Choice::Item(id)) if id == row(1).row.id));
+        assert!(!s.view.open);
+
+        let epoch = s.begin();
+        s.reveal(epoch);
+        s.show(epoch, vec![row(3), capture(2)]);
+        s.open_capture(epoch, row(3).row.id);
+        assert!(s.outcome.is_none() && s.view.open);
+        s.open_capture(epoch, capture(2).row.id);
+        assert!(matches!(s.outcome.take(), Some(Choice::Open(id)) if id == capture(2).row.id));
+        assert!(!s.view.open);
     }
     #[test]
     fn tap_and_cancel_claim_the_invocation_only_once() {
@@ -274,13 +340,13 @@ mod tests {
     fn cancelled_needs_an_explicit_selection_even_when_it_is_the_only_row() {
         let mut state = State::default();
         let mut cancelled = row(3);
-        cancelled.cancelled = true;
+        cancelled.row.cancelled = true;
         let epoch = state.begin();
         state.reveal(epoch);
         state.show(epoch, vec![cancelled.clone(), row(2)]);
         assert_eq!(state.view.cursor, 1);
         state.navigate(Nav::Commit);
-        assert!(matches!(state.outcome.take(),Some(Choice::Item(id)) if id==row(2).id));
+        assert!(matches!(state.outcome.take(),Some(Choice::Item(id)) if id==row(2).row.id));
         let epoch = state.begin();
         state.reveal(epoch);
         state.show(epoch, vec![cancelled.clone()]);
@@ -291,7 +357,7 @@ mod tests {
         state.show(epoch, vec![cancelled.clone()]);
         state.navigate(Nav::Next);
         state.navigate(Nav::Commit);
-        assert!(matches!(state.outcome.take(),Some(Choice::Item(id)) if id==cancelled.id));
+        assert!(matches!(state.outcome.take(),Some(Choice::Item(id)) if id==cancelled.row.id));
     }
     #[test]
     fn escape_and_delayed_click_never_commit_to_another_invocation() {
@@ -303,12 +369,12 @@ mod tests {
         let two = s.begin();
         s.reveal(two);
         s.show(two, vec![row(2), row(1)]);
-        s.pick(one, row(1).id);
+        s.pick(one, row(1).row.id);
         assert!(s.outcome.is_none());
         s.navigate(Nav::Next);
         s.navigate(Nav::Commit);
-        assert!(matches!(s.outcome.take(),Some(Choice::Item(id)) if id==row(1).id));
-        s.pick(two, row(2).id);
+        assert!(matches!(s.outcome.take(),Some(Choice::Item(id)) if id==row(1).row.id));
+        s.pick(two, row(2).row.id);
         assert!(s.outcome.is_none());
     }
 

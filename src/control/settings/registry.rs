@@ -640,6 +640,11 @@ pub(super) const KEYS: &[Key] = &[
         "Points the dictation HUD sits above the Dock or the screen's bottom edge at the Bottom position while Labs: HUD height is on; 24 by default, and 0 to 400 (macOS)",
     ),
     key(
+        "labs.indicator_follows_mouse",
+        Kind::Bool,
+        "Labs: while a dictation records and processes, the recording indicator sits just below the mouse pointer, or above it near the screen's bottom, and stays inside the screen; Hidden still hides it, and turning it off restores the Top or Bottom position (macOS)",
+    ),
+    key(
         "labs.skip_pauses",
         Kind::Bool,
         "Labs: a dictation transcribed as a whole clip hears only the start and end of each long pause, so slow computers paste sooner (Linux and Windows)",
@@ -823,6 +828,12 @@ pub(super) const KEYS: &[Key] = &[
         Kind::Bool,
         "Labs: a spoken phrase at the end of a hands-free dictation finishes it, as if the \
          shortcut were pressed again",
+    ),
+    key(
+        "labs.confirm_long_cancels",
+        Kind::Bool,
+        "Labs: once a dictation has recorded for 10 seconds, the first cancel press keeps \
+         recording and asks for a second within 3 seconds",
     ),
     key(
         "labs.stop_phrase_text",
@@ -1068,7 +1079,7 @@ pub(super) const CAPTURE_KEYS: &[Key] = &[
     optional(
         "capture.folder",
         Kind::Path,
-        "Folder for new captures; none uses Scrawl's captures folder",
+        "Folder for new captures; none uses the annotations folder in Hex's application data",
     ),
     optional(
         "capture.media_days",

@@ -421,24 +421,27 @@ pub struct RouterDirs {
     pub outbox: Option<PathBuf>,
     /// Sends that can be undone (`<delivery_id>.json`, 0600, kept 7 days).
     pub deliveries: Option<PathBuf>,
+    /// Private retry receipts for Hex annotation packages (`<hash>.json`, 0600).
+    pub retries: Option<PathBuf>,
     /// Picks counted toward a rule offer (a file, 0600).
     pub learned: Option<PathBuf>,
     /// The decision and correction log (JSON lines, 0600).
     pub log: Option<PathBuf>,
-    /// Kit's eval items (`*.jsonl`), read by `eval`.
+    /// Eval items (`*.jsonl`), read by `eval`.
     pub eval: Option<PathBuf>,
-    /// Captures (`*.scrawl` bundles): bundle IDs resolve here, and `eval` replays them.
+    /// Captures (`*.hexannotation` or `*.scrawl`): bundle IDs resolve here, and `eval` replays them.
     pub captures: Option<PathBuf>,
 }
 
 impl RouterDirs {
-    /// Scrawl's layout under `router`: `decisions/`, `outbox/`, `deliveries/`, `learned.json`
-    /// and `eval/`, with the log and captures where the host says.
+    /// Private router layout under `router`: `decisions/`, `outbox/`, `deliveries/`, `retries/`,
+    /// `learned.json` and `eval/`, with the log and captures where the host says.
     pub fn under(router: &Path, log: Option<PathBuf>, captures: Option<PathBuf>) -> Self {
         Self {
             decisions: Some(router.join("decisions")),
             outbox: Some(router.join("outbox")),
             deliveries: Some(router.join("deliveries")),
+            retries: Some(router.join("retries")),
             learned: Some(router.join("learned.json")),
             log,
             eval: Some(router.join("eval")),

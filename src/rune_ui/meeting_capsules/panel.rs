@@ -2,12 +2,10 @@
 //! rest, then Stop and the two copies, and the finished meeting's title
 //! and summary over the same copies.
 
-use rune::{Cursor, El, Icon, SpringPair, TextStyle, Transition, Tx, col, el, icon, row, text};
-use rune_theme_opencode::icons;
-
-use super::super::controls::DESCRIPTION;
 use super::super::notes_writer::NotesWriter;
 use super::*;
+use rune::{Cursor, El, Icon, SpringPair, Transition, Tx, col, el, icon, row, text};
+use rune_theme_opencode::icons;
 
 mod finished;
 
@@ -48,10 +46,10 @@ impl Notice {
 
 /// A capsule ✕'s hit box: the open recording's discard and the ready
 /// panel's close.
-const CLOSE_BOX: f32 = 28.0;
+const CLOSE_BOX: f32 = CAPSULE.close;
 /// The panel's icon spine: the centre of its rows' 16 pt glyphs, where every
 /// ✕ is centred too.
-pub(super) const SPINE: f32 = PANEL_PAD + ROW_PX + 8.0;
+pub(super) const SPINE: f32 = CAPSULE.icon_spine();
 /// How far the discard ✕ hangs past the header's inset, so its centre lands
 /// on the spine.
 const CLOSE_NUDGE: f32 = REST_PX + CLOSE_BOX / 2.0 - SPINE;
@@ -65,11 +63,7 @@ pub(super) const CONFIRM_HEIGHT: f32 = REST_HEIGHT + CONFIRM_BODY;
 const CONFIRM_BODY: f32 = 4.0 + 20.0 + 2.0 + 16.0 + 12.0 + CONFIRM_BUTTON + CONFIRM_INSET;
 const CONFIRM_BUTTON: f32 = 28.0;
 /// Keep and Discard sit this far in from the panel's sides and its edge.
-const CONFIRM_INSET: f32 = 8.0;
-/// Keep and Discard share the row equally, 8 pt apart.
-const CONFIRM_CHOICE_WIDTH: f32 = (PANEL_WIDTH - 2.0 * CONFIRM_INSET - 8.0) / 2.0;
-/// The question's words start here, as a card's text does.
-const CONFIRM_TEXT_RAIL: f32 = 16.0;
+const CONFIRM_INSET: f32 = CAPSULE.button_inset;
 /// The ready panel's title band: its link's padding round the title and length.
 const TITLE_PY: f32 = 8.0;
 /// Clear space under the title link's hover fill.
@@ -127,11 +121,6 @@ pub(super) fn ready_summary(manifest: &MeetingManifest) -> Option<(String, bool)
         .export_error
         .as_ref()
         .map(|error| (tr_fill("Markdown not saved: {}", error), false))
-}
-
-/// The timer: elapsed while recording, the length once finished.
-fn timer_style() -> TextStyle {
-    TextStyle::new(13.0, 500.0).mono().lh(18.0)
 }
 
 fn copied_hint(p: Paint) -> El {
@@ -264,7 +253,7 @@ fn copy_rows(p: Paint, capsule: &Capsule, recording: bool) -> Vec<El> {
 /// The panel's rounded body; only it takes the pointer, not the window's
 /// margin around it.
 fn panel_body(p: Paint, title: &str) -> El {
-    col()
+    let mut body = col()
         .key("pill")
         .role("status")
         .label(title)
@@ -273,7 +262,11 @@ fn panel_body(p: Paint, title: &str) -> El {
         .fill(p.k.c.bg_base)
         .border(p.hair, p.k.c.border_base)
         .clip_rounded(PANEL_RADIUS)
-        .hit()
+        .hit();
+    for shadow in &p.k.elevation.overlay {
+        body = body.box_shadow(*shadow);
+    }
+    body
 }
 
 /// A line replaced in place leaves sooner than it arrives, even under
@@ -390,7 +383,9 @@ fn result(
                     .child(
                         text(meeting::format_duration(duration))
                             .key("elapsed")
-                            .font(timer_style())
+                            .w(timer_text_width(duration / 60_000))
+                            .align(Align::End)
+                            .font(p.clock())
                             .color(p.muted()),
                     ),
             )
@@ -547,7 +542,7 @@ fn title_label(p: Paint, c: &Capsule, title: &str) -> El {
         .key("title")
         .w_full()
         .motion(Spring::NONE)
-        .font(TextStyle::new(13., 600.).lh(20.))
+        .font(p.strong())
         .color(p.text())
         .wrap_anywhere()
         .max_lines(TITLE_LINES)
@@ -588,11 +583,16 @@ fn bands(top: bool, meta: El, action: Option<El>) -> El {
     }
 }
 
-/// The time's width after `minutes`: its 13 pt monospaced digits each
-/// occupy 8 pt at layout resolution.
-fn timer_width(minutes: u64) -> f32 {
+/// Width reserved for the timer's digits after `minutes`: `TIMER_TEXT_WIDTH`
+/// for five characters (`00:00`), plus 8 pt for each extra minute digit.
+fn timer_text_width(minutes: u64) -> f32 {
     let extra = minutes.max(1).ilog10().saturating_sub(1);
-    TIMER_WIDTH + extra as f32 * 8.
+    TIMER_TEXT_WIDTH + extra as f32 * 8.
+}
+
+/// The time's width after `minutes`, dot and gap included.
+fn timer_width(minutes: u64) -> f32 {
+    timer_text_width(minutes) + REC_DOT + METER_GAP
 }
 
 /// Only grow the compact header for a notice or another minute digit.
@@ -692,6 +692,7 @@ pub(super) fn meter(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
         .clock()
         .saturating_duration_since(shown.started);
     let elapsed = meeting::format_duration(run.as_millis() as u64);
+    let minutes = run.as_secs() / 60;
     row()
         .key("meter")
         .h(REST_HEIGHT)
@@ -709,7 +710,9 @@ pub(super) fn meter(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
                 .child(
                     text(elapsed)
                         .key("elapsed")
-                        .font(timer_style())
+                        .w(timer_text_width(minutes))
+                        .align(Align::End)
+                        .font(p.clock())
                         .color(p.muted()),
                 ),
         )
@@ -1084,7 +1087,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording, held: Op
         // Leaving rows are drawn, not pressed.
         contents = contents.child(if open { rows } else { rows.inert() });
     }
-    let body = col()
+    let mut body = col()
         .key("pill")
         .role("status")
         .label(format!("{} · {}", tr("Recording"), shown.title))
@@ -1101,6 +1104,9 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording, held: Op
         // window is only as large as what it draws, so the pointer is
         // tracked on the window instead (see below).
         .hit();
+    for shadow in &p.k.elevation.overlay {
+        body = body.box_shadow(*shadow);
+    }
     // A recording in its offer's window is larger than the pill it draws, so
     // Windows tracks that window as it always has; one the recording owns is
     // opened by the pill and kept open by the window.
@@ -1409,16 +1415,16 @@ mod tests {
 
     #[test]
     fn the_resting_window_is_the_pill_and_the_open_one_the_panel() {
-        // The 165 pt pill (its field, the red dot, and the time) and its inset.
-        assert_eq!(rest(), (173., 44.));
-        assert_eq!(open(), (260., 185.));
+        // The 168 pt pill (its field, the red dot, and the time) and its inset.
+        assert_eq!(rest(), (176., 44.));
+        assert_eq!(open(), (260., 186.));
         // The discard question fits inside the open window.
         assert!(CONFIRM_HEIGHT + 2. * CAPSULE_INSET <= open().1);
         // A notice widens the resting pill to the panel, and adds its line
         // to the open one.
         let noticed = noticed();
         assert_eq!(rest_window(Some(&noticed)), (260., 44.));
-        assert_eq!(open_window(Some(&noticed)), (260., 205.));
+        assert_eq!(open_window(Some(&noticed)), (260., 206.));
     }
 
     #[test]

@@ -25,7 +25,7 @@ enum SpeechModelChoice: String, CaseIterable, Hashable {
         case .english:
             String(localized: "For English. A \(KeyboardParakeetDownload.format(KeyboardParakeetDownload.bytes)) download on Wi-Fi.")
         case .multilingual:
-            String(localized: "25 languages, even mixed in one sentence: \(Self.multilingualLanguages). A \(ParakeetUltraTranscriber.downloadSize) download as soon as you pick it. Hex dictates them with it too.")
+            String(localized: "25 languages, even mixed in one sentence: \(Self.multilingualLanguages). A \(ParakeetUltraTranscriber.downloadSize) download on Wi-Fi. Hex dictates them with it too.")
         }
     }
 
@@ -35,13 +35,15 @@ enum SpeechModelChoice: String, CaseIterable, Hashable {
         return ListFormatter.localizedString(byJoining: names.sorted { $0.localizedStandardCompare($1) == .orderedAscending })
     }
 
-    /// Picked in Settings: Multilingual downloads at once beside the engine Hex dictates with;
-    /// English stops that download (deleted unless complete) and gets English's model as
-    /// Speech model in keyboard does. The model picked before stays, and keeps dictating
-    /// English, until the new one is downloaded and has loaded once (`unpicked`).
+    /// Picked in Settings: Multilingual downloads beside the engine Hex dictates with, on Wi-Fi
+    /// or after Use mobile data; English stops that download (deleted unless complete) and gets
+    /// English's model as Speech model in keyboard does. The model picked before stays, and keeps
+    /// dictating English, until the new one is downloaded and has loaded once (`unpicked`).
+    /// Use mobile data was for the other model's download: this one asks again.
     @MainActor
     func select() {
         guard self != Self.current else { return }
+        SpeechModelDownloadNetwork.shared.forgetMobileData()
         MultilingualParakeetSettings().isEnabled = self == .multilingual
         DictationController.shared.multilingualParakeetChanged()
         DictationController.shared.startKeyboardParakeetDownloadIfWanted()

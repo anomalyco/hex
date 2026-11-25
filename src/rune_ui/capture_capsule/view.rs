@@ -494,7 +494,7 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 .key("send")
                 .size(send_w, BUTTON_H)
                 .pl(8.0)
-                .gap(5.0)
+                .gap(4.0)
                 .center_y()
                 .radius(ICON_BUTTON_RADIUS)
                 .hover(c.hover)
@@ -840,7 +840,7 @@ pub(super) fn thumbnail(p: Paint, pixels: &rune::Pixels) -> El {
 /// as the clock.
 pub(super) fn timer(p: Paint, surface: &Surface, live: &Animated) -> El {
     row().center_y().absolute(LEAD_TEXT_X, 0.0).h(CHIP_H).child(
-        label(&surface.clock, clock_style(), p.text())
+        label(&surface.clock, p.clock(), p.text())
             .live_text(&live.clock)
             .w(clock_width(&surface.clock)),
     )

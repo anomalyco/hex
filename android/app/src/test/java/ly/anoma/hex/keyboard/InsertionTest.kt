@@ -1,6 +1,7 @@
 package ly.anoma.hex.keyboard
 
 import java.net.ServerSocket
+import java.util.Locale
 import kotlin.concurrent.thread
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -16,6 +17,7 @@ import ly.anoma.hex.feedback.FeedbackRequest
 import ly.anoma.hex.feedback.FeedbackRetry
 import ly.anoma.hex.feedback.FeedbackSender
 import ly.anoma.hex.speech.DictationLanguage
+import ly.anoma.hex.speech.PhoneLanguage
 import ly.anoma.hex.speech.FrenchSpacing
 import ly.anoma.hex.speech.Spoken
 import ly.anoma.hex.speech.SpokenCleanup
@@ -23,7 +25,9 @@ import ly.anoma.hex.speech.SpokenPunctuation
 import ly.anoma.hex.speech.SpokenText
 import ly.anoma.hex.speech.SpeechOptions
 import ly.anoma.hex.speech.Style
+import ly.anoma.hex.speech.swipeUnreadableIn
 import ly.anoma.hex.speech.typingLayout
+import ly.anoma.hex.speech.phoneLanguage
 import ly.anoma.hex.speech.SpeechEdges
 import ly.anoma.hex.speech.speechSpan
 
@@ -495,6 +499,25 @@ class InsertionTest {
         assertEquals(DictationLanguage.Norwegian, DictationLanguage.automatic(null, listOf("nb")))
         assertEquals(DictationLanguage.English, DictationLanguage.automatic(null, listOf("ja")))
     }
+    @Test fun automaticListensForTheKeyboardsAndThePhonesLanguages() {
+        // The keyboard's language first, then the phone's other languages Hex dictates, then the last one picked by hand.
+        assertEquals(listOf(DictationLanguage.English, DictationLanguage.Spanish),
+            DictationLanguage.candidates(DictationLanguage.English, listOf("en", "es"), null))
+        assertEquals(listOf(DictationLanguage.Spanish, DictationLanguage.English),
+            DictationLanguage.candidates(DictationLanguage.Spanish, listOf("en", "es"), null))
+        assertEquals(listOf(DictationLanguage.German, DictationLanguage.English, DictationLanguage.Italian),
+            DictationLanguage.candidates(DictationLanguage.German, listOf("en"), DictationLanguage.Italian))
+        // At most three, the pick last.
+        assertEquals(listOf(DictationLanguage.English, DictationLanguage.Spanish, DictationLanguage.German),
+            DictationLanguage.candidates(DictationLanguage.English, listOf("es", "de", "fr"), DictationLanguage.Italian))
+        // Bokmål and Nynorsk are one; Danish, Swedish and languages Hex doesn't dictate never count.
+        assertEquals(listOf(DictationLanguage.English, DictationLanguage.Norwegian),
+            DictationLanguage.candidates(DictationLanguage.English, listOf("nb", "nn", "da", "sv", "ja"), null))
+        // One language: nothing to choose among, so dictation runs as it does with the lab off.
+        assertEquals(listOf(DictationLanguage.English), DictationLanguage.candidates(DictationLanguage.English, listOf("en", "zh"), null))
+        assertEquals(listOf(DictationLanguage.English),
+            DictationLanguage.candidates(DictationLanguage.English, listOf("en"), DictationLanguage.English))
+    }
     @Test fun whisperHearsTheSpeechAndAMarginNotTheQuietAround() {
         val second = 16_000
         // A tap, 3 s of speech from 1 s, then quiet to the 60 s limit: 0.3 s before it to 0.5 s after it.
@@ -542,7 +565,7 @@ class InsertionTest {
         assertEquals(DictationLanguage.Portuguese, DictationLanguage.automatic(null, listOf("pt")))
         assertEquals(DictationLanguage.Portuguese, DictationLanguage.automatic(null, listOf("pt", "en")))
         assertEquals(DictationLanguage.Portuguese, DictationLanguage.matching("pt"))
-        assertEquals(null, DictationLanguage.Portuguese.layout)
+        assertEquals(Spoken.Portuguese, DictationLanguage.Portuguese.layout)
         fun format(text: String, style: Style) = SpokenText.format(text, SpeechOptions(style, DictationLanguage.Portuguese,
             clean = true, translate = false, formatLists = true, spokenPunctuation = true))
         // English cleanup would drop "um" (a filler there, "a" here) and read "no" as a correction.
@@ -553,6 +576,24 @@ class InsertionTest {
         assertEquals("Fiquei no hotel um dia", format("Fiquei no hotel um dia", Style.Verbatim))
         assertEquals("o ônibus", SpokenText.continuing("O ônibus", "e", "pt"))
         assertEquals("Maria chegou", SpokenText.continuing("Maria chegou", "e", "pt"))
+    }
+    @Test fun setupSaysWhichLanguageAutomaticDictatesAndWhy() {
+        fun phone(vararg tags: String) = phoneLanguage(null, null, tags.map { Locale.forLanguageTag(it) })
+        assertEquals(PhoneLanguage(DictationLanguage.English), phone("en-US"))
+        // Two languages Hex dictates: the first, the other a hold of the space bar away.
+        assertEquals(PhoneLanguage(DictationLanguage.Portuguese, others = listOf(DictationLanguage.English)), phone("pt-BR", "en-US", "pt-PT"))
+        // A first language Hex can't dictate is named in itself; Automatic takes the next one it can.
+        assertEquals(PhoneLanguage(DictationLanguage.German, "日本語"), phone("ja-JP", "de-DE"))
+        assertEquals(PhoneLanguage(DictationLanguage.English, "中文"), phone("zh-CN"))
+        // The phone's own list, whatever Hex's App language: English only, with Hex in 中文, is English, said as such.
+        assertEquals(PhoneLanguage(DictationLanguage.English), phone("en-US"))
+        assertEquals(PhoneLanguage(DictationLanguage.English, "Svenska"), phone("sv-SE", "en-US"))
+        assertEquals(PhoneLanguage(DictationLanguage.Portuguese, others = listOf(DictationLanguage.English)), phone("pt-BR", "en-US"))
+        assertEquals(PhoneLanguage(DictationLanguage.Spanish, others = listOf(DictationLanguage.English, DictationLanguage.Portuguese)),
+            phone("es-ES", "en-US", "pt-BR"))
+        // A language chosen in Settings, or a pinned layout, is its own reason.
+        assertEquals(PhoneLanguage(DictationLanguage.Spanish, automatic = false), phoneLanguage(DictationLanguage.Spanish, null, listOf(Locale.forLanguageTag("ja-JP"))))
+        assertEquals(PhoneLanguage(DictationLanguage.German, automatic = false), phoneLanguage(null, Spoken.German, listOf(Locale.forLanguageTag("pt-BR"), Locale.ENGLISH)))
     }
     @Test fun polishAndRussianAreDictationLanguagesWithoutEnglishRules() {
         // Polish and Russian phones used to fall back to English, and Whisper told "en" translates.
@@ -575,9 +616,10 @@ class InsertionTest {
         assertEquals("Москва большая", SpokenText.continuing("Москва большая", "и", "ru"))
     }
     @Test fun aDictationLanguageWithoutItsOwnLayoutHasNoTypingModel() {
-        // Português keeps English's keys and accents, but its typing model would be English's: until a
+        // Nederlands keeps English's keys and accents, but its typing model would be English's: until a
         // layout is pinned, English's word list only stands in for the keys' geometry and your own words.
-        assertEquals(null, typingLayout(null, DictationLanguage.Portuguese))
+        // Português has a model of its own (Brazil's).
+        assertEquals(Spoken.Portuguese, typingLayout(null, DictationLanguage.Portuguese))
         assertEquals(null, typingLayout(null, DictationLanguage.Dutch))
         assertEquals(null, typingLayout(null, DictationLanguage.Polish))
         assertEquals(null, typingLayout(null, DictationLanguage.Russian))
@@ -586,6 +628,18 @@ class InsertionTest {
         assertEquals(Spoken.English, typingLayout(Spoken.English, DictationLanguage.Dutch))
         assertEquals(Spoken.Spanish, typingLayout(null, DictationLanguage.Spanish))
         assertEquals(Spoken.French, typingLayout(Spoken.French, DictationLanguage.Spanish))
+    }
+    @Test fun aSwipeNamesTheDictationLanguageWithoutATypingModel() {
+        // A swipe there types nothing, so the strip says swipes aren't available in the language, as the space bar names it.
+        assertEquals("Nederlands", swipeUnreadableIn(null, DictationLanguage.Dutch)?.label)
+        assertEquals("Polski", swipeUnreadableIn(null, DictationLanguage.Polish)?.label)
+        assertEquals("Русский", swipeUnreadableIn(null, DictationLanguage.Russian)?.label)
+        // A pinned layout's model reads swipes, and so does a dictation language with its own: nothing to say.
+        assertEquals(null, swipeUnreadableIn(Spoken.English, DictationLanguage.Dutch))
+        assertEquals(null, swipeUnreadableIn(Spoken.German, DictationLanguage.Polish))
+        for (language in listOf(DictationLanguage.English, DictationLanguage.Spanish, DictationLanguage.German,
+                DictationLanguage.Norwegian, DictationLanguage.French, DictationLanguage.Italian, DictationLanguage.Portuguese))
+            assertEquals(null, swipeUnreadableIn(null, language))
     }
     // Batch 3 (Rollover, holds, field kinds). These belong in a KeyboardTouchTest once new test files are agreed.
     @Test fun overlappingKeysTypeInTheOrderTheyWentDown() {
@@ -599,6 +653,20 @@ class InsertionTest {
         roll.down("shift"); down("g"); up("g"); up("shift") // shift acts as it goes down; it types nothing
         down("h"); roll.down("shift"); up("h")              // h held, shift down: h types first
         assertEquals("asd fgh", typed.toString())
+    }
+    @Test fun keyboardHeightIsGboardsStepsAndNormalUntilChosen() {
+        assertEquals(KeyboardHeight.Normal, KeyboardHeight.of(null))
+        assertEquals(KeyboardHeight.Normal, KeyboardHeight.of("huge"))
+        for (step in KeyboardHeight.entries) assertEquals(step, KeyboardHeight.of(step.key))
+        val shares = KeyboardHeight.entries.map { it.share }
+        assertEquals(shares.sorted(), shares)
+        assertEquals(1f, KeyboardHeight.Normal.share)
+        assertEquals(7, KeyboardHeight.entries.size)
+        // Inside Gboard's Resize (0.69 to 1.62 of the step); only the keys change, the gap between rows stays.
+        assertTrue(shares.first() >= 0.69f && shares.last() <= 1.62f)
+        val rows = KeyRows.of(375f, landscape = false)
+        for (step in KeyboardHeight.entries) assertEquals(rows.gap, step.of(rows).gap, 0.001f)
+        assertEquals(rows, KeyboardHeight.Normal.of(rows))
     }
     @Test fun heldKeysOfferGboardsOptions() {
         assertEquals(listOf("3", "e", "è", "é"), LetterFeedback.holds('e', "en", KeyboardLetters.digit(0, 2)).take(4))
@@ -824,5 +892,55 @@ class InsertionTest {
         assertFalse(SwipeText.takesBack("Hello worl", "Hello world", "world", letterByLetter = false))
         assertFalse(SwipeText.takesBack("Hello world", null, "world", letterByLetter = false))
         assertFalse(SwipeText.takesBack("Hello world!", "Hello world!", "world", letterByLetter = false))
+    }
+    @Test fun aDictationGoesOnlyIntoTheFieldItWasSpokenIn() {
+        val field = DictationField()
+        field.started()
+        val spoken = field.current
+        // The app hid the keyboard: no start came, the field is still current and connected, so the text goes in,
+        // shown or not.
+        assertTrue(field.takes(spoken, connected = true, secure = false))
+        assertFalse(field.takes(spoken, connected = false, secure = false))
+    }
+    @Test fun aDictationNeverReachesAnotherFieldAppOrPasswordField() {
+        val field = DictationField()
+        field.started()
+        val spoken = field.current
+        // Any start is another field: focus moving in a native app, another app, and a restart, which is how Chrome, a
+        // WebView or a Compose screen moves between its inputs (measured: same package, field ID -1 and EditorInfo for
+        // two web inputs, restarting = true).
+        field.started()
+        assertFalse(field.takes(spoken, connected = true, secure = false))
+        // A password field never takes a dictation, even its own.
+        assertFalse(field.takes(field.current, connected = true, secure = true))
+    }
+    @Test fun aDictationWhoseFieldIsGoneIsDropped() {
+        val field = DictationField()
+        field.started()
+        val spoken = field.current
+        field.finished()
+        assertFalse(field.takes(spoken, connected = true, secure = false))
+        field.started()
+        assertFalse(field.takes(spoken, connected = true, secure = false))
+    }
+    @Test fun aHoldCutShortByTheKeyboardHidingFinishes() {
+        assertTrue(DictationField.cancelledHoldFinishes(keyboardShown = false))
+        // A cancel with the keyboard still up discards the hold's dictation, as before.
+        assertFalse(DictationField.cancelledHoldFinishes(keyboardShown = true))
+    }
+    @Test fun aDictationWhoseFieldWentIsOfferedOnlyInTheSameApp() {
+        val field = DictationField()
+        field.started(app = "ai.x.grok")
+        val spoken = field.current
+        field.finished()
+        field.started(app = "ai.x.grok")
+        assertEquals("ai.x.grok", field.appOf(spoken))
+        assertTrue(DictationField.offersKept(field.appOf(spoken), "ai.x.grok", secure = false))
+        // Never in another app, a password field, or for a field Hex no longer remembers.
+        assertFalse(DictationField.offersKept(field.appOf(spoken), "com.bank", secure = false))
+        assertFalse(DictationField.offersKept(field.appOf(spoken), "ai.x.grok", secure = true))
+        repeat(10) { field.started(app = "chat") }
+        assertNull(field.appOf(spoken))
+        assertFalse(DictationField.offersKept(null, "chat", secure = false))
     }
 }

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Experiments › Two-language dictation, in the shared App Group so in-keyboard dictation
+/// Labs › Two-language dictation, in the shared App Group so in-keyboard dictation
 /// reads it too. Off by default. While it is on, Apple Speech reads one recording in the
 /// language dictation resolved and in the first other keyboard language whose model is
 /// already installed, and keeps the more confident reading for each phrase

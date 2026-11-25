@@ -15,7 +15,7 @@ use std::time::Duration;
 use rune::color::{srgb_decode, srgb_encode};
 use rune::{Color, Cursor, El, LineCap, Live, Shape, Tween, canvas, col, el, row, text};
 
-use super::super::controls::Paint;
+use super::super::controls::{CAPSULE, Paint};
 use super::{ACTIONS_INSET, CAPSULE_INSET, Capsule, button, panel_radius, presence};
 use crate::calendar::CallProvider;
 use crate::desktop::i18n::{tr, tr_fill};
@@ -29,7 +29,7 @@ pub(super) const PANEL_WIDTH: f32 = 460.0;
 pub(super) const ICON_SIZE: f32 = 26.0;
 /// Matches the capsule buttons' corner radius (`p.k.radius.md`) and macOS app
 /// icons' rounded-rect silhouette.
-const ICON_RADIUS: f32 = 6.0;
+const ICON_RADIUS: f32 = CAPSULE.inner(CAPSULE.button_inset);
 /// Fallback provider glyph size inside the `ICON_SIZE` tile.
 const GLYPH_SIZE: f32 = 15.0;
 /// Uniform clear gap between the icon's outer edge and the ring's inner edge.
@@ -43,7 +43,7 @@ const STROKE_INSET: f32 = RING_STROKE * 0.5;
 /// Centreline corner radius, concentric with the icon across `RING_GAP`.
 const STROKE_RADIUS: f32 = ICON_RADIUS + RING_GAP + STROKE_INSET;
 /// Left padding inside the 56 pt body: matches top/bottom `(56 - 36) / 2 = 10`.
-const BODY_PL: f32 = 10.0;
+const BODY_PL: f32 = CAPSULE.row_px;
 /// Points sampled along each 90° rounded corner.
 const CORNER_STEPS: usize = 20;
 
@@ -111,9 +111,9 @@ pub(super) fn view(
     let (status, status_font) = match content.countdown {
         Some((_, left)) => (
             tr_fill("Recording stops in {} s", &seconds(left).to_string()),
-            p.k.ty.small.features("'tnum' 1"),
+            p.tabular(p.meta()),
         ),
-        None => (tr("Hex is still recording.").to_owned(), p.k.ty.small),
+        None => (tr("Hex is still recording.").to_owned(), p.meta()),
     };
     let stop_label = if content.countdown.is_some() {
         tr("Stop now")

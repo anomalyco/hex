@@ -154,6 +154,8 @@ android {
     sourceSets["main"].assets.srcDir(modelAssets)
     // The same plain-text Android policy ships in Settings and in the Play listing drafts.
     sourceSets["main"].assets.srcDir(rootProject.file("play/policy"))
+    // The Hex words file's shared cases, read by path rather than copied (docs/specs/hex-words.md).
+    sourceSets["test"].resources.srcDir("../../tests/fixtures/hex-words")
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -183,9 +185,9 @@ val verifyInter by tasks.registering {
 // Pin the licensed HXTM files. An older prototype word-pair list cannot slip into an APK.
 val verifyTypingModels by tasks.registering {
     val dir = file("src/main/assets/typing")
-    val names = listOf("en.hextm", "es.hextm", "de.hextm", "nb.hextm", "fr.hextm", "it.hextm", "en.valid",
-        "es.valid", "de.valid", "nb.valid", "fr.valid", "it.valid",
-        "en.capitals", "es.capitals", "de.capitals", "fr.capitals", "it.capitals")
+    val names = listOf("en.hextm", "es.hextm", "de.hextm", "nb.hextm", "fr.hextm", "it.hextm", "pt.hextm", "en.valid",
+        "es.valid", "de.valid", "nb.valid", "fr.valid", "it.valid", "pt.valid",
+        "en.capitals", "es.capitals", "de.capitals", "fr.capitals", "it.capitals", "pt.capitals")
     val manifest = dir.resolve("SHA256SUMS")
     inputs.files(names.map(dir::resolve) + manifest)
     doLast {

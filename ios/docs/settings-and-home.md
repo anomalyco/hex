@@ -2,7 +2,7 @@
 
 Part of [Hex for iPhone](../README.md).
 
-Home's single screen and the four Settings pages, the experiments list,
+Home's single screen and the four Settings pages, the Labs list,
 and every `--snap-state` scene the app and the keyboard render.
 
 ## Settings (`ContentView`, `HEXMobile/Settings/`)
@@ -33,8 +33,11 @@ list starts at the top. The pages, one file each in `HEXMobile/Settings/`
   stored in Show what I say's and Type as I speak's two App Group keys (`LiveDictationMode`:
   Into field when Type as I speak's is on, In bar when only Show what I say's is, Off when
   neither; picking one writes both, so the two together, which 1.0.4 allowed, keep working
-  until another is picked); then Clean up what I say and Custom vocabulary (its list below
-  the switch); and last Speech model in keyboard, then **Model**: **English** (the
+  until another is picked); then Clean up what I say and Custom vocabulary (below the
+  switch while it's on: its list, then the **Word replacements** and **Words file** rows,
+  and **Undo last import** while an import can still be undone; see
+  [dictation.md](dictation.md#word-replacements-and-hex-words-files-settings--dictation--custom-vocabulary));
+  and last Speech model in keyboard, then **Model**: **English** (the
   default) or **Multilingual** (`SpeechModelChoice`, from Experiments until 2026-11-24, on
   iPhones with 6 GB or more), with what the picked one means and its status below,
   Keep mic warm and Microphone.
@@ -56,7 +59,7 @@ list starts at the top. The pages, one file each in `HEXMobile/Settings/`
   learned below the switch), and under **Advanced**, Record typing logs (off
   by default) with its Typing logs viewer while it's on; last, under **Feedback**, what
   Send feedback sends and when (only in a build with a report key).
-- **Experiments**, in four groups: **Dictation**: Two-language dictation, Voice isolation and Clean up with Apple Intelligence;
+- **Labs**, in four groups: **Dictation**: Two-language dictation, Voice isolation and Clean up with Apple Intelligence;
   **Languages**: Hinglish (Hindi in Latin letters), Greeklish (Greek in Latin letters),
   Korean keyboard (두벌식), Swipe typing in more languages and German spatial autocorrect
   (greyed, its value kept, unless Autocorrect and Spatial autocorrect are on); **Keyboard
@@ -73,7 +76,10 @@ added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
 (before iOS has asked for the microphone), and
 `settings-<dictation|keyboard|privacy|experiments>[-on][-end]`, and
 `model-card-<waiting|downloading|ready>` (Home's speech model card, with English
-dictation and no keyboard limit, so nothing downloads). Each settings scene writes
+dictation and no keyboard limit, so nothing downloads),
+`settings-dictation-model-<english|multilingual>-<waiting|downloading|ready>` (Settings ›
+Dictation › Model with that model picked and its download in that state; waiting wants
+`--simulate-cellular`, which makes Hex read the connection as off Wi-Fi). Each settings scene writes
 its page's switches to the App Group: off by default, on with `-on`; switches that are
 on by default (Spatial autocorrect, Swipe typing, Emoji key, Emoji suggestions) stay on.
 `-end` starts the page scrolled to the bottom. `settings-privacy-confirm`
@@ -90,7 +96,7 @@ look.
 A form that sends one report to Bellhop, Anomaly's feedback inbox
 (`POST https://api.blhp.app/v1/feedback`, https://blhp.app/docs/feedback), from Home's
 **Send feedback** row (`metadata.screen` "Home") and the row at the end of Settings ›
-Experiments ("Settings › Experiments"). Only the app has it: the keyboard target has no
+Labs ("Settings › Labs"). Only the app has it: the keyboard target has no
 feedback code or key and still makes no network request.
 
 ```ts

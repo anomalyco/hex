@@ -48,13 +48,13 @@ impl Filter {
 struct Sources {
     library: bool,
     annotate: bool,
-    root: PathBuf,
+    roots: Vec<PathBuf>,
     days: Option<u32>,
 }
 
-/// Merge on owner paths, not labels, ids from a different index, or text.
-/// A legacy library annotation and a ready Hex receipt for the same bundle
-/// produce one row with the completion timestamp.
+/// Merge on manifest identity without promoting an unmarked copy to a
+/// pasteable receipt. A library annotation and a ready Hex receipt for the
+/// same manifest produce one row with the completion timestamp.
 type FileRows = (Vec<Listed>, BTreeMap<PathBuf, Receipt>);
 fn capture_rows(s: &Sources, now: u64) -> FileRows {
     let files = if s.library {
@@ -69,23 +69,23 @@ fn capture_rows_from(s: &Sources, now: u64, indexed: Vec<saved::CaptureEntry>) -
     let mut bundles = BTreeMap::new();
     let mut receipts = BTreeMap::new();
     if s.library {
-        for a in annotations::in_folder(&s.root, now) {
-            bundles.insert(a.bundle.clone(), a);
+        for a in annotations::in_folders(&s.roots, now) {
+            bundles.insert(a.manifest_id.clone(), a);
         }
     }
     if s.annotate {
-        for ready in timeline::marked(&Scope::new(&s.root, s.days), usize::MAX, now) {
+        let scope = Scope::in_roots(&s.roots, s.days);
+        for ready in timeline::marked(&scope, usize::MAX, now) {
             let Owner::Paste(PasteId::Capture(id)) = ready.id else {
                 continue;
             };
-            if let Some(mut a) = bundles
-                .remove(id.bundle())
-                .or_else(|| annotations::read(id.bundle()))
-            {
-                a.at_ms = ready.ready_at;
-                receipts.insert(a.bundle.clone(), id);
-                bundles.insert(a.bundle.clone(), a);
-            }
+            let Some((dir, manifest)) = scope.resolve(&id, now) else {
+                continue;
+            };
+            let mut a = annotations::from_manifest(&dir, manifest);
+            a.at_ms = ready.ready_at;
+            receipts.insert(a.bundle.clone(), id);
+            bundles.insert(a.manifest_id.clone(), a);
         }
     }
     let mut files = BTreeMap::new();
@@ -135,14 +135,6 @@ impl Pane {
     }
 }
 
-pub(in crate::rune_ui) fn destination(ui: &mut Ui, pane: Destination) -> Destination {
-    if ui.history.unified.enabled && pane == Destination::Captures {
-        filter(ui, Filter::Captures);
-        Destination::History
-    } else {
-        pane
-    }
-}
 pub(in crate::rune_ui) fn poll(ui: &mut Ui) -> bool {
     if !ui.history.unified.enabled
         || ui.pane != Destination::History
@@ -156,7 +148,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui) -> bool {
     let sources = Sources {
         library: ui.settings.labs.screenshots,
         annotate: settings.enabled,
-        root: settings.captures_dir(),
+        roots: settings.annotation_roots(),
         days: settings.bundle_days,
     };
     let state = &mut ui.history.unified;

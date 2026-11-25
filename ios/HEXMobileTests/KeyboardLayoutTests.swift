@@ -185,7 +185,7 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(land.totalHeight, 198)
     }
 
-    /// Settings › Experiments › Join the keyboard when unfolded: off, the unfolded Duo splits as
+    /// Settings › Labs › Join the keyboard when unfolded: off, the unfolded Duo splits as
     /// before; on, one joined keyboard with unfoldedTall's side inset and unfoldedWide's rows.
     func testJoiningTheUnfoldedDuoDrawsOneKeyboard() {
         let split = KeyboardLayout(width: 801, posture: .unfoldedWide, windowInset: 75)
@@ -921,7 +921,7 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(layout.hitTest(CGPoint(x: 10, y: p.midY))?.kind, .character("p"), "the space left of P is P's")
     }
 
-    /// Settings › Experiments › Dvorak punctuation keys changes only English's Dvorak letters
+    /// Settings › Labs › Dvorak punctuation keys changes only English's Dvorak letters
     /// page: every other arrangement, and every page but the letters, builds the same keys with
     /// it on as with it off, and knows the row isn't there.
     func testDvorakPunctuationOffLeavesEveryLayoutAlone() {
@@ -971,7 +971,7 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
-    /// Settings › Experiments › Dvorak punctuation keys, on: comma and period come before P on
+    /// Settings › Labs › Dvorak punctuation keys, on: comma and period come before P on
     /// row 1, which starts at the left margin on a pitch no wider than row 3's, and delete keeps
     /// its keycap and place; rows 2 and 3 and the bottom row's other keys don't move.
     func testDvorakPunctuationPutsCommaAndPeriodBeforeP() throws {
@@ -1024,7 +1024,7 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
-    /// Settings › Experiments › Dvorak punctuation keys, on the Duo's split keyboard: comma and
+    /// Settings › Labs › Dvorak punctuation keys, on the Duo's split keyboard: comma and
     /// period go before P on the left half, whose pitch narrows to keep its right edge, the
     /// right half stays exactly where it was, and the semicolon takes its width from the left
     /// space bar, which keeps ending where it did.
@@ -1165,7 +1165,7 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertNotEqual(try plane(punctuated), try plane(apple), "the narrower row 1 is its own plane")
     }
 
-    /// Settings › Experiments › Comma and period keys changes only an iPhone's letters page in a
+    /// Settings › Labs › Comma and period keys changes only an iPhone's letters page in a
     /// text field: every other page, field, arrangement and iPad builds the same keys with it on
     /// as with it off, and where Dvorak punctuation is drawn its row 1 already has both.
     func testCommaAndPeriodKeysChangeOnlyAnIPhonesLettersPage() {
@@ -1222,7 +1222,7 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(dvorakOn.key(.character(";"))?.row, 3, "the semicolon stays")
     }
 
-    /// Settings › Experiments › Comma and period keys, on: a comma sits just left of the space
+    /// Settings › Labs › Comma and period keys, on: a comma sits just left of the space
     /// bar and a period just right of it, a letter wide and taking their width from the bar,
     /// and no other key moves. It fits every joined bottom row the iPhone builds.
     func testCommaAndPeriodKeysSitBesideTheSpaceBar() throws {
@@ -1282,7 +1282,7 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
-    /// Settings › Experiments › Comma and period keys on the Duo's split keyboard: a comma just
+    /// Settings › Labs › Comma and period keys on the Duo's split keyboard: a comma just
     /// left of the left half's space bar and a period just right of the right half's, each a
     /// split letter wide and taking its width from that half's bar, which keeps its far end;
     /// the halves keep their edges and every other key stays put.
@@ -1330,7 +1330,7 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
-    /// Settings › Experiments › Comma and period keys on the portrait bottom row, across widths,
+    /// Settings › Labs › Comma and period keys on the portrait bottom row, across widths,
     /// phone sizes, globe and emoji, and every Hex key placement: the comma and period are there
     /// if and only if the space bar held three letters and two gaps, the bar they leave is still
     /// a letter wide, every key is inside the keyboard, and its midpoint hits itself.
@@ -2993,7 +2993,7 @@ final class KeyboardLayoutTests: XCTestCase {
             for (width, posture, inset) in [(452.0, KeyboardPosture.cover, 7.0), (655, .unfoldedTall, 7), (801, .unfoldedWide, 75)] {
                 pair(layer) { KeyboardLayout(width: width, layer: $1, showsGlobe: true, posture: posture, windowInset: inset, numberRow: $0) }
             }
-            // The unfolded keyboard joined (Settings › Experiments): its rows never split.
+            // The unfolded keyboard joined (Settings › Labs): its rows never split.
             pair(layer) { KeyboardLayout(width: 801, layer: $1, showsGlobe: true, posture: .unfoldedWide, windowInset: 75, numberRow: $0, joinsUnfoldedKeyboard: true) }
         }
         return pairs
@@ -3210,7 +3210,7 @@ final class KeyboardLayoutTests: XCTestCase {
         }
         layouts.append(KeyboardLayout(width: 528, orientation: .landscape, posture: .cover, windowInset: 75))
         layouts.append(KeyboardLayout(width: 528, orientation: .landscape, showsGlobe: true, posture: .cover, windowInset: 75))
-        // The unfolded keyboard joined (Settings › Experiments), its rows' heights kept: every
+        // The unfolded keyboard joined (Settings › Labs), its rows' heights kept: every
         // language, the globe and emoji on and off, and the Hex key either side. The number row
         // has its own layouts (`numberRowLayouts`), since these suites assume none.
         for language in KeyboardLanguage.allCases {
@@ -3688,7 +3688,7 @@ final class FullKeyboardSettingsTests: XCTestCase {
         XCTAssertFalse(settings.numberRow)
     }
 
-    /// Settings › Experiments › Join the keyboard when unfolded is off by default, keeps its
+    /// Settings › Labs › Join the keyboard when unfolded is off by default, keeps its
     /// App Group key, and `--join-unfolded-keyboard on|off` sets it.
     func testJoinUnfoldedKeyboardIsOffByDefault() throws {
         let suite = "FullKeyboardSettingsTests-\(UUID().uuidString)"
@@ -3704,7 +3704,7 @@ final class FullKeyboardSettingsTests: XCTestCase {
         XCTAssertFalse(settings.joinsKeyboardWhenUnfolded)
     }
 
-    /// Settings › Experiments › Dvorak punctuation keys is off by default, keeps its App Group
+    /// Settings › Labs › Dvorak punctuation keys is off by default, keeps its App Group
     /// key, and `--experiment-dvorak-punctuation` turns it on.
     func testDvorakPunctuationIsOffByDefault() throws {
         let suite = "FullKeyboardSettingsTests-\(UUID().uuidString)"
@@ -3718,7 +3718,7 @@ final class FullKeyboardSettingsTests: XCTestCase {
         XCTAssertEqual(defaults.object(forKey: "experiments.dvorakPunctuation") as? Bool, true)
     }
 
-    /// Settings › Experiments › Comma and period keys is off by default, keeps its App Group
+    /// Settings › Labs › Comma and period keys is off by default, keeps its App Group
     /// key, and `--experiment-comma-period-keys` turns it on.
     func testCommaAndPeriodKeysAreOffByDefault() throws {
         let suite = "FullKeyboardSettingsTests-\(UUID().uuidString)"
@@ -3732,7 +3732,7 @@ final class FullKeyboardSettingsTests: XCTestCase {
         XCTAssertEqual(defaults.object(forKey: "experiments.commaPeriodKeys") as? Bool, true)
     }
 
-    /// Settings › Experiments › Quick accents is off by default, keeps its App Group key
+    /// Settings › Labs › Quick accents is off by default, keeps its App Group key
     /// (`experiments.quickAccents`), and `--experiment-quick-accents` turns it on.
     func testQuickAccentsIsOffByDefault() throws {
         let suite = "FullKeyboardSettingsTests-\(UUID().uuidString)"

@@ -2,6 +2,9 @@
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Whether the phone's network charges for data (unmetered Wi-Fi or not), so the speech model waits for Wi-Fi
+         unless the person chooses mobile data. Hex asks for nothing else about the network. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Hex registers no non-exported dynamic receivers through ContextCompat. -->
     <permission android:name="${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" tools:node="remove" />
@@ -13,7 +16,8 @@
         <provider android:authorities="user_dictionary" />
     </queries>
     <application android:label="@string/app_name" android:icon="@mipmap/ic_launcher"
-        android:theme="@style/HexApp" android:allowBackup="false" android:usesCleartextTraffic="false" android:supportsRtl="true">
+        android:theme="@style/HexApp" android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules" android:usesCleartextTraffic="false" android:supportsRtl="true">
         <activity android:name=".MainActivity" android:exported="true"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
@@ -21,6 +25,30 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- Hex words files (docs/specs/hex-words.md): opened from Files, mail or the share sheet into a review
+             sheet that changes nothing until Add. Content addresses only, no BROWSABLE category. -->
+        <activity android:name=".words.WordsActivity" android:exported="true" android:label="@string/words_open_label">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:mimeType="application/vnd.anomaly.hex-words+json" />
+                <data android:mimeType="application/json" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/vnd.anomaly.hex-words+json" />
+                <data android:mimeType="application/json" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
+        </activity>
+        <!-- Shares an exported words file from Hex's cache (res/xml/words_files.xml); not exported, per-share grants. -->
+        <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.words"
+            android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/words_files" />
+        </provider>
         <service android:name=".keyboard.HexKeyboard" android:label="@string/app_name"
             android:theme="@style/HexIme" android:exported="true"
             android:permission="android.permission.BIND_INPUT_METHOD">
@@ -29,5 +57,18 @@
             </intent-filter>
             <meta-data android:name="android.view.im" android:resource="@xml/input_method" />
         </service>
+        <!-- Labs › Dictate from Quick Settings. Off in the manifest: the Labs switch enables the tile service, so with the
+             lab off Android offers no Hex tile. The sheet is Hex's own (not exported), in a task of its own so it opens
+             over the app in front rather than bringing Hex forward, and kept out of Recents. -->
+        <service android:name=".QuickDictationTile" android:exported="true" android:enabled="false"
+            android:label="@string/quick_tile" android:icon="@drawable/hex_mark"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <activity android:name=".QuickDictationActivity" android:exported="false" android:theme="@style/HexSheet"
+            android:taskAffinity="" android:launchMode="singleTask" android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode|density|fontScale" />
     </application>
 </manifest>

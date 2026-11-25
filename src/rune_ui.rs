@@ -464,7 +464,10 @@ pub(crate) fn show(ui: &mut Ui, destination: Destination, tx: &mut Tx) {
             ui.meetings.select(id);
         }
         #[cfg(hex_capture)]
-        Destination::RoutingRules => scrawl::routing_rules::open(ui),
+        Destination::RoutingRules => {
+            ui.captures.view = scrawl::View::Settings;
+            scrawl::routing_rules::open(ui);
+        }
         _ => {}
     }
 }
@@ -681,7 +684,7 @@ pub(crate) struct Ui {
     build_preview: Option<BuildKind>,
     /// A scene showing the Paste Last picker over the window.
     #[cfg(all(target_os = "macos", hex_capture))]
-    paste_preview: bool,
+    paste_preview: paste_picker::Preview,
     capture: Capture,
     vocabulary: vocabulary::VocabularyEditor,
     /// The model the service was last seen preparing, and since when.
@@ -700,6 +703,8 @@ pub(crate) struct Ui {
     /// the hex link, read when the pane opens and after an install.
     #[cfg(hex_capture)]
     agents: scrawl::Agents,
+    #[cfg(all(hex_capture, not(target_os = "macos")))]
+    capture_folder: Option<crate::desktop::file_dialog::Pending>,
     modes: modes::ModesPane,
     output: output::OutputPane,
     picker: picker::Picker,
@@ -825,7 +830,7 @@ impl Ui {
             screenshot_folder: labs::screenshots::FolderChoice::default(),
             build_preview: None,
             #[cfg(all(target_os = "macos", hex_capture))]
-            paste_preview: false,
+            paste_preview: paste_picker::Preview::default(),
             capture: Capture::Idle,
             vocabulary,
             preparing: None,
@@ -838,6 +843,8 @@ impl Ui {
             captures: captures::CapturesPane::default(),
             #[cfg(hex_capture)]
             agents: scrawl::Agents::default(),
+            #[cfg(all(hex_capture, not(target_os = "macos")))]
+            capture_folder: None,
             modes,
             output: output::OutputPane::default(),
             picker: picker::Picker::default(),
@@ -1209,8 +1216,6 @@ impl Ui {
     /// Switches panes at once: the new pane replaces the old without a fade,
     /// already at rest (a grant's morph doesn't replay).
     fn select_pane(&mut self, pane: Pane, tx: &mut Tx) {
-        #[cfg(all(target_os = "macos", hex_capture))]
-        let pane = history::unified::destination(self, pane);
         let labs = std::mem::take(&mut self.labs_open);
         if self.pane == pane && !labs {
             return;
@@ -1383,7 +1388,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     );
     changed |= history::poll(ui);
     #[cfg(hex_capture)]
-    let mut changed = ui.captures.poll(ui.pane == Pane::Captures && !ui.labs_open) | changed;
+    let mut changed = scrawl::poll_list(ui) | changed;
     #[cfg(all(target_os = "macos", hex_capture))]
     {
         changed |= history::unified::poll(ui);
@@ -1540,8 +1545,6 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         ),
         Pane::Modes => modes::pane(ui, p, &mut layer),
         Pane::History => history::pane(ui, p, &mut layer),
-        #[cfg(hex_capture)]
-        Pane::Captures => (Vec::new(), captures::pane(ui, p)),
         Pane::Meetings => meetings::pane(ui, p, &mut layer),
         #[cfg(hex_capture)]
         Pane::Annotate => (Vec::new(), scrawl::pane(ui, p, &mut layer)),
@@ -1574,9 +1577,12 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
             if ui.labs_open {
                 Some(labs::search_field(ui, p))
             } else {
-                (ui.pane == Pane::Meetings)
-                    .then(|| meetings::view_switch(ui, p))
-                    .flatten()
+                match ui.pane {
+                    Pane::Meetings => meetings::view_switch(ui, p),
+                    #[cfg(hex_capture)]
+                    Pane::Annotate => scrawl::view_switch(ui, p),
+                    _ => None,
+                }
             },
             actions,
         ))
@@ -1605,9 +1611,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         None => {}
     }
     #[cfg(all(target_os = "macos", hex_capture))]
-    if ui.paste_preview {
-        layer.push(paste_picker::preview(p));
-    }
+    layer.extend(paste_picker::preview(&ui.paste_preview, p));
     if let Some(first_run) = onboarding_kit::live::overlay(ui, p, cx.is_reduced_motion()) {
         layer.push(first_run);
     }

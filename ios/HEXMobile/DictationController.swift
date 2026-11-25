@@ -52,6 +52,8 @@ final class DictationController {
     /// Settings › Dictation › Model: Multilingual: its download, beside the engine Hex
     /// dictates with until it's ready.
     @ObservationIgnored let multilingualDownload: ParakeetUltraDownload
+    /// Whether Settings › Dictation › Model's downloads may run: Wi-Fi, or Use mobile data.
+    @ObservationIgnored let downloadNetwork: SpeechModelDownloadNetwork
     private let cleaner: (any TranscriptCleaning)?
     private let cleanupSettings: AppleIntelligenceCleanupSettings
     private let customVocabularySettings: CustomVocabularySettings
@@ -201,7 +203,8 @@ final class DictationController {
         typingJournalSettings: TypingJournalSettings = TypingJournalSettings(),
         learnedDictationCorrections: (@MainActor (String?) -> [DictationCorrection])? = nil,
         languageSettings: LanguageSettings = LanguageSettings(),
-        multilingualDownload: ParakeetUltraDownload? = nil
+        multilingualDownload: ParakeetUltraDownload? = nil,
+        downloadNetwork: SpeechModelDownloadNetwork? = nil
     ) {
         // Before anything reads them: Parakeet's files live in the App Group now.
         SpeechModelStore.moveLegacyDownloads()
@@ -214,6 +217,7 @@ final class DictationController {
         self.transcriber = initialTranscriber
         self.transcriberFactory = transcriberFactory ?? Self.defaultTranscriber
         self.multilingualDownload = multilingualDownload ?? ParakeetUltraDownload()
+        self.downloadNetwork = downloadNetwork ?? .shared
         self.cleaner = cleaner
         self.cleanupSettings = cleanupSettings
         self.customVocabularySettings = customVocabularySettings
@@ -245,8 +249,14 @@ final class DictationController {
         wireAudioCallbacks()
         wireSystemIntentBus()
         self.multilingualDownload.onDownloaded = { [weak self] in
+            self?.downloadNetwork.forgetMobileData(for: .multilingual)
             self?.syncMultilingualParakeet()
         }
+        // Settings › Dictation › Model: Multilingual downloads by itself only on Wi-Fi, as English does.
+        let network = self.downloadNetwork
+        let download = self.multilingualDownload
+        download.mayDownload = { network.mayDownload(.multilingual) }
+        network.observe { [weak download] _ in download?.connectionChanged() }
         if autoPrepareOnInit {
             // At launch no dictation is running, so any Hex Live Activity is left over.
             liveActivity.endImmediately()
@@ -583,7 +593,7 @@ final class DictationController {
         }
 
         switch request {
-        case .setup, .translationSettings, .pasteSettings:
+        case .setup, .translationSettings, .pasteSettings, .home:
             break
 
         case .startSession:

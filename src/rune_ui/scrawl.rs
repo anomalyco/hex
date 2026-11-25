@@ -5,15 +5,17 @@
 //! for the transcriber, demos, and the replay Lab. Scrawl's own app keeps the
 //! shortcut while it runs until "Use Hex for annotations" asks it to quit.
 
+#[cfg(not(target_os = "macos"))]
+pub(super) mod folder;
 pub(super) mod routing_rules;
 
-use rune::{El, col, row, text};
+use rune::{El, Tx, col, row, text};
 use scrawl_capture::retention::{Policy, Preset};
 
 use super::controls::{
     ButtonKind, CardRow, Choice, METRICS, Paint, button, card, folder_label, folding, icon_row,
-    icon_toggle_row, nested, note, page, section, section_with, segmented, select, setting_row,
-    step_row,
+    icon_toggle_row, nested, note, page, section, section_with, segmented, segmented_tx, select,
+    setting_row, step_row,
 };
 use super::general::{advanced_open, advanced_toggle, disclosure_link, keys_button};
 use super::icons::{CLOCK, FOLDER, KEYBOARD, WAVE};
@@ -207,6 +209,15 @@ fn how_it_works(ui: &Ui, p: Paint, view: &ScrawlView) -> El {
 
 fn scrawl_request(ui: &mut Ui, request: ScrawlRequest) {
     ui.ask(PlatformRequest::Scrawl(request));
+}
+
+/// macOS's host opens the chooser and saves the pick; elsewhere the window
+/// does.
+fn choose_folder(ui: &mut Ui) {
+    #[cfg(target_os = "macos")]
+    scrawl_request(ui, ScrawlRequest::ChooseFolder);
+    #[cfg(not(target_os = "macos"))]
+    folder::choose(ui);
 }
 
 /// While Scrawl's own app runs it keeps the shortcut; only this card's
@@ -431,7 +442,7 @@ fn after_rows(ui: &Ui, p: Paint, view: &ScrawlView, layer: &mut Vec<El>) -> Vec<
                     "choose-capture-folder",
                     tr("Change…"),
                     ButtonKind::Secondary,
-                    |ui: &mut Ui, _| scrawl_request(ui, ScrawlRequest::ChooseFolder),
+                    |ui: &mut Ui, _| choose_folder(ui),
                 )),
         ),
     ];
@@ -838,7 +849,75 @@ fn agents_section(ui: &Ui, p: Paint) -> El {
     )
 }
 
+/// What the Annotate pane shows, picked in its header.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum View {
+    #[default]
+    Annotations,
+    Settings,
+}
+
+/// Whether the Annotations/Captures tab is reachable beside Settings.
+pub(super) fn has_list(ui: &Ui) -> bool {
+    ui.settings.capture.enabled || ui.settings.labs.screenshots
+}
+
+/// Polls the Annotations/Captures list only while its tab is visible.
+pub(super) fn poll_list(ui: &mut Ui) -> bool {
+    let visible = ui.pane == Pane::Annotate
+        && ui.captures.view == View::Annotations
+        && has_list(ui)
+        && !ui.labs_open;
+    #[cfg(not(target_os = "macos"))]
+    let chosen = folder::poll(ui);
+    #[cfg(target_os = "macos")]
+    let chosen = false;
+    ui.captures.poll(visible) | chosen
+}
+
+/// The header's `Annotations | Settings` switch (or `Captures | Settings`
+/// while Labs › Screenshots is on), beside the title as in Meetings; hidden
+/// while Annotate and Screenshots are both off.
+pub(super) fn view_switch(ui: &Ui, p: Paint) -> Option<El> {
+    if !has_list(ui) {
+        return None;
+    }
+    let list_label = if ui.settings.labs.screenshots {
+        tr("Captures")
+    } else {
+        tr("Annotations")
+    };
+    let views = [list_label, tr("Settings")];
+    let selected = match ui.captures.view {
+        View::Annotations => 0,
+        View::Settings => 1,
+    };
+    Some(segmented_tx(
+        p,
+        "annotate-view",
+        &views,
+        selected,
+        |ui: &mut Ui, index: usize, tx: &mut Tx| {
+            let view = if index == 0 {
+                View::Annotations
+            } else {
+                View::Settings
+            };
+            if ui.captures.view != view {
+                tx.settle();
+                ui.flush_drafts();
+                ui.open = None;
+                ui.captures.view = view;
+                ui.captures.confirm_trash = None;
+            }
+        },
+    ))
+}
+
 pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
+    if has_list(ui) && ui.captures.view == View::Annotations {
+        return super::captures::pane(ui, p);
+    }
     let view = ui.platform.scrawl.clone().unwrap_or_default();
     let enabled = ui.settings.capture.enabled;
     let mut content = page("content").child(card(p, "enable", top_rows(ui, p, &view)));
@@ -988,6 +1067,7 @@ mod tests {
         state.settings.capture.enabled = true;
         state.settings.labs.annotate_agent_install = true;
         state.platform.scrawl = Some(ScrawlView::preview());
+        state.captures.view = View::Settings;
         state.pane = Pane::Annotate;
         state.agents.paths = Some(agent_install::Paths {
             home: home.to_path_buf(),
@@ -1310,5 +1390,40 @@ mod tests {
             "an older skill",
             "nothing was written through the link"
         );
+    }
+
+    #[test]
+    fn annotate_tabs_switch_between_annotations_and_settings() {
+        let mut rt = pane("mac-annotate");
+        assert!(rt.find("nav-annotate").is_some());
+        assert!(rt.find("nav-captures").is_none());
+        assert!(rt.find("annotate-view").is_some());
+        assert!(rt.find("captures-list").is_some());
+        assert!(rt.find("capture-enabled").is_none());
+        assert!(texts(&rt).iter().any(|t| t == "Annotations"));
+        assert!(texts(&rt).iter().any(|t| t == "Settings"));
+
+        tap(&mut rt, "annotate-view/segment1");
+        assert_eq!(rt.state.captures.view, View::Settings);
+        assert!(rt.find("capture-enabled").is_some());
+        assert!(rt.find("captures-list").is_none());
+
+        tap(&mut rt, "annotate-view/segment0");
+        assert_eq!(rt.state.captures.view, View::Annotations);
+        assert!(rt.find("captures-list").is_some());
+
+        // With Labs › Screenshots on, the same Annotate item labels the tab
+        // Captures without adding a separate sidebar row.
+        let shots = pane("captures");
+        assert!(shots.find("nav-annotate").is_some());
+        assert!(shots.find("nav-captures").is_none());
+        assert!(shots.find("annotate-view").is_some());
+        assert!(shots.find("captures-list").is_some());
+        assert!(texts(&shots).iter().any(|t| t == "Captures"));
+
+        // Off (and Screenshots off): the header switch hides so the opt-in card shows.
+        let off = pane("mac-scrawl-off");
+        assert!(off.find("annotate-view").is_none());
+        assert!(off.find("capture-enabled").is_some());
     }
 }

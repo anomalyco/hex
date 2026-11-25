@@ -43,7 +43,10 @@ import ly.anoma.hex.speech.SpeechModel
 import ly.anoma.hex.speech.SpeechPreferences
 import ly.anoma.hex.speech.Spoken
 import ly.anoma.hex.speech.keepAwake
+import ly.anoma.hex.speech.swipeUnreadableIn
 import ly.anoma.hex.speech.typingLayout
+import ly.anoma.hex.typing.AdaptiveTouchStore
+import ly.anoma.hex.typing.ImportedWords
 import ly.anoma.hex.typing.PersonalWords
 import ly.anoma.hex.typing.SpatialDecoder
 import ly.anoma.hex.typing.TypingModel
@@ -84,6 +87,8 @@ class HexKeyboard : InputMethodService() {
     private fun voiceOnly(subtype: InputMethodSubtype? = null) =
         feedback.voiceOnly && VoiceOnly.shows(true, subtype?.mode ?: subtypeMode())
     private lateinit var capture: MicCapture
+    /** The field dictations are spoken in, so a text only ever goes back into its own. */
+    private val field = DictationField()
     internal val preferences by lazy { SpeechPreferences(this) }
     /** Labs › Learn from my fixes: the word pairs, their counts and when each was last made, and the
      * tracker's reports. */
@@ -103,18 +108,26 @@ class HexKeyboard : InputMethodService() {
     internal val engine by lazy {
         KeyboardEngine(InputConnectionTarget(this), feedback, { layoutLanguage }, { typingLanguage },
             { SpatialDecoder(TypingModel.asset(assets, it)) },
-            readPersonal = { PersonalWords.read(contentResolver, it) }, background = words,
+            readPersonal = { PersonalWords.read(contentResolver, it, if (feedback.importedWords) ImportedWords.read(this) else emptyList()) },
+            background = words,
             emoji = EmojiWords(assets, words),
-            learned = { if (preferences.learnFixes) fixes.record(it) })
+            learned = { if (preferences.learnFixes) fixes.record(it) },
+            adaptiveTouch = { if (feedback.adaptiveTouch) AdaptiveTouchStore.get(this) else null },
+            swipeUnavailable = ::swipeUnavailable)
     }
     private val typingChanged = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == TypingPreferences.SUGGEST_SWEAR_WORDS) engine.swearWordsChanged()
+        if (key == TypingPreferences.KEY_COLORS || key == TypingPreferences.KEY_COLOR) recolor()
         if (key == TypingPreferences.NUMBER_ROW) engine.numberRowChanged()
         if (key == TypingPreferences.LOCAL_CURRENCY) engine.localCurrencyChanged()
         if (key == TypingPreferences.EMOJI_SUGGESTIONS) engine.emojiSuggestionsChanged()
         if (key == TypingPreferences.KEYBOARD_TOOLS) { engine.keyboardToolsChanged(); watchClipboard() }
         if (key == TypingPreferences.VOICE_ONLY) modeChanged()
         if (key == TypingPreferences.PASSWORD_MANAGER_SUGGESTIONS) clearInline()
+        if (key == TypingPreferences.HEIGHT) resize()
+        if (key == TypingPreferences.ADAPTIVE_TOUCH) engine.adaptiveTouchChanged()
+        if (key == TypingPreferences.HEX_KEY_LEFT) view?.hexKeySideChanged()
+        if (key == TypingPreferences.USE_IMPORTED_WORDS || key == TypingPreferences.IMPORTED_WORDS) engine.personalWordsChanged()
     }
     // The strip's Paste tool comes and goes with the clipboard (Labs › Keyboard › Keyboard tools): the
     // listener exists only while the lab is on and the input view is shown.
@@ -182,6 +195,17 @@ class HexKeyboard : InputMethodService() {
         currentSubtype = newSubtype
         modeChanged(newSubtype)
     }
+    /** Labs › Keyboard › Key colors changed (tried in Hex's own settings, the keyboard may be showing): the keys are
+     * built again in the new colours, at once unless a dictation is running; then the next showing has them. */
+    private fun recolor() {
+        val old = view ?: return
+        if (old.colored(feedback.drawnKeyColor) || capture.phase != SpeechPhase.Idle) return
+        old.cancelGestures(); old.reset()
+        setInputView(inputView())
+        if (!isInputViewShown) return
+        engine.configureTyping(keepWord = true); view?.status(capture.phase, idleHint())
+        viewing = true; watchClipboard()
+    }
 
     /** The field's type as Hex last started in it: an app can change it in place (restarting the same box). */
     private var fieldType = 0 to 0
@@ -191,7 +215,10 @@ class HexKeyboard : InputMethodService() {
         typeChanged = restarting && fieldType != attribute.inputType to attribute.imeOptions
         fieldType = attribute.inputType to attribute.imeOptions
         nextEnglish = null
-        capture.cancel() // Even a different field in the same app must not receive an old result.
+        // Another field never receives an old result: its dictation is kept to offer. A restart counts too: browsers,
+        // WebViews and Compose restart one view to move between their inputs, which Hex can't tell from the same field.
+        field.started(attribute.packageName)
+        capture.leave()
         engine.startInput(attribute)
     }
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
@@ -207,6 +234,9 @@ class HexKeyboard : InputMethodService() {
             viewing = true
             return
         }
+        // Settings › Keyboard › Height or Labs › Keyboard › Key colors changed while a dictation ran: the new keys
+        // now, before they show.
+        if (view?.sized(feedback.height) == false || view?.colored(feedback.drawnKeyColor) == false) setInputView(inputView())
         view?.cancelGestures()
         // Another type in the same box: back to its keys, as a new field opens (configureTyping draws them).
         if (typeChanged) view?.closeMenu(configure = false)
@@ -217,6 +247,7 @@ class HexKeyboard : InputMethodService() {
         Diagnostics.keyboardShown(this, info.packageName, engine.secure) { view?.notice(it) }
         viewing = true
         watchClipboard()
+        offerKept()
     }
     override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int,
                                    candidatesStart: Int, candidatesEnd: Int) {
@@ -293,6 +324,17 @@ class HexKeyboard : InputMethodService() {
     internal fun openKeyboardSettings() = startActivity(Intent(this, MainActivity::class.java)
         .putExtra(MainActivity.EXTRA_PAGE, MainActivity.PAGE_KEYBOARD)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
+
+    /** Settings › Keyboard › Height changed: the keys are built again at the new size, at once unless a
+     * dictation is running (its bar stays until it ends; the next time the keyboard opens has them). */
+    private fun resize() {
+        val old = view ?: return
+        if (old.sized(feedback.height) || capture.phase != SpeechPhase.Idle) return
+        old.cancelGestures(); old.reset()
+        setInputView(inputView())
+        if (isInputViewShown) { engine.configureTyping(keepWord = true); view?.status(capture.phase, idleHint()) }
+    }
+
     internal fun nextIme() {
         capture.cancel()
         if (!switchToNextInputMethod(false)) getSystemService(InputMethodManager::class.java).showInputMethodPicker()
@@ -302,6 +344,13 @@ class HexKeyboard : InputMethodService() {
         checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED -> R.string.keyboard_hint_microphone
         else -> R.string.keyboard_hint_hold
     })
+    /** A swipe in a dictation language without a typing model types nothing: the strip names the language until typing
+     * starts, a tap or its ✕ (in place of Hex Preview's update line, which comes back in the next field). */
+    private fun swipeUnavailable() {
+        val language = swipeUnreadableIn(feedback.layout, preferences.spoken) ?: return
+        view?.notice(StripNotice(getString(R.string.keyboard_note_swipe, language.label), getString(R.string.keyboard_note_dismiss),
+            tap = {}, dismiss = {}))
+    }
     internal fun beginSpeech(): Boolean {
         if (engine.secure || currentInputConnection == null || !capture.canStart ||
             checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -309,7 +358,7 @@ class HexKeyboard : InputMethodService() {
             return false
         }
         engine.clearForDictation()
-        capture.start(preferences.options(nextEnglish))
+        capture.start(preferences.options(nextEnglish), field.current)
         nextEnglish = null
         return true
     }
@@ -339,7 +388,7 @@ class HexKeyboard : InputMethodService() {
         }
         if (blocked != null) { voice.status(SpeechPhase.Idle, blocked); return }
         engine.clearForDictation()
-        capture.start(preferences.options(nextEnglish))
+        capture.start(preferences.options(nextEnglish), field.current)
         nextEnglish = null
     }
     /** The bar's ✓: finish the dictation, or start one again after a blocked or failed start. */
@@ -389,24 +438,69 @@ class HexKeyboard : InputMethodService() {
     private fun showLevel(level: Float) {
         bar?.setLevel(level); view?.setLevel(level)
     }
-    private fun commitSpeech(text: String, heard: String, options: SpeechOptions) {
-        if (currentInputConnection == null || engine.secure || !isInputViewShown) { leaveVoiceOnly(); return }
+    /** A dictation's text, for the field it was spoken in ([spokenIn]): typed there even with the keyboard hidden, or
+     * dropped when that field is gone. */
+    private fun commitSpeech(text: String, heard: String, options: SpeechOptions, spokenIn: Int) {
+        if (field.takes(spokenIn, currentInputConnection != null, engine.secure)) insertSpoken(text, heard, options)
+        else keep(text, heard, options, field.appOf(spokenIn))
+        leaveVoiceOnly()
+    }
+    private fun insertSpoken(text: String, heard: String, options: SpeechOptions) {
         // Read now, so a toggle or text changed while it transcribed applies to this dictation. Hex's own
         // fields, such as Settings' practice box, never get the signature.
         val own = currentInputEditorInfo?.packageName == packageName
         val signed = if (own) null else Signature.append(text, preferences.signatureText, preferences.signature)
         engine.insertDictation(signed ?: text, if (options.translate) "en" else options.spoken.code, signed != null,
             heard, options.learnFixes && preferences.learnFixes && !options.translate)
-        leaveVoiceOnly()
     }
-    private fun leaveEditor() {
+
+    /** A dictation whose field went away, held in memory only for [KEPT_MS], never written to disk, the clipboard or a
+     * log. The strip offers it once, in a field of the same app that isn't a password one; it goes when inserted,
+     * dismissed, when that showing ends, or after [KEPT_MS]. Several join in the order they were spoken. */
+    private class Kept(val text: String, val heard: String, val options: SpeechOptions, val app: String) {
+        var offered = false
+    }
+    private var kept: Kept? = null
+    private val main = Handler(Looper.getMainLooper())
+    private val forgetKept = Runnable { dropKept() }
+    private fun keep(text: String, heard: String, options: SpeechOptions, app: String?) {
+        if (app == null) return
+        val earlier = kept?.takeIf { it.app == app && !it.offered }
+        kept = Kept(earlier?.let { it.text + " " + text } ?: text, earlier?.let { it.heard + " " + heard } ?: heard, options, app)
+        main.removeCallbacks(forgetKept)
+        main.postDelayed(forgetKept, KEPT_MS)
+        offerKept()
+    }
+    private fun offerKept() {
+        val waiting = kept ?: return
+        val strip = view ?: return
+        if (waiting.offered || !isInputViewShown || currentInputConnection == null ||
+            !DictationField.offersKept(waiting.app, currentInputEditorInfo?.packageName, engine.secure)) return
+        waiting.offered = true
+        strip.notice(StripNotice(getString(R.string.keyboard_kept), getString(R.string.keyboard_kept_discard),
+            tap = { insertKept(waiting) }, dismiss = { dropKept() }))
+    }
+    private fun insertKept(waiting: Kept) {
+        if (kept !== waiting) return
+        dropKept()
+        if (currentInputConnection != null && DictationField.offersKept(waiting.app, currentInputEditorInfo?.packageName, engine.secure))
+            insertSpoken(waiting.text, waiting.heard, waiting.options)
+    }
+    private fun dropKept() { kept = null; main.removeCallbacks(forgetKept) }
+    /** The keyboard goes away. Hidden with its field still there (an app hiding it, Back), a recording stops as with ✓
+     * and its text still goes into that field; with the field gone ([fieldGone]), it stops the same way and its text is
+     * kept to offer, never typed into another field. Either way the microphone closes now. A kept dictation the strip
+     * already offered goes with this showing. */
+    private fun leaveEditor(fieldGone: Boolean) {
         bar?.removeCallbacks(pendingLeave)
         viewing = false; watchClipboard()
-        clearInline(); view?.reset(); view?.cancelGestures(); engine.leave(); nextEnglish = null; capture.cancel()
+        clearInline(); view?.reset(); view?.cancelGestures(); engine.leave(); nextEnglish = null
+        if (fieldGone) capture.leave() else finishSpeech()
+        if (kept?.offered == true) { dropKept(); view?.notice(null) }
     }
-    override fun onFinishInputView(finishingInput: Boolean) { leaveEditor(); super.onFinishInputView(finishingInput) }
-    override fun onFinishInput() { leaveEditor(); super.onFinishInput() }
-    override fun onWindowHidden() { leaveEditor(); super.onWindowHidden() }
+    override fun onFinishInputView(finishingInput: Boolean) { leaveEditor(finishingInput); super.onFinishInputView(finishingInput) }
+    override fun onFinishInput() { field.finished(); leaveEditor(fieldGone = true); super.onFinishInput() }
+    override fun onWindowHidden() { leaveEditor(fieldGone = false); super.onWindowHidden() }
     // The speech model is a few hundred MB while loaded; give it back when Android runs short. Not on
     // TRIM_MEMORY_UI_HIDDEN, which only says the keyboard hid (every app switch), not that memory is low.
     override fun onTrimMemory(level: Int) {
@@ -414,6 +508,7 @@ class HexKeyboard : InputMethodService() {
         if (level >= TRIM_MEMORY_RUNNING_LOW && level != TRIM_MEMORY_UI_HIDDEN) SpeechModel.releaseSoon()
     }
     override fun onDestroy() {
+        dropKept()
         getSharedPreferences("typing", MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(typingChanged)
         contentResolver.unregisterContentObserver(dictionaryChanged); words.shutdownNow()
         viewing = false; watchClipboard()
@@ -424,5 +519,7 @@ class HexKeyboard : InputMethodService() {
     private companion object {
         /** A failed voice-only dictation's note stays this long before the keyboard comes back. */
         const val VOICE_NOTE_MS = 1_200L
+        /** How long a dictation whose field went away waits, in memory only, to be offered. */
+        const val KEPT_MS = 120_000L
     }
 }

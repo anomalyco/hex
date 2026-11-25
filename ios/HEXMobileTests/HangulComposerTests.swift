@@ -321,7 +321,7 @@ final class HangulKeyboardTests: XCTestCase {
     }
 }
 
-/// Settings › Experiments › Korean keyboard's language gating, with its flag in a test's own
+/// Settings › Labs › Korean keyboard's language gating, with its flag in a test's own
 /// defaults and the pure helpers taking it directly.
 final class KoreanKeyboardGatingTests: XCTestCase {
     private var suiteName: String!

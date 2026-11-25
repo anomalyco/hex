@@ -116,7 +116,8 @@ struct TypingLogsView: View {
 /// The system share sheet for files, over whatever is showing.
 @MainActor
 enum ShareSheet {
-    static func present(_ urls: [URL]) {
+    /// `completion` runs once the sheet closes, shared or not.
+    static func present(_ urls: [URL], completion: ((Bool) -> Void)? = nil) {
         guard !urls.isEmpty else { return }
         let scene = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
@@ -126,13 +127,16 @@ enum ShareSheet {
             top = presented
         }
         let controller = UIActivityViewController(activityItems: urls, applicationActivities: nil)
+        if let completion {
+            controller.completionWithItemsHandler = { _, completed, _, _ in completion(completed) }
+        }
         controller.popoverPresentationController?.sourceView = top.view
         controller.popoverPresentationController?.sourceRect = CGRect(x: top.view.bounds.midX, y: 60, width: 1, height: 1)
         top.present(controller, animated: true)
     }
 }
 
-/// `--snap-state experiments` (Settings › Experiments) and `--snap-state typing-logs`
+/// `--snap-state experiments` (Settings › Labs) and `--snap-state typing-logs`
 /// (the Typing logs screen) on Simulator; pass `--experiment-typing-logs` to show it on.
 struct ExperimentsSnapshotStage: View {
     let scene: String

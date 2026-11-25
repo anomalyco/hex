@@ -12,12 +12,12 @@ import ly.anoma.hex.useInter
 import kotlin.math.roundToInt
 
 /** Both callouts live inside the input window. No popup takes focus away from the editor. */
-internal class LetterFeedback(private val host: ViewGroup) {
+internal class LetterFeedback(private val host: ViewGroup, private val paints: KeyPaints) {
     private val context = host.context
     private fun dp(n: Int) = (context.resources.displayMetrics.density * n).roundToInt()
-    private fun face(id: Int, radius: Int, border: Boolean = false) = GradientDrawable().apply {
-        setColor(context.getColor(id)); cornerRadius = dp(radius).toFloat()
-        if (border) setStroke(dp(1), context.getColor(R.color.modifier))
+    private fun face(color: Int, radius: Int, border: Boolean = false) = GradientDrawable().apply {
+        setColor(color); cornerRadius = dp(radius).toFloat()
+        if (border) setStroke(dp(1), paints.popupRim)
     }
     private var panel: LinearLayout? = null
     // While a held key's list is open the keys behind it fade, as Gboard's do, so the list's edges never
@@ -72,12 +72,12 @@ internal class LetterFeedback(private val host: ViewGroup) {
         bottom = y + h
         val bar = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            background = face(R.color.sheet, 10, true); setPadding(pad, pad, pad, pad)
+            background = face(paints.popup, 10, true); setPadding(pad, pad, pad, pad)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
         }
         for (line in rows.asReversed()) bar.addView(LinearLayout(context).apply {
             for (s in line) addView(TextView(context).apply {
-                text = s; gravity = Gravity.CENTER; setTextColor(context.getColor(R.color.ink))
+                text = s; gravity = Gravity.CENTER; setTextColor(paints.ink)
                 useInter(500); textSize = if (hold) 21f else 27f; includeFontPadding = false
             }, LinearLayout.LayoutParams(cell, -1))
         }, LinearLayout.LayoutParams(-1, rowHeight))
@@ -101,8 +101,8 @@ internal class LetterFeedback(private val host: ViewGroup) {
             for (i in line.indices) {
                 val label = cells.getChildAt(i) as TextView
                 val on = holding && r == row && i == index
-                label.background = if (on) face(R.color.ink, 7) else null
-                label.setTextColor(context.getColor(if (on) R.color.page else R.color.ink))
+                label.background = if (on) face(paints.choice, 7) else null
+                label.setTextColor(if (on) paints.choiceInk else paints.ink)
             }
         }
     }
@@ -131,6 +131,12 @@ internal class LetterFeedback(private val host: ViewGroup) {
                 }
                 "de" -> when (lower) {
                     'a' -> "aàáâæãåā"; 'o' -> "oôòóœøōõ"; 'u' -> "uûùúū"; else -> accents[lower]
+                }
+                // iPhone Hex's Portuguese long presses (KeyboardLanguage.swift), Portugal's and Brazil's
+                // letters first; other letters hold nothing.
+                "pt" -> when (lower) {
+                    'a' -> "aáãàâäåæª"; 'e' -> "eéêèęėēë"; 'i' -> "iíîìïįī"; 'o' -> "oôóõòöœøōº"; 'u' -> "uúüùûū"
+                    'c' -> "cç"; 'n' -> "nñ"; else -> null
                 }
                 else -> accents[lower]
             }

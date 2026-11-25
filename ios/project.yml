@@ -49,6 +49,25 @@ targets:
             CFBundleURLName: anomaly.hex.mobile.keyboard-session
             CFBundleURLSchemes:
               - hex-dictation
+        # Hex words files (docs/specs/hex-words.md): AirDrop, Files and Open in Hex copy them
+        # into Documents/Inbox, and the review sheet reads them (HexInbox).
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Hex words file
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Owner
+            LSItemContentTypes:
+              - anomaly.hex.words
+        LSSupportsOpeningDocumentsInPlace: false
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: anomaly.hex.words
+            UTTypeDescription: Hex words file
+            UTTypeConformsTo:
+              - public.json
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - hexwords
+              public.mime-type:
+                - application/vnd.anomaly.hex-words+json
         NSMicrophoneUsageDescription: Hex turns what you say into text on this iPhone. Audio never leaves it and is deleted once it's transcribed.
         NSSpeechRecognitionUsageDescription: Hex uses Apple's on-device speech recognition to turn what you say into text. Nothing you say is sent to a server.
         NSSupportsLiveActivities: true
@@ -94,7 +113,7 @@ targets:
       # the iPhone's language where Hex is translated.
       - HEXMobile/Localizable.xcstrings
     dependencies:
-      # Experiments › Speech model in keyboard: Parakeet in the keyboard (KeyboardParakeet).
+      # Dictation › Speech model in keyboard: Parakeet in the keyboard (KeyboardParakeet).
       - package: FluidAudio
     info:
       path: HEXKeyboard/Info.plist
@@ -157,6 +176,10 @@ targets:
     sources:
       - HEXMobileTests
       - path: ../tests/fixtures/vocabulary/audio/term-hex-1.wav
+        buildPhase: resources
+      # The Hex words file's shared cases, read in place (HexWordsSharedCasesTests).
+      - path: ../tests/fixtures/hex-words
+        type: folder
         buildPhase: resources
     dependencies:
       - target: HEXMobile

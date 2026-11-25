@@ -34,7 +34,12 @@ import ly.anoma.hex.keyboard.vibrates
 import ly.anoma.hex.speech.DictationPlace
 import ly.anoma.hex.speech.DictationTimes
 import ly.anoma.hex.speech.Engine
+import ly.anoma.hex.speech.LanguageChoice
 import ly.anoma.hex.speech.ModelAtTick
+import ly.anoma.hex.speech.ModelChoice
+import ly.anoma.hex.speech.ModelChoiceState
+import ly.anoma.hex.speech.ModelChoiceStore
+import ly.anoma.hex.speech.NotCounted
 import ly.anoma.hex.speech.ModelStore
 import ly.anoma.hex.speech.RanOn
 import ly.anoma.hex.speech.SpeechPreferences
@@ -205,7 +210,9 @@ internal object Diagnostics {
                 "; dictation threads: ${SpeechModel.threads} ${runCatching { poolWords(SpeechModel.dictationCores()) }.getOrDefault("not known")}",
             fasterEnglishLine(SpeechPreferences(c).fastEnglish, ModelStore.english.installed(c) != null,
                 engineFor(SpeechPreferences(c).options(null))),
-        ) + haptics(c)
+        ) + SpeechPreferences(c).let { s ->
+            modelChoiceLines(s.pickModel, s.fastEnglishOffByHand, s.fastEnglish, ModelChoiceStore(c).state, ModelChoiceStore.decodeScale())
+        } + haptics(c)
     }
 
     private fun haptics(c: Context): List<String> {
@@ -456,6 +463,34 @@ internal fun fasterEnglishLine(on: Boolean, downloaded: Boolean, engine: Engine)
     "Faster English dictation: ${if (on) "on" else "off"}, ${if (downloaded) "downloaded" else "not downloaded"}; " +
         "the dictation language now uses ${if (engine == Engine.English && downloaded) "faster" else "standard"} dictation"
 
+/** Labs › Pick the English model for this phone in the report: whether it is on, what it decided and when, the median it
+ * decides on against the threshold, how far along the English dictations in a row are, and how many dictations didn't
+ * count, by reason. Numbers only, as the phone keeps them; never names an engine. [scale] is a debug build's stand-in
+ * (HexDecodeScale), said so a report can't pass for a phone's. */
+internal fun modelChoiceLines(on: Boolean, offByHand: Boolean, fastEnglish: Boolean, state: ModelChoiceState, scale: Double = 1.0): List<String> {
+    if (!on) return listOf("Model choice: off; nothing measured or kept")
+    fun n(value: Double) = String.format(Locale.ROOT, "%.2f", value)
+    val threshold = n(ModelChoice.THRESHOLD)
+    val median = ModelChoice.median(state.ratios)
+    // The ratios themselves, oldest first, so a report shows whether the median rests on steady numbers or a spread.
+    val ratios = if (state.ratios.isEmpty()) "" else " (${state.ratios.joinToString(", ") { n(it) }})"
+    val head = "Model choice: on" + (if (scale != 1.0) " (debug decode scale ×${scale.toString().removeSuffix(".0")})" else "") + "; "
+    val first = head + when {
+        state.decided -> "chose faster English dictation for this phone on ${java.time.LocalDate.ofEpochDay(state.decidedDay!!)}, " +
+            "median ${n(state.decidedMedian ?: 0.0)} s of decoding per second of speech over the last ${state.ratios.size} " +
+            "dictations counted$ratios (threshold $threshold)" + if (offByHand) "; faster English dictation since turned off by hand, so it stays off" else ""
+        offByHand -> "faster English dictation was turned off by hand, so Hex doesn't choose it; nothing is measured"
+        fastEnglish -> "faster English dictation is already on, so nothing is measured"
+        else -> (if (median == null) "no dictation counted yet" else "median ${n(median)} s of decoding per second of speech over the last " +
+            "${state.ratios.size} of ${ModelChoice.SAMPLES} dictations needed$ratios") + " (threshold $threshold); " +
+            "${state.englishInARow} of ${ModelChoice.WINDOW} English dictations in a row; standard dictation stays for now"
+    }
+    fun skipped(reason: NotCounted) = state.skipped[reason] ?: 0
+    return listOf(first, "  dictations counted: ${state.counted}; not counted: ${skipped(NotCounted.TooShort)} too short " +
+        "(under ${ModelChoice.MIN_KEPT_MS / 1000} s kept), ${skipped(NotCounted.OtherLanguage)} another language or translated, " +
+        "${skipped(NotCounted.ModelLoading)} model still loading, ${skipped(NotCounted.Retried)} decoded again")
+}
+
 /** Which build of the speech library runs, in words that can't be read as Faster English dictation (whose own line says
  * "faster") or name an engine. */
 internal fun libraryLabel(file: String?) = when {
@@ -537,7 +572,11 @@ internal fun lastDictationLines(t: DictationTimes?): String = buildString {
     if (t == null) { append(" none since Hex started\n"); return@buildString }
     append('\n')
     val mark = if (t.tick) "✓" else "the 1-minute stop"
-    append(if (t.place == DictationPlace.Keyboard) "  in the keyboard" else "  on Home")
+    append(when (t.place) {
+        DictationPlace.Keyboard -> "  in the keyboard"
+        DictationPlace.Home -> "  on Home"
+        DictationPlace.QuickSettings -> "  from Quick Settings"
+    })
     append(String.format(Locale.ROOT, ", %.1f s recorded, %.1f s kept", t.recordedMs / 1000.0, t.keptMs / 1000.0))
     append("; ").append(ranOn(t.ran))
     val timings = t.timings?.takeIf { it.size >= 7 }
@@ -564,6 +603,28 @@ internal fun lastDictationLines(t: DictationTimes?): String = buildString {
     append("; processor ").append(if (t.cpuMs < 0) "not readable" else "${t.cpuMs} ms")
     if (t.cpuMs >= 0 && wall > 0) append(String.format(Locale.ROOT, ", %.1f× the decode's wall time", t.cpuMs.toDouble() / wall))
     append('\n')
+    // hexspeech.cpp decoded it again without the custom vocabulary or learned words (its againWhy).
+    if (timings != null && timings.size >= 10 && timings[8] > 0) {
+        append("  ").append(when (timings[9]) { 1L -> "repeated text"; 2L -> "no text"; 3L -> "only your words"; 4L -> "a phrase written twice"; else -> "text unusable" })
+        append(", decoded again without your words: ${timings[8] / 1000} ms of the decode\n")
+    }
+    t.choice?.let { append("  ").append(languageWords(it, t.keptMs)).append('\n') }
+}
+
+/** Labs › Automatic listens for the language in the last dictation: the language written, whether that kept the keyboard's
+ * (the first candidate) or switched from it, each candidate's probability against what a switch takes (hexspeech.cpp: 99%
+ * under 4 s of audio, 95% from 4 s; [keptMs] decides, as the audio decoded is the kept audio, padded to 1.1 s), and the
+ * choice's time. Language names and numbers only. */
+internal fun languageWords(c: LanguageChoice, keptMs: Long): String = buildString {
+    append("language ").append(c.language.label)
+    val probabilities = c.probabilities
+    if (probabilities == null) { append(", the only one listened for"); return@buildString }
+    append(if (c.chosen == 0) ", kept the keyboard's" else ", switched from ${c.candidates[0].label}")
+    append("; ").append(c.candidates.indices.joinToString(", ") {
+        String.format(Locale.ROOT, "%s %.1f%%", c.candidates[it].label, 100 * probabilities[it])
+    })
+    append(if (keptMs < 4000) ", switching takes 99%" else ", switching takes 95%")
+    append(String.format(Locale.ROOT, "; chosen in %.1f ms", c.micros / 1000.0))
 }
 
 /** The text the page shows and Copy copies. */

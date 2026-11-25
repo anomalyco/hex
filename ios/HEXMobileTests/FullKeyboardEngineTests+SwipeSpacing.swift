@@ -190,7 +190,7 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(field.text, next)
     }
 
-    /// Settings › Experiments › Delete swiped words letter by letter (off by default): right
+    /// Settings › Labs › Delete swiped words letter by letter (off by default): right
     /// after a swipe, delete acts as anywhere else and takes one character, instead of the
     /// whole word and the space the swipe added before it (#2321).
     func testDeleteSwipedWordsLetterByLetterTakesOneCharacterAtATime() throws {
@@ -355,7 +355,7 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(view.plane.swipe?.model.language, "es")
     }
 
-    /// Settings › Experiments › Swipe typing in more languages (off by default): on, a swipe
+    /// Settings › Labs › Swipe typing in more languages (off by default): on, a swipe
     /// works in every language with a typing model, not only English and Spanish; off, French
     /// keeps a drag as a slide to another key, as before.
     func testSwipeTypingInMoreLanguagesFollowsTheLanguageSwitch() {

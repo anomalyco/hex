@@ -32,7 +32,10 @@ mod send;
 mod session_name;
 
 pub use rule_match::{AutoSendBy, RuleMatch};
-use send::{Clock, DeliverOutcome, PickAction, SavedRule, SendState, Sent, UndoPlan};
+use send::{
+    Clock, DeliverOutcome, PickAction, SavedRule, SendState, Sent, UndoPlan, delivery_kind,
+    describe,
+};
 
 #[cfg(test)]
 use session_name::session_name_by;
@@ -172,21 +175,22 @@ pub enum RouteDelivery {
 // ---------------------------------------------------------------------------
 // The router.
 
-/// The router with Hex's `capture.routing` and Scrawl's folders under
-/// `~/Library/Application Support/scrawl`. Never reads
+/// The router with Hex's `capture.routing` and private annotation-router folder. Never reads
 /// `~/.config/scrawl`. Its own log lines name sites and sessions, so they
 /// go to tracing's debug level, except how sends went (`deliver: …`).
 pub fn router() -> Router {
     let settings = crate::app_settings::capture_settings();
     let config = settings.routing.config().clone();
-    let support = crate::app_paths::home_dir()
-        .unwrap_or_default()
-        .join("Library/Application Support/scrawl");
-    let dirs = RouterDirs::under(
-        &support.join("router"),
-        Some(support.join("routing-decisions.jsonl")),
-        Some(settings.captures_dir()),
-    );
+    let dirs = crate::app_paths::support_dir()
+        .map(|support| {
+            let router = support.join("annotation-router");
+            RouterDirs::under(
+                &router,
+                Some(router.join("routing-decisions.jsonl")),
+                Some(settings.captures_dir()),
+            )
+        })
+        .unwrap_or_default();
     let router = Router::new(config, dirs)
         .with_log(|line| {
             if line.starts_with("deliver:") || line.starts_with("routing time:") {
@@ -755,8 +759,10 @@ impl Worker {
             }
             UndoPlan::RetriedNoHandle => true,
             UndoPlan::Queued => {
-                // Its retries stop with the marker.
                 let _ = std::fs::remove_file(current.bundle.join(delivery::PENDING));
+                if let Some(q) = current.router.dirs().retries.as_deref() {
+                    delivery::annotations::forget(q, &current.bundle);
+                }
                 self.correct(jev::Action::Cancel, "dismiss", None);
                 true
             }
@@ -933,13 +939,21 @@ impl Worker {
         }
         let router = router();
         let captures = crate::app_settings::capture_settings().captures_dir();
-        let report = router.run(|| {
-            delivery::retry_due(
-                &captures,
-                now_ms(),
-                scrawl_capture::handoff::send_bundle_to_session,
-            )
-        });
+        let report = router
+            .dirs()
+            .retries
+            .as_deref()
+            .map(|q| {
+                router.run(|| {
+                    delivery::annotations::retry(
+                        q,
+                        &captures,
+                        now_ms(),
+                        scrawl_capture::handoff::send_bundle_to_session,
+                    )
+                })
+            })
+            .unwrap_or_default();
         let outbox = router.retry_outbox();
         if !report.sent.is_empty() || !outbox.sent.is_empty() {
             tracing::info!(
@@ -1330,18 +1344,6 @@ fn recorded_destination(bundle: &Path) -> Option<Destination> {
         .and_then(|(_, loaded)| loaded.destination)
 }
 
-/// A delivery as a sentence for `hex capture send`.
-fn describe(delivery: &RouteDelivery) -> String {
-    match delivery {
-        RouteDelivery::Sending { to } => format!("Sending to {to}"),
-        RouteDelivery::Sent { to } => format!("Sent to {to}"),
-        RouteDelivery::Queued { to, why } => format!("Queued for {to}: {why}"),
-        RouteDelivery::TakenBack => "Taken back".into(),
-        RouteDelivery::TooLate { to } => format!("Already read in {to}"),
-        RouteDelivery::Failed { to, why } => format!("Not sent to {to}: {why}"),
-    }
-}
-
 /// Records where the capture went in its bundle, sends it, and remembers
 /// the send for an undo. A send OpenCode didn't take is queued for
 /// [`Worker::retry`].
@@ -1373,6 +1375,13 @@ fn deliver(
         );
         if let Err(error) = recorded {
             tracing::warn!(error = %format!("{error:#}"), "could not record a capture's destination");
+        }
+        // An explicit new send supersedes any earlier queued attempt.
+        if scrawl_capture::bundle::manifest_name(bundle) == Some(scrawl_capture::bundle::MANIFEST) {
+            let _ = std::fs::remove_file(bundle.join(delivery::PENDING));
+            if let Some(q) = router.dirs().retries.as_deref() {
+                delivery::annotations::forget(q, bundle);
+            }
         }
         let (delivery, posted) = delivery::deliver_by(
             bundle,
@@ -1406,6 +1415,19 @@ fn deliver(
                 offer: routing::learn_capture(bundle, &dest.session),
             },
             Delivery::Queued { error, .. } => {
+                let remembered = scrawl_capture::bundle::manifest_name(bundle)
+                    != Some(scrawl_capture::bundle::MANIFEST)
+                    || router
+                        .dirs()
+                        .retries
+                        .as_deref()
+                        .is_some_and(|q| delivery::annotations::remember(q, bundle, &dest.session).is_ok());
+                if !remembered {
+                    return DeliverOutcome::Failed {
+                        to,
+                        why: "Couldn't remember this send for retry".into(),
+                    };
+                }
                 let agent_host = router.config().agent_host().is_some();
                 let why = send_why(&error, agent_host);
                 if why == FILES_UNSEEN {
@@ -1463,17 +1485,6 @@ fn answer_kind(answer: &RouteAnswer) -> &'static str {
         RouteAnswer::Nothing { .. } => "nothing",
         RouteAnswer::NoAnswer { .. } => "no-answer",
         RouteAnswer::Unreachable { .. } => "unreachable",
-    }
-}
-
-fn delivery_kind(delivery: &RouteDelivery) -> &'static str {
-    match delivery {
-        RouteDelivery::Sending { .. } => "sending",
-        RouteDelivery::Sent { .. } => "sent",
-        RouteDelivery::Queued { .. } => "queued",
-        RouteDelivery::TakenBack => "taken-back",
-        RouteDelivery::TooLate { .. } => "too-late",
-        RouteDelivery::Failed { .. } => "failed",
     }
 }
 
@@ -3168,6 +3179,44 @@ mod tests {
                 Some("ses_home")
             );
             std::fs::remove_dir_all(bundle.parent().unwrap()).ok();
+        }
+
+        #[test]
+        fn hex_annotation_queued_send_writes_private_receipt_and_undo_forgets_it() {
+            fn offline(_: &Path, _: &str) -> anyhow::Result<scrawl_capture::handoff::Posted> {
+                anyhow::bail!("Could not reach server")
+            }
+            let dir = temp("hex-bundle").join("note.hexannotation");
+            std::fs::create_dir(&dir).unwrap();
+            let b: ScrawlBundle = serde_json::from_slice(include_bytes!(
+                "../../tests/fixtures/annotations/marked-v1.json"
+            ))
+            .unwrap();
+            scrawl_capture::bundle::publish(&dir, &b).unwrap();
+            let router = router_with(|_| {});
+            let retries = router.dirs().retries.clone().unwrap();
+            let outcomes = SharedOutcomes::default();
+            let mut worker = worker(outcomes.clone());
+            worker.forward = offline;
+            lock(&outcomes).fail(dir.clone(), "test".into());
+            let (look, found) = held_look(router, look::Live::default());
+            let _ = found.try_send(Some(look::Live::default()));
+            worker.written(dir.clone(), look);
+            settle(&mut worker);
+
+            worker.chosen("ses_board", false);
+            assert!(dir.join(delivery::PENDING).is_file());
+            assert_eq!(retries.read_dir().unwrap().count(), 1);
+
+            worker.undo();
+            assert!(!dir.join(delivery::PENDING).exists());
+            assert_eq!(retries.read_dir().unwrap().count(), 0);
+            assert_eq!(
+                worker.current.as_ref().unwrap().send.delivery(),
+                Some(RouteDelivery::TakenBack)
+            );
+            std::fs::remove_dir_all(dir.parent().unwrap()).ok();
+            std::fs::remove_dir_all(retries.parent().unwrap()).ok();
         }
     }
 }

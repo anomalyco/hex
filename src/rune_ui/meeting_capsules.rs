@@ -46,7 +46,7 @@ use rune::{
 };
 use rune_kit::{Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant};
 
-use super::controls::{Paint, PushSize, status_dot};
+use super::controls::{CAPSULE, Paint, PushSize, status_dot};
 use crate::app_settings::{MeetingIndicatorCorner, MeetingPolicy, MeetingProviderChoice};
 use crate::calendar::CalendarMeeting;
 use crate::desktop::i18n::{tr, tr_fill};
@@ -84,7 +84,7 @@ const MEETING_PANEL_WIDTH: f32 = 420.0;
 const MEETING_MENU_WIDTH: f32 = 560.0;
 const MEETING_PANEL_HEIGHT: f32 = 64.0;
 /// Between a capsule's buttons and its right edge.
-const ACTIONS_INSET: f32 = 8.0;
+const ACTIONS_INSET: f32 = CAPSULE.button_inset;
 /// The reminder: the meeting's title beside up to three buttons.
 const REMINDER_PANEL_WIDTH: f32 = 520.0;
 /// The call-ended capsule's width, beside Keep recording and Stop now /
@@ -93,37 +93,39 @@ const CALL_ENDED_PANEL_WIDTH: f32 = call_ended::PANEL_WIDTH;
 /// How often an open reminder recounts "Starts in N min".
 const REMINDER_TICK: Duration = Duration::from_secs(5);
 /// Between a capsule's window edges and what it draws.
-const CAPSULE_INSET: f32 = 4.0;
+const CAPSULE_INSET: f32 = CAPSULE.window_inset;
 /// Same header at rest and open so the waveform and timer stay put.
 const REST_HEIGHT: f32 = HEADER_HEIGHT;
 const REST_WIDTH: f32 = 2.0 * REST_PX + waveform::WIDTH + METER_GAP + TIMER_WIDTH;
 /// The header's sides, at rest and open, so the timer stays put as the pill
 /// opens: the inset the rows' labels, the title and the summary keep.
-const REST_PX: f32 = PANEL_PAD + ROW_PX;
+const REST_PX: f32 = CAPSULE.text_rail();
 /// Between the listening field and the time.
 const METER_GAP: f32 = 6.0;
-/// "00:00" in the timer's 13 pt monospaced digits, at layout resolution,
-/// with the recording dot and its gap before it.
-const TIMER_WIDTH: f32 = 39.0 + REC_DOT + METER_GAP;
+/// "00:00" in `Paint::clock()` (13 pt tabular medium), reserved as an exact
+/// integer width so layout matches across macOS, Linux, and Windows.
+const TIMER_TEXT_WIDTH: f32 = 38.0;
+/// `TIMER_TEXT_WIDTH` plus the recording dot and its gap before it.
+const TIMER_WIDTH: f32 = TIMER_TEXT_WIDTH + REC_DOT + METER_GAP;
 /// The recording dot before the elapsed time, a status dot's size.
 const REC_DOT: f32 = 8.0;
 /// The open recording pill and the ready panel.
-const PANEL_WIDTH: f32 = 252.0;
-const PANEL_RADIUS: f32 = 13.0;
+const PANEL_WIDTH: f32 = CAPSULE.panel_w;
+const PANEL_RADIUS: f32 = CAPSULE.radius;
 /// Around the open panel's rows.
-const PANEL_PAD: f32 = 5.0;
-const HEADER_HEIGHT: f32 = 36.0;
-const ROW_HEIGHT: f32 = 44.0;
+const PANEL_PAD: f32 = CAPSULE.row_inset;
+const HEADER_HEIGHT: f32 = CAPSULE.header_h;
+const ROW_HEIGHT: f32 = CAPSULE.row_h;
 const OPEN_HEADER: f32 = REST_HEIGHT + ROW_HEIGHT;
 /// The two copies and the gap under the raised one.
 const COPIES_HEIGHT: f32 = 2.0 * ROW_HEIGHT + ROW_GAP;
 /// Concentric with the panel across [`PANEL_PAD`].
-const ROW_RADIUS: f32 = PANEL_RADIUS - PANEL_PAD;
+const ROW_RADIUS: f32 = CAPSULE.inner(CAPSULE.row_inset);
 /// A row's icon and label inset; titles and summaries share it.
-const ROW_PX: f32 = 9.0;
+const ROW_PX: f32 = CAPSULE.row_px;
 /// Between two rows that can both be filled: under the raised first copy,
 /// and between Stop and the copies.
-const ROW_GAP: f32 = 2.0;
+const ROW_GAP: f32 = CAPSULE.row_gap;
 /// "Microphone is silent" or "Started automatically" under the header.
 const NOTICE_HEIGHT: f32 = 20.0;
 /// The ready panel's summary: the notes writer's two sentences.
@@ -1445,15 +1447,15 @@ fn pill(
         .key("capsule")
         .w_full()
         .h_full()
-        .px(4.0)
-        .py(4.0)
+        .px(CAPSULE_INSET)
+        .py(CAPSULE_INSET)
         .child(presence::anchored(capsule, body))
 }
 
 /// The panel capsule's corners, concentric with its buttons' (`radius.md`)
 /// across the [`ACTIONS_INSET`] between them and the edge.
-fn panel_radius(p: Paint) -> f32 {
-    p.k.radius.md + ACTIONS_INSET
+fn panel_radius(_: Paint) -> f32 {
+    CAPSULE.radius
 }
 
 /// The panel capsule's body: its dot and two truncated lines in a rounded
@@ -1468,7 +1470,7 @@ fn pill_body(p: Paint, dot: El, title: &str, subtitle: &str) -> El {
         .label(title)
         .h_full()
         .gap(12.0)
-        .pl(16.0)
+        .pl(CAPSULE.text_rail())
         .pr(ACTIONS_INSET)
         .center_y()
         .radius(panel_radius(p))

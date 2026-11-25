@@ -51,7 +51,7 @@ enum KeyboardSpeech {
         }
         let speech = AppleSpeechModule(language)
 
-        // Experiments › Two-language dictation: the same recording read by a second installed
+        // Labs › Two-language dictation: the same recording read by a second installed
         // language too, merged word by word; the pipeline still runs as the primary language.
         let twoLanguage = TwoLanguageDictationSettings()
         if twoLanguage.isEnabled,

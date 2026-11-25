@@ -301,7 +301,7 @@ actor AppleSpeechTranscriber: LocalTranscribing {
             throw TranscriberError.unavailable
         }
 
-        // Experiments › Two-language dictation: the same recording read by a second installed
+        // Labs › Two-language dictation: the same recording read by a second installed
         // language too, merged word by word. Off, or without a usable second language, the
         // single-language path below runs exactly as before.
         let twoLanguage = TwoLanguageDictationSettings()

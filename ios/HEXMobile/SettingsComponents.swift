@@ -12,7 +12,7 @@ enum SettingsPage: String, Hashable, CaseIterable {
         case .dictation: String(localized: "Dictation")
         case .keyboard: String(localized: "Keyboard")
         case .privacy: String(localized: "Privacy")
-        case .experiments: String(localized: "Experiments")
+        case .experiments: String(localized: "Labs")
         }
     }
 
@@ -332,6 +332,6 @@ enum SettingsSnapshotFixture {
         VoiceIsolationSettings().isEnabled = on
         AdaptiveTouchSettings().isEnabled = on
         // Settings scenes skip preparing a model, so this only draws the switch.
-        MultilingualParakeetSettings().isEnabled = on
+        MultilingualParakeetSettings().isEnabled = on || scene.contains("-multilingual-")
     }
 }

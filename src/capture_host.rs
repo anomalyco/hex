@@ -673,6 +673,12 @@ impl ConfigSource for HexConfig {
 
 fn hex_engine_config() -> EngineConfig {
     let mut config = EngineConfig::default();
+    config.captures_dir = Some(
+        crate::app_settings::capture_settings()
+            .captures_dir()
+            .to_string_lossy()
+            .into_owned(),
+    );
     config.autocrop = Some(serde_json::Value::Bool(true));
     config
         .experiments
@@ -795,8 +801,8 @@ fn corrected_words(words: Vec<TimedWord>, lag: Option<&WordLag>) -> Vec<WordTimi
         .collect()
 }
 
-/// Creates `dir` and missing parents owner-only, and makes `dir` itself
-/// owner-only if it already existed.
+/// Creates missing directories owner-only. Never chmod an existing custom
+/// location (it may be a shared folder, or the user's home directory).
 /// On Windows the folder inherits the profile's ACL, which is the user's.
 fn private_dirs(dir: &Path) -> Result<()> {
     let mut builder = DirBuilder::new();
@@ -806,36 +812,31 @@ fn private_dirs(dir: &Path) -> Result<()> {
     builder
         .create(dir)
         .wrap_err_with(|| format!("could not create {}", dir.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(dir, fs::Permissions::from_mode(0o700))
-            .wrap_err_with(|| format!("could not restrict {}", dir.display()))?;
-    }
     Ok(())
 }
 
-/// A fresh owner-only `<captures>/<unix ms>.scrawl` folder; never adopts one
+/// A fresh owner-only annotation package; never adopts one
 /// that exists. Stamps never repeat within the process: a discarded capture's
 /// folder is removed on its collector's thread, so a switch in the same
 /// millisecond could otherwise reuse its path while it is still unfinished.
 fn new_bundle_dir(captures_dir: &Path) -> Result<PathBuf> {
-    static LAST_STAMP: Mutex<u128> = Mutex::new(0);
+    color_eyre::eyre::ensure!(
+        captures_dir.is_absolute(),
+        "No absolute annotations folder is available"
+    );
     private_dirs(captures_dir)?;
-    let now = std::time::SystemTime::now()
+    let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
-    let stamp = {
-        let mut last = LAST_STAMP.lock().unwrap_or_else(|error| error.into_inner());
-        *last = now.max(*last + 1);
-        *last
-    };
-    for attempt in 0..100 {
-        let name = match attempt {
-            0 => format!("{stamp}.scrawl"),
-            n => format!("{stamp}-{n}.scrawl"),
-        };
+    for _ in 0..100 {
+        let mut random = [0; 16];
+        getrandom::fill(&mut random).map_err(|e| eyre!("Could not create annotation id: {e}"))?;
+        let name = format!(
+            "{stamp}-{:032x}.{}",
+            u128::from_be_bytes(random),
+            scrawl_capture::bundle::EXTENSION
+        );
         let dir = captures_dir.join(name);
         #[cfg_attr(not(unix), allow(unused_mut))]
         let mut builder = DirBuilder::new();
@@ -1285,12 +1286,9 @@ impl CaptureHost {
                     let settings = crate::app_settings::capture_settings();
                     let captures = settings.captures_dir();
                     if captures.is_dir() {
-                        scrawl_capture::retention::run_pass(
+                        scrawl_capture::retention::clean_annotations(
                             &captures,
                             &settings.retention(),
-                            false,
-                            Duration::ZERO,
-                            false,
                             &Self::retention_trasher,
                         );
                     }
@@ -3723,7 +3721,7 @@ mod tests {
     }
 
     #[test]
-    fn controls_are_idempotent_and_stop_writes_a_scrawl_bundle() {
+    fn controls_are_idempotent_and_stop_writes_a_hex_annotation() {
         let dir = temp_dir("control");
         let audio = FakeTimeline::default();
         let engine = FakeEngine::new(Arc::new(FakeTranscriber));
@@ -3807,8 +3805,10 @@ mod tests {
                 .iter()
                 .all(|sample| *sample != 0)
         );
-        let manifest: serde_json::Value =
-            serde_json::from_slice(&fs::read(bundle.join("scrawl.json")).unwrap()).unwrap();
+        let package: serde_json::Value =
+            serde_json::from_slice(&fs::read(bundle.join("annotation.json")).unwrap()).unwrap();
+        assert_eq!(package["formatVersion"], 1);
+        let manifest = &package["annotation"];
         let words = &manifest["transcript"]["words"];
         assert_eq!(manifest["transcript"]["text"], "hello there");
         assert_eq!(words[1]["text"], "there");
@@ -4997,7 +4997,19 @@ mod tests {
             cycle: false,
             search: false,
         });
+        let dir = temp_dir("grab-activity");
+        let audio = FakeTimeline::default();
+        let mut host = CaptureHost::with(
+            FakeEngine::new(Arc::new(FakeTranscriber)),
+            Some(dir.clone()),
+        )
+        .unwrap();
         assert!(suggesting() && !wants_escape() && !list_open());
+        assert_eq!(
+            host.shortcut_activity(CaptureInstant::now(), &audio),
+            ShortcutActivity::Capsule,
+            "compact/suggesting capsule claims the capture shortcut"
+        );
         assert!(!capsule_key(CapsuleKey::Escape));
         assert!(capsule_key(CapsuleKey::Press), "a press may fold them");
         assert!(capsule_key(CapsuleKey::Shift(true)), "Shift shows the rule");
@@ -5048,6 +5060,13 @@ mod tests {
         assert!(capsule_key(CapsuleKey::Press));
         // The search lets the capture shortcut through: it records anew.
         assert!(!capsule_key(CapsuleKey::Shortcut));
+        assert_eq!(
+            host.shortcut_activity(CaptureInstant::now(), &audio),
+            ShortcutActivity::Free,
+            "open search list lets the listener record anew"
+        );
+        host.shutdown(&audio);
+        fs::remove_dir_all(dir).ok();
         drop(second);
         assert!(!picking() && !list_open());
         assert!(!capsule_key(CapsuleKey::Escape));

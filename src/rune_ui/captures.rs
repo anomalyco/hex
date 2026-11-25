@@ -101,6 +101,7 @@ impl Listed {
 
 #[derive(Default)]
 pub(super) struct CapturesPane {
+    pub(super) view: super::scrawl::View,
     pub(super) confirm_trash: Option<(u64, PathBuf)>,
     pub(super) entries: Vec<Listed>,
     search: TextEdit,
@@ -219,6 +220,7 @@ impl CapturesPane {
             PathBuf::from("/Users/alex/Library/Application Support/Scrawl/captures/1.scrawl");
         let annotation = Annotation {
             id: 4,
+            manifest_id: "1".into(),
             movie: Some(bundle.join("recording.mp4")),
             bundle,
             at_ms: now - 20 * 60_000,
@@ -353,40 +355,52 @@ pub(super) fn open(ui: &mut Ui, id: u64) {
         return;
     };
     #[cfg(target_os = "macos")]
-    {
-        use super::screenshot_thumbnail::editor;
-        let words = |text: &str, timed: &[CaptureWord], duration_ms: u64| {
-            words_for_editor(text, timed, duration_ms)
-                .into_iter()
-                .map(|word| editor::clip::Word {
-                    t0: word.t0,
-                    t1: word.t1,
-                    text: word.text,
-                })
-                .collect()
-        };
-        match entry {
-            Listed::Saved(entry) => match entry.kind {
+    match entry {
+        Listed::Saved(entry) => {
+            use super::screenshot_thumbnail::editor;
+            match entry.kind {
                 CaptureKind::Shot => editor::open_with(entry.file.clone(), entry.words.clone()),
                 CaptureKind::Recording => editor::open_recording(
                     entry.file.clone(),
-                    words(&entry.words, &entry.timed, entry.duration_ms),
+                    editor_words(&entry.words, &entry.timed, entry.duration_ms),
                 ),
-            },
-            Listed::Annotated(annotation) => {
-                if let Some(movie) = &annotation.movie {
-                    editor::open_recording(
-                        movie.clone(),
-                        words(&annotation.words, &annotation.timed, annotation.duration_ms),
-                    );
-                } else if let Some(picture) = &annotation.picture {
-                    editor::open_with(picture.clone(), annotation.words.clone());
-                }
             }
         }
+        Listed::Annotated(annotation) => open_annotation(annotation),
     }
     #[cfg(not(target_os = "macos"))]
     let _ = entry;
+}
+
+/// Opens an annotation in the editor: its movie to trim, or its picture
+/// once the movie has expired. Safe from any thread.
+#[cfg(target_os = "macos")]
+pub(super) fn open_annotation(annotation: &Annotation) {
+    use super::screenshot_thumbnail::editor;
+    if let Some(movie) = &annotation.movie {
+        editor::open_recording(
+            movie.clone(),
+            editor_words(&annotation.words, &annotation.timed, annotation.duration_ms),
+        );
+    } else if let Some(picture) = &annotation.picture {
+        editor::open_with(picture.clone(), annotation.words.clone());
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn editor_words(
+    text: &str,
+    timed: &[CaptureWord],
+    duration_ms: u64,
+) -> Vec<super::screenshot_thumbnail::editor::clip::Word> {
+    words_for_editor(text, timed, duration_ms)
+        .into_iter()
+        .map(|word| super::screenshot_thumbnail::editor::clip::Word {
+            t0: word.t0,
+            t1: word.t1,
+            text: word.text,
+        })
+        .collect()
 }
 
 /// An entry's words for the editor: its own when the model timed them, else
@@ -493,19 +507,29 @@ pub(super) fn trash(ui: &mut Ui, id: u64) {
 /// The search over the list, or the empty state.
 pub(super) fn pane(ui: &Ui, p: Paint) -> El {
     let pane = &ui.captures;
+    let screenshots = ui.settings.labs.screenshots;
     let searching = !pane.searched.trim().is_empty();
     if pane.entries.is_empty() && !searching {
-        return ld::empty_state(
-            p,
-            "captures-empty",
-            &CAPTURES_ICON,
-            tr("No captures yet."),
-            Some(tr(
-                "Shots, recordings, and annotations from the last 30 days show here.",
-            )),
-        );
+        let (icon, title, detail) = if screenshots {
+            (
+                &CAPTURES_ICON,
+                tr("No captures yet."),
+                tr("Shots, recordings, and annotations from the last 30 days show here."),
+            )
+        } else {
+            (
+                &super::sidebar::SCRAWL_ICON,
+                tr("No annotations yet."),
+                tr("Annotations from the last 30 days show here."),
+            )
+        };
+        return ld::empty_state(p, "captures-empty", icon, title, Some(detail));
     }
-    let mut list = col().key("captures-list").label(tr("Captures"));
+    let mut list = col().key("captures-list").label(if screenshots {
+        tr("Captures")
+    } else {
+        tr("Annotations")
+    });
     let count = pane.entries.len();
     for (index, entry) in pane.entries.iter().enumerate() {
         list = list.child(item(ui, p, entry).position_in_set(index + 1, count));
@@ -515,12 +539,20 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
             p,
             "captures-empty",
             ld::SEARCH_ICON,
-            tr("No captures match."),
+            if screenshots {
+                tr("No captures match.")
+            } else {
+                tr("No annotations match.")
+            },
             None,
         ));
     }
     let search = TextInput::new(&pane.search)
-        .placeholder(tr("Search captures"))
+        .placeholder(if screenshots {
+            tr("Search captures")
+        } else {
+            tr("Search annotations")
+        })
         .width(None)
         .leading_icon(p.k.glyph.search)
         .on_edit(|ui: &mut Ui| &mut ui.captures.search)

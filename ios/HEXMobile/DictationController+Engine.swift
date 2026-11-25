@@ -86,12 +86,21 @@ extension DictationController {
     }
 
     /// Starts Parakeet Ultra's download when the experiment wants it and it isn't on the
-    /// iPhone, whatever engine is getting ready meanwhile.
+    /// iPhone, whatever engine is getting ready meanwhile; off Wi-Fi without Use mobile data it
+    /// waits for Wi-Fi (`SpeechModelDownloadNetwork`).
     func startMultilingualDownloadIfWanted() {
         // Memory left only matters for a load, not a download.
         guard ParakeetUltraTranscriber.chosenLanguage(availableMemory: 0) != nil,
               !ParakeetUltraModel.isDownloaded() else { return }
+        downloadNetwork.watch()
         multilingualDownload.start()
+    }
+
+    /// Use mobile data beside the multilingual model's "Downloads on Wi-Fi.": starts it now, on
+    /// any connection, until it is on the iPhone.
+    func useMobileDataForMultilingualParakeet() {
+        downloadNetwork.allowMobileData(for: .multilingual)
+        startMultilingualDownloadIfWanted()
     }
 
     /// Once an engine is ready, and once the download finishes: downloads Parakeet Ultra, or
@@ -195,6 +204,7 @@ extension DictationController {
         if ParakeetUltraModel.isDownloaded() {
             syncMultilingualParakeet()
         } else if ParakeetUltraTranscriber.chosenLanguage(availableMemory: 0) != nil {
+            downloadNetwork.watch()
             multilingualDownload.restart()
         }
     }

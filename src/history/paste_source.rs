@@ -19,6 +19,16 @@ pub(crate) struct Row {
     pub preview: String,
 }
 
+/// What the picker's preview shows for a dictation. Display only: a paste
+/// resolves the row's ID again.
+pub(crate) struct Words {
+    pub text: String,
+    /// Dictated without processing.
+    pub raw: bool,
+    pub application: Option<String>,
+    pub model: Option<String>,
+}
+
 pub(super) struct Recovery {
     id: Id,
     ready_at: u64,
@@ -99,6 +109,22 @@ impl HistoryStore {
                 .map(|e| e.final_text.as_str()),
         }
     }
+
+    /// The whole text and what History knows of it, for the picker's
+    /// preview. An unretained output has its text alone.
+    pub(crate) fn paste_words(&self, id: Id, now: u64) -> Option<Words> {
+        let text = self.resolve_paste(id, now)?.to_owned();
+        let entry = match id {
+            Id::Retained(id) => self.entries().find(|e| e.id == id),
+            Id::Session(_) => None,
+        };
+        Some(Words {
+            text,
+            raw: entry.is_some_and(|e| matches!(e.kind, HistoryKind::Raw)),
+            application: entry.and_then(|e| e.application.clone()),
+            model: entry.and_then(|e| e.model.clone()),
+        })
+    }
 }
 
 impl super::History {
@@ -147,6 +173,9 @@ impl super::History {
     }
     pub(crate) fn resolve_paste(&self, id: Id, now: u64) -> Option<String> {
         self.synced().resolve_paste(id, now).map(str::to_owned)
+    }
+    pub(crate) fn paste_words(&self, id: Id, now: u64) -> Option<Words> {
+        self.synced().paste_words(id, now)
     }
     /// The ordered output worker hands its only unretained text to the same
     /// owner Clear and retention use. No file read or write to recover it.

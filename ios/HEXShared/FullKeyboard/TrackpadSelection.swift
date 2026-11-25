@@ -19,7 +19,7 @@ struct PendingSelectionDictation {
     var document: UUID?
 }
 
-/// Settings › Experiments › Two-thumb selection: while the space bar is the trackpad, a second
+/// Settings › Labs › Two-thumb selection: while the space bar is the trackpad, a second
 /// finger starts a selection instead of being ignored. A keyboard can't select in the host, so
 /// the range lives here, shown in the strip, and the actions change the text through the same
 /// `KeyboardTextTarget` moves the keys use. Each thumb moves one end with its own

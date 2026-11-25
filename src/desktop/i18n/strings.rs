@@ -345,7 +345,6 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Recommended", ["Zalecany", "推荐", "おすすめ", "Empfohlen", "Recomendado", "Рекомендована"]),
     ("Settings", ["Ustawienia", "设置", "設定", "Einstellungen", "Ajustes", "Налаштування"]),
     ("General", ["Ogólne", "通用", "一般", "Allgemein", "General", "Загальні"]),
-    ("Experiments", ["Eksperymenty", "实验", "実験", "Experimente", "Experimentos", "Експерименти"]),
     ("Voice Filter", ["Filtr głosu", "声音滤镜", "ボイスフィルター", "Stimmfilter", "Filtro de voz", "Голосовий фільтр"]),
     ("Recordings", ["Nagrania", "录音", "録音", "Aufnahmen", "Grabaciones", "Записи"]),
     ("Advanced", ["Zaawansowane", "高级", "詳細", "Erweitert", "Avanzado", "Додатково"]),

@@ -1,6 +1,6 @@
 import UIKit
 
-/// Settings › Experiments › Korean keyboard (두벌식): while 한국어 types, the letter keys feed
+/// Settings › Labs › Korean keyboard (두벌식): while 한국어 types, the letter keys feed
 /// `HangulComposer` and the field shows the composing run by deleting the part that changed
 /// and inserting what it became. Nothing is marked text: a commit only forgets the run, which
 /// already sits in the host, so space, return, punctuation, a page or language switch, emoji,

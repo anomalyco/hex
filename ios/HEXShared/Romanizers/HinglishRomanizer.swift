@@ -1,6 +1,6 @@
 import Foundation
 
-/// Experiments › Hinglish: Hindi dictation as people text it, in Latin letters ("kya kar rahe
+/// Labs › Hinglish: Hindi dictation as people text it, in Latin letters ("kya kar rahe
 /// ho", "meeting kal 5 baje hai"), never translated. Apple's \`SpeechTranscriber\` already writes
 /// Hindi in Latin letters, English words in English (macOS and iOS 27: "meeting kal panch baje
 /// hai"); \`DictationTranscriber\`, the module on iPhones without it, writes Devanagari, English

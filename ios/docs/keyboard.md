@@ -26,7 +26,12 @@ In-keyboard dictation listens from touch-down, so a tap's or hold's first
 words are kept; moving
 more than 10 pt first opens the style menu, dropping that capture; releasing over a row picks it, and releasing elsewhere leaves
 the menu open for taps (`HexKeyGesture`). VoiceOver activation dictates,
-and the **Dictation styles** action opens the menu.
+and the **Dictation styles** action opens the menu. Its last row, **Open Hex**, set apart by a
+line below the translation rows, opens Hex at Home (`KeyboardLaunchRequest.home`, which closes
+Settings back to Home and starts no session); like every Open Hex it is a tap that says so, so
+still nothing opens Hex unless Open Hex is tapped. Without Full Access a hold on the Hex key
+shows the Full Access hint instead of the menu, so the row isn't offered there. The dictation
+bar has no such menu: its styles and languages are trays of chips.
 
 ## Auto-start
 
@@ -152,7 +157,7 @@ autocorrect count (`TypingJournal.allows`). Nothing leaves the iPhone.
   Typing insights lists these dictation fixes with a switch each and the share of
   dictations kept and edited; Delete what Hex learned erases everything,
   including what a running keyboard still holds.
-- **Per language (Settings › Experiments › Learn each language separately):**
+- **Per language (Settings › Labs › Learn each language separately):**
   Off by default (`experiments.learnPerLanguage`, App Group). Every correction and
   dictation fix is tagged with the language it was typed or dictated in either way,
   so turning it on needs nothing learned again; a fix made in two languages is
@@ -256,7 +261,7 @@ phone's dictionary on the simulator, which has no Polish word data, and 0% witho
 With English as the second language, Polish makes 85.0% fewer errors (86.4% alone: English
 takes "cos", "troche", "beda" as its words) and English is unchanged.
 
-## German spatial autocorrect (Settings › Experiments › German spatial autocorrect)
+## German spatial autocorrect (Settings › Labs › German spatial autocorrect)
 
 Off by default (`experiments.germanSpatialAutocorrect`, App Group), and only while
 Spatial autocorrect is on too. With both on, the Deutsch layout reads taps with
@@ -292,7 +297,7 @@ Off, Deutsch keeps the dictionary engine exactly as before: no decoder, no word 
 the letter odds or model completions, and no model for a bilingual partner. Off, swipe
 typing never reads German, even with Swipe typing in more languages on.
 
-## Adaptive touch (Settings › Experiments › Adaptive touch)
+## Adaptive touch (Settings › Labs › Adaptive touch)
 
 Off by default
 (`experiments.adaptiveTouch`). The keyboard learns where you land on each physical
@@ -358,7 +363,7 @@ On by default (stored as
 `experiments.swipeTyping` from when it was an experiment off by default: unset or true
 is on, false off, so testers who turned it off keep it off), for the
 English and Spanish layouts (every other layout keeps a drag as a slide to
-another key), and with Settings › Experiments › Swipe typing in more languages on
+another key), and with Settings › Labs › Swipe typing in more languages on
 (`experiments.swipeMoreLanguages`, off by default) for every language with a typing
 model too: French (France), Polish, and German while Spatial autocorrect and German
 spatial autocorrect are on. Off under VoiceOver. A touch that goes down on a letter and
@@ -374,7 +379,7 @@ swipe types " There"), and a name the dictionary only knows capitalised is
 capitalised. The strip then offers the next three readings, the likeliest in the
 centre; tapping one puts it in the word's place. Until anything else changes the
 text, delete takes the whole word back (with the space it added), unless Settings ›
-Experiments › Delete swiped words letter by letter is on
+Labs › Delete swiped words letter by letter is on
 (`experiments.swipeDeleteLetterByLetter`, off by default), which makes delete act as
 anywhere else and take one letter at a time; space never autocorrects it. As on Apple's
 keyboard (watched on iOS 27.2), a space stays pending
@@ -571,7 +576,7 @@ with no language switch; Portuguese, Polish and Turkish offer "Add to Existing
 Keyboard". There it fixed "I dont know" and "Dont do it" to "don't", kept "est" and
 "merci" after English words, and wrote "Im" as "I m"; the simulator's French word data is
 thin ("je pense" became "he pence"), so how it weighs French there is unverified.
-**한국어 (두벌식):** Settings › Experiments › Korean keyboard (off by
+**한국어 (두벌식):** Settings › Labs › Korean keyboard (off by
 default, `experiments.koreanKeyboard`) adds 한국어 to the list: the standard Dubeolsik rows
 with shift's ㅃㅉㄸㄲㅆ and ㅒㅖ, and no qwerty/azerty choice. `HangulComposer` composes each
 syllable in the field (한, then delete to 하, ㅎ, nothing; ㅘ splits to ㅗ; 닭 + ㅗ → 달고,
@@ -624,14 +629,14 @@ letter keys holds them right after their base letter, as Apple's does (German QW
 A Ä À…, O Ö…, U Ü…; Spanish QWERTY: N Ñ Ń). Apple's Dvorak is P Y F G C R L and delete,
 A O E U I D H T N S from the edge, shift and Q J K X B M W V Z, on keys narrowed so that
 row fits (38.3 pt pitch on a 402 pt iPhone); split on the Duo it keeps delete on row 3
-(Apple's split Dvorak unobserved). Settings › Experiments › Dvorak punctuation keys (off by
+(Apple's split Dvorak unobserved). Settings › Labs › Dvorak punctuation keys (off by
 default, `experiments.dvorakPunctuation`) puts `,` and `.` ahead of P on row 1, whose nine keys
 narrow to start at the left margin and end at the same delete key, puts `;` just left of the
 space bar where it can give up a letter's width, and types `<`, `>` and `:` with a shift you
 press or caps lock (auto-capitalization leaves the comma); on the split Duo the two
 punctuation keys join only the left half, on a pitch narrowed so it keeps its right edge (its
 top-row keys are narrower), and `;` takes from the left space bar. A URL, email or web search
-field keeps its own `.` key instead of row 1's, and Experiments › Comma and period keys adds no second pair
+field keeps its own `.` key instead of row 1's, and Labs › Comma and period keys adds no second pair
 beside the space bar where this experiment put them on row 1. Off, every layout is key for key
 the one it was. Kept per
 language in the App Group
@@ -933,7 +938,7 @@ screenshots beside Apple's; no physical iPhone run checks it.
 
 ## Comma and period keys (full keyboard, iPhone)
 
-Settings › Experiments › Comma and
+Settings › Labs › Comma and
 period keys (off by default, `experiments.commaPeriodKeys`, App Group) puts a comma just
 left of the space bar and a period just right of it, both a letter wide, on the letters page
 in a plain text field. On the joined keyboard the comma starts where the bar used to start
@@ -952,7 +957,7 @@ iOS targets, and no physical iPhone run checks it.
 
 The strip above the keys shows the words the engine
 offers as you type, the emoji of the word being typed, and after a space the finished
-word's emoji (Emoji below). Settings › Experiments ›
+word's emoji (Emoji below). Settings › Labs ›
 Hide word suggestions (off by default, `experiments.hideWordSuggestions`, App Group) stops
 the suggestions: the strip keeps its height, the Hex key, Undo, status, notices and the Paste
 chip, but shows no typing or next-word suggestions, swipe readings, typed or finished-word
@@ -1008,7 +1013,7 @@ rule unchecked), and every page (123, #+=). Spatial autocorrect reads taps as on
 unsplit keyboard (`KeyboardLayout.unsplitX`), so either G is one key. Apple's split
 follows its own Split Keyboard preference, which a keyboard extension can't read, so
 Hex splits whenever the Duo is in that posture (the iOS 27.2 simulator has Apple's off
-until `KeyboardShouldSplitInDefaultContext` is set). Settings › Experiments › Join the
+until `KeyboardShouldSplitInDefaultContext` is set). Settings › Labs › Join the
 keyboard when unfolded (off by default, `experiments.joinKeyboardWhenUnfolded`, App
 Group) draws one joined keyboard there instead: unfoldedWide's own 39 pt rows on a
 51.7 pt row pitch, 19 pt in from the keyboard's own side as unfoldedTall's keys sit
@@ -1166,7 +1171,7 @@ so even a full-width field skips one going down). The keys blank to keycaps 60%
 of the way to the backdrop, as Apple's, with no haptic while it moves. Apple's second-finger
 tap to select text has no host counterpart: `UITextDocumentProxy` (iOS 27.2 SDK) can read the
 selection but not make one. Off (the default), a second finger does nothing. Settings ›
-Experiments › Two-thumb selection (off by default, `experiments.twoThumbSelection`, App Group)
+Labs › Two-thumb selection (off by default, `experiments.twoThumbSelection`, App Group)
 gives it one: while the space bar is the trackpad, a second finger starts a selection from
 the cursor, and the finger further left moves the start of the range, the other the end, each
 with its own `TrackpadCursor.State` (the trackpad's gain, acceleration and rows). Settling the
@@ -1243,7 +1248,7 @@ off the keys it types nothing and the page stays. Holding shift and sliding to a
 shows and types its capital. None of them is a swipe, and a slid-to key opens no
 accent menu (Apple's does after a hold).
 
-## Quick accents (full keyboard, Settings › Experiments)
+## Quick accents (full keyboard, Settings › Labs)
 
 Off by default
 (`experiments.quickAccents`, App Group). Holding a letter opens its callout with the letter's
@@ -1258,7 +1263,7 @@ going down while the callout is held commits the preselection. Only letters: the
 callout opens on the key's own letter. Unit tests only (`FullKeyboardEngineTests`): no CI
 compiles the iOS targets, and no physical iPhone run checks it.
 
-## Emoji shortcodes (full keyboard, Settings › Experiments)
+## Emoji shortcodes (full keyboard, Settings › Labs)
 
 Off by default
 (`experiments.emojiShortcodes`, App Group). In a plain text field that takes emoji, with
@@ -1312,7 +1317,7 @@ touches that land on something its layers draw, so both have an invisible fill
 landing between emoji reached nothing, so a swipe that began there did nothing and a
 glide couldn't be stopped or flung again (TestFlight build 147: "the animation in the
 emoji section is not cancelable"; iOS 27.2 simulator). With
-Settings › Experiments › ABC under the emoji key on (off by default,
+Settings › Labs › ABC under the emoji key on (off by default,
 `experiments.emojiLettersUnderEmojiKey`, App Group), ABC sits exactly where the emoji
 key that opened the panel was, its x and width, so switching back to the letters needs
 no thumb move; a tap left of it still goes to ABC, and the categories take the room
