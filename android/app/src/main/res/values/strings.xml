@@ -115,7 +115,7 @@
     <!-- Labs › Dictation › Faster English dictation. Never name a speech engine or model in these. %1$d: the download's
          size in MB (ModelStore.english). -->
     <string name="fast_english">Faster English dictation</string>
-    <string name="fast_english_detail">Several times faster after a one-time %1$d MB download. Numbers come out as words for now. Other languages are unchanged.</string>
+    <string name="fast_english_detail">Several times faster after a one-time %1$d MB download. Other languages are unchanged.</string>
     <string name="fast_english_download">Download %1$d MB</string>
     <string name="fast_english_loading">Downloading %1$d MB · %2$d%%</string>
     <string name="fast_english_ready">Ready · %1$d MB</string>
