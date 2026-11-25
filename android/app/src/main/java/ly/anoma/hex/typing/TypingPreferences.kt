@@ -95,6 +95,11 @@ internal class TypingPreferences(context: Context) {
     var hexKeyLeft: Boolean
         get() = prefs.getBoolean(HEX_KEY_LEFT, false)
         set(value) { prefs.edit().putBoolean(HEX_KEY_LEFT, value).apply() }
+    /** Labs › Keyboard › Volume in the Hex menu: a Volume row that opens Android's own volume panel (#2868).
+     * Off by default. */
+    var volumeInMenu: Boolean
+        get() = prefs.getBoolean(VOLUME_IN_MENU, false)
+        set(value) { prefs.edit().putBoolean(VOLUME_IN_MENU, value).apply() }
     /** Labs › Keyboard › Voice-only mode: a "voice" subtype other keyboards switch to for dictation
      * alone, off by default. */
     var voiceOnly: Boolean
@@ -153,6 +158,7 @@ internal class TypingPreferences(context: Context) {
         const val VOICE_ONLY = "voiceOnly"
         const val HEIGHT = "keyboardHeight"
         const val HEX_KEY_LEFT = "hexKeyLeft"
+        const val VOLUME_IN_MENU = "volumeInMenu"
         const val KEY_COLORS = "keyColors"
         const val KEY_COLOR = "keyColor"
         const val TEST_KEYBOARD_ON_HOME = "testKeyboardOnHome"

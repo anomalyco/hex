@@ -183,6 +183,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val passwordManager = remember(revision) { typing.passwordManagerSuggestions }
     val voiceOnly = remember(revision) { typing.voiceOnly }
     val hexKeyLeft = remember(revision) { typing.hexKeyLeft }
+    val volumeInMenu = remember(revision) { typing.volumeInMenu }
     // Labs › Dictate from Quick Settings is the tile service's enabled state, not a preference.
     var quickDictation by remember { mutableStateOf(QuickDictation.enabled(context)) }
     val keyColors = remember(revision) { typing.keyColors }
@@ -632,6 +633,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 // Labs › Keyboard › Hex key on the left: off, the Hex key stays at the strip's right end.
                                 Toggle(stringResource(R.string.hex_key_left), stringResource(R.string.hex_key_left_detail),
                                     hexKeyLeft) { typing.hexKeyLeft = it }
+                                Rule()
+                                // Labs › Keyboard › Volume in the Hex menu: off, the Hex menu has no Volume row.
+                                Toggle(stringResource(R.string.volume_in_menu), stringResource(R.string.volume_in_menu_detail),
+                                    volumeInMenu) { typing.volumeInMenu = it }
                                 Rule()
                                 // Labs › Keyboard › Key colors: iPhone Hex's key themes, the keys only. Off, the keys are
                                 // Automatic's whatever Color says; the choice is kept for the next time it is on.
