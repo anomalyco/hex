@@ -18,6 +18,8 @@
     <string name="keyboard_cancel_dictation">取消听写</string>
     <string name="keyboard_finish_dictation">完成听写</string>
     <string name="keyboard_undo_dictation">撤销听写</string>
+    <string name="keyboard_kept">插入听写</string>
+    <string name="keyboard_kept_discard">丢弃听写</string>
     <string name="keyboard_pane">Hex 键盘，%1$s</string>
     <string name="keyboard_shift_on">已启用 Shift</string>
     <string name="keyboard_caps_lock_on">已启用大写锁定</string>

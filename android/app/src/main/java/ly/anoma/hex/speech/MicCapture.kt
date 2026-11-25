@@ -106,6 +106,8 @@ internal class MicCapture(
         val job = jobs.incrementAndGet()
         @Volatile var finish = false
         @Volatile var cancelled = false
+        /** The keyboard's field went away: its notes aren't shown in the next one. */
+        var left = false
         var done = false
         var note: String? = null
         var text: String? = null
@@ -179,8 +181,14 @@ internal class MicCapture(
         } else cancel()
     }
 
-    /** Nothing recording or transcribing goes in: the keyboard's field went away, Next keyboard, Home or the Quick
-     * Settings sheet closing. A decode in progress stops too, or the next dictation's load and decode would wait for it. */
+    /** The keyboard's field went away: a recording stops as with ✓ and is still transcribed, and nothing of it is shown
+     * in the next field; [insert] gets each text with its old field number, so the keyboard keeps it rather than type it. */
+    fun leave() {
+        queue.forEach { it.left = true }
+        active?.let { it.left = true; finish() }
+    }
+
+    /** Nothing recording or transcribing goes in: Next keyboard, Home or the Quick Settings sheet closing. A decode in progress stops too, or the next dictation's load and decode would wait for it. */
     fun cancel() {
         active?.cancelled = true
         active = null
@@ -213,7 +221,7 @@ internal class MicCapture(
         var shown: String? = null
         while (queue.firstOrNull()?.done == true) {
             val next = queue.removeFirst()
-            shown = next.note ?: shown
+            if (!next.left) shown = next.note ?: shown
             next.text?.let { insert(it, next.heard ?: it, next.written ?: next.options, next.field) }
             next.spent?.let {
                 val times = durations(next, it, if (next.text != null) System.nanoTime() else 0L)
