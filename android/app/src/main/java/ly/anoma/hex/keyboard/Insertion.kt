@@ -19,30 +19,23 @@ internal fun dictationInsertion(transcript: String, before: String?, after: Char
     return if (spaced.isEmpty() || !standalone) spaced else "\n$spaced"
 }
 
-/** The field a dictation's text may go into. Every field Hex starts in gets a new number; the same field restarting in
- * place (the same app and view: an app resetting it or changing its type) keeps it, and the field finishing retires it.
+/** The field a dictation's text may go into. Every start Hex gets is a new number, a restart included: a browser, a
+ * WebView or a Compose screen moves between its inputs by restarting the same view, with the same package, field ID and
+ * often the same EditorInfo, so a restart can't be told from another field. The field finishing retires its number.
  * A dictation keeps the number it was spoken in, and its text goes in only while that number is current, the editor is
  * connected and the field isn't a password one, whether or not the keyboard shows: an app hiding the keyboard keeps its
- * field, so the text lands where it was spoken, and never in another field or app. */
+ * field (no start comes), so the text lands where it was spoken, and never in another field or app. */
 internal class DictationField {
     var current = 0
         private set
     private var live = false
-    private var app: String? = null
-    private var view = 0
     /** The app of each recent field number, for a dictation whose field went away (its text is offered only there). */
     private val apps = LinkedHashMap<Int, String?>()
 
-    /** A field started; true when it is the same one restarting, which keeps its number. */
-    fun started(restarting: Boolean, app: String?, view: Int): Boolean {
-        val same = live && restarting && app == this.app && view == this.view
-        if (!same) {
-            current++
-            apps[current] = app
-            if (apps.size > RECENT) apps.remove(apps.keys.first())
-        }
-        live = true; this.app = app; this.view = view
-        return same
+    fun started(app: String? = null) {
+        current++; live = true
+        apps[current] = app
+        if (apps.size > RECENT) apps.remove(apps.keys.first())
     }
 
     /** The app field [number] was in, while it is recent. */

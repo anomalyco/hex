@@ -215,9 +215,10 @@ class HexKeyboard : InputMethodService() {
         typeChanged = restarting && fieldType != attribute.inputType to attribute.imeOptions
         fieldType = attribute.inputType to attribute.imeOptions
         nextEnglish = null
-        // A different field, even in the same app, never receives an old result; the same field restarting in place
-        // keeps its dictation.
-        if (!field.started(restarting, attribute.packageName, attribute.fieldId)) capture.leave()
+        // Another field never receives an old result: its dictation is kept to offer. A restart counts too: browsers,
+        // WebViews and Compose restart one view to move between their inputs, which Hex can't tell from the same field.
+        field.started(attribute.packageName)
+        capture.leave()
         engine.startInput(attribute)
     }
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
