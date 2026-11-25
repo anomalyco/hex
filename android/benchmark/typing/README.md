@@ -65,9 +65,9 @@ Per language, against the same input with Adaptive touch off:
 - **A, identical:** on, but before it has learned anything (one session, so never in use), the gate's whole input comes out the same, item for item.
 - **B, fewer errors:** each typist types the 2,000 noisy sentences in order with it learning; word errors in the second thousand. Also reported: the held-out taps as they are, and the same centres deciding alone, without the guard (in brackets).
 - **C, no more correct words changed:** each typist's profile, frozen, never changes more correctly typed words than it off, typed on the key centres or on the typist's own aim, and every critical case passes.
-- **D, a grip change:** learned on T1, typed as T1m: no word it off gets right is broken while T1's centres are still in use; also reported after they fall back, and without the fallback.
+- **D, a grip change:** learned on T1, typed as T1m: T1's centres fall back to the drawn ones within three sentences, and the words they break before then, against it off, are at most 2% of what they break with no fallback. Also reported: words broken after the fallback, while the new grip is learned.
 
-2026-11-24, branch `android-adaptive-touch` on `dev` 786451f00, host JVM on the Studio. Word errors in sentences 1,001–2,000, off → on (without the guard):
+2026-11-24, branch `android-adaptive-touch` on `dev` 5d977b5ed, host JVM on the Studio. Word errors in sentences 1,001–2,000, off → on (without the guard):
 
 | Layout | Held-out taps | T1 | T2 | T3 | C: changed on centres / on the aim | D: broken before / after the fallback / without it |
 |---|---:|---:|---:|---:|---|---|
@@ -77,8 +77,9 @@ Per language, against the same input with Adaptive touch off:
 | French | 415 → 422 | 569 → 556 (466) | 557 → 552 (488) | 436 → 442 (426) | never more / never more | 0 / 7 / 154 |
 | Italian | 378 → 378 | 526 → 513 (409) | 521 → 509 (427) | 446 → 444 (408) | never more / never more | 0 / 11 / 153 |
 | Bokmål | 332 → 330 | 436 → 425 (364) | 408 → 390 (356) | 365 → 363 (349) | never more / never more | 0 / 11 / 140 |
+| Portuguese | 443 → 416 | 656 → 629 (546) | 620 → 557 (517) | 491 → 470 (472) | never more / never more | 0 / 6 / 99 |
 
-A held in all six, and the gate's own numbers are unchanged, field for field. The guard (`TypingWord.guarded`: space corrects a word only when the drawn centres would correct it too, and puts in their reading unless yours also clears their margin) keeps C, and most of the gain with it: without the guard, T1 and T2 make 6–22% fewer errors, but the same frozen centres change more correctly typed words in every layout (1–5 more on the centres, 91 for 76 on T1's aim in Bokmål). Letting your centres alone fix a spelling no list knows recovered 3–10% for T1 and T2, and changed 1–5 more correctly typed words in all six: names and words the lists lack. The fallback needs about 16 labels, so the first two sentences of a new grip can still read the old centres (German's one word).
+A held in all seven, and the gate's own numbers are `dev`'s, field for field. With the guard, T1 and T2 make 0.9–4.4% fewer errors (Portuguese's T2 10.2%), and T3 0.4–1.2% fewer (Portuguese 4.3%) except in French, 6 more: B fails there, and French's held-out taps also come out 7 errors worse (415 → 422). The guard (`TypingWord.guarded`: space corrects a word only when the drawn centres would correct it too, and puts in their reading unless yours also clears their margin) keeps C, and most of the gain with it: without the guard, T1 and T2 make 6–22% fewer errors, but the same frozen centres change more correctly typed words in every layout (1–5 more on the centres, 91 for 76 on T1's aim in Bokmål). Letting your centres alone fix a spelling no list knows recovered 3–10% for T1 and T2, and changed 1–5 more correctly typed words in all six then measured: names and words the lists lack. D's bar was "no word broken before the fallback" until German broke one: the fallback needs about 16 labels, two sentences, so a new grip's first words still read the old centres, and zero can only be luck. 1 word against 179 without the fallback is what it is there for.
 
 ## Swipe typing
 

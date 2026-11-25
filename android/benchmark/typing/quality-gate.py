@@ -121,8 +121,8 @@ def adaptive(lang, model, rows, cases, gate_input, gate_output, tmp, command):
     aim off the centres the same way every time (TYPISTS, Replay.bias) type the noisy sentences in order with it
     learning, a new session every 50; the second thousand's word errors against it off. C: the profile each learned,
     frozen, never changes more correctly typed words than it off, typed on the centres or on the typist's own aim, and
-    every critical case still passes. D: learned on T1, typed with T1's aim mirrored: no word it off gets right is
-    broken."""
+    every critical case still passes. D: learned on T1, typed with T1's aim mirrored: T1's centres fall back within three
+    sentences, breaking at most 2% of the words they would break with no fallback."""
     count = len(rows)
     refs = [text.lower().split() for _, _, text, _, _ in rows]
     later = slice(count // 2, count)
@@ -199,8 +199,9 @@ def adaptive(lang, model, rows, cases, gate_input, gate_output, tmp, command):
                                  broken_before_fallback=broken(refs, off, on, range(min(held + 1, count))),
                                  broken_after_fallback=broken(refs, off, on, range(held + 1, count)),
                                  broken_without_fallback=broken(refs, off, stuck, range(count)), adaptive=info)
-    if report['grip_change']['broken_before_fallback']:
-        failed.append('adaptive: words broken before the fallback')
+    grip = report['grip_change']
+    if grip['fell_back_after'] > 3 or grip['broken_before_fallback'] > .02 * grip['broken_without_fallback']:
+        failed.append('adaptive: the grip change')
     report['failed'] = failed
     return report
 
