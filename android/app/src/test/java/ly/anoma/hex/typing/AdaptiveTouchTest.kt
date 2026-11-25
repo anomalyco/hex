@@ -245,4 +245,26 @@ class AdaptiveTouchTest {
             for ((i, a) in off.withIndex()) if (a == "-") assertEquals("$s at $aim, word $i", "-", on[i])
         }
     }
+
+    // "On this phone only", as the policy says of Adaptive touch and Learn from my fixes: no backup and no transfer to
+    // a new phone carries any of Hex's files. allowBackup="false" stops the cloud backup but not a device-to-device
+    // transfer on Android 12 and later, so the manifest names rules that leave every domain out of both.
+    @Test fun nothingHexKeepsGoesIntoABackupOrATransferToANewPhone() {
+        val xml = javax.xml.parsers.DocumentBuilderFactory.newInstance().apply { isNamespaceAware = true }.newDocumentBuilder()
+        val android = "http://schemas.android.com/apk/res/android"
+        val application = xml.parse(File("src/main/AndroidManifest.xml")).getElementsByTagName("application").item(0) as org.w3c.dom.Element
+        assertEquals("false", application.getAttributeNS(android, "allowBackup"))
+        assertEquals("@xml/data_extraction_rules", application.getAttributeNS(android, "dataExtractionRules"))
+        val rules = xml.parse(File("src/main/res/xml/data_extraction_rules.xml")).documentElement
+        val domains = setOf("root", "file", "database", "sharedpref", "external",
+            "device_root", "device_file", "device_database", "device_sharedpref")
+        for (section in listOf("cloud-backup", "device-transfer")) {
+            val element = rules.getElementsByTagName(section).item(0) as org.w3c.dom.Element
+            assertEquals(section, 0, element.getElementsByTagName("include").length)
+            val list = element.getElementsByTagName("exclude")
+            val excluded = (0 until list.length).map { list.item(it) as org.w3c.dom.Element }
+                .filter { it.getAttribute("path") == "." }.map { it.getAttribute("domain") }.toSet()
+            assertEquals(section, domains, excluded)
+        }
+    }
 }
