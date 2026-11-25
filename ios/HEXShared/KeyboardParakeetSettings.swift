@@ -113,14 +113,32 @@ nonisolated struct KeyboardParakeetSettings {
         reason: UnavailableReason? = nil,
         now: Date = Date()
     ) {
+        // Hex reads these from another process: `.unavailable` gets its reason before the
+        // state, so it is never seen without one (`forgetUnavailableWithoutReason`).
+        if state == .unavailable {
+            defaults?.set(reason?.rawValue, forKey: Self.keyboardStateReasonKey)
+        }
         defaults?.set(state?.rawValue, forKey: Self.keyboardStateKey)
         defaults?.set(multilingual, forKey: Self.keyboardStateMultilingualKey)
         defaults?.set(now.timeIntervalSince1970, forKey: Self.keyboardStateAtKey)
-        defaults?.set(state == .unavailable ? reason?.rawValue : nil, forKey: Self.keyboardStateReasonKey)
+        if state != .unavailable {
+            defaults?.removeObject(forKey: Self.keyboardStateReasonKey)
+        }
     }
 
-    /// Why the keyboard last said `.unavailable`; nil for any other state, or one written
-    /// without a reason (a keyboard from before 1.0.5).
+    /// A keyboard from before 1.0.5 said `.unavailable` without a reason, and nothing else
+    /// clears it until the keyboard loads again, which some never do (a limit under 131 MB:
+    /// `KeyboardParakeetPlan.tooSmall` loads nothing and writes nothing). It says nothing true
+    /// any more, so Hex forgets it at launch; since 1.0.5 the keyboard always writes a reason.
+    @discardableResult
+    func forgetUnavailableWithoutReason() -> Bool {
+        guard keyboardState?.state == .unavailable,
+              defaults?.string(forKey: Self.keyboardStateReasonKey) == nil else { return false }
+        setKeyboardState(nil)
+        return true
+    }
+
+    /// Why the keyboard last said `.unavailable`; nil for any other state.
     var unavailableReason: UnavailableReason? {
         guard keyboardState?.state == .unavailable,
               let raw = defaults?.string(forKey: Self.keyboardStateReasonKey) else { return nil }

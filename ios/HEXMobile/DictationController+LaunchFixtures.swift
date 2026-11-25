@@ -241,9 +241,8 @@ extension DictationController {
     /// real rule: pass `--simulate-cellular` and the keyboard has measured room for the model,
     /// so only the connection holds it. The other states leave the keyboard unmeasured, so
     /// nothing really downloads on the simulator's Wi-Fi. English also has what the keyboard
-    /// said about a downloaded model, preparing|short|noengine|failed|unknown (unknown: an
-    /// older keyboard's unavailable without a reason), and toosmall, a keyboard limit under
-    /// KeyboardParakeetBudget.requiredLimit.
+    /// said about a downloaded model, preparing|short|noengine|failed, and toosmall, a keyboard
+    /// limit under KeyboardParakeetBudget.requiredLimit.
     private func applySpeechModelFixture(_ scene: String) {
         let multilingual = scene.contains("-multilingual-")
         let step = scene.split(separator: "-").last.map(String.init) ?? "waiting"
@@ -252,7 +251,6 @@ extension DictationController {
             "short": (.unavailable, .shortOfMemory),
             "noengine": (.unavailable, .noNeuralEngine),
             "failed": (.unavailable, .loadFailed),
-            "unknown": (.unavailable, nil),
         ]
         let said = multilingual ? nil : keyboardSaid[step]
         let card = multilingual ? "waiting" : said == nil ? step : "ready"

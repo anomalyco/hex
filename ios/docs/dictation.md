@@ -477,7 +477,17 @@ keyboard can't use it right now", which stayed up after the cause had passed: on
 keyboard's next load, the switch or removing the model clears what it said, and unlike
 "Getting ready" (3 minutes) it never expires, so each line now says what happens next
 rather than that it's so now. A load still going after `loadPatience` (180 s) is only logged;
-it used to say the keyboard couldn't use it. Dictating in another
+it used to say the keyboard couldn't use it. Every keyboard open that decides not to load
+says why: after a memory warning (in that view controller, or within `reloadAfterWarning`)
+it writes `shortOfMemory` rather than nothing, and a model still loaded says ready again if
+Hex cleared it. Where the plan picks no model (a limit under 131 MB, another language, nothing
+downloaded) the keyboard writes nothing and Hex says why from the same plan: a limit under
+131 MB says so even with the model downloaded, as a download turned on by hand skips the
+hold. A `.unavailable` without a reason can only come from a keyboard before 1.0.5 (the
+reason is written before the state), says nothing true, and Hex forgets it at launch
+(`forgetUnavailableWithoutReason`; TestFlight build 153 on an iPhone 14 showed it), so no
+reason means the keyboard hasn't said anything since: "Downloaded. The keyboard gets it
+ready the next time it opens." Dictating in another
 language than English, Hinglish included, it says "Only for English dictation." even once
 downloaded: Apple's speech recognition takes that dictation whatever the keyboard last wrote
 (build 147 said "Ready in the keyboard", which reads as Parakeet taking Hinglish). Each dictation logs
