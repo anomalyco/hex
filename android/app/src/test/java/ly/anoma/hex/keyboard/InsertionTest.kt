@@ -620,6 +620,20 @@ class InsertionTest {
         down("h"); roll.down("shift"); up("h")              // h held, shift down: h types first
         assertEquals("asd fgh", typed.toString())
     }
+    @Test fun keyboardHeightIsGboardsStepsAndNormalUntilChosen() {
+        assertEquals(KeyboardHeight.Normal, KeyboardHeight.of(null))
+        assertEquals(KeyboardHeight.Normal, KeyboardHeight.of("huge"))
+        for (step in KeyboardHeight.entries) assertEquals(step, KeyboardHeight.of(step.key))
+        val shares = KeyboardHeight.entries.map { it.share }
+        assertEquals(shares.sorted(), shares)
+        assertEquals(1f, KeyboardHeight.Normal.share)
+        assertEquals(7, KeyboardHeight.entries.size)
+        // Inside Gboard's Resize (0.69 to 1.62 of the step); only the keys change, the gap between rows stays.
+        assertTrue(shares.first() >= 0.69f && shares.last() <= 1.62f)
+        val rows = KeyRows.of(375f, landscape = false)
+        for (step in KeyboardHeight.entries) assertEquals(rows.gap, step.of(rows).gap, 0.001f)
+        assertEquals(rows, KeyboardHeight.Normal.of(rows))
+    }
     @Test fun heldKeysOfferGboardsOptions() {
         assertEquals(listOf("3", "e", "è", "é"), LetterFeedback.holds('e', "en", KeyboardLetters.digit(0, 2)).take(4))
         assertEquals(listOf("1"), LetterFeedback.holds('q', "en", KeyboardLetters.digit(0, 0)))

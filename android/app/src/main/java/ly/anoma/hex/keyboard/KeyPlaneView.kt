@@ -41,7 +41,7 @@ import kotlin.math.roundToInt
  * point of the area types a key (KeyRowLayout); the bottom row stays mounted across page changes.
  * Keys that type as they lift do so in the order the fingers went down ([Rollover]). */
 internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, private val host: KeyboardView,
-                            private val feedback: LetterFeedback) : LinearLayout(context) {
+                            private val feedback: LetterFeedback, size: KeySize) : LinearLayout(context) {
     private companion object {
         /** How far (key pitches) a swipe may go from where it went down and still be a tap that slid (iPhone Hex). */
         const val SLID_TAP_REACH = 1.6
@@ -50,23 +50,52 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private val density = resources.displayMetrics.density
     private fun dp(value: Int) = (value * density).roundToInt()
     private fun px(value: Float) = (value * density).roundToInt()
-    private val caps = KeyCaps(context) { ime.feedback.haptics }
+    private val caps = KeyCaps(context, KeyRows.labelBase(resources)) { ime.feedback.haptics }
     private val ink = caps.ink
     private val modifier = caps.modifier
     private val quiet = context.getColor(R.color.quiet)
     private val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-    private val rowHeight = px(if (landscape) KeyboardMetrics.ROW_LANDSCAPE else KeyboardMetrics.ROW)
-    private val keyHeight = px(if (landscape) KeyboardMetrics.KEY_HEIGHT_LANDSCAPE else KeyboardMetrics.KEY_HEIGHT)
+    // Gboard's rows for this screen ([KeyRows]) at Settings › Keyboard › Height. Each key's touch target is its row's
+    // full height (KeyRowLayout), so the targets, and the keycap centres the typing model and swipe read
+    // (geometry()), follow the rows.
+    private val rowSize = size.rows
+    private val rowHeight = px(rowSize.pitch)
+    private val keyHeight = px(rowSize.key)
     private val insetTop = (rowHeight - keyHeight) / 2
     private val insetBottom = rowHeight - keyHeight - insetTop
+    /** One row above the bottom row, in px: its step and its keycaps', and where the keycaps sit in it. */
+    private class Band(val pitch: Int, val key: Int) {
+        val top = (pitch - key) / 2
+        val under = pitch - key - top
+    }
+    private val plain = Band(rowHeight, keyHeight)
+    // Labs › Keyboard › Number row: Gboard's sizes for it and for the letter rows under it ([KeyRows.withNumberRow]).
+    private val numberRows = KeyRows.withNumberRow(rowSize, landscape)
+    private val digitBand = Band(px(numberRows.digits.pitch), px(numberRows.digits.key))
+    private val letterBand = Band(px(numberRows.letters.pitch), px(numberRows.letters.key))
+    /** Whether the number row's height is above this page's keys: on the letters, and on ?123, =< and the symbol
+     * pad, which have no number row (their first row is the digits) and, as Gboard's, stretch their three rows over
+     * the same height, so switching pages never resizes the keyboard. A number or phone field's pad has its own. */
+    private fun numberBand(page: KeyboardPage?) = page != null && page.numberRow && (page.pad == null || page.pad == Pad.Symbols)
+    /** The rows above the bottom row on [page], top first. */
+    private fun bands(page: KeyboardPage?): List<Band> = when {
+        !numberBand(page) -> List(3) { plain }
+        page!!.digits != null -> List(3) { letterBand }
+        else -> {
+            // ?123, =< and the symbol pad: the number row's and the three letter rows' height over three rows.
+            val total = digitBand.pitch + 3 * letterBand.pitch
+            List(3) { i -> val p = total / 3 + if (i < total % 3) 1 else 0; Band(p, p - (letterBand.pitch - letterBand.key)) }
+        }
+    }
+    /** The keys above the bottom row on [page], the number row included. */
+    private fun upperHeight(page: KeyboardPage?) = bands(page).sumOf { it.pitch } + if (page?.digits != null) digitBand.pitch else 0
     private val bottomExtra = px(if (landscape) KeyboardMetrics.BOTTOM_LANDSCAPE else KeyboardMetrics.BOTTOM)
     private val reach = if (landscape) 0 else px(KeyboardMetrics.ROW1_REACH)
     private val side = KeyboardMetrics.SIDE * density
     private val gap = KeyboardMetrics.GAP * density
     /** The menu's height is the keys' height for the page, the number row included, so opening it
      * never resizes the keyboard. */
-    val menuHeight get() = rowHeight * (KeyboardMetrics.MENU_ROWS + if (current?.digits != null) 1 else 0) +
-        bottomExtra + reach
+    val menuHeight get() = upperHeight(current) + rowHeight + bottomExtra + reach
     private val letters = LinkedHashMap<Char, KeyCap>()
     private var grid: KeyGrid? = null
     private var pendingAccents: Runnable? = null
@@ -159,7 +188,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         emojiKey = caps.icon(R.drawable.ic_emoji, context.getString(R.string.keyboard_emoji), caps.key,
             { if (current?.symbols == true) ime.engine.pad(Pad.Symbols) else host.openEmoji() })
         emojiKey.face.addView(TextView(context).apply {
-            text = context.getString(R.string.keyboard_pad_label); textSize = 13f; useInter(500); setTextColor(ink)
+            text = context.getString(R.string.keyboard_pad_label); setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP, 13f); useInter(500); setTextColor(ink)
             gravity = Gravity.CENTER; includeFontPadding = false; setLineSpacing(0f, 0.9f); visibility = GONE
         }, FrameLayout.LayoutParams(-1, -1))
         emojiKey.textEntry = false
@@ -284,10 +313,12 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         val side = KeyboardMetrics.sideWidth(page, lines)
         // Labs › Keyboard › Number row: the digits above the letters, in a row of their own.
         page.digits?.let { addDigitRow(it, columns) }
+        val bands = bands(page)
         for ((index, line) in lines.withIndex()) {
+            val band = bands[index]
             val top = if (index == 0 && page.digits == null) reach else 0
-            val row = KeyRowLayout(context, columns, this.side, gap, insetTop + top, insetBottom)
-            rows.addView(row, LayoutParams(LayoutParams.MATCH_PARENT, rowHeight + top))
+            val row = KeyRowLayout(context, columns, this.side, gap, band.top + top, band.under)
+            rows.addView(row, LayoutParams(LayoutParams.MATCH_PARENT, band.pitch + top))
             // Rows 1 and 2 centre their letters; row 3's share what shift and delete leave.
             var at = if (index < 2) (columns - line.length) / 2f else 0f
             val width = if (index < 2) 1f else (columns - 2 * side) / line.length
@@ -371,7 +402,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         modeKey.contentDescription = context.getString(if (symbols) R.string.keyboard_letters else R.string.keyboard_numbers)
         val commaLabel = page.commaText
         comma.label?.text = commaLabel
-        comma.label?.textSize = if (commaLabel == "@") 21f else 26f
+        comma.labelSize = if (commaLabel == "@") 21f else 26f
         comma.longClickLabel = if (page.more) context.getString(R.string.keyboard_more_characters) else null
         comma.setOnLongClickListener(if (page.more) commaHolds else null)
         comma.isLongClickable = page.more
@@ -386,7 +417,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         period.contentDescription = if (periodLabel == ".") context.getString(R.string.keyboard_period) else periodLabel
         // An app's own label, else Gboard's symbol for the editor's action.
         val label = page.enter.label
-        enterKey.label?.text = label.orEmpty()
+        enterKey.label?.text = label.orEmpty(); enterKey.requestLayout()
         enterIcon.setImageResource(actionIcon(page.enter.action))
         enterIcon.visibility = if (label == null) View.VISIBLE else View.GONE
         enterKey.contentDescription = label ?: actionLabel(page.enter.action) ?: context.getString(R.string.keyboard_return)
@@ -395,8 +426,8 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     /** The number row: 1 to 0 across the letters' cells, with the ?123 page's digit keys' feedback,
      * pop-ups and held symbols. Shift neither changes them nor is changed by them. */
     private fun addDigitRow(digits: String, columns: Float) {
-        val row = KeyRowLayout(context, columns, side, gap, insetTop + reach, insetBottom)
-        rows.addView(row, LayoutParams(LayoutParams.MATCH_PARENT, rowHeight + reach))
+        val row = KeyRowLayout(context, columns, side, gap, digitBand.top + reach, digitBand.under)
+        rows.addView(row, LayoutParams(LayoutParams.MATCH_PARENT, digitBand.pitch + reach))
         val width = columns / digits.length
         for ((position, c) in digits.withIndex()) {
             val text = c.toString()
@@ -417,12 +448,15 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private fun showPad(page: KeyboardPage, pad: Pad) {
         bottom.visibility = GONE
         val cells = KeyPads.cells(pad)
-        val padKey = maxOf(keyHeight, rowHeight - px(KeyboardMetrics.PAD_ROW_GAP))
-        val top = (rowHeight - padKey) / 2; val under = rowHeight - padKey - top
+        // With the number row on, the symbol pad's three rows take the number row's height too ([bands]).
+        val steps = bands(page).map { it.pitch }
+        val step = steps[0]
+        val padKey = maxOf(keyHeight, step - px(KeyboardMetrics.PAD_ROW_GAP))
+        val top = (step - padKey) / 2; val under = step - padKey - top
         val lines = KeyPads.rows(pad)
         // The symbol pad's operators stand in one column beside its first three rows.
         val block = if (pad == Pad.Symbols) PadBlock(cells, reach + top, under).also {
-            rows.addView(it, LayoutParams(LayoutParams.MATCH_PARENT, 3 * rowHeight + reach))
+            rows.addView(it, LayoutParams(LayoutParams.MATCH_PARENT, upperHeight(page) + reach))
         } else null
         for ((index, line) in lines.withIndex()) {
             val first = index == 0; val last = index == lines.lastIndex
@@ -430,7 +464,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
             val t = if (last && pad == Pad.Symbols) insetTop else top
             val b = if (last && pad == Pad.Symbols) insetBottom else under
             val row = KeyRowLayout(context, cells, side, gap, t + (if (first) reach else 0), b + (if (last) bottomExtra else 0))
-            val height = rowHeight + (if (first) reach else 0) + (if (last) bottomExtra else 0)
+            val height = (if (last) rowHeight else steps.getOrElse(index) { step }) + (if (first) reach else 0) + (if (last) bottomExtra else 0)
             (if (block != null && !last) block.lines else rows).addView(row, LayoutParams(LayoutParams.MATCH_PARENT, height))
             for (key in line) row.add(padKeyView(key, page), key.start, key.width)
         }
@@ -572,7 +606,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         val share = if (landscape) 0.67f else 0.6f
         val grow = minOf(px(KeyboardMetrics.EMOJI_GROW), (resources.displayMetrics.heightPixels * share).toInt() - keyboard).coerceAtLeast(0)
         // With the number row on, the panel takes its place too, so the keyboard keeps its height.
-        val height = (if (current?.digits != null) 4 else 3) * rowHeight + reach + extra + grow
+        val height = upperHeight(current) + reach + extra + grow
         val p = picker?.also { it.setRecentEmojiProvider(recents); it.post { it.toTop() } } ?: EmojiPickerView(ContextThemeWrapper(context, R.style.HexEmoji)).also { p ->
             p.setRecentEmojiProvider(recents)
             p.setOnEmojiPickedListener { item ->
@@ -893,7 +927,8 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         spaceKey.contentDescription = context.getString(R.string.keyboard_space)
         spaceKey.longClickLabel = context.getString(R.string.keyboard_space_language_action, label)
         spaceKey.label?.text = label
-        spaceKey.label?.textSize = if (next.translate) 12f else 14f
+        spaceKey.labelSize = if (next.translate) 12f else 14f
+        spaceKey.requestLayout() // A longer language name is fitted to the bar again.
     }
     fun cancelGestures() {
         cancelSwipe()

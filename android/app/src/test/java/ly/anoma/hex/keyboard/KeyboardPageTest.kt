@@ -2,6 +2,8 @@ package ly.anoma.hex.keyboard
 
 import ly.anoma.hex.speech.Spoken
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -156,5 +158,78 @@ class KeyboardPageTest {
         // Only d: the rest of the rows keep Gboard's marks.
         assertEquals("@", LetterFeedback.letterSymbol('a', currency = '¥')?.toString())
         assertEquals("?", LetterFeedback.letterSymbol('m', currency = '¥')?.toString())
+    }
+
+    // Inter's shapes per px of size (v4.1: ascender 0.969, descender 0.242, capitals 0.727 em; W the widest letter).
+    private val letterW = TextShape(advance = 0.94f, ascent = 0.969f, descent = 0.242f, cap = 0.727f)
+    private val wideHint = TextShape(advance = 0.98f, ascent = 0.969f, descent = 0.242f, cap = 0.727f) // @ at weight 500
+
+    /** Whether the centred letter's capitals and the corner hint's box share a pixel, in a keycap [w] by [h]. */
+    private fun touches(w: Float, h: Float, s: KeyLabelSizes, label: TextShape, hint: TextShape): Boolean {
+        val letterRight = (w + label.advance * s.label) / 2
+        val letterTop = h / 2 + ((label.ascent - label.descent) / 2 - label.cap) * s.label
+        val hintLeft = w - s.hintEnd - hint.advance * s.hint
+        val hintBottom = s.hintTop + hint.ascent * s.hint
+        return letterRight > hintLeft && letterTop < hintBottom
+    }
+
+    @Test fun keyRowsFollowGboardsThreeScreenWidths() {
+        assertEquals(RowSize(KeyboardMetrics.ROW, KeyboardMetrics.KEY_HEIGHT), KeyRows.of(411.4f, landscape = false))
+        assertEquals(KeyRows.of(400f, false), KeyRows.of(480f, false))
+        assertEquals(RowSize(50.3f, 40.3f), KeyRows.of(360f, false))
+        assertEquals(RowSize(50.3f, 40.3f), KeyRows.of(392.7f, false))
+        assertEquals(RowSize(48f, 37.7f), KeyRows.of(344.4f, false))
+        assertEquals(RowSize(KeyboardMetrics.ROW_LANDSCAPE, KeyboardMetrics.KEY_HEIGHT_LANDSCAPE), KeyRows.of(411.4f, landscape = true))
+    }
+
+    @Test fun keyLettersKeepGboardsShareOfTheKeyOnEveryScreen() {
+        val d = 2.625f
+        val pixel8 = KeyLabels.sizes(KeyLabels.REF_WIDTH * d, KeyLabels.REF_HEIGHT * d, d, KeyLabels.REF_HEIGHT, 26f, letterW, wideHint)
+        assertEquals(26f * d, pixel8.label, 0.01f)
+        assertEquals(KeyLabels.HINT * d, pixel8.hint, 0.01f)
+        // A 375 dp phone's 31.9 x 40.3 dp keycap: Gboard's capitals are 0.41 of it, about 16.5 dp (Inter's: 0.727 em).
+        val narrow = KeyLabels.sizes(31.9f * d, 40.3f * d, d, 40.3f, 26f, letterW, wideHint)
+        assertEquals(0.41f * 40.3f, narrow.label / d * letterW.cap, 0.6f)
+        assertTrue(narrow.hint < pixel8.hint)
+        // A taller row (Settings › Keyboard › Height) keeps the letters as they are; a much shorter one shrinks them.
+        assertEquals(pixel8.label, KeyLabels.sizes(KeyLabels.REF_WIDTH * d, 60f * d, d, KeyLabels.REF_HEIGHT, 26f, letterW, null).label, 0.01f)
+        assertTrue(KeyLabels.sizes(KeyLabels.REF_WIDTH * d, 30f * d, d, KeyLabels.REF_HEIGHT, 26f, letterW, null).label < pixel8.label)
+    }
+
+    @Test fun aLetterNeverTouchesItsHintOrLeavesItsKeycap() {
+        val d = 2.625f
+        // Narrow and wide phones, short and tall rows, turned keys.
+        for (w in listOf(24f, 27.1f, 30.3f, 35.43f, 44f, 60f)) for (h in listOf(28f, 37.7f, 39f, 40.3f, 47f, 56f)) {
+            val s = KeyLabels.sizes(w * d, h * d, d, minOf(h, KeyLabels.REF_HEIGHT), 26f, letterW, wideHint)
+            assertFalse("${w}x$h", touches(w * d, h * d, s, letterW, wideHint))
+            assertTrue("${w}x$h", letterW.advance * s.label <= w * d)
+        }
+    }
+
+    @Test fun aLongLabelFitsItsKeyInsteadOfAnEllipsis() {
+        val d = 2.625f
+        // ?123 on a 1.5-cell modifier key of a 360 dp phone.
+        val label = TextShape(advance = 2.4f, ascent = 0.969f, descent = 0.242f, cap = 0.727f)
+        val s = KeyLabels.sizes(45f * d, 40.3f * d, d, 40.3f, 17f, label, null)
+        assertTrue(label.advance * s.label <= 45f * d - 2 * KeyLabels.SIDE * d)
+        assertTrue(s.label > 0f)
+    }
+
+    @Test fun theNumberRowTakesGboardsHeightNotAWholeLetterRow() {
+        // A Pixel 8 upright: letters every 56.4 dp, digits every 52.6 dp; the keyboard grows by 45 dp, not 59.
+        val upright = KeyRows.of(411.4f, false)
+        val on = KeyRows.withNumberRow(upright, landscape = false)
+        assertEquals(56.4f, on.letters.pitch, 0.1f)
+        assertEquals(52.6f, on.digits.pitch, 0.1f)
+        assertEquals(upright.key, on.letters.key, 0.01f)
+        assertEquals(on.letters.gap, on.digits.gap, 0.01f)
+        assertEquals(45f, on.digits.pitch + 3 * on.letters.pitch - 3 * upright.pitch, 0.5f)
+        // Turned: 35 dp digits over 41.1 dp letters, about 30 dp more where a whole row was 43.
+        val turned = KeyRows.of(411.4f, true)
+        val turnedOn = KeyRows.withNumberRow(turned, landscape = true)
+        assertEquals(35f, turnedOn.digits.pitch, 0.1f)
+        assertEquals(30f, turnedOn.digits.pitch + 3 * turnedOn.letters.pitch - 3 * turned.pitch, 1f)
+        // Every screen step keeps a gap under its keys.
+        for (w in listOf(320f, 375f, 411f)) assertTrue(KeyRows.withNumberRow(KeyRows.of(w, false), false).letters.gap > 0f)
     }
 }

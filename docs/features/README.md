@@ -3280,6 +3280,15 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   `:app:assembleDebug` built the arm64 libraries (the native import check included) on 2026-11-24 on
 │   OpenJDK 21 and Android SDK 36 (NDK 27.2.12479018); the repo has no Android CI, and nothing was tried
 │   on a device or emulator.
+├── Key rows and labels -> Gboard 15.1's (Pixel 8 emulator, 13 screen sizes): rows follow the
+│   smallest width only (46.9 dp keys every 59 dp from 400 dp, 40.3/50.3 from 360, 37.7/48 below;
+│   turned 39/43), letters and hints are the same share of the key everywhere and ignore font
+│   scale; a label shrinks to fit (no "…") and a letter clears its corner hint (KeyRows, KeyLabels).
+│   The strip's words are in dp too, as Gboard's suggestions ignore font scale (StripView).
+│   KeyboardPageTest; emulator screenshots at 360 and 411 dp, font scale 1.0/1.3/2.0.
+├── Keyboard > Height -> Extra short, Short, Mid-short, Normal (default), Mid-tall, Tall, Extra
+│   tall: 0.75 to 1.25 of the screen's row step, the gaps kept (Gboard 15.1's Resize spans
+│   0.69 to 1.62); touch targets, key centres and swipe follow the rows. InsertionTest.
 ├── Labs › Keyboard › Hex key on the left (off, #2800) -> the strip's Hex key, ✕ and recording well
 │   mirror to its left end (`StripView.placeHexKey`, `TypingPreferences.hexKeyLeft`); hold, tap and
 │   slide work as on the right, the well grows rightwards out of ✓, and the idle row keeps its order.
@@ -3397,9 +3406,13 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   corner digits and digit-first hold are hidden while it shows; accents on hold stay, and
 │   the Symbols on letter keys hints and holds still work: row 1's first ten letters show a
 │   symbol instead of the digit, Gboard's such as q for % and p for }, or its own home- or
-│   bottom-row symbol where it has one, like AZERTY a for @. The keyboard is one row taller
-│   and the Hex menu matches that height; ?123, the symbols pages and the pads keep their keys
-│   and are a row shorter than the letters while it is on. Off, the page is unchanged.
+│   bottom-row symbol where it has one, like AZERTY a for @. The keyboard grows as Gboard's
+│   does (letters close up to 0.956 of their step, digits every 0.892 of it, 0.814 turned):
+│   45 dp on a Pixel 8, 30 dp turned, not a whole row (KeyRows.withNumberRow). ?123, =< and
+│   the symbol pad stretch their three rows over the same height, so the keyboard never
+│   changes height between pages; the Hex menu and emoji panel match it; a number or phone
+│   field's pad keeps its own. Off, the page is unchanged. Emulator: before, letters 395 dp
+│   and ?123 336 dp; after, both the same height.
 │   KeyboardPageTest covers it, including the top row's symbols, and passed in
 │   https://github.com/anomalyco/hex/actions/runs/45450568457 (testDebugUnitTest + compileDebugKotlin,
 │   GitHub-hosted); not tried on a device. The repo has no Android CI.

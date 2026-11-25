@@ -98,6 +98,14 @@
     <string name="settings_keyboard_layout">Keyboard layout</string>
     <string name="settings_layout_follows">Follows dictation · %1$s</string>
     <string name="settings_layout_automatic_detail">Follows your dictation language</string>
+    <string name="settings_keyboard_height">Height</string>
+    <string name="keyboard_height_extra_short">Extra short</string>
+    <string name="keyboard_height_short">Short</string>
+    <string name="keyboard_height_mid_short">Mid-short</string>
+    <string name="keyboard_height_normal">Normal</string>
+    <string name="keyboard_height_mid_tall">Mid-tall</string>
+    <string name="keyboard_height_tall">Tall</string>
+    <string name="keyboard_height_extra_tall">Extra tall</string>
     <string name="settings_autocorrect">Autocorrect</string>
     <string name="settings_autocorrect_detail">Fixes typos when you press space</string>
     <string name="settings_spatial">Spatial autocorrect</string>

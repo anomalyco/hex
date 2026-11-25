@@ -2,6 +2,7 @@ package ly.anoma.hex.typing
 
 import android.content.Context
 import java.security.MessageDigest
+import ly.anoma.hex.keyboard.KeyboardHeight
 import ly.anoma.hex.speech.Spoken
 
 internal class TypingPreferences(context: Context) {
@@ -83,6 +84,10 @@ internal class TypingPreferences(context: Context) {
     var voiceOnly: Boolean
         get() = prefs.getBoolean(VOICE_ONLY, false)
         set(value) { prefs.edit().putBoolean(VOICE_ONLY, value).apply() }
+    /** Settings › Keyboard › Height: Normal until another step is chosen. */
+    var height: KeyboardHeight
+        get() = KeyboardHeight.of(prefs.getString(HEIGHT, null))
+        set(value) { prefs.edit().putString(HEIGHT, value.key).apply() }
 
     // Remember only explicit rejection of this exact pair in this language; never save typed text.
     private fun pair(language: String, original: String, replacement: String): String {
@@ -109,6 +114,7 @@ internal class TypingPreferences(context: Context) {
         const val ADAPTIVE_TOUCH = "adaptiveTouch"
         const val PASSWORD_MANAGER_SUGGESTIONS = "passwordManagerSuggestions"
         const val VOICE_ONLY = "voiceOnly"
+        const val HEIGHT = "keyboardHeight"
         const val HEX_KEY_LEFT = "hexKeyLeft"
     }
 }
