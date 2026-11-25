@@ -732,12 +732,12 @@
         }
       }
     },
-    "Apple can't translate between these languages." : {
+    "Apple can't translate %@ to %@ on this iPhone. Pick another language." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Apple 无法在这两种语言之间翻译。"
+            "value" : "这台 iPhone 上，Apple 无法把%1$@翻译成%2$@。请选择其他语言。"
           }
         }
       }
@@ -1699,7 +1699,7 @@
         }
       }
     },
-    "Insert in" : {
+    "Translate to" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
