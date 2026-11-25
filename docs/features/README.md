@@ -3573,6 +3573,13 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
     build-tools 36.0.0, NDK 27.2.12479018); `VoiceOnlyTest` covers the bar-or-keyboard and restart
     decisions, `python3 scripts/code-shape.py --check` and `git diff --check` pass, and the repo has
     no Android CI; nothing was tried on a device or emulator.
+├── Labs > Keyboard > Test keyboard on Home (off, #2801) -> Keyboard's Test keyboard… field moves to
+    Home, below the Dictate bar and its result, so tapping it brings up the Hex keyboard there with
+    the current settings; the Keyboard page no longer shows it while the lab is on. Both places share
+    one field's text for the session. Home's Send feedback picture paints that field over too while
+    it holds text, as it does the dictation result. Off, Home and Keyboard are exactly as before.
+    Checks: none run; no Android SDK was available, so it is not compiled, and nothing was tried on
+    a device or emulator.
 ├── Dictation > Custom vocabulary (off) > Word replacements and Words file -> the Android side of
 │   Hex words files (`.hexwords`, [docs/specs/hex-words.md](../specs/hex-words.md)). Everything sits
 │   behind the existing Custom vocabulary switch: off, dictation, Settings and the keyboard are as

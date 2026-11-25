@@ -208,6 +208,8 @@
     <string name="key_color_forest">Forest</string>
     <string name="key_color_ember">Ember</string>
     <string name="key_color_burgundy">Burgundy</string>
+    <string name="test_keyboard_on_home">Test keyboard on Home</string>
+    <string name="test_keyboard_on_home_detail">Puts the Test keyboard field on Home instead of the Keyboard page</string>
     <!-- Hex words files and Custom vocabulary's Word replacements (docs/specs/hex-words.md). -->
     <string name="words_open_label">Add to Hex</string>
     <string name="words_replacements">Word replacements</string>
