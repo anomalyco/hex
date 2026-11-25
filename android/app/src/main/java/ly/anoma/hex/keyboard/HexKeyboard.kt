@@ -1,9 +1,11 @@
 package ly.anoma.hex.keyboard
 
 import android.Manifest
+import android.content.BroadcastReceiver
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -27,6 +29,7 @@ import android.widget.inline.InlinePresentationSpec
 import androidx.autofill.inline.UiVersions
 import androidx.autofill.inline.common.TextViewStyle
 import androidx.autofill.inline.v1.InlineSuggestionUi
+import androidx.core.content.ContextCompat
 import kotlin.math.roundToInt
 import ly.anoma.hex.MainActivity
 import ly.anoma.hex.R
@@ -157,6 +160,30 @@ class HexKeyboard : InputMethodService() {
     private var inField = false
     private fun keepClip() = ClipboardHistory.copied(this, clipboard.primaryClipDescription, { clipboard.primaryClip },
         secureField = inField && engine.secure, noLearning = inField && !engine.learnsTyping)
+    // Expired texts leave the file when they expire, not when someone next looks: a timer for the earliest expiry while
+    // this process lives (none while nothing unpinned is kept), and a purge as the keyboard starts and each time it
+    // shows. The timer counts only while the phone is awake and never sees a clock moved on, so the screen coming on and
+    // a clock change purge too, listened for only while a text waits to expire. No alarm, no permission, nothing that
+    // keeps Hex running; if Android has stopped Hex, the next start purges.
+    private val expiry = Handler(Looper.getMainLooper())
+    private val expire = Runnable { expireClips() }
+    private val wakeOrClock = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) = expireClips()
+    }
+    private var awaitingExpiry = false
+    private fun expireClips() {
+        expiry.removeCallbacks(expire)
+        val next = if (feedback.clipboardHistory) ClipboardHistory.purge(this) else null
+        if (next != null) expiry.postDelayed(expire, (next - System.currentTimeMillis()).coerceAtLeast(0))
+        awaitExpiry(next != null)
+    }
+    private fun awaitExpiry(await: Boolean) {
+        if (await == awaitingExpiry) return
+        awaitingExpiry = await
+        if (await) ContextCompat.registerReceiver(this, wakeOrClock,
+            IntentFilter(Intent.ACTION_SCREEN_ON).apply { addAction(Intent.ACTION_TIME_CHANGED) }, ContextCompat.RECEIVER_NOT_EXPORTED)
+        else unregisterReceiver(wakeOrClock)
+    }
     /** A text from the Hex menu's Clipboard page goes in as typed; never in a password field. */
     internal fun pasteCopied(text: String) {
         if (engine.secure) return
@@ -173,6 +200,8 @@ class HexKeyboard : InputMethodService() {
         // The lab off is the keyboard it always was: never touch the system's subtype list for it.
         if (feedback.voiceOnly) VoiceOnly.setEnabled(this, true)
         clipKeeper.sync()
+        ClipboardHistory.changed = { expiry.post(expire) }
+        expireClips()
     }
     override fun onEvaluateFullscreenMode() = false
     override fun onCreateInputView(): View = inputView()
@@ -244,6 +273,7 @@ class HexKeyboard : InputMethodService() {
     }
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        expireClips()
         // A subtype or lab change may have arrived while no view existed: it shows the right one.
         val voice = voiceOnly()
         if (voice != (bar != null) || (!voice && view == null)) setInputView(inputView())
@@ -493,6 +523,7 @@ class HexKeyboard : InputMethodService() {
         contentResolver.unregisterContentObserver(dictionaryChanged); words.shutdownNow()
         viewing = false; watchClipboard()
         clipKeeper.stop()
+        ClipboardHistory.changed = null; expiry.removeCallbacks(expire); awaitExpiry(false)
         bar?.removeCallbacks(pendingLeave)
         view?.cancelGestures(); view = null; bar = null; engine.surface = null; capture.close(); super.onDestroy()
     }

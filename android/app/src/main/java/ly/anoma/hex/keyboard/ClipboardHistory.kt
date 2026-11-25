@@ -48,6 +48,11 @@ internal object ClipboardRules {
     fun current(items: List<CopiedText>, now: Long): List<CopiedText> =
         ordered(items.filter { it.pinned || now - it.copiedAt in 0 until LIFETIME_MS })
 
+    /** When the next unpinned text kept at [now] expires, or null when none will (nothing kept, or every text pinned):
+     * the keyboard sets its timer for that moment, and none at all when this is null. */
+    fun nextExpiry(items: List<CopiedText>, now: Long): Long? =
+        current(items, now).filter { !it.pinned }.minOfOrNull { it.copiedAt + LIFETIME_MS }
+
     private fun ordered(items: List<CopiedText>): List<CopiedText> {
         val (pinned, recent) = items.partition { it.pinned }
         return pinned.sortedByDescending { it.copiedAt }.take(PINNED) + recent.sortedByDescending { it.copiedAt }.take(RECENT)
@@ -97,7 +102,14 @@ internal object ClipboardHistory {
      * on keeps only what is copied after. */
     private var seen = 0L
 
+    /** Told after each change, so the keyboard sets its timer for the next expiry again. */
+    @Volatile var changed: (() -> Unit)? = null
+
     private fun file(context: Context) = AtomicFile(File(context.applicationContext.noBackupFilesDir, FILE))
+
+    /** Expired texts leave the file now, not when someone next looks; returns when the next one expires, if any. */
+    @Synchronized fun purge(context: Context, now: Long = System.currentTimeMillis()): Long? =
+        ClipboardRules.nextExpiry(items(context, now), now)
 
     @Synchronized fun items(context: Context, now: Long = System.currentTimeMillis()): List<CopiedText> {
         val all = loaded ?: read(context)
@@ -113,6 +125,7 @@ internal object ClipboardHistory {
         items(context)
         seen = maxOf(seen, System.currentTimeMillis())
         write(context)
+        changed?.invoke()
     }
 
     /** The primary clip changed, or the keyboard opened on one it may have missed. The clip itself is asked for only
@@ -143,11 +156,13 @@ internal object ClipboardHistory {
     @Synchronized fun deleteAll(context: Context) {
         loaded = emptyList(); seen = 0L
         file(context).delete()
+        changed?.invoke()
     }
 
     private fun update(context: Context, items: List<CopiedText>) {
         loaded = ClipboardRules.current(items, System.currentTimeMillis())
         write(context)
+        changed?.invoke()
     }
 
     private fun read(context: Context): List<CopiedText> = runCatching {

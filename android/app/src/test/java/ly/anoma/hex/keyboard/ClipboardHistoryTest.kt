@@ -3,6 +3,7 @@ package ly.anoma.hex.keyboard
 import android.content.ClipDescription
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -95,6 +96,20 @@ class ClipboardHistoryTest {
         val items = listOf(CopiedText("old", 0), CopiedText("new", hour / 2))
         assertEquals(listOf("new", "old"), ClipboardRules.current(items, hour - 1).map { it.text })
         assertEquals(listOf("new"), ClipboardRules.current(items, hour).map { it.text })
+    }
+
+    @Test fun theTimerIsSetForTheOldestUnpinnedTextAndMovesOnOnceItIsDue() {
+        val items = listOf(CopiedText("pin", 0, pinned = true), CopiedText("new", hour / 2), CopiedText("old", hour / 4))
+        assertEquals(hour / 4 + hour, ClipboardRules.nextExpiry(items, hour / 2))
+        // At that moment "old" is due; the pin stays and the timer moves to "new".
+        assertEquals(listOf("pin", "new"), ClipboardRules.current(items, hour / 4 + hour).map { it.text })
+        assertEquals(hour / 2 + hour, ClipboardRules.nextExpiry(items, hour / 4 + hour))
+    }
+
+    @Test fun noTimerWhileNothingUnpinnedIsKept() {
+        assertNull(ClipboardRules.nextExpiry(emptyList(), 0))
+        assertNull(ClipboardRules.nextExpiry(listOf(CopiedText("pin", 0, pinned = true)), 2 * hour))
+        assertNull(ClipboardRules.nextExpiry(listOf(CopiedText("old", 0)), hour))
     }
 
     @Test fun aPinnedTextOutlivesTheHour() {

@@ -1,6 +1,7 @@
 package ly.anoma.hex.keyboard
 
 import android.content.Context
+import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.text.TextUtils
@@ -102,6 +103,8 @@ internal class ClipboardPage(private val context: Context, private val body: Lin
             tile.addView(View(context).apply { setBackgroundColor(color(R.color.rule)) },
                 LinearLayout.LayoutParams(-1, maxOf(1, dp(0.5f))).apply { marginStart = dp(12f); marginEnd = dp(12f) })
             tile.addView(actions, LinearLayout.LayoutParams(-1, -2))
+            // A tile held near the bottom scrolls up so Pin, Delete and Cancel are in view.
+            tile.post { tile.requestRectangleOnScreen(Rect(0, 0, tile.width, tile.height)) }
         }
         body.addView(tile, LinearLayout.LayoutParams(-1, -2).apply {
             val side = dp(KeyboardMetrics.SIDE + KeyboardMetrics.GAP / 2)
