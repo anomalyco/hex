@@ -116,6 +116,7 @@ Download Hex                              // setup.download-recovery
 Install on Windows                        // setup.windows-installer
 ├── Setup.exe, per user, no admin -> managed versions\<version>\hex.exe
 │   ├── x64 without a Vulkan 1.2 driver -> installs; speech on the CPU + Settings note (#1240)
+│   ├── OBS Studio installed -> Hex skips OBS's Vulkan hook, so OBS updates while Hex runs (#2818)
 │   ├── another version installed (e.g. self-updated) -> install this one over it
 │   ├── the setup engine is signed -> Smart App Control runs the copy extracted to %TEMP%
 │   │   (unsigned, it blocks setup: "Unable to execute file in the temporary directory", error 4551)
