@@ -146,6 +146,26 @@ impl<'a> Scope<'a> {
             .collect()
     }
 
+    /// The picture the picker's preview shows for `bundle` in `dir`: its
+    /// first keyframe, else its contact sheet. Only a plain relative name
+    /// inside the bundle is followed, as `resolve` follows no other.
+    pub(crate) fn picture(dir: &Path, bundle: &ScrawlBundle) -> Option<PathBuf> {
+        let inside = |name: &str| {
+            let path = Path::new(name);
+            let plain = !name.is_empty()
+                && path
+                    .components()
+                    .all(|part| matches!(part, std::path::Component::Normal(_)));
+            let path = dir.join(path);
+            (plain && fs::symlink_metadata(&path).is_ok_and(|m| m.is_file())).then_some(path)
+        };
+        bundle
+            .keyframes
+            .first()
+            .and_then(|frame| inside(&frame.file))
+            .or_else(|| inside(&bundle.contact_sheet))
+    }
+
     pub(crate) fn resolve(&self, id: &Id, now: u64) -> Option<(PathBuf, ScrawlBundle)> {
         if &self.identity(&id.dir, now)? != id {
             return None;

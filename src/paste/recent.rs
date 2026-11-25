@@ -10,6 +10,66 @@ use std::path::PathBuf;
 
 pub(crate) use crate::history::timeline::{PasteId as Id, Row, latest, snapshot};
 
+/// What the picker's preview shows beside a row: the whole text, where the
+/// row keeps its first hundred characters, and what its owner knows of it.
+/// Display only. A paste resolves the row's ID again, never this copy.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct Detail {
+    pub text: String,
+    /// Dictated without processing.
+    pub raw: bool,
+    pub application: Option<String>,
+    pub model: Option<String>,
+    /// A capture's length; 0 for a dictation.
+    pub duration_ms: u64,
+    /// A capture's picture: its first keyframe, else its contact sheet.
+    pub picture: Option<PathBuf>,
+}
+
+/// One picker row with its preview.
+#[derive(Clone)]
+pub(crate) struct Entry {
+    pub row: Row,
+    pub detail: Detail,
+}
+
+impl From<Row> for Entry {
+    fn from(row: Row) -> Self {
+        Self {
+            detail: Detail {
+                text: row.preview.clone(),
+                ..Detail::default()
+            },
+            row,
+        }
+    }
+}
+
+fn detail(history: &History, captures: Option<&Scope<'_>>, row: &Row, now: u64) -> Detail {
+    let read = match &row.id {
+        Id::Dictation(id) => history.paste_words(*id, now).map(|words| Detail {
+            text: words.text,
+            raw: words.raw,
+            application: words.application,
+            model: words.model,
+            ..Detail::default()
+        }),
+        Id::Capture(id) => {
+            captures
+                .and_then(|scope| scope.resolve(id, now))
+                .map(|(dir, bundle)| Detail {
+                    picture: Scope::picture(&dir, &bundle),
+                    text: bundle.transcript.text.trim().to_owned(),
+                    application: bundle.target.app,
+                    duration_ms: bundle.duration_ms,
+                    ..Detail::default()
+                })
+        }
+    };
+    // Gone since the rows were read: the row still says what it was.
+    read.unwrap_or_else(|| Entry::from(row.clone()).detail)
+}
+
 pub(crate) enum Output {
     Text(String),
     Capture(PathBuf, Box<ScrawlBundle>),
@@ -63,11 +123,31 @@ pub(crate) fn enabled() -> bool {
     crate::labs::paste_last_picker()
 }
 
-pub(crate) fn current_rows(history: &History) -> Vec<Row> {
+pub(crate) fn current_rows(history: &History) -> Vec<Entry> {
     let settings = crate::app_settings::capture_settings();
     let root = settings.enabled.then(|| settings.captures_dir());
     let scope = root.as_ref().map(|p| Scope::new(p, settings.bundle_days));
-    snapshot(history, scope.as_ref(), 8, crate::history::now_ms())
+    let now = crate::history::now_ms();
+    snapshot(history, scope.as_ref(), 8, now)
+        .into_iter()
+        .map(|row| Entry {
+            detail: detail(history, scope.as_ref(), &row, now),
+            row,
+        })
+        .collect()
+}
+
+/// The capture `id` names, while it is still what the picker listed, for
+/// the editor it opens in.
+pub(crate) fn capture_bundle(id: &Id) -> Option<PathBuf> {
+    let Id::Capture(id) = id else {
+        return None;
+    };
+    let settings = crate::app_settings::capture_settings();
+    let root = settings.enabled.then(|| settings.captures_dir())?;
+    Scope::new(&root, settings.bundle_days)
+        .resolve(id, crate::history::now_ms())
+        .map(|(dir, _)| dir)
 }
 
 impl Request {

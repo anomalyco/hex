@@ -241,6 +241,11 @@ const PATHS: &[(&str, &str)] = &[
     ("mac-history-empty", "Window/History/Nothing yet"),
     #[cfg(all(target_os = "macos", hex_capture))]
     ("mac-paste-picker", "Window/History/Paste Last picker"),
+    #[cfg(all(target_os = "macos", hex_capture))]
+    (
+        "mac-paste-picker-dictation",
+        "Window/History/Paste Last picker, a dictation",
+    ),
     #[cfg(hex_capture)]
     ("captures", "Window/Annotate/Captures"),
     #[cfg(hex_capture)]
