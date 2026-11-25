@@ -28,6 +28,7 @@ import android.widget.TextView
 import androidx.core.view.children
 import androidx.emoji2.emojipicker.EmojiPickerView
 import ly.anoma.hex.R
+import ly.anoma.hex.speech.DictationLanguage
 import ly.anoma.hex.typing.KeyGrid
 import ly.anoma.hex.typing.KeyPoint
 import ly.anoma.hex.typing.KeyRect
@@ -886,10 +887,12 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     }
     fun refreshSpace() {
         val next = ime.preferences.options(ime.nextEnglish)
+        // Translation is always from Spanish, also while Automatic listens for it among other languages.
+        val label = if (next.translate) context.getString(R.string.keyboard_space_translate, DictationLanguage.Spanish.label)
+            else next.spoken.label
         spaceKey.contentDescription = context.getString(R.string.keyboard_space)
-        spaceKey.longClickLabel = context.getString(R.string.keyboard_space_language_action,
-            if (next.translate) context.getString(R.string.keyboard_space_translate, next.spoken.label) else next.spoken.label)
-        spaceKey.label?.text = if (next.translate) context.getString(R.string.keyboard_space_translate, next.spoken.label) else next.spoken.label
+        spaceKey.longClickLabel = context.getString(R.string.keyboard_space_language_action, label)
+        spaceKey.label?.text = label
         spaceKey.label?.textSize = if (next.translate) 12f else 14f
     }
     fun cancelGestures() {
