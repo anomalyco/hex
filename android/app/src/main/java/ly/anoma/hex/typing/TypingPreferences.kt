@@ -70,6 +70,11 @@ internal class TypingPreferences(context: Context) {
     var importedWords: Boolean
         get() = prefs.getBoolean(USE_IMPORTED_WORDS, false)
         set(value) { prefs.edit().putBoolean(USE_IMPORTED_WORDS, value).apply() }
+    /** Labs › Keyboard › Punctuation after autocorrect: a clause mark typed right after an autocorrection or a text
+     * replacement on space takes the space it typed, as one does after a pick (#2813). Off by default. */
+    var marksTakeFixSpace: Boolean
+        get() = prefs.getBoolean(MARKS_TAKE_FIX_SPACE, false)
+        set(value) { prefs.edit().putBoolean(MARKS_TAKE_FIX_SPACE, value).apply() }
     /** Labs › Keyboard › Adaptive touch: the decoder reads taps with your own key centres once it has learned them
      * ([AdaptiveTouch], kept by [AdaptiveTouchStore]). Off by default. */
     var adaptiveTouch: Boolean
@@ -131,6 +136,7 @@ internal class TypingPreferences(context: Context) {
         const val KEYBOARD_TOOLS = "keyboardTools"
         const val SMART_QUOTES = "smartQuotes"
         const val SWIPE_DELETE_LETTERS = "swipeDeleteLetters"
+        const val MARKS_TAKE_FIX_SPACE = "marksTakeFixSpace"
         const val ADAPTIVE_TOUCH = "adaptiveTouch"
         const val USE_IMPORTED_WORDS = "importedWords"
         /** A counter [ImportedWords] bumps whenever the imported list changes, so the keyboard reads it again. */

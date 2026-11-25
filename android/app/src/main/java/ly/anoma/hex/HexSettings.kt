@@ -159,6 +159,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val keyboardTools = remember(revision) { typing.keyboardTools }
     val smartQuotes = remember(revision) { typing.smartQuotes }
     val swipeDeleteLetters = remember(revision) { typing.swipeDeleteLetters }
+    val marksTakeFixSpace = remember(revision) { typing.marksTakeFixSpace }
     val adaptiveTouch = remember(revision) { typing.adaptiveTouch }
     // Labs › Keyboard › Adaptive touch: how far it has learned (labelled taps on one key plane, and whether any reads your
     // own centres), and whether the phone keeps averages, which Reset touch learning removes even with the lab off.
@@ -529,6 +530,9 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                     swipeDeleteLetters) { typing.swipeDeleteLetters = it }
                                 Rule()
                                 ImportedWordsRows(typing, revision)
+                                Rule()
+                                Toggle(stringResource(R.string.marks_take_fix_space), stringResource(R.string.marks_take_fix_space_detail),
+                                    marksTakeFixSpace) { typing.marksTakeFixSpace = it }
                                 Rule()
                                 // Labs › Keyboard › Adaptive touch: off, the keys read the drawn centres and learn nothing;
                                 // what was learned stays on the phone until Reset touch learning or Delete what Hex learned.
