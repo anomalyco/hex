@@ -538,7 +538,11 @@ internal fun lastDictationLines(t: DictationTimes?): String = buildString {
     if (t == null) { append(" none since Hex started\n"); return@buildString }
     append('\n')
     val mark = if (t.tick) "✓" else "the 1-minute stop"
-    append(if (t.place == DictationPlace.Keyboard) "  in the keyboard" else "  on Home")
+    append(when (t.place) {
+        DictationPlace.Keyboard -> "  in the keyboard"
+        DictationPlace.Home -> "  on Home"
+        DictationPlace.QuickSettings -> "  from Quick Settings"
+    })
     append(String.format(Locale.ROOT, ", %.1f s recorded, %.1f s kept", t.recordedMs / 1000.0, t.keptMs / 1000.0))
     append("; ").append(ranOn(t.ran))
     val timings = t.timings?.takeIf { it.size >= 7 }

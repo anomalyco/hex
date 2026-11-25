@@ -8,6 +8,14 @@
         <item name="android:statusBarColor">@color/page</item>
         <item name="android:navigationBarColor">@color/page</item>
     </style>
+    <!-- Labs › Dictate from Quick Settings' sheet: Hex's page colours on a card over the app in front. -->
+    <style name="HexSheet" parent="HexApp">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@android:style/Animation.Translucent</item>
+    </style>
     <style name="HexIme" parent="android:style/Theme.InputMethod">
         <item name="android:fontFamily">@font/inter_variable</item>
         <item name="android:windowLightNavigationBar">@bool/light_bars</item>

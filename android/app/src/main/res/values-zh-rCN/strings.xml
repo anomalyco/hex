@@ -267,4 +267,10 @@
     <string name="words_refused_not_hex_words">Hex 没有打开此文件：它不是 Hex 词汇文件。</string>
     <string name="words_refused_bad_version">Hex 没有打开此文件：Hex 不认识它的版本。</string>
     <string name="words_refused_cant_open">Hex 无法打开该文件。</string>
+    <string name="quick_dictation">从快捷设置听写</string>
+    <string name="quick_dictation_detail">在快捷设置中添加 Hex 功能块。在任何应用中点按它并说话，Hex 会复制文字供你粘贴。适用于无法使用 Hex 键盘的应用，例如工作应用。</string>
+    <string name="quick_tile">Hex 听写</string>
+    <string name="quick_hint">请说话，然后点按“完成听写”</string>
+    <string name="quick_copied">已复制。请粘贴到你刚才输入的位置。</string>
+    <string name="quick_close">关闭</string>
 </resources>

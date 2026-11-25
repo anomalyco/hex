@@ -1,6 +1,9 @@
 package ly.anoma.hex.keyboard
 
+import ly.anoma.hex.QuickDictation
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -26,5 +29,21 @@ class VoiceOnlyTest {
         assertFalse(VoiceOnly.shows(lab = true, subtypeMode = null))
         assertFalse(VoiceOnly.shows(lab = true, subtypeMode = ""))
         assertFalse(VoiceOnly.shows(lab = true, subtypeMode = "Voice"))
+    }
+
+    // Labs › Dictate from Quick Settings, the other way to dictate without Hex as the keyboard.
+    @Test fun theQuickSettingsSheetClosesOnceItsTextIsCopied() {
+        // Android 13 and later show their own copied preview: the sheet closes at once.
+        assertEquals(0L, QuickDictation.closeAfterCopyMs(noteShown = false, sdk = 33))
+        assertEquals(0L, QuickDictation.closeAfterCopyMs(noteShown = false, sdk = 36))
+        // Android 12 shows none: the sheet says Copied for a moment.
+        assertEquals(QuickDictation.COPIED_MS, QuickDictation.closeAfterCopyMs(noteShown = false, sdk = 31))
+        assertEquals(QuickDictation.COPIED_MS, QuickDictation.closeAfterCopyMs(noteShown = false, sdk = 32))
+    }
+
+    @Test fun aNoteKeepsTheQuickSettingsSheetOpen() {
+        // The 1-minute stop or low memory explains the copied text: the person closes the sheet.
+        assertNull(QuickDictation.closeAfterCopyMs(noteShown = true, sdk = 36))
+        assertNull(QuickDictation.closeAfterCopyMs(noteShown = true, sdk = 31))
     }
 }

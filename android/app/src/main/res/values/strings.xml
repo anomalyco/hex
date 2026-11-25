@@ -288,4 +288,11 @@
     <string name="words_refused_not_hex_words">Hex didn’t open this file: it isn’t a Hex words file.</string>
     <string name="words_refused_bad_version">Hex didn’t open this file: its version isn’t one Hex understands.</string>
     <string name="words_refused_cant_open">Hex couldn’t open that file.</string>
+    <!-- Labs › Dictate from Quick Settings: the Labs row, the tile's label and the sheet's lines. -->
+    <string name="quick_dictation">Dictate from Quick Settings</string>
+    <string name="quick_dictation_detail">Adds a Hex tile to Quick Settings. Tap it in any app, speak, and Hex copies the text for you to paste. For apps where Hex can’t be your keyboard, such as work apps.</string>
+    <string name="quick_tile">Hex dictation</string>
+    <string name="quick_hint">Speak, then tap Finish dictation</string>
+    <string name="quick_copied">Copied. Paste it where you were typing.</string>
+    <string name="quick_close">Close</string>
 </resources>
