@@ -583,7 +583,7 @@ final class DictationController {
         }
 
         switch request {
-        case .setup, .translationSettings, .pasteSettings:
+        case .setup, .translationSettings, .pasteSettings, .home:
             break
 
         case .startSession:

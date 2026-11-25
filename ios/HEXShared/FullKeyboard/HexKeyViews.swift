@@ -571,8 +571,10 @@ final class PanelKeyButton: UIControl {
 }
 
 /// Holding the Hex key: dictation styles, then the dictation language when there are choices,
-/// then Translate to <language> (on or off) and the target to translate into. The language
-/// page takes a language off with a long press and Remove, and adds one from More languages….
+/// then Translate to <language> (on or off) and the target to translate into, and last Open Hex,
+/// which opens the app at Home (a tap that says Open Hex, the one way the keyboard opens it).
+/// The language page takes a language off with a long press and Remove, and adds one from More
+/// languages….
 @MainActor
 final class HexStyleMenuView: UIView {
     enum Page { case styles, languages, moreLanguages, translation }
@@ -598,6 +600,8 @@ final class HexStyleMenuView: UIView {
     /// Translate to <language> switched on (true) or off.
     var onTranslationToggle: ((Bool) -> Void)?
     var onTranslationTarget: ((String) -> Void)?
+    /// The last row, Open Hex: shown while set.
+    var onOpenHex: (() -> Void)? { didSet { if (onOpenHex == nil) != (oldValue == nil) { rebuild() } } }
     var onDismiss: (() -> Void)?
     var onHoverChanged: (() -> Void)?
     /// The Hex key's keycap, in this view's coordinates; the panel opens above it.
@@ -719,6 +723,11 @@ final class HexStyleMenuView: UIView {
                         self?.show(page: .translation)
                     })
                 }
+            }
+            if onOpenHex != nil {
+                rows.append(makeRow(title: String(localized: "Open Hex"), selected: false, showsTopDivider: true) { [weak self] in
+                    self?.onOpenHex?()
+                })
             }
         case .languages:
             let automatic = automaticLanguage.map {

@@ -8,6 +8,8 @@ struct HEXMobileApp: App {
     @State private var openedFromKeyboard = Self.initialOpenedFromKeyboard
     @State private var showSetup = SettingsSnapshotFixture.showsSetupSheet
     @State private var openPage: SettingsPage?
+    /// Counts the keyboard's Open Hex taps from the Hex key menu: each one shows Home.
+    @State private var homeRequests = 0
 
     init() {
         FullKeyboardSettings().applyLaunchArguments()
@@ -48,7 +50,8 @@ struct HEXMobileApp: App {
                     dictation: dictation,
                     openedFromKeyboard: $openedFromKeyboard,
                     showSetup: $showSetup,
-                    openPage: $openPage
+                    openPage: $openPage,
+                    homeRequests: homeRequests
                 )
                 .onOpenURL { url in
                     // A Hex words file from AirDrop, Files or Open in Hex: its review sheet.
@@ -60,6 +63,10 @@ struct HEXMobileApp: App {
                     } else if case .translationSettings = request {
                         openedFromKeyboard = false
                         openPage = .dictation
+                    } else if case .home = request {
+                        openedFromKeyboard = false
+                        showSetup = false
+                        homeRequests += 1
                     } else if case .pasteSettings = request {
                         openedFromKeyboard = false
                         openPage = .keyboard
