@@ -76,7 +76,10 @@ added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
 (before iOS has asked for the microphone), and
 `settings-<dictation|keyboard|privacy|experiments>[-on][-end]`, and
 `model-card-<waiting|downloading|ready>` (Home's speech model card, with English
-dictation and no keyboard limit, so nothing downloads). Each settings scene writes
+dictation and no keyboard limit, so nothing downloads),
+`settings-dictation-model-<english|multilingual>-<waiting|downloading|ready>` (Settings ›
+Dictation › Model with that model picked and its download in that state; waiting wants
+`--simulate-cellular`, which makes Hex read the connection as off Wi-Fi). Each settings scene writes
 its page's switches to the App Group: off by default, on with `-on`; switches that are
 on by default (Spatial autocorrect, Swipe typing, Emoji key, Emoji suggestions) stay on.
 `-end` starts the page scrolled to the bottom. `settings-privacy-confirm`

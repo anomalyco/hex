@@ -23,11 +23,16 @@ final class ParakeetUltraDownload {
         case loading
         /// What went wrong, in plain words.
         case failed(String)
+        /// Off Wi-Fi without Use mobile data (`mayDownload`): bytes on disk, waiting for Wi-Fi.
+        case waitingForWiFi(Int64)
     }
 
     private(set) var state = State.idle
     /// Called once every file is on disk.
     @ObservationIgnored var onDownloaded: (@MainActor () -> Void)?
+    /// Whether it may download now: on Wi-Fi, or after Use mobile data
+    /// (`SpeechModelDownloadNetwork`). Otherwise a start waits for Wi-Fi.
+    @ObservationIgnored var mayDownload: @MainActor () -> Bool = { true }
 
     nonisolated static let stallLimit: Duration = .seconds(20)
     static let automaticTries = 6
@@ -82,11 +87,47 @@ final class ParakeetUltraDownload {
 
     var total: Int64 { files.reduce(0) { $0 + $1.size } }
 
-    /// Starts, or resumes from what's on disk; does nothing while it runs.
+    /// Starts, or resumes from what's on disk; does nothing while it runs. Off Wi-Fi without Use
+    /// mobile data, it waits for Wi-Fi instead.
     func start() {
         guard task == nil else { return }
+        guard mayDownload() else { return waitForWiFi() }
         tries = 0
         run()
+    }
+
+    /// Says it downloads on Wi-Fi, with what's already on disk; nothing while it runs.
+    func waitForWiFi() {
+        guard task == nil else { return }
+        endBackgroundTime()
+        state = .waitingForWiFi(ParakeetUltraModel.bytesOnDisk(in: directory, files: files))
+    }
+
+    /// `--snap-state settings-dictation-model-multilingual-downloading`: partway, for screenshots.
+    func applyFixture(share: Double) {
+        state = .downloading(Int64(Double(total) * share))
+    }
+
+    var isWaitingForWiFi: Bool {
+        if case .waitingForWiFi = state { return true }
+        return false
+    }
+
+    /// The connection changed, or Use mobile data was tapped: a download waiting for Wi-Fi starts
+    /// once it may, and one that may no longer go on (off Wi-Fi without Use mobile data) stops
+    /// where it is (its files resume) and waits.
+    func connectionChanged() {
+        if mayDownload() {
+            if isWaitingForWiFi { start() }
+        } else if let running = task {
+            task = nil
+            running.cancel()
+            Task { [weak self] in
+                await running.value
+                guard let self, self.task == nil else { return }
+                self.waitForWiFi()
+            }
+        }
     }
 
     /// Starts over from what's on disk, with all the automatic tries again. The transfer it
@@ -97,6 +138,7 @@ final class ParakeetUltraDownload {
         task = nil
         tries = 0
         guard let running else {
+            guard mayDownload() else { return waitForWiFi() }
             run()
             return
         }
@@ -335,6 +377,8 @@ final class ParakeetUltraDownload {
             String(localized: "Getting the multilingual model ready")
         case .failed(let message):
             message
+        case .waitingForWiFi:
+            String(localized: "Downloads on Wi-Fi.")
         }
     }
 
@@ -342,6 +386,8 @@ final class ParakeetUltraDownload {
     var fraction: Double? {
         switch state {
         case .downloading(let bytes), .waiting(let bytes, _):
+            total > 0 ? min(1, Double(bytes) / Double(total)) : 0
+        case .waitingForWiFi(let bytes) where bytes > 0:
             total > 0 ? min(1, Double(bytes) / Double(total)) : 0
         default:
             nil
@@ -375,12 +421,13 @@ private nonisolated final class ByteReading: @unchecked Sendable {
 }
 
 /// The multilingual model's download or load, on home and under Settings › Dictation › Model:
-/// what it's doing, that Hex dictates with its usual model meanwhile, and after a failure
-/// Try again and Use English.
+/// what it's doing, that Hex dictates with its usual model meanwhile, after a failure Try again
+/// and Use English, and off Wi-Fi Use mobile data.
 struct MultilingualModelStatus: View {
     let download: ParakeetUltraDownload
     let retry: () -> Void
     let turnOff: () -> Void
+    let useMobileData: () -> Void
 
     var body: some View {
         if let status = download.status {
@@ -418,6 +465,13 @@ struct MultilingualModelStatus: View {
                     .foregroundStyle(HexTheme.textBase)
                     .buttonStyle(MultilingualStatusButtonStyle())
                 }
+                if download.isWaitingForWiFi {
+                    Button("Use mobile data", action: useMobileData)
+                        .accessibilityIdentifier("multilingual-model-use-mobile-data")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(HexTheme.textBase)
+                        .buttonStyle(MultilingualStatusButtonStyle())
+                }
             }
             .padding(14)
             .background(
@@ -428,7 +482,8 @@ struct MultilingualModelStatus: View {
     }
 }
 
-private struct MultilingualStatusButtonStyle: ButtonStyle {
+/// The capsule the speech model rows' actions wear (Try again, Use English, Use mobile data).
+struct MultilingualStatusButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .padding(.horizontal, 12)

@@ -5237,6 +5237,16 @@
         }
       }
     },
+    "Use mobile data" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用蜂窝数据"
+          }
+        }
+      }
+    },
     "The keyboard dictates with the model below. Until it's ready, it uses Apple's speech recognition." : {
       "localizations" : {
         "zh-Hans" : {
@@ -5277,12 +5287,12 @@
         }
       }
     },
-    "25 languages, even mixed in one sentence: %@. A %@ download as soon as you pick it. Hex dictates them with it too." : {
+    "25 languages, even mixed in one sentence: %@. A %@ download on Wi-Fi. Hex dictates them with it too." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "支持 25 种语言，一句话里混着说也行：%1$@。选择后立即下载 %2$@。Hex 自己听写这些语言时也会使用它。"
+            "value" : "支持 25 种语言，一句话里混着说也行：%1$@。连接 Wi-Fi 后下载 %2$@。Hex 自己听写这些语言时也会使用它。"
           }
         }
       }

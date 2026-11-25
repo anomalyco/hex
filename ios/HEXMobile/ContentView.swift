@@ -242,7 +242,8 @@ struct ContentView: View {
                 MultilingualModelStatus(
                     download: dictation.multilingualDownload,
                     retry: { dictation.retryMultilingualParakeet() },
-                    turnOff: { dictation.turnOffMultilingualParakeet() }
+                    turnOff: { dictation.turnOffMultilingualParakeet() },
+                    useMobileData: { dictation.useMobileDataForMultilingualParakeet() }
                 )
 
                 SpeechModelHomeCard(download: KeyboardParakeetDownload.shared, open: {
