@@ -931,9 +931,11 @@ lost with no error. Before sending it, the listener reads the foreground
 window, its class, its process, and the keyboard-focused child, and logs one
 line per paste (`Windows paste target`, with the process stem and class; never
 the words). The desktop and taskbar classes (`Progman`, `WorkerW`,
-`Shell_TrayWnd`, `Shell_SecondaryTrayWnd`) owned by `explorer` count as the
-shell; an Explorer window that is not one of them (`CabinetWClass`) pastes as
-usual, and a desktop rename box (`Edit`) still takes the paste.
+`Shell_TrayWnd`, `Shell_SecondaryTrayWnd`) and the taskbar's hidden-icons
+overflow flyout (`TopLevelWindowForOverflowXamlIsland`) owned by `explorer`
+count as the shell; an Explorer window that is not one of them
+(`CabinetWClass`) pastes as usual, and a desktop rename box (`Edit`) still
+takes the paste.
 
 ```ts
 Windows paste                                     // dictate.windows-paste-target
@@ -967,6 +969,7 @@ so its step completes even when its field couldn't receive the text.
 
 Checks: `the_desktop_and_taskbars_take_no_paste`,
 `no_foreground_window_takes_no_paste`,
+`the_taskbar_overflow_flyout_takes_no_paste`,
 `a_desktop_rename_box_still_takes_a_paste`,
 `explorer_windows_that_are_not_the_shell_still_take_a_paste`, and
 `another_process_using_a_shell_class_is_not_the_shell` in
