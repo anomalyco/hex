@@ -2,8 +2,10 @@
 //! again only when Hex saw it go silent right after its own pause.
 //!
 //! macOS no longer tells other apps what is playing, so Hex listens to the
-//! browsers' own output: the level says whether the system pause reached a
-//! browser, and only that proof allows the play at the end.
+//! browsers' own output: the level says whether the pause reached a
+//! browser, and only that proof allows the play at the end. Both commands go
+//! to the browsers by name: the system's Now Playing app is whichever app
+//! started last, often a music player Hex resumed after the browser (#2825).
 
 use std::ffi::c_void;
 use std::ptr::NonNull;
@@ -61,19 +63,28 @@ pub(crate) trait BrowserAudio {
     fn in_call(&mut self) -> bool;
     /// Peak of the browsers' output over `window`, in dBFS; None when it cannot listen.
     fn peak_dbfs(&mut self, window: Duration) -> Option<f32>;
-    fn send(&mut self, command: MediaCommand) -> bool;
+    /// The browsers with open output, by canonical bundle ID.
+    fn playing_browsers(&mut self) -> Vec<&'static str>;
+    /// Sends `command` to `browsers`, or to the system's Now Playing app
+    /// when there are none or the system cannot address an app by name.
+    fn send(&mut self, command: MediaCommand, browsers: &[&'static str]) -> bool;
     /// A browser process runs and every one has closed its audio output.
     fn output_closed(&mut self) -> bool;
 }
 
-/// Proof that Hex paused a sounding browser; only this allows play.
+/// Proof that Hex paused a sounding browser; only this allows play, and
+/// only to the browsers it names.
 #[derive(Debug)]
-pub(crate) struct PausedBrowser(());
+pub(crate) struct PausedBrowser {
+    browsers: Vec<&'static str>,
+}
 
 #[cfg(test)]
 impl PausedBrowser {
     pub(crate) fn for_test() -> Self {
-        Self(())
+        Self {
+            browsers: Vec::new(),
+        }
     }
 }
 
@@ -98,8 +109,9 @@ pub(crate) fn pause(audio: &mut impl BrowserAudio) -> Option<(PausedBrowser, Cap
             }
         }
     }
+    let browsers = audio.playing_browsers();
     let sent_at = CaptureInstant::now();
-    if !audio.send(MediaCommand::Pause) {
+    if !audio.send(MediaCommand::Pause, &browsers) {
         tracing::info!("the system refused the pause command");
         return None;
     }
@@ -112,7 +124,7 @@ pub(crate) fn pause(audio: &mut impl BrowserAudio) -> Option<(PausedBrowser, Cap
             silent += 1;
             if silent == SILENT_WINDOWS {
                 tracing::info!("paused the browser");
-                return Some((PausedBrowser(()), sent_at));
+                return Some((PausedBrowser { browsers }, sent_at));
             }
         } else {
             silent = 0;
@@ -122,7 +134,7 @@ pub(crate) fn pause(audio: &mut impl BrowserAudio) -> Option<(PausedBrowser, Cap
     None
 }
 
-pub(crate) fn resume(audio: &mut impl BrowserAudio, _paused: PausedBrowser) {
+pub(crate) fn resume(audio: &mut impl BrowserAudio, paused: PausedBrowser) {
     let mut heard = true;
     match audio.peak_dbfs(RESUME_LISTEN) {
         Some(peak) if peak <= SOUND_DBFS => {}
@@ -138,7 +150,7 @@ pub(crate) fn resume(audio: &mut impl BrowserAudio, _paused: PausedBrowser) {
             return;
         }
     }
-    if !audio.send(MediaCommand::Play) {
+    if !audio.send(MediaCommand::Play, &paused.browsers) {
         tracing::info!("the system refused the play command");
         return;
     }
@@ -165,10 +177,10 @@ pub(crate) fn resume(audio: &mut impl BrowserAudio, _paused: PausedBrowser) {
         tracing::info!("sent play but cannot hear the browser");
         return;
     }
-    // A closed or reloaded tab stays silent, and the play went to whatever
-    // macOS now treats as playing: pause that again.
+    // A closed or reloaded tab stays silent, and a play sent without a
+    // browser's name went to whatever macOS now treats as playing: pause again.
     tracing::info!("the browser stayed silent after play; sent pause again");
-    audio.send(MediaCommand::Pause);
+    audio.send(MediaCommand::Pause, &paused.browsers);
 }
 
 /// The browsers' own output, heard through a private Core Audio process tap,
@@ -219,8 +231,30 @@ impl BrowserAudio for NativeBrowserAudio {
         self.tap.as_ref()?.peak_dbfs(window)
     }
 
-    fn send(&mut self, command: MediaCommand) -> bool {
-        send_media_command(command)
+    fn playing_browsers(&mut self) -> Vec<&'static str> {
+        crate::microphone_activity::browser_applications(BrowserProcesses::Playing)
+            .inspect_err(|error| tracing::warn!(%error, "could not list the playing browsers"))
+            .unwrap_or_default()
+    }
+
+    fn send(&mut self, command: MediaCommand, browsers: &[&'static str]) -> bool {
+        let mut by_name = None;
+        for &browser in browsers {
+            if let Some(sent) = send_media_command_to_app(command, browser) {
+                by_name = Some(by_name.unwrap_or(false) | sent);
+            }
+        }
+        match by_name {
+            Some(true) => true,
+            // A play by name the browsers refused goes nowhere else: the
+            // system one could start an app Hex never paused.
+            Some(false) if command == MediaCommand::Play => false,
+            Some(false) => {
+                tracing::info!(?browsers, "no browser took the pause; sent it to the system");
+                send_media_command(command)
+            }
+            None => send_media_command(command),
+        }
     }
 
     fn output_closed(&mut self) -> bool {
@@ -382,25 +416,160 @@ fn check(status: i32, context: &str) -> Result<()> {
 }
 
 type SendCommand = unsafe extern "C" fn(u32, *const c_void) -> bool;
+/// `MRMediaRemoteSendCommandToApp(command, options, origin, bundleID,
+/// flags, queue, completion)`; the completion gets an error code and the
+/// handler statuses.
+type SendCommandToApp = unsafe extern "C" fn(
+    u32,
+    *const c_void,
+    *const c_void,
+    *const c_void,
+    u32,
+    *mut c_void,
+    *mut c_void,
+);
+type GetLocalOrigin = unsafe extern "C" fn() -> *const c_void;
+
+/// How long a browser has to answer a command sent by name.
+const SEND_TO_APP_TIMEOUT: Duration = Duration::from_millis(500);
+
+unsafe extern "C" {
+    fn dispatch_get_global_queue(identifier: isize, flags: usize) -> *mut c_void;
+}
+
+#[link(name = "CoreFoundation", kind = "framework")]
+unsafe extern "C" {
+    fn CFArrayGetCount(array: *const c_void) -> isize;
+    fn CFArrayGetValueAtIndex(array: *const c_void, index: isize) -> *const c_void;
+    fn CFGetTypeID(value: *const c_void) -> usize;
+    fn CFArrayGetTypeID() -> usize;
+    fn CFNumberGetTypeID() -> usize;
+    fn CFNumberGetValue(number: *const c_void, number_type: isize, value: *mut c_void) -> bool;
+}
+
+const CF_NUMBER_SINT64_TYPE: isize = 4;
+
+/// The handler statuses MediaRemote reports for a command sent by name;
+/// non-numbers are skipped.
+///
+/// # Safety
+/// `statuses` must be null or a live CF object for the duration of the call.
+unsafe fn handler_statuses(statuses: *const c_void) -> Vec<i64> {
+    // SAFETY: The caller keeps `statuses` alive; every value is type-checked
+    // before it is read.
+    unsafe {
+        if statuses.is_null() || CFGetTypeID(statuses) != CFArrayGetTypeID() {
+            return Vec::new();
+        }
+        (0..CFArrayGetCount(statuses))
+            .filter_map(|index| {
+                let value = CFArrayGetValueAtIndex(statuses, index);
+                if value.is_null() || CFGetTypeID(value) != CFNumberGetTypeID() {
+                    return None;
+                }
+                let mut status = 0_i64;
+                CFNumberGetValue(value, CF_NUMBER_SINT64_TYPE, (&mut status as *mut i64).cast())
+                    .then_some(status)
+            })
+            .collect()
+    }
+}
+
+/// A command sent by name reached the app only when MediaRemote reports no
+/// error and at least one handler succeeded (status 0): an error of 0 with
+/// no handler, or only failing ones (no such content, command failed, no
+/// actionable item), means nothing acted on it.
+fn handled(error: u32, statuses: &[i64]) -> bool {
+    error == 0 && statuses.contains(&0)
+}
+
+/// A symbol of the private MediaRemote framework, null when it is missing.
+fn media_remote_symbol(name: &std::ffi::CStr) -> *mut c_void {
+    static HANDLE: OnceLock<usize> = OnceLock::new();
+    let handle = *HANDLE.get_or_init(|| {
+        // SAFETY: dlopen with a static C string; the handle is never closed.
+        unsafe {
+            libc::dlopen(
+                c"/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote".as_ptr(),
+                libc::RTLD_LAZY,
+            ) as usize
+        }
+    });
+    if handle == 0 {
+        return std::ptr::null_mut();
+    }
+    // SAFETY: dlsym on a live handle with a C string.
+    unsafe { libc::dlsym(handle as *mut c_void, name.as_ptr()) }
+}
+
+/// `MRMediaRemoteSendCommandToApp`: the command reaches the app named by
+/// `bundle_id` whichever app macOS has as Now Playing. None when this macOS
+/// cannot address an app by name; otherwise whether the app took it.
+fn send_media_command_to_app(command: MediaCommand, bundle_id: &str) -> Option<bool> {
+    static SEND: OnceLock<Option<(SendCommandToApp, Option<GetLocalOrigin>)>> = OnceLock::new();
+    let (send, origin) = (*SEND.get_or_init(|| {
+        let send = media_remote_symbol(c"MRMediaRemoteSendCommandToApp");
+        let origin = media_remote_symbol(c"MRMediaRemoteGetLocalOrigin");
+        if send.is_null() {
+            return None;
+        }
+        // SAFETY: Both symbols have these signatures where they exist.
+        let send = unsafe { std::mem::transmute::<*mut c_void, SendCommandToApp>(send) };
+        let origin = (!origin.is_null())
+            .then(|| unsafe { std::mem::transmute::<*mut c_void, GetLocalOrigin>(origin) });
+        Some((send, origin))
+    }))?;
+    let (done, answer) = std::sync::mpsc::sync_channel::<(u32, Vec<i64>)>(1);
+    let completion = RcBlock::new(move |error: u32, statuses: *const c_void| {
+        // SAFETY: MediaRemote keeps the array alive for the block's call.
+        let statuses = unsafe { handler_statuses(statuses) };
+        let _ = done.try_send((error, statuses));
+    });
+    let name = objc2_core_foundation::CFString::from_str(bundle_id);
+    // SAFETY: The origin is the local device's (or null for it), `name` is
+    // a live CFString, the queue is a global one, and MediaRemote
+    // copies the block before returning.
+    unsafe {
+        let origin = origin.map_or(std::ptr::null(), |origin| origin());
+        send(
+            command as u32,
+            std::ptr::null(),
+            origin,
+            (&*name as *const objc2_core_foundation::CFString).cast(),
+            0,
+            dispatch_get_global_queue(0, 0),
+            RcBlock::as_ptr(&completion).cast(),
+        );
+    }
+    let sent = match answer.recv_timeout(SEND_TO_APP_TIMEOUT) {
+        Ok((error, statuses)) if handled(error, &statuses) => true,
+        Ok((error, statuses)) => {
+            tracing::info!(
+                bundle_id,
+                error,
+                ?statuses,
+                "the browser did not act on the media command"
+            );
+            false
+        }
+        Err(_) => {
+            tracing::info!(bundle_id, "the browser did not answer the media command");
+            false
+        }
+    };
+    Some(sent)
+}
 
 /// `MRMediaRemoteSendCommand` from the private MediaRemote framework: the
 /// same pause and play as the media keys, sent to the app macOS has as Now Playing.
 fn send_media_command(command: MediaCommand) -> bool {
     static SEND: OnceLock<Option<SendCommand>> = OnceLock::new();
     let send = SEND.get_or_init(|| {
-        // SAFETY: dlopen and dlsym with static C strings; the symbol has
-        // this signature on every macOS that ships the framework.
-        unsafe {
-            let handle = libc::dlopen(
-                c"/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote".as_ptr(),
-                libc::RTLD_LAZY,
-            );
-            if handle.is_null() {
-                return None;
-            }
-            let symbol = libc::dlsym(handle, c"MRMediaRemoteSendCommand".as_ptr());
-            (!symbol.is_null()).then(|| std::mem::transmute::<*mut c_void, SendCommand>(symbol))
-        }
+        let symbol = media_remote_symbol(c"MRMediaRemoteSendCommand");
+        // SAFETY: The symbol has this signature on every macOS that ships
+        // the framework.
+        (!symbol.is_null())
+            .then(|| unsafe { std::mem::transmute::<*mut c_void, SendCommand>(symbol) })
     });
     let Some(send) = send else {
         tracing::warn!("MediaRemote is not available");
@@ -421,6 +590,8 @@ mod tests {
         in_call: bool,
         peaks: VecDeque<Option<f32>>,
         sent: Vec<MediaCommand>,
+        sent_to: Vec<Vec<&'static str>>,
+        browsers: Vec<&'static str>,
         send_ok: bool,
         listened: usize,
         output_closed: bool,
@@ -432,6 +603,8 @@ mod tests {
                 in_call: false,
                 peaks: peaks.into_iter().collect(),
                 sent: Vec::new(),
+                sent_to: Vec::new(),
+                browsers: vec!["net.imput.helium"],
                 send_ok: true,
                 listened: 0,
                 output_closed: false,
@@ -449,8 +622,13 @@ mod tests {
             self.peaks.pop_front().flatten()
         }
 
-        fn send(&mut self, command: MediaCommand) -> bool {
+        fn playing_browsers(&mut self) -> Vec<&'static str> {
+            self.browsers.clone()
+        }
+
+        fn send(&mut self, command: MediaCommand, browsers: &[&'static str]) -> bool {
             self.sent.push(command);
+            self.sent_to.push(browsers.to_vec());
             self.send_ok
         }
 
@@ -531,6 +709,33 @@ mod tests {
         let (paused, _) = pause(&mut audio).expect("the pause is confirmed");
         resume(&mut audio, paused);
         assert_eq!(audio.sent, [MediaCommand::Pause, MediaCommand::Play]);
+    }
+
+    #[test]
+    fn a_command_by_name_counts_only_when_a_handler_succeeded() {
+        assert!(handled(0, &[0]));
+        assert!(handled(0, &[2, 0]));
+        assert!(!handled(0, &[]));
+        assert!(!handled(0, &[1, 2, 3]));
+        assert!(!handled(5, &[0]));
+    }
+
+    #[test]
+    fn play_goes_only_to_the_browsers_hex_paused() {
+        // Another app is Now Playing after Hex resumes it (#2825): both
+        // commands name the browsers that were playing.
+        let mut audio = Fake::new(playing().into_iter().chain([
+            Some(-200.0),
+            Some(-200.0),
+            Some(-200.0),
+            Some(-25.0),
+        ]));
+        audio.browsers = vec!["com.google.Chrome", "net.imput.helium"];
+        let (paused, _) = pause(&mut audio).expect("the pause is confirmed");
+        audio.browsers = vec!["com.apple.Safari"];
+        resume(&mut audio, paused);
+        assert_eq!(audio.sent, [MediaCommand::Pause, MediaCommand::Play]);
+        assert_eq!(audio.sent_to, [["com.google.Chrome", "net.imput.helium"]; 2]);
     }
 
     #[test]

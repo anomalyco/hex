@@ -1173,7 +1173,10 @@ Pause media + Also pause the browser     // browser_media
 ├── No browser process has its audio output open -> leave it alone (no tap)
 ├── Listen to those processes' own output (private process tap), 3 windows of 100 ms
 │   └── Any window at or below -60 dBFS, or no level -> leave it alone
-├── Send the system pause command (MediaRemote 1; never the toggle)
+├── Send pause (MediaRemote 1; never the toggle) to each browser with open output, by bundle ID
+│   ├── Not the Now Playing app: that is whichever app started last, often a player Hex resumed (#2825)
+│   ├── This macOS cannot send by name, or the playing browsers cannot be listed -> the system pause command
+│   └── No browser took it by name (an error, no answer in 500 ms, or no handler status 0) -> the system pause command
 ├── Poll 5 windows of 100 ms
 │   ├── 2 windows in a row below -90 dBFS -> Hex paused it
 │   └── Otherwise (another tab, a sound that ended later, or the pause went elsewhere) -> no play later
@@ -1182,7 +1185,7 @@ Pause media + Also pause the browser     // browser_media
     ├── No level, a browser runs and every one has closed its output -> still paused: play
     │   (a pause longer than about 10 s closes the output; a tap on it delivers nothing)
     ├── No level otherwise (browser quit, tap failed) -> no play
-    └── Otherwise -> send the system play command (MediaRemote 0), then poll 20 windows of 100 ms
+    └── Otherwise -> send play (MediaRemote 0) only to the browsers Hex paused (the system play only when this macOS cannot send by name or none was recorded; a play no browser took by name goes nowhere), then poll 20 windows of 100 ms
         ├── A window above -60 dBFS -> resumed
         ├── No level before the first level (the output is opening again) -> keep polling
         ├── No level after a level -> stop listening

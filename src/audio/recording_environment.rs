@@ -406,7 +406,8 @@ impl Drop for AudioBehaviorGuard {
             }
             Self::Ducked { guard } => guard.restore(),
             Self::Paused { players, browser } => {
-                // The browser first: its play goes to whatever macOS treats as
+                // The browser first: its play goes to it by name, but where
+                // macOS cannot name it, it goes to whatever macOS treats as
                 // playing, which a player resumed just before could become.
                 if let Some(paused) = browser.take() {
                     browser_media::resume(&mut NativeBrowserAudio::for_resume(), paused);
