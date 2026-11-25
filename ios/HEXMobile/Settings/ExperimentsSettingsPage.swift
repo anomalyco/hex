@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Settings › Experiments: unfinished features grouped by domain (Dictation, Languages,
+/// Settings › Labs: unfinished features grouped by domain (Dictation, Languages,
 /// Keyboard layout, Typing), off until turned on. They live in the App Group so the keyboard
 /// reads them too.
 struct ExperimentsSettingsPage: View {
@@ -50,7 +50,7 @@ struct ExperimentsSettingsPage: View {
     }
 
     var body: some View {
-        SettingsPageScaffold(title: "Experiments") {
+        SettingsPageScaffold(title: "Labs") {
             dictationSection
             languagesSection
             layoutSection
@@ -59,7 +59,7 @@ struct ExperimentsSettingsPage: View {
             // Testers tell the team how an experiment went (absent without a report key).
             if Feedback.isAvailable {
                 SettingsCard {
-                    FeedbackRow(screen: "Settings › Experiments", dictation: DictationController.shared)
+                    FeedbackRow(screen: "Settings › Labs", dictation: DictationController.shared)
                 }
                 .padding(.top, 8)
             }

@@ -1,6 +1,6 @@
 import CoreGraphics
 
-/// Settings › Experiments › Comma and period keys: the keys one space bar gives up at its ends.
+/// Settings › Labs › Comma and period keys: the keys one space bar gives up at its ends.
 nonisolated extension KeyboardLayout {
     /// `space` with a letter-wide key taken out of its leading (a comma) or trailing (a period)
     /// end, and that key. nil where the bar would not still hold a letter-wide space after it.

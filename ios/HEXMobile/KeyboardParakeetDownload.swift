@@ -214,7 +214,7 @@ final class KeyboardParakeetDownload {
 }
 
 extension DictationController {
-    /// The switch in Experiments: on downloads Parakeet V2 for the keyboard unless it's there;
+    /// The switch in Settings › Dictation: on downloads Parakeet V2 for the keyboard unless it's there;
     /// off stops the download and deletes it, unless Hex itself dictates with Parakeet V2.
     func keyboardParakeetChanged() {
         let settings = KeyboardParakeetSettings()

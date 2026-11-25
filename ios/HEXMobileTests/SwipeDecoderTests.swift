@@ -53,7 +53,7 @@ final class SwipeDecoderTests: XCTestCase {
         XCTAssertEqual(Set(read("esta", es, keys).prefix(2)), ["esta", "está"], "one path, both readings")
     }
 
-    /// Settings › Experiments › Swipe typing in more languages reads French (France), German
+    /// Settings › Labs › Swipe typing in more languages reads French (France), German
     /// and Polish on their own layouts too: an accented letter is read on its base letter's
     /// key, and French's AZERTY and German's QWERTZ are the keys as drawn.
     func testFrenchGermanAndPolishSwipesReadTheirWords() throws {

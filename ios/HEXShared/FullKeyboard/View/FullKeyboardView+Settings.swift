@@ -1,6 +1,6 @@
 import UIKit
 
-/// The keyboard's key layout settings (Settings › Keyboard and Settings › Experiments),
+/// The keyboard's key layout settings (Settings › Keyboard and Settings › Labs),
 /// applied on every sync: where the Hex key sits, the number row, and whether the Duo unfolded
 /// draws one keyboard. Switches that only change typing behaviour stay in
 /// `FullKeyboardView.syncSettings`.
@@ -35,7 +35,7 @@ extension FullKeyboardView {
         onPreferredHeightChange?()
     }
 
-    /// Settings › Experiments › Join the keyboard when unfolded: the Duo unfolded upright draws
+    /// Settings › Labs › Join the keyboard when unfolded: the Duo unfolded upright draws
     /// one keyboard rather than the split one. The rows keep their heights, so the host is asked
     /// for nothing.
     func syncJoinsUnfoldedKeyboard() {
@@ -47,7 +47,7 @@ extension FullKeyboardView {
         setNeedsLayout()
     }
 
-    /// Settings › Experiments › Dvorak punctuation keys: English's Dvorak letters gain comma,
+    /// Settings › Labs › Dvorak punctuation keys: English's Dvorak letters gain comma,
     /// period and semicolon keys. No row changes height, so the host is asked for nothing.
     func syncDvorakPunctuation() {
         let on = FullKeyboardSettings().dvorakPunctuation
@@ -58,7 +58,7 @@ extension FullKeyboardView {
         setNeedsLayout()
     }
 
-    /// Settings › Experiments › Comma and period keys: a comma and a period join the space bar
+    /// Settings › Labs › Comma and period keys: a comma and a period join the space bar
     /// on an iPhone's letters page in a text field. No row changes height, so the host is asked
     /// for nothing.
     func syncCommaPeriodKeys() {

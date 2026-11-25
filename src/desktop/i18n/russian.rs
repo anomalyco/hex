@@ -411,7 +411,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Recommended", "Рекомендуется"),
     ("Settings", "Настройки"),
     ("General", "Основные"),
-    ("Experiments", "Эксперименты"),
     ("Voice Filter", "Голосовой фильтр"),
     ("Recordings", "Записи"),
     ("Advanced", "Дополнительно"),

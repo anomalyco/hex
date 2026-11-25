@@ -1,7 +1,7 @@
 import UIKit
 
 /// The strip's two-thumb selection actions and the dictation around them (Settings ›
-/// Experiments): Delete, Cut, Copy, Dictate or Cancel on the range two thumbs picked. Dictate
+/// Labs): Delete, Cut, Copy, Dictate or Cancel on the range two thumbs picked. Dictate
 /// leaves the range in the field and its words replace it when they arrive; a cancelled or
 /// empty dictation leaves it untouched. The range itself is the engine's
 /// (`TrackpadSelectionSession`); this is the keyboard's side of it.

@@ -403,7 +403,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Recommended", "Ajánlott"),
     ("Settings", "Beállítások"),
     ("General", "Általános"),
-    ("Experiments", "Kísérletek"),
     ("Voice Filter", "Hangszűrő"),
     ("Recordings", "Felvételek"),
     ("Advanced", "Speciális"),

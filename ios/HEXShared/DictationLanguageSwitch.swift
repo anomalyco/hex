@@ -6,7 +6,7 @@ nonisolated enum DictationLanguageSwitch {
     static let maxChoices = 5
 
     /// Up to five languages, best first: the one set now, the ones picked recently, Hindi while
-    /// Experiments › Hinglish is on and Greek while Greeklish is (shown as Hinglish and
+    /// Labs › Hinglish is on and Greek while Greeklish is (shown as Hinglish and
     /// Greeklish), then the iPhone's preferred languages.
     /// Each is matched to a language Apple Speech has (`supported`, BCP 47) when that list is
     /// known, and dropped when it has none. One variant per language: the first of es-US and
@@ -172,7 +172,7 @@ nonisolated enum DictationLanguageSwitch {
 
     /// The language's own short name: "English", "Norsk", "Español", "Deutsch", "עברית",
     /// "Русский", and "Srpski" in its script for Serbian (Latin). Hindi is "Hinglish" while
-    /// Experiments › Hinglish writes it in Latin letters, and Greek is "Greeklish" while
+    /// Labs › Hinglish writes it in Latin letters, and Greek is "Greeklish" while
     /// Greeklish does. `supported` (what Apple Speech has
     /// here) adds the region where it offers more than one of the language, as Apple's own
     /// keyboards do: "Español (US)" while it also has Spain's, "English (GB)"; Norwegian stays

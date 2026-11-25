@@ -3643,7 +3643,7 @@ final class AudioSessionSetupTests: XCTestCase {
         XCTAssertEqual(session.calls.filter { if case .category = $0 { true } else { false } }.count, 2)
     }
 
-    /// Experiments › Voice isolation: on, Hex records in `.voiceChat` mode, whose voice
+    /// Labs › Voice isolation: on, Hex records in `.voiceChat` mode, whose voice
     /// processing lets Control Center's Mic Mode offer Voice Isolation; off, `.measurement`
     /// exactly as before. The options stay today's either way, and the category (with the
     /// mode) is still set only when it changes, even though `.voiceChat` adds

@@ -2,7 +2,7 @@ import UIKit
 import XCTest
 @testable import HEX
 
-/// Settings › Experiments › Keyboard themes: the full keyboard's keys in their own colours,
+/// Settings › Labs › Keyboard themes: the full keyboard's keys in their own colours,
 /// off by default, over iOS's glass, and Automatic exactly as it was before them.
 @MainActor
 final class KeyboardThemeTests: XCTestCase {

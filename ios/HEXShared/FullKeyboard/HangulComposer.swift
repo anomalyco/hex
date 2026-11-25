@@ -216,7 +216,7 @@ nonisolated struct HangulComposer {
     ]
 }
 
-/// Settings › Experiments › Korean keyboard, and the composing run it feeds
+/// Settings › Labs › Korean keyboard, and the composing run it feeds
 /// (`FullKeyboardEngine+Hangul`). The switch is read once when the engine is made and again
 /// whenever Settings applies.
 nonisolated struct KoreanKeyboardState {

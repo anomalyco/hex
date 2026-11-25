@@ -337,7 +337,7 @@ extension FullKeyboardEngineTests {
     }
 }
 
-// MARK: - Adaptive touch (Settings › Experiments)
+// MARK: - Adaptive touch (Settings › Labs)
 
 /// A text field with the traits Adaptive touch must not learn in.
 @MainActor

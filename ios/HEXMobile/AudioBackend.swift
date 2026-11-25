@@ -269,7 +269,7 @@ final class SystemAudioManager: AudioManaging {
     /// at its end. The hardware keeps its own rate: the recorder writes 16 kHz itself, and the
     /// keepalive taps whatever format the hardware reports.
     ///
-    /// Experiments › Voice isolation is the one exception to `.measurement`: with it on the
+    /// Labs › Voice isolation is the one exception to `.measurement`: with it on the
     /// session records in `.voiceChat` mode, whose voice processing lets Control Center's Mic
     /// Mode offer Voice Isolation while Hex records. Off, the mode and every option are exactly
     /// as before, so Hex records as it always has.

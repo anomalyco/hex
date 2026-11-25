@@ -1,6 +1,6 @@
 import Foundation
 
-/// Experiments › Voice isolation, in the shared App Group so in-keyboard dictation
+/// Labs › Voice isolation, in the shared App Group so in-keyboard dictation
 /// reads it too. Off by default. While it is on, the app records in
 /// `AVAudioSession.Mode.voiceChat` instead of `.measurement`, so Control Center's Mic Mode
 /// can offer Voice Isolation while Hex records, and in-keyboard dictation asks WebKit for

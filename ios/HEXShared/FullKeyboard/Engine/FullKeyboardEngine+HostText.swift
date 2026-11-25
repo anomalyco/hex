@@ -142,7 +142,7 @@ extension FullKeyboardEngine {
         expectedTypingContext = nil
     }
 
-    // MARK: - Emoji shortcodes (Settings › Experiments; EmojiShortcode)
+    // MARK: - Emoji shortcodes (Settings › Labs; EmojiShortcode)
 
     /// A closing ":" that finishes an emoji shortcode (":pizza") types the emoji instead of
     /// the colon, taking the whole token back. False when no shortcode ends here or the

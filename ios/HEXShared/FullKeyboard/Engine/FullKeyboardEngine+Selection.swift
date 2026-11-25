@@ -1,13 +1,13 @@
 import UIKit
 
-/// Settings › Experiments › Two-thumb selection: while the space bar is the trackpad, a second
+/// Settings › Labs › Two-thumb selection: while the space bar is the trackpad, a second
 /// finger picks a range instead of being ignored. The host's selection can't be set from a
 /// keyboard, so the range is shown in the strip and the actions (Delete, Cut, Copy, Dictate,
 /// Cancel) change the text through the proxy. See `TrackpadSelectionSession`.
 @MainActor
 extension FullKeyboardEngine {
     /// A second finger on the trackpad starts a selection, rather than typing the blank key
-    /// under it: Settings › Experiments › Two-thumb selection, off by default.
+    /// under it: Settings › Labs › Two-thumb selection, off by default.
     var startsTwoThumbSelection: Bool {
         trackpadSelectionState.enabled && trackpadSelectionState.session == nil && isTrackpadActive
     }

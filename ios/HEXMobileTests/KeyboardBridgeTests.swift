@@ -1470,7 +1470,7 @@ final class DictationLanguageSwitchTests: XCTestCase {
         )
     }
 
-    /// Experiments › Hinglish offers Hindi in the Hex key's language menu, named Hinglish.
+    /// Labs › Hinglish offers Hindi in the Hex key's language menu, named Hinglish.
     func testHinglishOffersHindiByThatName() throws {
         let suite = "hex.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -1501,7 +1501,7 @@ final class DictationLanguageSwitchTests: XCTestCase {
         )
     }
 
-    /// Experiments › Greeklish offers Greek in the Hex key's language menu, named Greeklish,
+    /// Labs › Greeklish offers Greek in the Hex key's language menu, named Greeklish,
     /// the way Hinglish offers Hindi.
     func testGreeklishOffersGreekByThatName() throws {
         let suite = "hex.tests.\(UUID().uuidString)"

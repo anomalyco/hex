@@ -31,7 +31,7 @@ import Foundation
 /// held accents (á ä, é ë, í ï, ó ö and ú ü first on the vowels, j́ on J for a stressed íj́;
 /// no ĳ letter) and the iPhone's nl dictionary.
 /// Korean is the standard two-set (Dubeolsik, 두벌식) layout, whose syllables `HangulComposer`
-/// composes as the jamo are typed; it is offered only while Settings › Experiments › Korean
+/// composes as the jamo are typed; it is offered only while Settings › Labs › Korean
 /// keyboard is on.
 nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     case english = "en"
@@ -621,7 +621,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         }
     }
 
-    /// Settings › Experiments › Quick accents: the accent a held letter picks first, where the
+    /// Settings › Labs › Quick accents: the accent a held letter picks first, where the
     /// language has one clear most-used spelling rather than whatever the system callout lists
     /// next to the key (`AccentCatalog.primaryVariant`). Lowercase base → lowercase variant; a
     /// value a key doesn't actually hold is ignored and the callout's own next option stands.

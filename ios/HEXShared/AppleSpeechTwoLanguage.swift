@@ -2,7 +2,7 @@ import AVFAudio
 import Foundation
 import Speech
 
-/// Experiments › Two-language dictation on Apple Speech: one recording read by two
+/// Labs › Two-language dictation on Apple Speech: one recording read by two
 /// `SpeechAnalyzer`s, each in a language whose `SpeechTranscriber` model is installed, then
 /// merged word by word by `TwoLanguageMerger`. Shared by the app
 /// (`AppleSpeechTranscriber`) and in-keyboard dictation (`KeyboardSpeech`), so both take
