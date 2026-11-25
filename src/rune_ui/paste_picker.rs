@@ -153,6 +153,7 @@ pub(super) fn card<S: 'static>(
                 title: item.preview.clone(),
                 meta: kind,
                 meta_ink: None,
+                note: None,
                 time: event_age_at(item.ready_at, now),
                 hover: Vec::new(),
                 selected: i == cursor,

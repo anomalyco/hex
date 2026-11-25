@@ -4,6 +4,11 @@
     <string name="keyboard_hint_hold">Hold Hex to talk</string>
     <string name="keyboard_hint_password">Dictation off in password fields</string>
     <string name="keyboard_hint_microphone">Allow the microphone in Hex</string>
+    <!-- Labs › Keyboard › Voice-only mode's bar. -->
+    <string name="voice_only_hint">Say what you want to type</string>
+    <string name="voice_only_listening">Listening…</string>
+    <string name="voice_only_unavailable">Dictation can’t start here</string>
+    <string name="voice_only_back">Back to your keyboard</string>
     <!-- Dictation's notes, the same sentences MicCapture sends (HexKeyboard.speechNote). -->
     <string name="keyboard_note_microphone">Microphone unavailable. Try again.</string>
     <string name="keyboard_note_transcribe">Couldn’t transcribe. Try again.</string>
@@ -15,6 +20,9 @@
          strip says so, once per field. %1$s is the language as the space bar names it (Nederlands, Polski…). -->
     <string name="keyboard_note_swipe">Swipe typing isn’t available in %1$s yet</string>
     <string name="keyboard_note_dismiss">Dismiss</string>
+    <!-- Labs › Faster English dictation: a shortage of memory sent an English dictation to the standard model. At most
+         once a day. -->
+    <string name="keyboard_note_low_memory">Low on memory: used standard dictation.</string>
     <string name="keyboard_cancel_dictation">Cancel dictation</string>
     <string name="keyboard_finish_dictation">Finish dictation</string>
     <string name="keyboard_undo_dictation">Undo dictation</string>

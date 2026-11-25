@@ -40,20 +40,30 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ly.anoma.hex.diagnostics.DiagnosticsPage
 import ly.anoma.hex.feedback.Feedback
 import ly.anoma.hex.feedback.FeedbackForm
+import ly.anoma.hex.keyboard.VoiceOnly
 import ly.anoma.hex.speech.*
+import ly.anoma.hex.typing.AdaptiveTouchModel
+import ly.anoma.hex.typing.AdaptiveTouchStore
 import ly.anoma.hex.typing.TypingPreferences
 import ly.anoma.hex.updates.Updates
+import ly.anoma.hex.words.WordReplacementsPage
+import ly.anoma.hex.words.WordsFilePage
+import ly.anoma.hex.words.WordsRows
+import ly.anoma.hex.words.WordsStore
 
 private enum class Page(val title: Int) {
     Home(R.string.app_name), Dictation(R.string.settings_dictation), Keyboard(R.string.settings_keyboard), Privacy(R.string.settings_privacy),
     Labs(R.string.settings_labs),
     Language(R.string.settings_dictation_language), Layout(R.string.settings_keyboard_layout), Styles(R.string.settings_style),
     Policy(R.string.settings_privacy_policy), Licences(R.string.settings_licences), Licence(R.string.settings_licences),
-    Feedback(R.string.feedback_send_feedback);
+    Feedback(R.string.feedback_send_feedback), Diagnostics(R.string.diagnostics),
+    Replacements(R.string.words_replacements), WordsFile(R.string.words_file);
     val parent get() = when (this) {
-        Language, Styles -> Dictation
+        Diagnostics -> Labs
+        Language, Styles, Replacements, WordsFile -> Dictation
         Layout -> Keyboard
         Policy, Licences -> Privacy
         Licence -> Licences
@@ -79,7 +89,11 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                          notice: String?, dictate: () -> Unit, cancel: () -> Unit, clear: () -> Unit, setupPage: (Int) -> Unit,
                          systemSettings: () -> Unit, startPage: String? = null) {
     var page by rememberSaveable {
-        mutableStateOf(if (startPage == MainActivity.PAGE_KEYBOARD) Page.Keyboard else Page.Home)
+        mutableStateOf(when (startPage) {
+            MainActivity.PAGE_KEYBOARD -> Page.Keyboard
+            MainActivity.PAGE_DIAGNOSTICS -> Page.Diagnostics
+            else -> Page.Home
+        })
     }
     var licence by rememberSaveable { mutableStateOf("") }
     var practice by remember { mutableStateOf("") }
@@ -88,7 +102,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     // Observe them even while trying the keyboard inside this page.
     var revision by remember { mutableIntStateOf(0) }
     DisposableEffect(context) {
-        val stores = listOf("speech", "typing").map { context.getSharedPreferences(it, Context.MODE_PRIVATE) }
+        val stores = listOf("speech", "typing", AdaptiveTouchStore.FILE).map { context.getSharedPreferences(it, Context.MODE_PRIVATE) }
         val changed = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> revision++ }
         stores.forEach { it.registerOnSharedPreferenceChangeListener(changed) }
         onDispose { stores.forEach { it.unregisterOnSharedPreferenceChangeListener(changed) } }
@@ -104,13 +118,39 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val formatLists = remember(revision) { speech.formatLists }
     val spokenPunctuation = remember(revision) { speech.spokenPunctuation }
     val customVocabulary = remember(revision) { speech.customVocabulary }
-    var vocabularyDraft by remember { mutableStateOf(speech.vocabularyTerms.joinToString("\n")) }
+    // An import or its Undo changes the terms under the editor, so it reloads them.
+    val words = remember(context) { WordsStore(context) }
+    val imports = remember(revision) { words.imports }
+    var vocabularyDraft by remember(imports) { mutableStateOf(speech.vocabularyTerms.joinToString("\n")) }
     val signature = remember(revision) { speech.signature }
+    val fastEnglish = remember(revision) { speech.fastEnglish }
+    val learnFixes = remember(revision) { speech.learnFixes }
+    val fixStore = remember(context) { DictationFixStore(context) }
+    val learnedFixes = remember(revision, learnFixes) { if (learnFixes) fixStore.learned() else emptyList() }
+    val disabledFixes = remember(revision, learnFixes) { if (learnFixes) fixStore.disabled() else emptySet() }
+    // The lab off stops learning and applying, not the records already on the phone: Delete stays reachable.
+    val storedFixes = remember(revision) { fixStore.hasRecords() }
+    var forgetting by remember { mutableStateOf(false) }
+    val english = ModelStore.english.state.collectAsState().value
     var signatureDraft by remember { mutableStateOf(speech.signatureText) }
     val emojiSuggestions = remember(revision) { typing.emojiSuggestions }
     val keyboardTools = remember(revision) { typing.keyboardTools }
+    val smartQuotes = remember(revision) { typing.smartQuotes }
+    val swipeDeleteLetters = remember(revision) { typing.swipeDeleteLetters }
+    val adaptiveTouch = remember(revision) { typing.adaptiveTouch }
+    // Labs › Keyboard › Adaptive touch: how far it has learned (labelled taps on one key plane, and whether any reads your
+    // own centres), and whether the phone keeps averages, which Reset touch learning removes even with the lab off.
+    val touchStatus = remember(revision, adaptiveTouch) {
+        if (adaptiveTouch) AdaptiveTouchStore.get(context).let { it.taps to it.anyActive } else null
+    }
+    val touchStored = remember(revision) { AdaptiveTouchStore.stored(context) }
+    var resettingTouch by remember { mutableStateOf(false) }
+    val passwordManager = remember(revision) { typing.passwordManagerSuggestions }
+    val voiceOnly = remember(revision) { typing.voiceOnly }
     // A hidden field or leaving Labs shows the saved line again, never an unsaved draft.
     LaunchedEffect(page, signature) { if (page != Page.Labs || !signature) signatureDraft = speech.signatureText }
+    LaunchedEffect(page, learnFixes) { if (page != Page.Labs || !learnFixes) forgetting = false }
+    LaunchedEffect(page) { if (page != Page.Labs) resettingTouch = false }
     val autoCapitalize = remember(revision) { typing.autoCapitalize }
     val autocorrect = remember(revision) { typing.autocorrect }
     val swearWords = remember(revision) { typing.suggestSwearWords }
@@ -120,6 +160,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val haptics = remember(revision) { typing.haptics }
     val letterSymbols = remember(revision) { typing.letterSymbols }
     val numberRow = remember(revision) { typing.numberRow }
+    val localCurrency = remember(revision) { typing.localCurrency }
     var copied by remember(transcript) { mutableStateOf(false) }
     fun open(next: Page) {
         // A send in progress keeps the form; leaving it otherwise drops what was written.
@@ -248,18 +289,22 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             if (customVocabulary) {
                                 val ink = colorResource(R.color.ink)
                                 BasicTextField(value = vocabularyDraft, onValueChange = {
-                                    vocabularyDraft = it; speech.vocabularyTerms = it.split('\n')
+                                    vocabularyDraft = it; speech.vocabularyTerms = it.split('\n'); words.edited()
                                 }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 14.dp),
                                     textStyle = TextStyle(color = ink, fontFamily = inter, fontSize = 16.sp),
                                     cursorBrush = SolidColor(ink), decorationBox = { field ->
                                         Box { if (vocabularyDraft.isEmpty()) Label(stringResource(R.string.dictation_vocabulary_hint), muted = true); field() }
                                     })
                             }
+                            WordsRows(speech, words, revision, customVocabulary, { open(Page.Replacements) }, { open(Page.WordsFile) })
                         }
                         Card {
                             val action = modelAction(model)
                             Entry(stringResource(R.string.model_title), modelStatus(model), action?.let { stringResource(it) } ?: "",
                                 if (action != null) download else null)
+                            if (fastEnglish && english == ModelStore.State.Ready) {
+                                Rule(); Entry(stringResource(R.string.fast_english_in_use), action = { open(Page.Labs) })
+                            }
                         }
                     }
                     Page.Keyboard -> {
@@ -303,8 +348,81 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                         }
                     }
                     Page.Feedback -> FeedbackForm(done = { open(Page.Home) })
+                    Page.Diagnostics -> DiagnosticsPage()
+                    Page.Replacements -> WordReplacementsPage(speech, words, revision)
+                    Page.WordsFile -> WordsFilePage(speech, words, revision)
                     Page.Labs -> {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Label(stringResource(R.string.labs_dictation), muted = true, size = 14,
+                                mod = Modifier.padding(start = 16.dp))
+                            Card {
+                                val size = ModelStore.english.megabytes
+                                                // Its line says what the download is and what stays as it was, and is never cut off, however
+                                // large the font.
+                                Toggle(stringResource(R.string.fast_english), stringResource(R.string.fast_english_detail, size),
+                                    fastEnglish, noteLines = Int.MAX_VALUE) {
+                                    speech.fastEnglish = it
+                                    // Off stops a download under way and drops its partial file; a finished one stays
+                                    // until Delete download.
+                                    if (!it && english != ModelStore.State.Ready) ModelStore.english.delete(context)
+                                }
+                                if (fastEnglish) {
+                                    Rule()
+                                    // The download starts only on this tap, with its size on the row.
+                                    when (english) {
+                                        ModelStore.State.Available -> Entry(stringResource(R.string.fast_english_download, size), value = "",
+                                            action = { ModelStore.english.download(context) })
+                                        is ModelStore.State.Loading -> Entry(stringResource(R.string.fast_english_loading, size, english.percent))
+                                        is ModelStore.State.Retry -> Entry(stringResource(when (english.problem) {
+                                            ModelStore.Problem.Connection -> R.string.fast_english_no_connection
+                                            ModelStore.Problem.Space -> R.string.fast_english_no_space
+                                            ModelStore.Problem.Server -> R.string.fast_english_stopped
+                                        }), value = stringResource(R.string.model_try_again), action = { ModelStore.english.download(context) })
+                                        ModelStore.State.Ready -> Entry(stringResource(R.string.fast_english_ready, size),
+                                            value = stringResource(R.string.fast_english_delete),
+                                            action = { ModelStore.english.delete(context); speech.fastEnglish = false })
+                                    }
+                                }
+                                Rule()
+                                // Labs › Learn from my fixes: off, the keyboard tracks nothing, applies nothing and
+                                // offers no hints; on, the learned word pairs are listed with a switch each.
+                                Toggle(stringResource(R.string.learn_fixes), stringResource(R.string.learn_fixes_detail),
+                                    learnFixes, noteLines = Int.MAX_VALUE) {
+                                    speech.learnFixes = it
+                                    if (!it) forgetting = false
+                                }
+                                if (learnFixes) {
+                                    if (learnedFixes.isEmpty()) {
+                                        Rule()
+                                        Label(stringResource(R.string.learn_fixes_empty), muted = true, size = 13,
+                                            lines = Int.MAX_VALUE, mod = Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+                                    } else {
+                                        learnedFixes.forEach { fix ->
+                                            Rule()
+                                            Toggle(fix.heard + " → " + fix.meant,
+                                                stringResource(R.string.learn_fixes_count, fix.count),
+                                                fix.id !in disabledFixes) { on -> fixStore.disable(fix.id, !on) }
+                                        }
+                                    }
+                                }
+                                if (learnFixes || storedFixes) {
+                                    Rule()
+                                    if (forgetting) {
+                                        Row(Modifier.fillMaxWidth().heightIn(min = 52.dp)
+                                            .padding(start = 16.dp, end = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically) {
+                                            Label(stringResource(R.string.learn_fixes_delete_confirm), size = 14,
+                                                lines = 2, mod = Modifier.weight(1f))
+                                            Action(stringResource(R.string.learn_fixes_cancel)) { forgetting = false }
+                                            Action(stringResource(R.string.learn_fixes_delete_action)) {
+                                                fixStore.clear(); AdaptiveTouchStore.clear(context); forgetting = false
+                                            }
+                                        }
+                                    } else {
+                                        Entry(stringResource(R.string.learn_fixes_delete), action = { forgetting = true })
+                                    }
+                                }
+                            }
                             Label(stringResource(R.string.labs_output), muted = true, size = 14,
                                 mod = Modifier.padding(start = 16.dp))
                             Card {
@@ -341,11 +459,62 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 Toggle(stringResource(R.string.number_row), stringResource(R.string.number_row_detail),
                                     numberRow) { typing.numberRow = it }
                                 Rule()
+                                Toggle(stringResource(R.string.local_currency), stringResource(R.string.local_currency_detail),
+                                    localCurrency) { typing.localCurrency = it }
+                                Rule()
                                 Toggle(stringResource(R.string.emoji_suggestions), stringResource(R.string.emoji_suggestions_detail),
                                     emojiSuggestions) { typing.emojiSuggestions = it }
                                 Rule()
                                 Toggle(stringResource(R.string.keyboard_tools), stringResource(R.string.keyboard_tools_detail),
                                     keyboardTools) { typing.keyboardTools = it }
+                                Rule()
+                                Toggle(stringResource(R.string.smart_quotes), stringResource(R.string.smart_quotes_detail),
+                                    smartQuotes) { typing.smartQuotes = it }
+                                Rule()
+                                Toggle(stringResource(R.string.swipe_delete_letters), stringResource(R.string.swipe_delete_letters_detail),
+                                    swipeDeleteLetters) { typing.swipeDeleteLetters = it }
+                                Rule()
+                                // Labs › Keyboard › Adaptive touch: off, the keys read the drawn centres and learn nothing;
+                                // what was learned stays on the phone until Reset touch learning or Delete what Hex learned.
+                                Toggle(stringResource(R.string.adaptive_touch), stringResource(R.string.adaptive_touch_detail),
+                                    adaptiveTouch, noteLines = Int.MAX_VALUE) { typing.adaptiveTouch = it }
+                                touchStatus?.let { (taps, active) ->
+                                    Label(if (active) stringResource(R.string.adaptive_touch_active) else stringResource(
+                                        R.string.adaptive_touch_learning, minOf(taps, AdaptiveTouchModel.ACTIVE_TAPS), AdaptiveTouchModel.ACTIVE_TAPS),
+                                        muted = true, size = 13, mod = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp))
+                                }
+                                if (adaptiveTouch || touchStored) {
+                                    Rule()
+                                    if (resettingTouch) {
+                                        Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(start = 16.dp, end = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically) {
+                                            Label(stringResource(R.string.adaptive_touch_reset_confirm), size = 14, lines = 2,
+                                                mod = Modifier.weight(1f))
+                                            Action(stringResource(R.string.learn_fixes_cancel)) { resettingTouch = false }
+                                            Action(stringResource(R.string.adaptive_touch_reset_action)) {
+                                                AdaptiveTouchStore.clear(context); resettingTouch = false
+                                            }
+                                        }
+                                    } else {
+                                        Entry(stringResource(R.string.adaptive_touch_reset), action = { resettingTouch = true })
+                                    }
+                                }
+                                Rule()
+                                Toggle(stringResource(R.string.password_manager_suggestions),
+                                    stringResource(R.string.password_manager_suggestions_detail),
+                                    passwordManager) { typing.passwordManagerSuggestions = it }
+                                Rule()
+                                Toggle(stringResource(R.string.voice_only_mode), stringResource(R.string.voice_only_detail),
+                                    voiceOnly) { typing.voiceOnly = it; VoiceOnly.setEnabledFromSettings(context, it) }
+                            }
+                            // Hex Preview and debug builds only.
+                            if (BuildConfig.DIAGNOSTICS) {
+                                Label(stringResource(R.string.labs_troubleshooting), muted = true, size = 14,
+                                    mod = Modifier.padding(start = 16.dp))
+                                Card {
+                                    Entry(stringResource(R.string.diagnostics), stringResource(R.string.diagnostics_detail),
+                                        action = { open(Page.Diagnostics) })
+                                }
                             }
                         }
                     }
@@ -363,8 +532,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             else (listOf(null) + DictationLanguage.entries).map { Triple(it?.label, it == selectedLanguage, { speech.language = it }) }
                         choices.forEachIndexed { i, (label, chosen, pick) ->
                             if (i != 0) Rule()
+                            // Automatic dictates in one language it picks, never the one spoken: its entry says which, now.
                             Entry(label ?: stringResource(R.string.settings_automatic),
-                                if (label != null) null else stringResource(if (layout) R.string.settings_layout_automatic_detail else R.string.dictation_language_automatic_detail),
+                                if (label != null) null else if (layout) stringResource(R.string.settings_layout_automatic_detail)
+                                else automatic.label + " · " + stringResource(R.string.dictation_language_automatic_detail),
                                 if (chosen) "✓" else "", { pick(); open(page.parent) })
                         }
                     }
@@ -422,10 +593,10 @@ private fun reflow(lines: List<String>) = buildString {
 @Composable internal fun Rule() {
     Spacer(Modifier.fillMaxWidth().padding(start = 16.dp).height(1.dp).background(colorResource(R.color.rule)))
 }
-@Composable private fun RowScope.RowTitle(title: String, note: String?) {
+@Composable private fun RowScope.RowTitle(title: String, note: String?, noteLines: Int = 2) {
     Column(Modifier.weight(1f)) {
         Label(title, weight = FontWeight.Medium)
-        if (note != null) Label(note, size = 13, muted = true, lines = 2)
+        if (note != null) Label(note, size = 13, muted = true, lines = noteLines)
     }
 }
 @Composable internal fun Entry(title: String, note: String? = null, value: String = "›", action: (() -> Unit)? = null) {
@@ -436,11 +607,12 @@ private fun reflow(lines: List<String>) = buildString {
         if (action != null && value.isNotEmpty()) Label(value, muted = true, size = if (value == "›") 22 else 15)
     }
 }
-@Composable internal fun Toggle(title: String, note: String, on: Boolean, enabled: Boolean = true, change: (Boolean) -> Unit) {
+@Composable internal fun Toggle(title: String, note: String, on: Boolean, enabled: Boolean = true, noteLines: Int = 2,
+                                change: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().toggleable(on, enabled = enabled, role = Role.Switch, onValueChange = change)
         .heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        RowTitle(title, note)
+        RowTitle(title, note, noteLines)
         Box(Modifier.size(38.dp, 23.dp).background(colorResource(if (on) R.color.ink else R.color.modifier), RoundedCornerShape(50))
             .padding(3.dp), contentAlignment = if (on) Alignment.CenterEnd else Alignment.CenterStart) {
             Spacer(Modifier.size(17.dp).background(colorResource(if (on) R.color.page else R.color.key), RoundedCornerShape(50)))

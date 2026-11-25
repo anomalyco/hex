@@ -1,6 +1,6 @@
 //! Labs › Screenshots' recording strings, kept beside [`super::TRANSLATIONS`]
-//! and the French, Portuguese, and Russian tables so those stay under the
-//! source cap.
+//! and the French, Portuguese, Russian, and Hungarian tables so those stay
+//! under the source cap.
 
 use std::collections::HashMap;
 
@@ -11,6 +11,7 @@ pub(super) enum Language {
     French,
     Portuguese,
     Russian,
+    Hungarian,
 }
 
 /// A one-language table with these strings added.
@@ -18,54 +19,76 @@ pub(super) fn merged(
     table: &[(&'static str, &'static str)],
     language: Language,
 ) -> HashMap<&'static str, &'static str> {
-    let (extra, agents, signature, style, hud_height, voice_isolation, annotate, calls, edits) =
-        match language {
-            Language::French => (
-                FRENCH,
-                super::agents::FRENCH,
-                super::signature::FRENCH,
-                super::style::FRENCH,
-                super::hud_height::FRENCH,
-                super::voice_isolation::FRENCH,
-                super::annotate_dictation::FRENCH,
-                super::calls::FRENCH,
-                super::transcript_edits::FRENCH,
-            ),
-            Language::Portuguese => (
-                PORTUGUESE,
-                super::agents::PORTUGUESE,
-                super::signature::PORTUGUESE,
-                super::style::PORTUGUESE,
-                super::hud_height::PORTUGUESE,
-                super::voice_isolation::PORTUGUESE,
-                super::annotate_dictation::PORTUGUESE,
-                super::calls::PORTUGUESE,
-                super::transcript_edits::PORTUGUESE,
-            ),
-            Language::Russian => (
-                RUSSIAN,
-                super::agents::RUSSIAN,
-                super::signature::RUSSIAN,
-                super::style::RUSSIAN,
-                super::hud_height::RUSSIAN,
-                super::voice_isolation::RUSSIAN,
-                super::annotate_dictation::RUSSIAN,
-                super::calls::RUSSIAN,
-                super::transcript_edits::RUSSIAN,
-            ),
-        };
+    let sections: &[&[(&'static str, &'static str)]] = match language {
+        Language::French => &[
+            FRENCH,
+            super::agents::FRENCH,
+            super::signature::FRENCH,
+            super::clipboard_phrase::FRENCH,
+            super::style::FRENCH,
+            super::hud_height::FRENCH,
+            super::voice_isolation::FRENCH,
+            super::annotate_dictation::FRENCH,
+            super::calls::FRENCH,
+            super::transcript_edits::FRENCH,
+            super::routing::FRENCH,
+            super::meeting_audio_source::FRENCH,
+            super::meeting_mute::FRENCH,
+            super::model_switch::FRENCH,
+        ],
+        Language::Portuguese => &[
+            PORTUGUESE,
+            super::agents::PORTUGUESE,
+            super::signature::PORTUGUESE,
+            super::clipboard_phrase::PORTUGUESE,
+            super::style::PORTUGUESE,
+            super::hud_height::PORTUGUESE,
+            super::voice_isolation::PORTUGUESE,
+            super::annotate_dictation::PORTUGUESE,
+            super::calls::PORTUGUESE,
+            super::transcript_edits::PORTUGUESE,
+            super::routing::PORTUGUESE,
+            super::meeting_audio_source::PORTUGUESE,
+            super::meeting_mute::PORTUGUESE,
+            super::model_switch::PORTUGUESE,
+        ],
+        Language::Russian => &[
+            RUSSIAN,
+            super::agents::RUSSIAN,
+            super::signature::RUSSIAN,
+            super::clipboard_phrase::RUSSIAN,
+            super::style::RUSSIAN,
+            super::hud_height::RUSSIAN,
+            super::voice_isolation::RUSSIAN,
+            super::annotate_dictation::RUSSIAN,
+            super::calls::RUSSIAN,
+            super::transcript_edits::RUSSIAN,
+            super::routing::RUSSIAN,
+            super::meeting_audio_source::RUSSIAN,
+            super::meeting_mute::RUSSIAN,
+            super::model_switch::RUSSIAN,
+        ],
+        Language::Hungarian => &[
+            HUNGARIAN,
+            super::agents::HUNGARIAN,
+            super::signature::HUNGARIAN,
+            super::clipboard_phrase::HUNGARIAN,
+            super::style::HUNGARIAN,
+            super::hud_height::HUNGARIAN,
+            super::voice_isolation::HUNGARIAN,
+            super::annotate_dictation::HUNGARIAN,
+            super::calls::HUNGARIAN,
+            super::transcript_edits::HUNGARIAN,
+            super::routing::HUNGARIAN,
+            super::meeting_audio_source::HUNGARIAN,
+            super::meeting_mute::HUNGARIAN,
+            super::model_switch::HUNGARIAN,
+        ],
+    };
 
     table
         .iter()
-        .chain(extra)
-        .chain(agents)
-        .chain(signature)
-        .chain(style)
-        .chain(hud_height)
-        .chain(voice_isolation)
-        .chain(annotate)
-        .chain(calls)
-        .chain(edits)
+        .chain(sections.iter().flat_map(|section| section.iter()))
         .copied()
         .collect()
 }
@@ -169,4 +192,30 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
     ("Display {}", "Дисплей {}"),
     ("Export size", "Размер экспорта"),
     ("Pause", "Пауза"),
+];
+
+/// Hungarian, for the strings above.
+#[rustfmt::skip]
+pub(super) const HUNGARIAN: &[(&str, &str)] = &[
+    ("Scale Retina to 1x", "Retina méretezése 1x-re"),
+    ("Max resolution", "Max. felbontás"),
+    ("Frame rate", "Képsebesség"),
+    ("Quality", "Minőség"),
+    ("30 fps", "30 fps"),
+    ("60 fps", "60 fps"),
+    ("High", "Magas"),
+    ("Medium", "Közepes"),
+    ("Low", "Alacsony"),
+    ("1440p", "1440p"),
+    ("1080p", "1080p"),
+    ("720p", "720p"),
+    ("Full screen", "Teljes képernyő"),
+    ("No microphone", "Nincs mikrofon"),
+    ("Computer audio", "Számítógép hangja"),
+    ("Options", "Opciók"),
+    ("Same as dictation", "Ugyanaz, mint a diktálásnál"),
+    ("Record computer audio", "Számítógép hangjának rögzítése"),
+    ("Display {}", "Képernyő {}"),
+    ("Export size", "Export mérete"),
+    ("Pause", "Szünet"),
 ];

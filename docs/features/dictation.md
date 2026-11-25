@@ -729,6 +729,57 @@ the Windows `a_second_dictation_shortcut_owns_the_capture_it_starts`
 (cross-compiled only). Proof limits: no physical shortcut or real terminal run
 on either OS.
 
+### Model Switch Shortcut (Labs, every OS)
+
+Labs › Model switch shortcut (`labs.model_switch_shortcut`, off by default)
+gives the other dictation model its own key. General shows its recorder and an
+Other model row: an installed model, then a language it supports, saved as
+`model_switch_other`. A press asks the app that owns model preparation for a
+swap; that owner plans it, starts the same installed-only preparation the
+speech-model picker, the menu bar, and `hex model use` use, and only when the
+new model loads does it save `transcription` and `model_switch_other`
+together. A failed switch keeps the active model and the saved selection.
+
+```ts
+Labs > Model switch shortcut
+├── Other model unset, the lab off, or the same selection -> nothing starts
+├── Press while idle -> the app's installed-only preparation starts
+│   ├── It loads -> both selections saved in one write; the engine reloads
+│   └── Refused, missing, or it fails -> the active model and saved choice stay
+│       Settings says why; the HUD too when Labs › Failure notices is on
+├── A newer choice during a swap -> the swap's load is canceled and the new one
+│   waits for it to exit, so two models never load at once
+├── Another preparation running (a download or Enable's check) -> refused
+│   without canceling it
+├── Press while a capture records -> swallowed with no state change
+│   └── macOS and Windows: the capture still finishes normally
+├── Press while a dictation transcribes -> ignored
+└── hex model switch -> the same owner path from a terminal; busy while
+    recording or while accepted dictation jobs are pending
+```
+
+A choice Hex can't switch to is refused before anything loads: Apple Speech or
+an unsupported language (`KeyboardModelChoice::validate`), a missing import
+that would be the way back, a current model that couldn't be saved as the
+other choice (Apple Speech), or the selection already running (a no-op, with
+no reload). The failure notice uses the interface's translations and no sound
+plays. Checks: `a_plan_moves_to_the_other_model_and_back`,
+`the_same_model_is_a_no_op`, `an_invalid_choice_and_a_lab_that_is_off_are_refused`,
+`a_current_model_that_cannot_run_refuses_the_switch`, and
+`a_current_model_that_could_not_be_the_other_choice_refuses_the_switch` in
+[transcription/other_model.rs](../../src/transcription/other_model.rs);
+`a_newer_choice_waits_for_the_swap_it_supersedes` and
+`a_switch_never_cancels_another_preparation` in
+[linux/app.rs](../../src/linux/app.rs);
+`a_model_switch_swap_saves_both_selections` in
+[app_settings/persistence/tests.rs](../../src/app_settings/persistence/tests.rs);
+`a_switch_press_never_strands_a_capture` in
+[suppression/tests.rs](../../src/suppression/tests.rs) (macOS);
+`the_model_switch_key_never_ends_a_modifier_only_capture` in
+[windows/input.rs](../../src/windows/input.rs) (cross-compiled only).
+Proof limits: no physical shortcut press on any OS, and no model switched while
+a real capture records.
+
 ### Second Dictation Shortcut (Labs, every OS)
 
 Another optional dictation shortcut, for a keyboard whose main shortcut key is
@@ -880,9 +931,11 @@ lost with no error. Before sending it, the listener reads the foreground
 window, its class, its process, and the keyboard-focused child, and logs one
 line per paste (`Windows paste target`, with the process stem and class; never
 the words). The desktop and taskbar classes (`Progman`, `WorkerW`,
-`Shell_TrayWnd`, `Shell_SecondaryTrayWnd`) owned by `explorer` count as the
-shell; an Explorer window that is not one of them (`CabinetWClass`) pastes as
-usual, and a desktop rename box (`Edit`) still takes the paste.
+`Shell_TrayWnd`, `Shell_SecondaryTrayWnd`) and the taskbar's hidden-icons
+overflow flyout (`TopLevelWindowForOverflowXamlIsland`) owned by `explorer`
+count as the shell; an Explorer window that is not one of them
+(`CabinetWClass`) pastes as usual, and a desktop rename box (`Edit`) still
+takes the paste.
 
 ```ts
 Windows paste                                     // dictate.windows-paste-target
@@ -896,8 +949,9 @@ Windows paste                                     // dictate.windows-paste-targe
 │   └── Still the shell -> No chord; the plain transcript stays on the
 │       clipboard with the usual history/cloud exclusion, the job reports
 │       "copied" (never "pasted"), and History and Paste Last still keep it
-└── Tray Paste Last -> The tracker skips the desktop and taskbars, so it never
-    brings one forward; the listener applies the same rule per paste
+└── Tray Paste Last -> The tracker skips the desktop, taskbars, and the
+    taskbar's overflow flyout, so it never brings one forward; the listener
+    applies the same rule per paste
 ```
 
 The fallback keeps the marking a default paste has: the transcript is left out
@@ -916,6 +970,7 @@ so its step completes even when its field couldn't receive the text.
 
 Checks: `the_desktop_and_taskbars_take_no_paste`,
 `no_foreground_window_takes_no_paste`,
+`the_taskbar_overflow_flyout_takes_no_paste`,
 `a_desktop_rename_box_still_takes_a_paste`,
 `explorer_windows_that_are_not_the_shell_still_take_a_paste`, and
 `another_process_using_a_shell_class_is_not_the_shell` in
@@ -2467,6 +2522,12 @@ Finish
   │       // synthetic ⌘V resolves on any active layout: it uses the layout's
   │       // Command layer ("Dvorak – QWERTY ⌘"), and a non-Latin layout
   │       // falls back to the ASCII-capable layout like AppKit itself
+  │       // macOS 27.3+ checks the posting grant (System & App Protection
+  │       // Override) before the clipboard is touched, on every paste path.
+  │       // a refused dictation paste (and a refused Paste last) fails with a
+  │       // HUD notice shown even with Labs › Failure notices off, instead of
+  │       // a silent no-op; the text stays for Paste last dictation and no
+  │       // History entry is written. a refused capture hand-off only logs
   └── Queue full -> Explicit rejection                // bounded admission
 
 A pending -> Start capture B                          // dictate.overlap

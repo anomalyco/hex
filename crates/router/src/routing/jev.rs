@@ -26,7 +26,8 @@ use crate::model::{InteractionEvent, ScrawlBundle};
 /// The experiment that asks Jev (only read when `smartRouting` is on too).
 pub const JEV_ROUTING: &str = "jevRouting";
 
-/// Pinned: thresholds tuned on one version can shift on the next.
+/// Pinned: `jev-1.13` beat `jev-1.14` significantly across our 60-capture / 1,080-trial
+/// routing eval; re-evaluate before changing.
 pub const MODEL: &str = "jev-1.13";
 const ENDPOINT: &str = "https://opencode.ai/inference/systemone/v1/systemone";
 /// Cloudflare answers 403 (error 1010) to requests without a user agent.
@@ -38,11 +39,12 @@ const TIMEOUT: Duration = Duration::from_secs(3);
 /// Not worth asking with less time than this left before a deadline.
 const MIN_ASK: Duration = Duration::from_millis(400);
 
-/// Send when the target's confidence and its lead over the runner-up both clear these. Jev's
-/// target choice is well calibrated; its yes/no answers aren't (real positives land between
-/// 0.3 and 0.65), so `any_fits` never blocks a confident choice.
-pub const SEND_AT: f64 = 0.85;
+/// Send when the chosen target's probability, its lead over the runner-up, and `any_fits` all
+/// clear these. Inline criteria shift probabilities higher, so `SEND_AT` is 0.88 and
+/// `SEND_FITS_AT` blocks out-of-distribution confident mispicks.
+pub const SEND_AT: f64 = 0.88;
 pub const MARGIN_AT: f64 = 0.3;
+pub const SEND_FITS_AT: f64 = 0.3;
 /// Below this confidence Jev doesn't know: the item goes to HOME (or stays on the clipboard).
 /// Between it and a send it's offered, unless `any_fits` is under [`NO_FIT_AT`], which picks
 /// HOME over the weak choice.
@@ -85,6 +87,7 @@ pub enum Low {
 pub struct Thresholds {
     pub send: f64,
     pub margin: f64,
+    pub send_fits: f64,
     pub offer: f64,
     pub no_fit: f64,
     pub low: Low,
@@ -98,6 +101,7 @@ impl Default for Thresholds {
         Self {
             send: SEND_AT,
             margin: MARGIN_AT,
+            send_fits: SEND_FITS_AT,
             offer: OFFER_AT,
             no_fit: NO_FIT_AT,
             low: Low::Home,
@@ -107,8 +111,9 @@ impl Default for Thresholds {
 }
 
 impl Thresholds {
-    /// `"jevRouting": {"send": 0.85, "margin": 0.3, "offer": 0.5, "noFit": 0.2, "low": "home",
-    /// "lines": false}` in `config.json`; anything missing or out of range keeps its default.
+    /// `"jevRouting": {"send": 0.88, "margin": 0.3, "sendFits": 0.3, "offer": 0.5, "noFit": 0.2,
+    /// "low": "home", "lines": false}` in `config.json`; anything missing or out of range keeps
+    /// its default.
     pub fn from_config(value: Option<&Value>) -> Self {
         let mut t = Self::default();
         let Some(value) = value else {
@@ -122,6 +127,7 @@ impl Thresholds {
         };
         t.send = num("send").unwrap_or(t.send);
         t.margin = num("margin").unwrap_or(t.margin);
+        t.send_fits = num("sendFits").unwrap_or(t.send_fits);
         t.offer = num("offer").unwrap_or(t.offer);
         t.no_fit = num("noFit").unwrap_or(t.no_fit);
         if value.get("low").and_then(Value::as_str) == Some("keep") {
@@ -139,12 +145,24 @@ impl Thresholds {
     }
 
     pub fn band(&self, answer: &Answer) -> Band {
-        self.band_of(answer.confidence, answer.margin(), answer.fits)
+        if answer.choice_probability() >= self.send
+            && answer.margin() >= self.margin
+            && answer.fits >= self.send_fits
+        {
+            Band::Send
+        } else if answer.confidence < self.offer || answer.fits < self.no_fit {
+            match self.low {
+                Low::Home => Band::Fallback,
+                Low::Keep => Band::Keep,
+            }
+        } else {
+            Band::Ask
+        }
     }
 
     /// The band for a confidence, its margin over the runner-up and `any_fits`.
     pub fn band_of(&self, confidence: f64, margin: f64, fits: f64) -> Band {
-        if confidence >= self.send && margin >= self.margin {
+        if confidence >= self.send && margin >= self.margin && fits >= self.send_fits {
             Band::Send
         } else if confidence < self.offer || fits < self.no_fit {
             match self.low {
@@ -379,8 +397,8 @@ pub struct Asking {
 /// goes to Jev and the saved decision only, never to scrawl.log.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Screen {
-    /// Front to back.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// Front to back (serialized as up to [`NEARBY_WINDOWS`] deduplicated nearby windows).
+    #[serde(rename = "nearby_windows", skip_serializing_if = "Vec::is_empty")]
     pub windows: Vec<ScreenWindow>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub focused: Option<Focused>,
@@ -427,6 +445,8 @@ pub struct Earlier {
 
 /// Caps on what a caller sends, applied again here whatever it capped.
 pub const SCREEN_WINDOWS: usize = 12;
+/// Nearby foreground windows sent to Jev after dropping the exact captured window.
+pub const NEARBY_WINDOWS: usize = 3;
 const WINDOW_CHARS: usize = 160;
 const LABEL_CHARS: usize = 200;
 const VALUE_CHARS: usize = 500;
@@ -505,6 +525,21 @@ impl Screen {
 
     pub fn is_empty(&self) -> bool {
         *self == Self::default()
+    }
+
+    /// Drops any window echoing `capture`'s own app and title and keeps at most
+    /// [`NEARBY_WINDOWS`] foreground windows so `screen` carries only non-redundant context.
+    fn prepared(&self, capture: &Value) -> Self {
+        let cap_app = capture.get("app").and_then(Value::as_str);
+        let cap_title = capture.get("window_title").and_then(Value::as_str);
+        let mut screen = self.clone();
+        if cap_app.is_some() || cap_title.is_some() {
+            screen
+                .windows
+                .retain(|w| !(w.app.as_deref() == cap_app && w.title.as_deref() == cap_title));
+        }
+        screen.windows.truncate(NEARBY_WINDOWS);
+        screen
     }
 
     /// The state's `screen` for `targets`: an earlier item's session named as its target.
@@ -791,11 +826,15 @@ pub fn pick_targets(evidence: &Evidence, smart: &Judgement, asking: &Asking) -> 
     picked
 }
 
+fn is_home(candidate: &Candidate) -> bool {
+    candidate.title.trim().eq_ignore_ascii_case(HOME_TITLE)
+}
+
 /// The open root session titled HOME, the newest if there are several.
 pub fn home_session(candidates: &[Candidate]) -> Option<Candidate> {
     candidates
         .iter()
-        .filter(|c| c.title.trim().eq_ignore_ascii_case(HOME_TITLE))
+        .filter(|c| is_home(c))
         .max_by_key(|c| c.updated_ms)
         .cloned()
 }
@@ -997,11 +1036,10 @@ pub fn capture_state(bundle: &ScrawlBundle, url: Option<&str>) -> Value {
     notes.sort_by_key(|(t, _)| *t);
     let notes: Vec<String> = notes.into_iter().take(NOTES).map(|(_, n)| n).collect();
     let mut capture = serde_json::Map::new();
-    capture.insert("kind".into(), json!("capture"));
-    capture.insert(
-        "transcript".into(),
-        json!(trim_middle(&bundle.transcript.text, TRANSCRIPT_CHARS)),
-    );
+    let transcript = trim_middle(&bundle.transcript.text, TRANSCRIPT_CHARS);
+    if !transcript.is_empty() {
+        capture.insert("transcript".into(), json!(transcript));
+    }
     if let Some(note) = bundle.note.as_deref().filter(|n| !n.trim().is_empty()) {
         capture.insert("note".into(), json!(note));
     }
@@ -1017,8 +1055,6 @@ pub fn capture_state(bundle: &ScrawlBundle, url: Option<&str>) -> Value {
     if let Some(url) = url {
         capture.insert("url".into(), json!(url));
     }
-    capture.insert("mode".into(), json!(target.mode));
-    capture.insert("duration".into(), json!(clock(bundle.duration_ms)));
     Value::Object(capture)
 }
 
@@ -1049,24 +1085,30 @@ fn trim_end(text: &str, max: usize) -> String {
     format!("{cut}…")
 }
 
-/// The clues besides what was said, as sentences, with the targets they point at.
+/// The clues besides what was said, as sentences, with the targets they point at. Drops
+/// redundant app/title word echoes and folder clues that match no candidate session.
 pub fn hints(evidence: &Evidence, targets: &[Candidate]) -> Vec<String> {
     let t_of = |id: &str| {
         targets
             .iter()
             .position(|c| c.id == id)
-            .map(|i| format!("targets.t{}", i + 1))
+            .map(|i| format!("t{}", i + 1))
     };
     let mut hints = Vec::new();
     for clue in &evidence.clues {
         if clue.source == Source::Speech {
             continue;
         }
+        if matches!(clue.source, Source::App | Source::Title)
+            && matches!(clue.pointer, Pointer::Words { .. })
+        {
+            continue;
+        }
         let mut hint = sentence(&tilde(&clue.note));
         match &clue.pointer {
             Pointer::Session { id, .. } => {
                 if let Some(t) = t_of(id) {
-                    hint = format!("{hint} That session is `{t}`.");
+                    hint = format!("{hint} Matches {t}.");
                 }
             }
             Pointer::Folder(folder) => {
@@ -1079,10 +1121,12 @@ pub fn hints(evidence: &Evidence, targets: &[Candidate]) -> Vec<String> {
                         dir.is_some_and(|d| d.starts_with(&folder.root))
                             || (folder.repo.is_some() && repo == folder.repo.as_deref())
                     })
-                    .map(|(i, _)| format!("`targets.t{}`", i + 1))
+                    .map(|(i, _)| format!("t{}", i + 1))
                     .collect();
                 if !inside.is_empty() && !smart::is_home_or_root(&folder.root) {
                     hint = format!("{hint} Sessions in that project: {}.", inside.join(", "));
+                } else {
+                    continue;
                 }
             }
             Pointer::Words { .. } => {}
@@ -1154,23 +1198,56 @@ impl Serialize for Ordered<'_> {
     }
 }
 
-const TARGET_INSTRUCTIONS: &str = "Kit recorded `capture` (his screen, voice and pointer) and it goes \
-to the OpenCode session it is about. `targets` are his open sessions, most recently active first: each \
-has a title, its project folder and when it was last active{lines}. `hints` are facts Scrawl observed \
-while recording. Which target is `capture` about?";
-const LINES_INSTRUCTIONS: &str = ", and its latest exchange (`recent`)";
-const HISTORY_INSTRUCTIONS: &str = " `history` lists Kit's earlier items, latest last, and where they \
-went; `corrected_to` is where he moved one by hand.";
+const TARGET_INSTRUCTIONS: &str = "The user recorded `capture` (screen, voice, and pointer) to route \
+to one OpenCode coding session. Pick the session that `capture` is about based on topic, what is said \
+in `capture.transcript`, the shown app/window/URL, and project matches in `hints`.{lines} Ignore option \
+order; recency is only a tie-breaker when two sessions match the same topic. Prefer a specific project \
+or task session over HOME whenever one clearly matches; pick HOME only for general, personal, or \
+cross-project work where no specific session applies.";
+const LINES_INSTRUCTIONS: &str = " Each option may also include its latest exchange (`recent`).";
+const HISTORY_INSTRUCTIONS: &str = " `history` lists earlier items, latest last, and where they \
+went; `corrected_to` is where one was moved by hand.";
 
-const SCREEN_INSTRUCTIONS: &str = " Use `screen` (visible windows, focused text, the OpenCode tab){lines} \
+const SCREEN_INSTRUCTIONS: &str = " Use `screen` (nearby windows, focused text, the OpenCode tab){lines} \
 to judge; an OpenCode tab is a strong hint, not proof.";
 const SCREEN_LINES: &str = " and each target's recent lines";
 
-const FITS_INSTRUCTIONS: &str = "Is `capture` clearly about the work in one of `targets`?";
-const FITS_TRUE: &str = "What Kit says or shows clearly matches one target's title, project folder or \
-recent exchange (when it has one): the same app, feature, page, bug or conversation.";
-const FITS_FALSE: &str = "It is about something new or general, or none of the targets in particular, \
-or it fits several targets equally.";
+const FITS_INSTRUCTIONS: &str =
+    "Does `capture` clearly belong to one specific task or project session in `targets`?";
+const FITS_TRUE: &str = "What the user says or shows clearly identifies one specific project, app, \
+feature, page, or bug matching one non-HOME session in `targets`.";
+const FITS_FALSE: &str = "The capture is about a brand-new topic not in `targets`, is a \
+general/personal inbox note for HOME, is too vague or short to identify a session, or could \
+equally belong to multiple different sessions with no distinguishing clue.";
+
+fn short_dir_str(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    if let Some(rest) = normalized.strip_prefix("~/code/") {
+        rest.to_owned()
+    } else if let Some(rest) = normalized.strip_prefix("~/Documents/") {
+        format!("Documents/{rest}")
+    } else if let Some(rest) = normalized.strip_prefix("~/Desktop/") {
+        format!("Desktop/{rest}")
+    } else {
+        normalized
+    }
+}
+
+fn target_project(candidate: &Candidate) -> Option<String> {
+    let path = candidate.directory.as_ref().or(candidate.repo.as_ref())?;
+    let short = short_dir_str(&tilde(&path.display().to_string()));
+    (!short.is_empty()).then_some(short)
+}
+
+fn recent_topic(recent: Option<&Recent>) -> Option<String> {
+    let r = recent?;
+    match (&r.user, &r.assistant) {
+        (Some(u), Some(a)) => Some(format!("user: {u} / assistant: {a}")),
+        (Some(u), None) => Some(format!("user: {u}")),
+        (None, Some(a)) => Some(format!("assistant: {a}")),
+        (None, None) => None,
+    }
+}
 
 /// [`request_body`] with as much of `screen` as fits in [`STATE_BYTES`].
 #[allow(clippy::too_many_arguments)]
@@ -1183,7 +1260,7 @@ fn fitted_body(
     screen: &Screen,
     now_ms: u64,
 ) -> Vec<u8> {
-    let mut screen = screen.clone();
+    let mut screen = screen.prepared(capture);
     loop {
         let state = screen.state(targets);
         let body = request_body(
@@ -1201,9 +1278,9 @@ fn fitted_body(
     }
 }
 
-/// The request for `targets`. They are listed most recently active first, in the state and as
-/// the choice's options; Jev's answer shouldn't depend on that order (the skill warns option order
-/// can sway a choice), and recency order only means a true tie leans to the newest.
+/// The request for `targets`. Each choice criterion inlines the session's title, project folder,
+/// recency, and optional recent exchange directly (avoiding `targets.tN` indirection), while
+/// `state.targets` keeps a compact summary for `any_fits`.
 pub fn request_body(
     capture: &Value,
     hints: &[String],
@@ -1213,40 +1290,39 @@ pub fn request_body(
     screen: Option<&Value>,
     now_ms: u64,
 ) -> Vec<u8> {
-    let entries: Vec<(String, Value)> = targets
-        .iter()
-        .enumerate()
-        .map(|(i, c)| {
-            let mut t = serde_json::Map::new();
-            t.insert("title".into(), json!(c.label()));
-            if let Some(dir) = &c.directory {
-                t.insert("directory".into(), json!(tilde(&dir.display().to_string())));
-            }
-            t.insert(
-                "last_active".into(),
-                json!(last_active(c.updated_ms, now_ms)),
-            );
-            if let Some(r) = recent.get(i) {
-                let mut last = serde_json::Map::new();
-                if let Some(user) = &r.user {
-                    last.insert("user".into(), json!(user));
-                }
-                if let Some(assistant) = &r.assistant {
-                    last.insert("assistant".into(), json!(assistant));
-                }
-                if !last.is_empty() {
-                    t.insert("recent".into(), Value::Object(last));
-                }
-            }
-            (format!("t{}", i + 1), Value::Object(t))
-        })
-        .collect();
-    let has_lines = entries.iter().any(|(_, t)| t.get("recent").is_some());
-    let criteria: Vec<(String, Value)> = entries
-        .iter()
-        .zip(targets)
-        .map(|((t, _), c)| (t.clone(), json!(format!("`targets.{t}` ({})", c.label()))))
-        .collect();
+    let mut entries: Vec<(String, Value)> = Vec::with_capacity(targets.len());
+    let mut criteria: Vec<(String, Value)> = Vec::with_capacity(targets.len());
+    let mut has_lines = false;
+    for (i, c) in targets.iter().enumerate() {
+        let key = format!("t{}", i + 1);
+        let project = target_project(c);
+        let ago = last_active(c.updated_ms, now_ms);
+        let topic = recent_topic(recent.get(i));
+        if topic.is_some() {
+            has_lines = true;
+        }
+        let mut summary = if is_home(c) {
+            "HOME (general personal/inbox fallback session)".to_owned()
+        } else if let Some(dir) = &project {
+            format!("{} [{dir}] (active {ago})", c.label())
+        } else {
+            format!("{} (active {ago})", c.label())
+        };
+        let mut criterion = if is_home(c) {
+            "HOME \u{2014} general personal/cross-project inbox when no specific project or task session fits"
+                .to_owned()
+        } else if let Some(dir) = &project {
+            format!("{} \u{2014} project: {dir} (active {ago})", c.label())
+        } else {
+            format!("{} (active {ago})", c.label())
+        };
+        if let Some(topic) = topic {
+            summary.push_str(&format!(" \u{2014} recent: {topic}"));
+            criterion.push_str(&format!(" \u{2014} recent: {topic}"));
+        }
+        entries.push((key.clone(), Value::String(summary)));
+        criteria.push((key, Value::String(criterion)));
+    }
     #[derive(Serialize)]
     struct State<'a> {
         capture: &'a Value,
@@ -1345,7 +1421,15 @@ impl Answer {
         self.probabilities.get(t).copied().unwrap_or(0.0)
     }
 
-    /// The choice's confidence less the likeliest other target's probability.
+    /// The chosen target's probability, falling back to `confidence` when absent.
+    pub fn choice_probability(&self) -> f64 {
+        self.probabilities
+            .get(&self.target)
+            .copied()
+            .unwrap_or(self.confidence)
+    }
+
+    /// The chosen target's probability less the likeliest other target's probability.
     pub fn margin(&self) -> f64 {
         let second = self
             .probabilities
@@ -1353,7 +1437,7 @@ impl Answer {
             .filter(|(t, _)| **t != self.target)
             .map(|(_, p)| *p)
             .fold(0.0, f64::max);
-        self.confidence - second
+        self.choice_probability() - second
     }
 
     /// Targets by probability, the chosen one first.
@@ -1524,6 +1608,12 @@ fn post(key: &str, body: &str, timeout: Duration) -> Result<Reply> {
         retry_after,
         body: body.to_owned(),
     })
+}
+
+/// Whether a Jev credential is available (`jev_api_key`, `$OPENCODE_API_KEY`, or an active,
+/// unexpired `opencode` credential in OpenCode's database) within `budget`. Never logs the key.
+pub fn available(budget: Duration) -> bool {
+    api_key(Instant::now() + budget).is_ok()
 }
 
 /// The OpenCode key: the host's `jev_api_key`, `$OPENCODE_API_KEY`, or the active `opencode`
@@ -2343,12 +2433,55 @@ mod tests {
     }
 
     #[test]
-    fn any_fits_only_sends_a_weak_choice_home() {
-        // any_fits never blocks a confident choice...
-        reply("t1", 0.95, 0.1, json!({"t1": 0.97, "t2": 0.02, "t3": 0.01}));
-        let (_, record) = run(&evidence(vec![]), &Thresholds::default());
+    fn send_gate_requires_send_at_088_and_any_fits_030() {
+        assert_eq!(SEND_AT, 0.88);
+        assert_eq!(SEND_FITS_AT, 0.3);
+
+        // Low any_fits blocks auto-send even when choice probability is very high:
+        // under NO_FIT_AT (0.20) falls back to HOME; between 0.20 and 0.30 demotes to Ask.
+        reply(
+            "t1",
+            0.95,
+            0.15,
+            json!({"t1": 0.97, "t2": 0.02, "t3": 0.01}),
+        );
+        let (judgement, record) = run(&evidence(vec![]), &Thresholds::default());
+        assert_eq!(record.band, Band::Fallback);
+        assert_eq!(sent_to(&judgement).unwrap().session, "ses_home");
+
+        reply(
+            "t1",
+            0.95,
+            0.25,
+            json!({"t1": 0.97, "t2": 0.02, "t3": 0.01}),
+        );
+        let (judgement, record) = run(&evidence(vec![]), &Thresholds::default());
+        assert_eq!(record.band, Band::Ask);
+        assert!(matches!(judgement.decision, Decision::Offer { .. }));
+
+        // Clearing SEND_AT (via chosen option's probability), margin, and any_fits >= 0.30 sends.
+        reply(
+            "t1",
+            0.86,
+            0.30,
+            json!({"t1": 0.88, "t2": 0.08, "t3": 0.04}),
+        );
+        let (judgement, record) = run(&evidence(vec![]), &Thresholds::default());
         assert_eq!(record.band, Band::Send);
-        // ...but picks HOME over a weak one.
+        assert_eq!(sent_to(&judgement).unwrap().session, "ses_hex");
+
+        // Borderline probability below 0.88 does not auto-send.
+        reply(
+            "t1",
+            0.85,
+            0.80,
+            json!({"t1": 0.86, "t2": 0.08, "t3": 0.06}),
+        );
+        let (judgement, record) = run(&evidence(vec![]), &Thresholds::default());
+        assert_eq!(record.band, Band::Ask);
+        assert!(matches!(judgement.decision, Decision::Offer { .. }));
+
+        // Weak choice with low fits still picks HOME over offering.
         reply("t1", 0.7, 0.35, json!({"t1": 0.7, "t2": 0.2, "t3": 0.1}));
         let (judgement, _) = run(&evidence(vec![]), &Thresholds::default());
         assert!(matches!(judgement.decision, Decision::Offer { .. }));
@@ -2402,7 +2535,7 @@ mod tests {
     }
 
     #[test]
-    fn the_request_lists_targets_newest_first_with_hints_and_recent_lines() {
+    fn the_request_inlines_criteria_with_hints_and_optional_recent_lines() {
         reply("t1", 0.9, 0.9, json!({"t1": 0.9}));
         let terminal = Clue::new(
             Source::Terminal,
@@ -2429,21 +2562,43 @@ mod tests {
         let sent = SENT.with(|s| s.borrow().clone()).unwrap();
         assert_eq!(sent["model"], MODEL);
         let targets = sent["state"]["targets"].as_object().unwrap();
-        assert_eq!(targets["t1"]["title"], "HEX");
-        assert_eq!(targets["t1"]["last_active"], "1 min ago");
-        assert_eq!(targets["t1"]["recent"]["user"], "last words in ses_hex");
-        assert_eq!(targets["t2"]["title"], "HOME");
         assert_eq!(
-            sent["questions"]["target"]["criteria"]["t3"],
-            "`targets.t3` (PROBLEMS)"
+            targets["t1"],
+            "HEX [/Users/k/code/hex] (active 1 min ago) \u{2014} recent: user: last words in ses_hex"
         );
+        assert_eq!(
+            targets["t2"],
+            "HOME (general personal/inbox fallback session) \u{2014} recent: user: last words in ses_home"
+        );
+        let criteria = &sent["questions"]["target"]["criteria"];
+        assert_eq!(
+            criteria["t1"],
+            "HEX \u{2014} project: /Users/k/code/hex (active 1 min ago) \u{2014} recent: user: last words in ses_hex"
+        );
+        assert!(
+            criteria["t2"]
+                .as_str()
+                .unwrap()
+                .starts_with("HOME \u{2014} general personal/cross-project inbox")
+        );
+        assert_eq!(
+            criteria["t3"],
+            "PROBLEMS \u{2014} project: /Users/k/code/board (active 1 min ago) \u{2014} recent: user: last words in ses_board"
+        );
+        for key in ["t1", "t2", "t3"] {
+            assert!(
+                !criteria[key].as_str().unwrap().contains("targets."),
+                "inline criteria should not use targets.tN indirection: {}",
+                criteria[key]
+            );
+        }
         let hints = sent["state"]["hints"].as_array().unwrap();
         assert_eq!(hints.len(), 1, "speech is in the transcript, not a hint");
         assert!(
             hints[0]
                 .as_str()
                 .unwrap()
-                .ends_with("Sessions in that project: `targets.t1`."),
+                .ends_with("Sessions in that project: t1."),
             "{hints:?}"
         );
         assert_eq!(sent["questions"]["any_fits"]["type"], "noul");
@@ -2451,10 +2606,25 @@ mod tests {
             .as_str()
             .unwrap();
         assert!(instructions.contains("latest exchange"), "{instructions}");
+        assert!(
+            !instructions.contains("most recently active first"),
+            "order bias must be removed: {instructions}"
+        );
+        assert!(
+            instructions.contains("Ignore option order"),
+            "{instructions}"
+        );
         // By default the targets go without their lines, and the question doesn't mention them.
         run(&evidence(vec![terminal, said]), &Thresholds::default());
         let sent = SENT.with(|s| s.borrow().clone()).unwrap();
-        assert!(sent["state"]["targets"]["t1"].get("recent").is_none());
+        assert_eq!(
+            sent["state"]["targets"]["t1"],
+            "HEX [/Users/k/code/hex] (active 1 min ago)"
+        );
+        assert_eq!(
+            sent["questions"]["target"]["criteria"]["t1"],
+            "HEX \u{2014} project: /Users/k/code/hex (active 1 min ago)"
+        );
         let instructions = sent["questions"]["target"]["instructions"]
             .as_str()
             .unwrap();
@@ -2555,7 +2725,7 @@ mod tests {
         // Targets newest first: t1 HEX, t2 HOME, t3 PROBLEMS.
         let sent = run_with(&evidence(vec![]), &asking, &json!({"kind": "dictation"}));
         let screen = &sent["state"]["screen"];
-        assert_eq!(screen["windows"][0]["title"], "notes.txt");
+        assert_eq!(screen["nearby_windows"][0]["title"], "notes.txt");
         assert_eq!(screen["recent"][0]["routed_to"], "targets.t1");
         let hints = sent["state"]["hints"].as_array().unwrap();
         assert!(
@@ -2608,7 +2778,7 @@ mod tests {
                 .len(),
             VISIBLE_CHARS
         );
-        // A capture that leaves room for about half the windows: the visible text goes first.
+        // A capture that leaves room for only part of nearby_windows: visible_text goes first.
         let base = serde_json::to_vec(&run_with(
             &evidence(vec![]),
             &Asking::default(),
@@ -2616,14 +2786,14 @@ mod tests {
         ))
         .unwrap()
         .len();
-        let filler = "c".repeat(STATE_BYTES - base - 1_400);
+        let filler = "c".repeat(STATE_BYTES - base - 450);
         let (tight, bytes) = size(&json!({"text": filler}));
         assert!(bytes <= STATE_BYTES, "{bytes}");
-        let windows = tight["state"]["screen"]["windows"]
+        let windows = tight["state"]["screen"]["nearby_windows"]
             .as_array()
             .map_or(0, Vec::len);
         assert!(tight["state"]["screen"].get("visible_text").is_none());
-        assert!(windows > 0 && windows < 12, "{windows}");
+        assert!(windows > 0 && windows < NEARBY_WINDOWS, "{windows}");
         assert_eq!(tight["state"]["targets"].as_object().unwrap().len(), 3);
         // No room at all: the screen goes, the targets stay.
         let (full, _) = size(&json!({"text": "c".repeat(STATE_BYTES)}));
@@ -2704,13 +2874,170 @@ mod tests {
     #[test]
     fn thresholds_read_from_config_with_defaults() {
         let t = Thresholds::from_config(Some(
-            &json!({"send": 0.9, "margin": 0.2, "offer": 2, "low": "keep"}),
+            &json!({"send": 0.9, "margin": 0.2, "sendFits": 0.4, "offer": 2, "low": "keep"}),
         ));
         assert_eq!(t.send, 0.9);
         assert_eq!(t.margin, 0.2);
+        assert_eq!(t.send_fits, 0.4);
         assert_eq!(t.offer, OFFER_AT, "out of range keeps the default");
         assert_eq!(t.low, Low::Keep);
         assert_eq!(Thresholds::from_config(None), Thresholds::default());
+    }
+
+    #[test]
+    fn inline_criteria_shorten_directories_and_fall_back_to_repo() {
+        assert_eq!(short_dir_str("~/code/acme/web"), "acme/web");
+        assert_eq!(short_dir_str("~/Documents/specs"), "Documents/specs");
+        assert_eq!(short_dir_str("~/Desktop/mockups"), "Desktop/mockups");
+        assert_eq!(short_dir_str("~\\code\\acme\\cli"), "acme/cli");
+        assert_eq!(short_dir_str("/opt/work/app"), "/opt/work/app");
+
+        let mut repo_only = candidate("ses_repo", "API cleanup", "", 50_000);
+        repo_only.directory = None;
+        repo_only.repo = Some(PathBuf::from("acme/api"));
+        let body = request_body(
+            &json!({"transcript": "fix the retry header"}),
+            &[],
+            &[],
+            &[repo_only],
+            &[],
+            None,
+            110_000,
+        );
+        let sent: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            sent["questions"]["target"]["criteria"]["t1"],
+            "API cleanup \u{2014} project: acme/api (active 1 min ago)"
+        );
+        assert_eq!(
+            sent["state"]["targets"]["t1"],
+            "API cleanup [acme/api] (active 1 min ago)"
+        );
+    }
+
+    #[test]
+    fn capture_state_screen_and_hints_trim_redundant_noise() {
+        let bundle: ScrawlBundle = serde_json::from_value(json!({
+            "version": 1, "id": "cap-1", "createdAtMs": 0, "durationMs": 4200,
+            "target": {
+                "mode": "window", "displayId": 0, "app": "Browser", "windowTitle": "Acme Docs",
+                "frame": {"x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0, "scale": 1.0}
+            },
+            "transcript": {"source": "test", "text": "fix the nav padding", "segments": []},
+            "note": "header",
+            "strokes": [], "marks": [], "events": [], "keyframes": [], "contactSheet": "c.png"
+        }))
+        .unwrap();
+        let capture = capture_state(&bundle, Some("https://example.com/docs"));
+        assert!(capture.get("kind").is_none());
+        assert!(capture.get("mode").is_none());
+        assert!(capture.get("duration").is_none());
+        assert_eq!(capture["transcript"], "fix the nav padding");
+        assert_eq!(capture["note"], "header");
+        assert_eq!(capture["app"], "Browser");
+        assert_eq!(capture["window_title"], "Acme Docs");
+        assert_eq!(capture["url"], "https://example.com/docs");
+
+        // Screen deduplicates the exact captured window and caps nearby_windows to 3.
+        let screen = Screen {
+            windows: vec![
+                ScreenWindow {
+                    app: Some("Browser".into()),
+                    title: Some("Acme Docs".into()),
+                },
+                ScreenWindow {
+                    app: Some("Editor".into()),
+                    title: Some("nav.css".into()),
+                },
+                ScreenWindow {
+                    app: Some("Terminal".into()),
+                    title: Some("shell".into()),
+                },
+                ScreenWindow {
+                    app: Some("Notes".into()),
+                    title: Some("todo".into()),
+                },
+                ScreenWindow {
+                    app: Some("Music".into()),
+                    title: Some("playlist".into()),
+                },
+            ],
+            ..Screen::default()
+        };
+        reply("t1", 0.9, 0.9, json!({"t1": 0.9}));
+        let ev = evidence(vec![
+            Clue::new(
+                Source::App,
+                Pointer::Words {
+                    words: vec!["browser".into()],
+                },
+                "the recorded app is Browser",
+            ),
+            Clue::new(
+                Source::Title,
+                Pointer::Words {
+                    words: vec!["acme".into()],
+                },
+                "the window title is Acme Docs",
+            ),
+            Clue::new(
+                Source::Terminal,
+                Pointer::Folder(smart::Folder {
+                    path: "/Users/k/code/unmatched".into(),
+                    root: "/Users/k/code/unmatched".into(),
+                    tree: true,
+                    repo: None,
+                }),
+                "terminal in /Users/k/code/unmatched",
+            ),
+            Clue::new(
+                Source::Viewed,
+                Pointer::Session {
+                    id: "ses_hex".into(),
+                    directory: None,
+                },
+                "OpenCode showed HEX",
+            ),
+        ]);
+        let sent = run_with(
+            &ev,
+            &Asking {
+                screen,
+                ..Asking::default()
+            },
+            &capture,
+        );
+        let nearby = sent["state"]["screen"]["nearby_windows"]
+            .as_array()
+            .unwrap();
+        let apps: Vec<&str> = nearby.iter().map(|w| w["app"].as_str().unwrap()).collect();
+        assert_eq!(apps, ["Editor", "Terminal", "Notes"]);
+        let hints = sent["state"]["hints"].as_array().unwrap();
+        assert_eq!(
+            hints.len(),
+            1,
+            "redundant app/title/unmatched folder clues dropped: {hints:?}"
+        );
+        assert_eq!(hints[0], "OpenCode showed HEX. Matches t1.");
+    }
+
+    #[test]
+    fn any_fits_criteria_name_positive_and_negative_boundaries() {
+        reply("t1", 0.9, 0.9, json!({"t1": 0.9}));
+        let sent = run_with(
+            &evidence(vec![]),
+            &Asking::default(),
+            &json!({"transcript": "something vague"}),
+        );
+        let any_fits = &sent["questions"]["any_fits"];
+        assert_eq!(any_fits["type"], "noul");
+        let true_c = any_fits["criteria"]["true"].as_str().unwrap();
+        let false_c = any_fits["criteria"]["false"].as_str().unwrap();
+        assert!(true_c.contains("non-HOME"), "{true_c}");
+        assert!(false_c.contains("brand-new topic"), "{false_c}");
+        assert!(false_c.contains("HOME"), "{false_c}");
+        assert!(false_c.contains("too vague"), "{false_c}");
+        assert!(false_c.contains("multiple different sessions"), "{false_c}");
     }
 
     #[test]
@@ -2720,11 +3047,18 @@ mod tests {
                 bail!("timed out");
             }
             Ok(if path.contains("type=user") {
-                br#"{"data":[{"type":"user","text":"From HOME:\n please   look"}]}"#.to_vec()
+                serde_json::to_vec(&json!({
+                    "data": [{"type": "user", "text": "From HOME:\n please   look"}]
+                }))
+                .unwrap()
             } else {
-                br#"{"data":[{"type":"assistant","content":[{"type":"reasoning","text":"x"}]},
-                    {"type":"assistant","content":[{"type":"text","text":"Done."}]}]}"#
-                    .to_vec()
+                serde_json::to_vec(&json!({
+                    "data": [
+                        {"type": "assistant", "content": [{"type": "reasoning", "text": "x"}]},
+                        {"type": "assistant", "content": [{"type": "text", "text": "Done."}]}
+                    ]
+                }))
+                .unwrap()
             })
         }
         let recent = recent_from_api(

@@ -9,8 +9,6 @@ struct ExperimentsSettingsPage: View {
     @State private var cleanupAvailability = AppleIntelligenceCleanupAvailability.current
     @State private var adaptiveTouchStatus = AdaptiveTouchStatus.sessionOnly
     @State private var confirmingTouchReset = false
-    @State private var multilingualParakeet = MultilingualParakeetSettings().isEnabled
-    private let multilingualParakeetFits = MultilingualParakeetSettings.fits()
 
     private func toggleBinding(_ get: @escaping () -> Bool, _ set: @escaping (Bool) -> Void) -> Binding<Bool> {
         Binding(
@@ -68,15 +66,8 @@ struct ExperimentsSettingsPage: View {
         }
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: adaptiveTouchOn)
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: keyboardThemesOn)
-        .onChange(of: multilingualParakeet) { _, enabled in
-            guard enabled != MultilingualParakeetSettings().isEnabled else { return }
-            MultilingualParakeetSettings().isEnabled = enabled
-            // On: downloads beside the engine that dictates; off: stops and deletes it.
-            DictationController.shared.multilingualParakeetChanged()
-        }
         .onAppear {
             cleanupAvailability = AppleIntelligenceCleanupAvailability.current
-            multilingualParakeet = MultilingualParakeetSettings().isEnabled
             refreshAdaptiveTouchStatus()
             revision += 1
         }
@@ -87,27 +78,6 @@ struct ExperimentsSettingsPage: View {
         SettingsSectionHeader(title: "Dictation")
 
         SettingsCard {
-            SettingsToggleRow(
-                title: String(localized: "Multilingual model (Parakeet)"),
-                detail: multilingualParakeetFits
-                    ? String(localized: "25 languages, even mixed in one sentence. \(ParakeetUltraTranscriber.downloadSize) download. Once ready, keyboard dictation opens Hex.")
-                    : String(localized: "Needs an iPhone with 6 GB of memory or more"),
-                isOn: $multilingualParakeet
-            )
-            .disabled(!multilingualParakeetFits)
-
-            if multilingualParakeet {
-                MultilingualModelStatus(
-                    download: DictationController.shared.multilingualDownload,
-                    retry: { DictationController.shared.retryMultilingualParakeet() },
-                    turnOff: { multilingualParakeet = false }
-                )
-                .padding(.horizontal, 12)
-                .padding(.bottom, 12)
-            }
-
-            SettingsDivider()
-
             SettingsToggleRow(
                 title: String(localized: "Two-language dictation"),
                 detail: String(localized: "Checks a second keyboard language and keeps the better match."),
@@ -232,7 +202,7 @@ struct ExperimentsSettingsPage: View {
             SettingsDivider()
 
             SettingsToggleRow(
-                title: String(localized: "Keyboard themes"),
+                title: String(localized: "Key colors"),
                 isOn: keyboardBinding(\.keyboardThemesEnabled)
             )
 
@@ -373,13 +343,13 @@ struct ExperimentsSettingsPage: View {
     }
 }
 
-/// Experiments › Keyboard themes: the theme the full keyboard draws while it's on.
+/// Experiments › Key colors: the colour the full keyboard's keys take while it's on.
 private struct KeyboardThemeRow: View {
     @Binding var theme: KeyboardTheme
 
     var body: some View {
         HStack(spacing: 12) {
-            SettingsRowLabel(title: String(localized: "Theme"))
+            SettingsRowLabel(title: String(localized: "Color"))
             Spacer(minLength: 8)
             Menu {
                 ForEach(KeyboardTheme.allCases, id: \.self) { option in

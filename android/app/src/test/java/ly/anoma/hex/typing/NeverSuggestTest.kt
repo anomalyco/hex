@@ -46,7 +46,7 @@ class NeverSuggestTest {
         for ((lang, swear, slur) in listOf(
             Triple("en", "fuck", "nigger"), Triple("es", "mierda", "maricón"),
             Triple("de", "scheiße", "neger"), Triple("nb", "faen", "neger"),
-            Triple("fr", "merde", "nègre"), Triple("it", "cazzo", "frocio")
+            Triple("fr", "merde", "nègre"), Triple("it", "cazzo", "frocio"), Triple("pt", "porra", "viado")
         )) {
             val w = word(lang, spatial = false)
             assertTrue("$lang still knows the slur", w.decoder.model.index(slur) >= 0)
@@ -116,7 +116,7 @@ class NeverSuggestTest {
     @Test fun everyListedLiteralIsKeptSeparatelyFromRankedSuggestions() {
         val rows = File("src/main/assets/typing/never-suggest.tsv").readLines()
             .filterNot { it.isBlank() || it.startsWith('#') }.map { it.split('\t') }
-        for (lang in listOf("en", "es", "de", "nb", "fr", "it")) {
+        for (lang in listOf("en", "es", "de", "nb", "fr", "it", "pt")) {
             val w = word(lang)
             for ((layout, kind, entry) in rows) {
                 if (layout != "*" && layout != lang) continue
@@ -280,6 +280,56 @@ class NeverSuggestTest {
         }
         // Only English decides by context.
         assertEquals("es ill ", word("es", spatial = false).typed(layout("es"), "es ill "))
+    }
+
+    // A mark from the ?123 page ends the word typed on the letters as the letters page's own marks do: the
+    // engine keeps the word across the switch and asks the same TypingWord.endsWord (iPhone Hex's wordEnders, plus
+    // the smart ”), so "teh" then ?123 "?" is "the?" (Gboard too). A digit or a mark that carries the token on (an
+    // apostrophe, @, _, -, / or #) never ends it, so it corrects nothing on either page.
+    @Test fun aClosingMarkFromTheSymbolPageCorrectsAsOnTheLetters() {
+        val g = layout("en")
+        for (mark in ",.!?;:)\"\u201D") {
+            val w = word(spatial = false)
+            w.reset("")
+            for (c in "teh") w.tap(g, c)
+            assertTrue("$mark ends a word", TypingWord.endsWord(mark))
+            assertEquals("teh$mark", "the", w.finish(mark)?.replacement)
+        }
+        for (mark in "0123456789'\u2019@_-/#") assertFalse("$mark carries the token on", TypingWord.endsWord(mark))
+    }
+
+    // Labs › Keyboard › Smart quotes: a word autocorrected to a curly apostrophe is still revised by
+    // the word after it, because revision looks the word up by its straight spelling.
+    @Test fun aCurledContractionIsStillRevisedByTheNextWord() {
+        val g = layout("en")
+        val w = word(spatial = false)
+        val curly: (String) -> String = { it.replace('\'', '\u2019') }
+        w.reset("")
+        for (c in "youre") w.tap(g, c)
+        val first = w.finish(' ', KeyPoint(183.93, 234.5), g, curly)
+        assertEquals("you’re", first?.replacement)
+        w.reset("you’re ")
+        for (c in "mother") w.tap(g, c)
+        val second = w.finish(' ', KeyPoint(183.93, 234.5), g, curly)
+        assertEquals("you’re mother", second?.original)
+        assertEquals("your mother", second?.replacement)
+    }
+
+    // The same rule as the straight-apostrophe test ("you're mother " stays): a correction that
+    // changes letters and carries an apostrophe ("your" -> "you're") is never revised by the word
+    // after it, with the apostrophe straight or smart.
+    @Test fun aCurledCountChangingFixIsNotRevised() {
+        val g = layout("en")
+        val w = word(spatial = false)
+        personal(w, emptyList(), mapOf("your" to "you're"))
+        val curly: (String) -> String = { it.replace('\'', '\u2019') }
+        w.reset("")
+        for (c in "your") w.tap(g, c)
+        val first = w.finish(' ', KeyPoint(183.93, 234.5), g, curly)
+        assertEquals("you’re", first?.replacement)
+        w.reset("you’re ")
+        for (c in "mother") w.tap(g, c)
+        assertNull(w.finish(' ', KeyPoint(183.93, 234.5), g, curly))
     }
 
     // iOS testASpaceTappedAtTheSpaceBarsEdgeForALetterJoinsTheWords: a space tapped at the bar's top
@@ -574,7 +624,7 @@ class NeverSuggestTest {
     // Every language has words for the strip between words: at a sentence's start, after a comma and
     // after a word the pairs don't know (0.2.0's French and Italian showed nothing there).
     @Test fun everyLanguageOffersWordsBetweenWords() {
-        for (lang in listOf("en", "es", "de", "nb", "fr", "it")) {
+        for (lang in listOf("en", "es", "de", "nb", "fr", "it", "pt")) {
             val w = word(lang)
             for (before in listOf("", "zzqx, ", "zzqx ")) assertEquals("$lang [$before]", 3, w.predictions(before).size)
         }
@@ -634,7 +684,8 @@ class NeverSuggestTest {
         val es = swipeReader("es"); val ge = swipeGrid("es")
         for (w in listOf("año", "también", "gracias", "mañana", "teclado")) assertEquals(w, es.read(w, ge).first())
         assertEquals(setOf("esta", "está"), es.read("esta", ge).take(2).toSet())
-        for ((language, w) in listOf("de" to "hallo", "nb" to "norsk", "fr" to "bonjour", "it" to "perché", "de" to "schön", "nb" to "kjøre"))
+        for ((language, w) in listOf("de" to "hallo", "nb" to "norsk", "fr" to "bonjour", "it" to "perché", "de" to "schön", "nb" to "kjøre",
+                "pt" to "obrigado", "pt" to "você"))
             assertTrue("$language: $w", w in swipeReader(language).read(w, swipeGrid(language)).take(2))
         // iPhone drops these: ß is swiped through s, œ through o and e.
         assertTrue(swipeReader("de").read("straße", swipeGrid("de")).take(3).contains("straße"))

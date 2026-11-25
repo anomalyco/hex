@@ -548,8 +548,7 @@ final class AutocorrectEngine {
             || (language == .greek && (written == ";" || written == "\u{037E}"))
     }
 
-    /// Common sentence-initial words per language (Hex's own short lists), lowercase except
-    /// words that always take a capital.
+    /// Common sentence starters per language (Hex's own short lists), capitalised only if always.
     static func sentenceStarters(_ language: KeyboardLanguage) -> [String] {
         switch language {
         case .english: ["I", "the", "I'm"]
@@ -559,10 +558,11 @@ final class AutocorrectEngine {
         case .italian: ["io", "il", "la"]
         case .portuguese: ["eu", "o", "a"]
         case .polish: ["ja", "to", "nie"]
-        case .czech: ["to", "já", "ale"]
+        case .czech, .slovak: language == .czech ? ["to", "já", "ale"] : ["to", "ja", "ale"]
         case .hungarian: ["ez", "én", "a"]
+        case .dutch: ["ik", "het", "de"]
         case .romanian: ["eu", "nu", "am"]
-        case .norwegian: ["jeg", "det", "vi"]
+        case .norwegian, .swedish: language == .norwegian ? ["jeg", "det", "vi"] : ["jag", "det", "vi"]
         case .russian: ["я", "это", "мы"]
         case .ukrainian: ["я", "це", "ми"]
         case .greek: ["θα", "δεν", "το"]
@@ -584,10 +584,11 @@ final class AutocorrectEngine {
         case .italian: ["e", "ma", "che"]
         case .portuguese: ["e", "mas", "que"]
         case .polish: ["a", "ale", "że"]
-        case .czech: ["a", "ale", "že"]
+        case .czech, .slovak: ["a", "ale", "že"]
         case .hungarian: ["és", "de", "hogy"]
+        case .dutch: ["en", "maar", "dat"]
         case .romanian: ["și", "dar", "că"]
-        case .norwegian: ["og", "men", "jeg"]
+        case .norwegian, .swedish: language == .norwegian ? ["og", "men", "jeg"] : ["och", "men", "jag"]
         case .russian: ["и", "но", "что"]
         case .ukrainian: ["і", "але", "що"]
         case .greek: ["και", "αλλά", "που"]
@@ -606,10 +607,11 @@ final class AutocorrectEngine {
         case .italian: ["di", "e", "che", "la", "il", "a"]
         case .portuguese: ["de", "que", "e", "o", "a", "do"]
         case .polish: ["nie", "i", "w", "się", "na", "to"]
-        case .czech: ["a", "se", "je", "v", "na", "to"]
+        case .czech, .slovak: ["a", language == .czech ? "se" : "sa", "je", "v", "na", "to"]
         case .hungarian: ["a", "az", "és", "hogy", "nem", "egy"]
+        case .dutch: ["de", "en", "het", "van", "een", "ik"]
         case .romanian: ["de", "și", "în", "nu", "să", "la"]
-        case .norwegian: ["og", "i", "det", "er", "på", "som"]
+        case .norwegian, .swedish: language == .norwegian ? ["og", "i", "det", "er", "på", "som"] : ["och", "i", "att", "det", "som", "en"]
         case .russian: ["и", "в", "не", "на", "я", "что"]
         case .ukrainian: ["і", "в", "не", "на", "що", "я"]
         case .greek: ["και", "να", "το", "θα", "δεν", "η"]

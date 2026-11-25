@@ -178,22 +178,26 @@ impl VoiceIsolation {
     }
 }
 
+struct PendingReplacement {
+    receiver: Receiver<InputOpenResult>,
+    /// This replacement is a silence recovery, which opens raw to renegotiate
+    /// the device's clock; its install must not remember a voice-processing
+    /// failure.
+    voice_isolation_skipped: bool,
+}
+
 pub struct RecoveringAudioInput {
     input: Option<AudioInput>,
     delivery: StreamDelivery,
     device_override: Option<String>,
     selected_device: Option<String>,
     voice_isolation: VoiceIsolation,
-    /// This replacement is a silence recovery, which opens raw to renegotiate
-    /// the device's clock; its install must not remember a voice-processing
-    /// failure.
-    voice_isolation_skipped: bool,
     /// The resolved microphone last installed, kept while the stream is
     /// closed so a reopen on another device can be told apart.
     resolved_device: Option<(String, Option<String>)>,
     active_revision: u64,
     recovery: MicrophoneRecovery,
-    replacement: Option<Receiver<InputOpenResult>>,
+    replacement: Option<PendingReplacement>,
     /// The [`input_route_generation`] the open input was resolved at.
     route_generation: u64,
     /// The wait before looking again for a missing saved microphone.
@@ -274,7 +278,6 @@ impl RecoveringAudioInput {
             device_override: device_override.map(str::to_owned),
             selected_device: selected_device.map(str::to_owned),
             voice_isolation: VoiceIsolation::from_enabled(crate::labs::voice_isolation()),
-            voice_isolation_skipped: false,
             resolved_device: None,
             active_revision: selection_revision,
             recovery: MicrophoneRecovery::default(),
@@ -306,7 +309,6 @@ impl RecoveringAudioInput {
         input.route_generation = route_generation();
         // A test's opens follow its own requests, never the saved setting.
         input.voice_isolation = VoiceIsolation::Off;
-        input.voice_isolation_skipped = false;
         input.resolved_device = None;
         input.opener = Arc::new(opener);
         input
@@ -339,7 +341,10 @@ impl RecoveringAudioInput {
             None,
         );
         let (sender, receiver) = mpsc::channel();
-        input.replacement = Some(receiver);
+        input.replacement = Some(PendingReplacement {
+            receiver,
+            voice_isolation_skipped: false,
+        });
         (input, sender)
     }
 
@@ -458,12 +463,8 @@ impl RecoveringAudioInput {
     }
 
     pub fn close(&mut self) {
-        if let Some(previous) = self.input.take() {
-            previous.feed_hex_microphone(false);
-        }
-        self.delivery = StreamDelivery::Unobserved;
+        self.retire_input();
         self.replacement = None;
-        self.voice_isolation_skipped = false;
         self.recovery.recovered();
         self.outage.clear();
         self.retry_warning = None;
@@ -487,7 +488,6 @@ impl RecoveringAudioInput {
             return;
         }
         self.replacement = None;
-        self.voice_isolation_skipped = false;
         if self.input.is_none() {
             self.recovery.recovered();
         }
@@ -501,7 +501,6 @@ impl RecoveringAudioInput {
         self.voice_isolation.reset_fallback();
         if self.input.is_none() && !self.is_recovering() {
             let was_opening = self.replacement.take().is_some();
-            self.voice_isolation_skipped = false;
             self.active_revision = revision;
             self.recovery.recovered();
             if was_opening {
@@ -714,7 +713,7 @@ impl RecoveringAudioInput {
         // A silence recovery must change the device's rate before its stream
         // opens; voice processing builds its own engine and cannot, so that
         // one open stays raw and the next idle pass restores it.
-        self.voice_isolation_skipped = self.voice_isolation.enabled() && renegotiate_rate;
+        let voice_isolation_skipped = self.voice_isolation.enabled() && renegotiate_rate;
         let request = OpenRequest {
             device_override: self.device_override.clone(),
             selected_device: self.selected_device.clone(),
@@ -733,7 +732,10 @@ impl RecoveringAudioInput {
             let result = opener(&request).map_err(|error| format!("{error:#}"));
             let _ = sender.send((revision, result));
         });
-        self.replacement = Some(receiver);
+        self.replacement = Some(PendingReplacement {
+            receiver,
+            voice_isolation_skipped,
+        });
     }
 
     /// While the open input stands in for a saved microphone that would not
@@ -758,8 +760,8 @@ impl RecoveringAudioInput {
     }
 
     fn poll_replacement(&mut self) -> Option<(InputOpenResult, bool)> {
-        let skipped = self.voice_isolation_skipped;
-        let result = match self.replacement.as_ref()?.try_recv() {
+        let pending = self.replacement.as_ref()?;
+        let result = match pending.receiver.try_recv() {
             Ok(result) => result,
             Err(TryRecvError::Empty) => return None,
             Err(TryRecvError::Disconnected) => (
@@ -767,8 +769,10 @@ impl RecoveringAudioInput {
                 Err("microphone replacement worker stopped".into()),
             ),
         };
-        self.replacement = None;
-        self.voice_isolation_skipped = false;
+        let skipped = self
+            .replacement
+            .take()
+            .is_some_and(|pending| pending.voice_isolation_skipped);
         Some((result, skipped))
     }
 }

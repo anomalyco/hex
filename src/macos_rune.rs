@@ -460,6 +460,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
                 shutdown,
                 (!setup_ready).then_some(recognition_start),
                 listener_failure,
+                indicator.clone(),
             )
         })?;
     // A closed window is only ordered out, and AppKit keeps it on the Space
@@ -516,10 +517,14 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
                     window.update(move |ui, _| crate::rune_ui::meeting_settings_saved(ui));
                 }
             },
-            move |corner| {
-                crate::app_settings::save_meeting_indicator_corner(corner);
-                window.update(move |ui, _| crate::rune_ui::meeting_settings_saved(ui));
+            {
+                let window = window.clone();
+                move |corner, display| {
+                    crate::app_settings::save_meeting_indicator_anchor(corner, display);
+                    window.update(move |ui, _| crate::rune_ui::meeting_settings_saved(ui));
+                }
             },
+            move |id| show(&window, Destination::Meetings(Some(id))),
         )
     };
     let hud = crate::rune_hud::install(&mut app);
@@ -639,7 +644,22 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     // so take the error here and stop the way Quit does, with the reason in
     // the process log and a failed launch's exit status. The Linux window
     // keeps running instead (`rune_ui::run_app`).
-    let started = app.try_run();
+    //
+    // A panic in a frame, pump, or host callback comes back out of
+    // `EventLoop::run_app` too: winit catches it at the AppKit boundary and
+    // resumes it once the loop returns. Letting it leave `main` ends the
+    // process through libc `exit`, which runs C++ static destructors under
+    // live threads (ggml's Metal device aborts in `ggml_metal_rsets_free`),
+    // so catch it here and stop the way Quit does.
+    let started = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.try_run()))
+        .unwrap_or_else(|panic| {
+            let reason = panic
+                .downcast_ref::<&'static str>()
+                .copied()
+                .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+                .unwrap_or("a panic without a message");
+            Err(format!("the Hex window panicked: {reason}"))
+        });
     if let Err(error) = &started {
         tracing::error!(%error, "the Hex window failed; Hex stops");
     }
@@ -848,6 +868,11 @@ pub(crate) fn open_paste_history() {
     });
 }
 
+#[cfg(hex_capture)]
+pub(crate) fn open_routing_rules() {
+    with_window(|window| show(window, Destination::RoutingRules));
+}
+
 fn bring_forward(window: &rune::AppHandle<Ui>) {
     // An open window always shows the Dock icon: hiding it
     // would deactivate Hex and drop the window behind other apps.
@@ -921,6 +946,7 @@ impl Pump {
                     &published.settings,
                     &published.preparation,
                 );
+                crate::macos_rune::status_item::update_annotate(&published.settings);
                 crate::macos_rune::status_item::update_paste_last(&published.settings);
             }
             self.model_menu_at = now + MODEL_MENU_REFRESH;
@@ -967,6 +993,16 @@ impl Pump {
             StatusItemAction::CancelModelPreparation => {
                 let _ = self.runtime.send(Request::CancelModel);
                 self.model_menu_at = Instant::now();
+            }
+            StatusItemAction::ToggleAnnotate => {
+                #[cfg(hex_capture)]
+                {
+                    let (reply, _) = std::sync::mpsc::sync_channel(1);
+                    let _ = self.runtime.recognition(RecognitionControl::ScrawlCapture {
+                        action: crate::control::ScrawlCaptureAction::Toggle,
+                        reply,
+                    });
+                }
             }
             StatusItemAction::PasteLast => {
                 let _ = self
@@ -1042,6 +1078,21 @@ impl Pump {
                     tracing::warn!(%error, "could not stop meeting from status item");
                 }
             }
+            // Labs › Mute the microphone while recording: the recording's own
+            // microphone leaves or returns; the call's audio records on.
+            StatusItemAction::ToggleMeetingMicrophoneMute => {
+                if !crate::labs::meeting_microphone_mute() {
+                    return;
+                }
+                let muted = !crate::meeting::microphone_muted();
+                if let Err(error) = self
+                    .runtime
+                    .meeting(MeetingRequest::SetMicrophoneMuted(muted))
+                {
+                    tracing::warn!(%error, "could not mute the meeting microphone");
+                }
+                self.meeting_menu_at = Instant::now();
+            }
             StatusItemAction::CopyLastMeetingTranscript => {
                 let copied = crate::meeting::latest_transcript_markdown().and_then(|markdown| {
                     arboard::Clipboard::new()?.set_text(markdown)?;
@@ -1090,7 +1141,9 @@ impl Pump {
             | ControllerEvent::Reminder { .. }
             | ControllerEvent::ReminderWithdrawn { .. }
             | ControllerEvent::CallEndedWithdrawn => {}
-            ControllerEvent::Starting(_) => self.meeting_state = MeetingMenuState::Starting,
+            ControllerEvent::Starting(_) => {
+                self.meeting_state = MeetingMenuState::Starting { stopping: false }
+            }
             ControllerEvent::RecordingStarted { id, title, .. } => {
                 self.meeting_state = MeetingMenuState::Recording {
                     started: Instant::now(),
@@ -1098,6 +1151,7 @@ impl Pump {
                     title,
                     chapters: Vec::new(),
                     warning: None,
+                    stopping: false,
                 };
             }
             ControllerEvent::SourceWarning { warning } => {
@@ -1123,14 +1177,14 @@ impl Pump {
                     tracing::info!(%app, "the call ended; the recording continues until Stop");
                 }
             }
-            ControllerEvent::Stopping => {}
+            ControllerEvent::Stopping => self.meeting_state.stopping_requested(),
             ControllerEvent::Transcribing => self.meeting_state = MeetingMenuState::Transcribing,
             ControllerEvent::Finished(manifest) => {
                 tracing::info!(id = %manifest.id, "meeting transcript ready");
                 self.meeting_state = MeetingMenuState::Idle;
             }
             ControllerEvent::Discarded(id) => {
-                tracing::info!(%id, "meeting had no speech; moved to the Trash");
+                tracing::info!(%id, "meeting discarded; moved to the Trash");
                 self.meeting_state = MeetingMenuState::Idle;
             }
             ControllerEvent::NotesProgress(_) | ControllerEvent::NotesFinished(_) => {}

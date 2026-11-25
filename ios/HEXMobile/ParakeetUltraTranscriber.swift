@@ -2,7 +2,7 @@ import FluidAudio
 import Foundation
 import os
 
-/// Experiments › Multilingual model (Parakeet): Parakeet Ultra (`ParakeetUltraModel`) through
+/// Settings › Dictation › Model: Multilingual: Parakeet Ultra (`ParakeetUltraModel`) through
 /// FluidAudio's v3 decoder, in Hex's own process. It hears its 25 languages without being told
 /// which, mixed within a sentence, so `languageIdentifier` only names the dictation language
 /// for the steps after it (formatting, lists, cleanup).

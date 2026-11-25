@@ -96,7 +96,7 @@ pub(super) const SCENES: &[Scene] = &[
         ui.history = history::HistoryPane::fixture();
         ui.history.stats = Some(history::HistoryPane::fixture_stats());
         ui.history.usage = Some(history::HistoryPane::fixture_usage());
-        ui.history.stats_open = true;
+        ui.open_modal(Modal::HistoryStats);
         ui.settings.labs.history_stats = true;
         crate::labs::apply(&ui.settings.labs);
         ui.pane = Pane::History;
@@ -120,21 +120,34 @@ pub(super) const SCENES: &[Scene] = &[
         ui.history = history::HistoryPane::fixture_selection();
         ui.pane = Pane::History;
     }),
-    // Labs › Screenshots' Captures: a shot, a recording with its words, and
-    // an older shot; and before any.
+    // Annotate's Captures tab with Labs › Screenshots on: a shot, a recording
+    // with its words, and an older shot; and before any.
     #[cfg(hex_capture)]
     ("captures", |ui| {
         *ui = portal_fixture();
+        ui.settings.capture.enabled = true;
         ui.settings.labs.screenshots = true;
+        ui.platform.scrawl = Some(platform::ScrawlView::preview());
         ui.captures = captures::CapturesPane::fixture();
-        ui.pane = Pane::Captures;
+        ui.pane = Pane::Annotate;
     }),
     #[cfg(hex_capture)]
     ("captures-empty", |ui| {
         *ui = portal_fixture();
+        ui.settings.capture.enabled = true;
         ui.settings.labs.screenshots = true;
+        ui.platform.scrawl = Some(platform::ScrawlView::preview());
         ui.captures = captures::CapturesPane::fixture_empty();
-        ui.pane = Pane::Captures;
+        ui.pane = Pane::Annotate;
+    }),
+    // Annotate's default Annotations tab (without Labs › Screenshots).
+    #[cfg(hex_capture)]
+    ("mac-annotate", |ui| {
+        *ui = mac_fixture();
+        ui.settings.capture.enabled = true;
+        ui.platform.scrawl = Some(platform::ScrawlView::preview());
+        ui.captures = captures::CapturesPane::fixture();
+        ui.pane = Pane::Annotate;
     }),
     ("history-empty", |ui| {
         *ui = portal_fixture();
@@ -779,6 +792,16 @@ pub(super) const SCENES: &[Scene] = &[
         ui.meetings = meetings::MeetingsPane::chapters_fixture();
         ui.pane = Pane::Meetings;
     }),
+    ("meetings-audio-off", |ui| {
+        *ui = mac_fixture();
+        ui.platform.system_audio = false;
+        ui.pane = Pane::Meetings;
+    }),
+    ("meetings-off-sidebar", |ui| {
+        *ui = mac_fixture();
+        ui.settings.meetings.enabled = false;
+        ui.pane = Pane::Meetings;
+    }),
     ("meetings-empty", |ui| {
         *ui = mac_fixture();
         ui.meetings = meetings::MeetingsPane::default();
@@ -788,6 +811,16 @@ pub(super) const SCENES: &[Scene] = &[
     ("mac-scrawl-off", |ui| scrawl_fixture(ui, false, |_| {})),
     #[cfg(hex_capture)]
     ("mac-scrawl", |ui| scrawl_fixture(ui, true, |_| {})),
+    #[cfg(hex_capture)]
+    ("mac-routing-rules", |ui| {
+        scrawl_fixture(ui, true, |_| {});
+        scrawl::routing_rules::fixture(ui, true, false);
+    }),
+    #[cfg(hex_capture)]
+    ("mac-routing-add", |ui| {
+        scrawl_fixture(ui, true, |_| {});
+        scrawl::routing_rules::fixture(ui, true, true);
+    }),
     #[cfg(hex_capture)]
     ("mac-scrawl-open", |ui| {
         scrawl_fixture(ui, true, |view| view.how_it_works = true);
@@ -1044,6 +1077,7 @@ fn scrawl_fixture(ui: &mut Ui, enabled: bool, adjust: fn(&mut platform::ScrawlVi
     let mut view = platform::ScrawlView::preview();
     adjust(&mut view);
     ui.platform.scrawl = Some(view);
+    ui.captures.view = scrawl::View::Settings;
     ui.pane = Pane::Annotate;
 }
 

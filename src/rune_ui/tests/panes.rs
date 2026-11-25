@@ -1298,6 +1298,14 @@ fn the_explainer_picker_and_shortcut_recording_never_share_the_window() {
         rt.state.is_modal(Modal::Picker),
         "the picker replaces the explainer"
     );
+    picker::close(&mut rt.state);
+    tap(&mut rt, "dictation-hotkey");
+    assert!(matches!(
+        rt.state.capture,
+        settings::Capture::Listening { .. }
+    ));
+    picker::open(&mut rt.state);
+    assert!(matches!(rt.state.capture, settings::Capture::Idle));
     explainer::open(&mut rt.state);
     assert!(
         rt.state.is_modal(Modal::Explainer),
@@ -1348,7 +1356,7 @@ fn the_meetings_switch_stays_put_and_a_swap_drops_pending_edits() {
             .unwrap()
     };
     let recordings = switch(&rt);
-    tap(&mut rt, "meeting-rename");
+    rename(&mut rt);
     assert!(rt.state.meetings.renaming.is_some());
     rt.state.meetings.delete_armed = Some("preview-notes".into());
     tap(&mut rt, "meetings-view/segment1");
@@ -1431,7 +1439,7 @@ fn meetings_off_offers_the_opt_in_and_keeps_the_pane() {
     let mut rt = runtime("meetings-off", true, PANE_SIZE);
     assert!(rt.find("meetings-view").is_none());
     assert!(rt.find("start-meeting").is_none());
-    tap(&mut rt, "meetings-enabled");
+    tap(&mut rt, "meetings-turn-on");
     assert!(rt.state.settings.meetings.enabled);
     refresh(&mut rt);
     assert!(
@@ -1439,6 +1447,53 @@ fn meetings_off_offers_the_opt_in_and_keeps_the_pane() {
         "on, it joins the sidebar"
     );
     assert!(rt.find("meetings-view").is_some());
+}
+
+/// Labs › Choose meeting audio puts Computer audio in Meetings › Settings:
+/// all computer audio first, and a saved device the list doesn't have stays
+/// visible with why, so the choice is never silently lost.
+#[test]
+fn meeting_audio_source_lists_all_audio_and_keeps_a_missing_choice_visible() {
+    use crate::meeting::audio_source::SourceChoice;
+    let mut rt = runtime("meetings-settings", true, (980.0, 2400.0));
+    settle(&mut rt);
+    assert!(
+        rt.find("meeting-audio-source").is_none(),
+        "hidden while the lab is off"
+    );
+    assert_eq!(
+        rt.state.settings.labs.meeting_audio_source_choice,
+        SourceChoice::All
+    );
+    rt.update(|ui, _| ui.settings.labs.meeting_audio_source = true);
+    refresh(&mut rt);
+    assert!(rt.find("meeting-audio-source").is_some());
+    assert_eq!(
+        a11y_value(&rt, "meeting-audio-source-control-trigger").as_deref(),
+        Some("All computer audio")
+    );
+    rt.update(|ui, _| {
+        ui.settings.labs.meeting_audio_source_choice = SourceChoice::Output {
+            id: "alsa_output.dock".into(),
+            name: "Dock speakers".into(),
+        };
+    });
+    refresh(&mut rt);
+    assert_eq!(
+        a11y_value(&rt, "meeting-audio-source-control-trigger").as_deref(),
+        Some("Dock speakers"),
+        "the saved device stays the shown choice"
+    );
+    assert!(
+        texts(&rt).iter().any(|text| text == "not connected"),
+        "a missing device says why it isn't listed"
+    );
+    tap(&mut rt, "meeting-audio-source-control-trigger");
+    tap(&mut rt, "meeting-audio-source-menu-item0");
+    assert_eq!(
+        rt.state.settings.labs.meeting_audio_source_choice,
+        SourceChoice::All
+    );
 }
 
 #[test]
@@ -1452,7 +1507,7 @@ fn meetings_settings_save_and_ask_for_system_audio() {
     assert!(!rt.state.settings.meetings.enabled);
     assert!(rt.find("meeting-folder").is_none());
     assert!(rt.find("calls").is_none());
-    assert!(rt.find("meetings-enabled").is_some(), "the opt-in remains");
+    assert!(rt.find("meetings-turn-on").is_some(), "the opt-in remains");
 }
 
 /// The Calls row opens the sheet; its radios set the answer every call
@@ -1476,7 +1531,7 @@ fn the_calls_sheet_saves_the_default_and_each_answer() {
     assert_eq!(policy(&rt, "example.com"), MeetingPolicy::Ask);
     assert!(rt.find("call4").is_some(), "a saved answer stays listed");
     // A new default carries the calls that followed the old one.
-    tap(&mut rt, "default-never");
+    pick(&mut rt, "calls-default", 2);
     let meetings = &rt.state.settings.meetings;
     assert_eq!(meetings.default_policy, MeetingPolicy::NeverOffer);
     assert_eq!(policy(&rt, "meet.google.com"), MeetingPolicy::NeverOffer);
@@ -1655,7 +1710,7 @@ fn recording_starts_and_stops_from_the_header() {
     assert!(rt.find("stop-meeting").is_none(), "finalizing");
 
     let mut rt = runtime("meetings-empty", true, PANE_SIZE);
-    assert!(texts(&rt).iter().any(|text| text == "No meetings yet."));
+    assert!(texts(&rt).iter().any(|text| text == "No meetings yet"));
     tap(&mut rt, "start-meeting");
     assert_eq!(
         asked(&rt),
@@ -1663,10 +1718,17 @@ fn recording_starts_and_stops_from_the_header() {
     );
 }
 
+/// Rename is in the detail's ⋯ menu.
+fn rename(rt: &mut Runtime<Ui>) {
+    tap(rt, "meeting-more");
+    let rename = menu_item(rt, "meeting-actions", "Rename…");
+    tap(rt, &rename);
+}
+
 #[test]
 fn meetings_rename_from_the_title_field() {
     let mut rt = runtime("meetings", true, PANE_SIZE);
-    tap(&mut rt, "meeting-rename");
+    rename(&mut rt);
     assert_eq!(rt.state.meetings.renaming.as_deref(), Some("preview-notes"));
     rt.state.meetings.rename = TextEdit::new("Arcade launch");
     refresh(&mut rt);
@@ -2134,6 +2196,54 @@ fn stale_permissions_offer_fix_it_and_reset_entries_across_panes() {
 }
 
 #[test]
+fn macos_27_3_stale_accessibility_restarts_once_then_resets() {
+    // The post-event preflight keeps its launch-time answer there, so the
+    // first stale row can only be settled by a restart: a reset would drop
+    // the grant.
+    let mut rt = runtime("mac-settings-permissions-stale", true, PANE_SIZE);
+    rt.state.platform.accessibility_split = true;
+    refresh(&mut rt);
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == "Restart Hex"));
+    assert!(
+        shown
+            .iter()
+            .any(|text| text == "Turns on when Hex restarts")
+    );
+    assert!(!shown.iter().any(|text| text == "Still grey? Fix it"));
+    tap(&mut rt, "permission-accessibility-allow");
+    assert_eq!(
+        asked(&rt),
+        [PlatformRequest::Permission(PermissionAction::Restart)]
+    );
+
+    // That restart was spent and the row still reads untrusted: the existing
+    // reset-and-prompt flow comes back instead of a second restart.
+    let mut rt = runtime("mac-settings-permissions-stale", true, PANE_SIZE);
+    rt.state.platform.accessibility_split = true;
+    rt.state.platform.accessibility_restart_done = true;
+    refresh(&mut rt);
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == "Still grey? Fix it"));
+    assert!(!shown.iter().any(|text| text == "Restart Hex"));
+    tap(&mut rt, "permission-accessibility-allow");
+    assert_eq!(
+        asked(&rt),
+        [PlatformRequest::Permission(
+            PermissionAction::ResetAndPrompt(PermissionKind::Accessibility)
+        )]
+    );
+
+    // The reset clears the one-restart marker (host) and the person tries
+    // again, still untrusted: Restart Hex is offered once more.
+    rt.state.platform.accessibility_restart_done = false;
+    rt.state.platform.note_stale(PermissionKind::Accessibility);
+    refresh(&mut rt);
+    assert!(texts(&rt).iter().any(|text| text == "Restart Hex"));
+    assert!(!texts(&rt).iter().any(|text| text == "Still grey? Fix it"));
+}
+
+#[test]
 fn visible_untrusted_permission_rows_are_reported_for_legacy_cleanup() {
     let mut rt = runtime("mac-onboarding-permissions", true, PANE_SIZE);
     refresh(&mut rt);
@@ -2454,8 +2564,12 @@ fn labs_lists_every_toggle_off_by_default() {
     rt.state.settings.experimental.hex_microphone = false;
     rt.state.platform.hex_microphone = None;
     refresh(&mut rt);
+    // On a Mac, Meetings stays in the sidebar while off, to offer itself.
+    assert!(
+        rt.find("nav-meetings").is_some(),
+        "Meetings left the sidebar"
+    );
     for hidden in [
-        "nav-meetings",
         "nav-annotate",
         "nav-voice-filter",
         "nav-playground",
@@ -2506,7 +2620,10 @@ fn labs_lists_every_toggle_off_by_default() {
     tap(&mut rt, "lab-cursor-context");
     assert!(rt.state.settings.labs.cursor_context);
     tap(&mut rt, "lab-meetings");
-    assert!(rt.find("nav-meetings").is_none(), "hidden while off");
+    assert!(
+        rt.find("nav-meetings").is_some(),
+        "a Mac keeps it while off, to offer itself"
+    );
 
     // Windows lists Terminal paste in Labs, not General. Labs is tall enough
     // that its last row needs the macOS half's height to be on screen.
@@ -2738,6 +2855,63 @@ fn stop_phrase_shows_its_phrase_on_its_card_while_on() {
     tap(&mut rt, "lab-stop-phrase");
     assert!(!rt.state.settings.labs.stop_phrase);
     assert!(rt.find("stop-phrase-text").is_none());
+}
+
+#[test]
+fn clipboard_phrase_shows_its_phrase_on_its_card_while_on() {
+    use crate::labs::Feature;
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    rt.update(|ui, _| ui.lab_store.group = Some(Feature::ClipboardPhrase.group()));
+    settle(&mut rt);
+    assert!(
+        rt.find("clipboard-phrase-text").is_none(),
+        "hidden while off"
+    );
+    tap(&mut rt, "lab-clipboard-phrase");
+    assert!(rt.state.settings.labs.clipboard_phrase);
+    assert!(rt.find("clipboard-phrase-text").is_some());
+    assert_eq!(
+        rt.state.lab_store.clipboard_phrase.text,
+        crate::dictation::clipboard_phrase::DEFAULT_PHRASE,
+        "the field starts at the saved phrase"
+    );
+
+    // A draft that fails validation stays in the field, says why, and leaves
+    // the saved phrase working.
+    rt.update(|ui, _| {
+        ui.lab_store.clipboard_phrase = rune::TextEdit::new("clipboard".to_string());
+    });
+    rt.state.flush_drafts();
+    assert_eq!(
+        rt.state.settings.labs.clipboard_phrase_text,
+        crate::dictation::clipboard_phrase::DEFAULT_PHRASE
+    );
+    refresh(&mut rt);
+    assert!(rt.find("clipboard-phrase-text-error").is_some());
+
+    // A valid draft saves.
+    rt.update(|ui, _| {
+        ui.lab_store.clipboard_phrase = rune::TextEdit::new("what I copied".to_string());
+    });
+    rt.state.flush_drafts();
+    assert_eq!(
+        rt.state.settings.labs.clipboard_phrase_text,
+        "what I copied"
+    );
+    refresh(&mut rt);
+    assert!(rt.find("clipboard-phrase-text-error").is_none());
+
+    // A phrase saved elsewhere updates the field.
+    let mut external = rt.state.settings.clone();
+    external.labs.clipboard_phrase_text = "the clipboard".to_string();
+    assert!(rt.state.adopt(external));
+    refresh(&mut rt);
+    assert_eq!(rt.state.lab_store.clipboard_phrase.text, "the clipboard");
+
+    // The field leaves with its lab.
+    tap(&mut rt, "lab-clipboard-phrase");
+    assert!(!rt.state.settings.labs.clipboard_phrase);
+    assert!(rt.find("clipboard-phrase-text").is_none());
 }
 
 #[test]

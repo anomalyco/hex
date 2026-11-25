@@ -183,6 +183,12 @@ impl crate::control::host::Host for LinuxControl {
             .map_err(|error| ControlError::new("failed", format!("{error:#}")))
     }
 
+    fn model_switch(&self) -> std::result::Result<(), ControlError> {
+        self.host
+            .request(HostRequest::SwapModel)
+            .map_err(|error| ControlError::new("failed", format!("{error:#}")))
+    }
+
     fn cancel_model(&self) {
         let _ = self.host.request(HostRequest::CancelModel);
     }

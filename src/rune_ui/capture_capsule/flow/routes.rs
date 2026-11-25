@@ -75,11 +75,12 @@ fn keep_rows(shown: &Route, next: Route) -> Route {
     }
     recent.extend(added);
     match next {
-        Route::Rule { to, site, .. } => Route::Rule {
+        Route::Rule { to, site, by, .. } => Route::Rule {
             to,
             suggested,
             recent,
             site,
+            by,
         },
         Route::Guess { site, .. } => Route::Guess {
             suggested,
@@ -170,6 +171,7 @@ mod tests {
             )),
             0.0,
         );
+        flow.input(Input::OpenList, 0.1);
         let shown = sessions(&flow);
         assert_eq!(shown, ["ses_board", "ses_home", "ses_hex"]);
         flow.point(1, true);
@@ -200,10 +202,9 @@ mod tests {
             "rows keep their place and take their new reason; a new one comes last"
         );
         let shown = sessions(&flow);
-        flow.input(Input::OpenList, 0.5);
-        assert_eq!(sessions(&flow), shown, "the search opens on the same rows");
-        flow.input(Input::Escape, 0.6);
-        assert_eq!(sessions(&flow), shown, "and goes back to them");
+        flow.input(Input::Escape, 0.5);
+        flow.input(Input::OpenList, 0.6);
+        assert_eq!(sessions(&flow), shown, "reopening keeps the same rows");
         flow.input(
             Input::Refined(guess_of(
                 vec![Dest::new("Rune", "mentioned").session("ses_rune")],
@@ -248,6 +249,7 @@ mod tests {
                 suggested: Vec::new(),
                 recent: Vec::new(),
                 site: None,
+                by: AutoSendBy::Rule,
             }),
             2.0,
         );

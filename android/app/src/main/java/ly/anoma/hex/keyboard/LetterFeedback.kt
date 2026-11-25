@@ -132,6 +132,12 @@ internal class LetterFeedback(private val host: ViewGroup) {
                 "de" -> when (lower) {
                     'a' -> "aàáâæãåā"; 'o' -> "oôòóœøōõ"; 'u' -> "uûùúū"; else -> accents[lower]
                 }
+                // iPhone Hex's Portuguese long presses (KeyboardLanguage.swift), Portugal's and Brazil's
+                // letters first; other letters hold nothing.
+                "pt" -> when (lower) {
+                    'a' -> "aáãàâäåæª"; 'e' -> "eéêèęėēë"; 'i' -> "iíîìïįī"; 'o' -> "oôóõòöœøōº"; 'u' -> "uúüùûū"
+                    'c' -> "cç"; 'n' -> "nñ"; else -> null
+                }
                 else -> accents[lower]
             }
             return raw.orEmpty().map { (if (c.isUpperCase()) (if (it == 'ß') 'ẞ' else it.uppercaseChar()) else it).toString() }
@@ -139,27 +145,49 @@ internal class LetterFeedback(private val host: ViewGroup) {
 
         /** What a held letter offers: on row 1 its digit first, under the finger (Gboard types the digit
          * when a held q to p lifts), then its accents with the letter itself. With [symbolsOnLetters], a
-         * second or third row letter offers its symbol first instead, as SwiftKey does. */
-        fun holds(c: Char, language: String, digit: Char?, symbolsOnLetters: Boolean = false): List<String> {
+         * letter with no digit to show offers its symbol first instead: Gboard's on the second and third
+         * rows. On the top row, while the number row holds its digit, Gboard's set only fills in for a
+         * letter with no home- or bottom-row symbol of its own. [currency] is Labs › Keyboard › Local
+         * currency's symbol, which takes $'s place on d as it does on the ?123 page. */
+        fun holds(c: Char, language: String, digit: Char?, symbolsOnLetters: Boolean = false,
+                  topRow: Boolean = false, currency: Char? = null): List<String> {
             val accents = options(c, language)
-            val first = digit?.toString() ?: (if (symbolsOnLetters) letterSymbol(c)?.toString() else null)
+            val first = digit?.toString() ?: (if (symbolsOnLetters) letterSymbol(c, topRow, currency)?.toString() else null)
             return if (first == null) accents else listOf(first) + accents
         }
 
-        // SwiftKey's symbols on the second and third letter rows, keyed by letter so every layout keeps
-        // them wherever it draws that letter. Row 1's letters keep the digit Hex already offers.
-        private val letterSymbols = mapOf('a' to '@', 's' to '#', 'd' to '&', 'f' to '*', 'g' to '-',
-            'h' to '+', 'j' to '=', 'k' to '(', 'l' to ')', 'z' to '_', 'x' to '$', 'c' to '"', 'v' to '\'',
-            'b' to ':', 'n' to ';', 'm' to '/')
-        fun letterSymbol(c: Char): Char? = letterSymbols[c.lowercaseChar()]
+        // Gboard's symbols on the second and third letter rows, the same the ?123 page draws there, keyed
+        // by letter so every layout keeps them wherever it draws that letter. A row-1 letter with none of
+        // its own keeps the digit Hex already offers.
+        private val letterSymbols = mapOf('a' to '@', 's' to '#', 'd' to '$', 'f' to '_', 'g' to '&',
+            'h' to '-', 'j' to '+', 'k' to '(', 'l' to ')', 'z' to '*', 'x' to '"', 'c' to '\'',
+            'v' to ':', 'b' to ';', 'n' to '!', 'm' to '?')
+        // Gboard's top row, which the number row leaves without digits. Keyed by letter too, but offered
+        // only while the letter is drawn on row 1, so AZERTY's q/w and QWERTZ's y keep none where their
+        // layouts draw them lower.
+        private val topRowSymbols = mapOf('q' to '%', 'w' to '\\', 'e' to '|', 'r' to '=', 't' to '[',
+            'y' to ']', 'u' to '<', 'i' to '>', 'o' to '{', 'p' to '}')
+        fun letterSymbol(c: Char, topRow: Boolean = false, currency: Char? = null): Char? {
+            val lower = c.lowercaseChar()
+            // A local currency replaces Gboard's $ on d, as it does on the ?123 page's own key.
+            if (lower == 'd' && currency != null) return currency
+            return letterSymbols[lower] ?: (if (topRow) topRowSymbols[lower] else null)
+        }
 
-        // Gboard's held symbols (Pixel 8 emulator, API 36, black box) on the keys Hex's pages share with
-        // its: the option Gboard selects first, then the rest left to right. Digits offer themselves first.
+        // Gboard's held symbols (Pixel 8 emulator, API 36, black box): the option Gboard selects first,
+        // then the rest left to right. Digits offer themselves first. Each key here is drawn on one of the
+        // two symbol pages, < and > as the =< page's keys beside space; ? and ! hold Spanish's ¿ and ¡,
+        // which neither page has a key of its own for.
         private val symbols = mapOf('1' to "1½⅓¼⅕⅙⅐⅛⅑⅒", '2' to "2⅔⅖", '3' to "3⅗¾⅜", '4' to "4⅘", '5' to "5⅝⅚",
             '7' to "7⅞", '0' to "0∅ⁿ", '#' to "№", '$' to "¢€£₹¥₱", '-' to "_—–·", '+' to "±", '(' to "<[{",
             ')' to ">]}", '*' to "†★‡", '"' to "”„“«»", '\'' to "’‚‘‹›", '!' to "¡", '?' to "¿‽", '.' to "…",
             '%' to "‰℅", '^' to "↑←↓→", '=' to "≠∞≈", '<' to "≤«‹⟨", '>' to "≥⟩»›", '•' to "♪♣♠♥♦")
-        fun symbolHolds(c: Char): List<String> = symbols[c].orEmpty().map { it.toString() }
+        /** A symbol key's held options. With a Labs local currency in [currency]'s place, that key offers the
+         * $ it replaced first and the list has no duplicate of itself. */
+        fun symbolHolds(c: Char, currency: Char? = null): List<String> {
+            val held = if (currency != null && c == currency) "\$" + symbols.getValue('$') else symbols[c].orEmpty()
+            return held.filter { it != currency }.map { it.toString() }
+        }
 
         /** The period key's held punctuation on the letters page, as Gboard's three rows (nearest the key
          * first), with the comma under the finger. */

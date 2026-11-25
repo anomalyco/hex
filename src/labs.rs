@@ -107,6 +107,16 @@ impl Feature {
     pub fn managed(self) -> Option<crate::policy::Lock> {
         crate::policy::Policy::current().labs_lock(self)
     }
+
+    /// Whether `settings` turn this feature on in this build and OS under
+    /// `policy`, without reading the process's runtime switch bank.
+    pub(crate) fn enabled_under(
+        self,
+        settings: &AppSettings,
+        policy: crate::policy::Policy,
+    ) -> bool {
+        self.on(settings) && self.shipped() && self.on_this_os() && policy.labs_lock(self).is_none()
+    }
 }
 
 /// Number of 64-bit words needed to hold one bit per [`Feature`].
@@ -183,10 +193,20 @@ static STOP_PHRASE_TEXT: LazyLock<RwLock<String>> =
 static SIGNATURE_TEXT: LazyLock<RwLock<String>> =
     LazyLock::new(|| RwLock::new(crate::dictation::signature::DEFAULT_TEXT.to_owned()));
 
+/// The words Labs › Clipboard phrase replaces with the clipboard. An invalid
+/// saved phrase reads as the default.
+static CLIPBOARD_PHRASE_TEXT: LazyLock<RwLock<String>> =
+    LazyLock::new(|| RwLock::new(crate::dictation::clipboard_phrase::DEFAULT_PHRASE.to_owned()));
+
 /// The style each normal dictation is written as, read only while
 /// `Feature::DictationStyle` is on.
 static DICTATION_STYLE_CHOICE: LazyLock<RwLock<DictationStyle>> =
     LazyLock::new(|| RwLock::new(DictationStyle::Polished));
+
+/// The app or output a meeting's computer audio records, read only while
+/// `Feature::MeetingAudioSource` is on.
+static MEETING_AUDIO_SOURCE_CHOICE: LazyLock<RwLock<crate::meeting::audio_source::SourceChoice>> =
+    LazyLock::new(|| RwLock::new(crate::meeting::audio_source::SourceChoice::All));
 
 pub(super) fn ensure_loaded() {
     if LOADED.load(Ordering::Acquire) {
@@ -264,12 +284,32 @@ fn store_signature_text(signature: &str) {
         .unwrap_or_else(|error| error.into_inner()) = accepted.to_owned();
 }
 
+/// Records the words replaced with the clipboard; an invalid value never
+/// turns matching off.
+fn store_clipboard_phrase_text(phrase: &str) {
+    *CLIPBOARD_PHRASE_TEXT
+        .write()
+        .unwrap_or_else(|error| error.into_inner()) =
+        crate::dictation::voice_prompt::accepted_phrase_or(
+            phrase,
+            crate::dictation::clipboard_phrase::DEFAULT_PHRASE,
+        );
+}
+
 /// Records the style each normal dictation is written as. An unknown value
 /// never reaches here (serde rejects it on load).
 fn store_dictation_style_choice(style: DictationStyle) {
     *DICTATION_STYLE_CHOICE
         .write()
         .unwrap_or_else(|error| error.into_inner()) = style;
+}
+
+/// Records the app or output a meeting's computer audio records; a malformed
+/// saved value never reaches here (it loads as all computer audio).
+fn store_meeting_audio_source_choice(choice: crate::meeting::audio_source::SourceChoice) {
+    *MEETING_AUDIO_SOURCE_CHOICE
+        .write()
+        .unwrap_or_else(|error| error.into_inner()) = choice;
 }
 
 fn store_all(settings: &LabsSettings) {
@@ -294,7 +334,9 @@ fn store_all(settings: &LabsSettings) {
     store_voice_prompt_phrase(&settings.voice_prompt_phrase);
     store_stop_phrase_text(&settings.stop_phrase_text);
     store_signature_text(&settings.signature_text);
+    store_clipboard_phrase_text(&settings.clipboard_phrase_text);
     store_dictation_style_choice(settings.dictation_style_choice);
+    store_meeting_audio_source_choice(settings.meeting_audio_source_choice.clone());
     for (slot, word) in BANK.iter().zip(bank.0) {
         slot.store(word, Ordering::Release);
     }
@@ -553,6 +595,59 @@ mod tests {
     }
 
     #[test]
+    fn the_meeting_microphone_mute_lab_is_a_macos_meetings_lab_off_by_default() {
+        let feature = Feature::MeetingMicrophoneMute;
+        assert_eq!(feature.name(), "meeting-microphone-mute");
+        assert_eq!(feature.group(), Group::Meetings);
+        assert_eq!(feature.audience(), Audience::Everyone);
+        assert_eq!(feature.oses(), &[Os::Macos]);
+        assert_eq!(feature.added(), 20261124);
+        assert!(!feature.on(&AppSettings::default()));
+        assert_eq!(feature.on_this_os(), cfg!(target_os = "macos"));
+        assert_eq!(Feature::from_name("meeting-microphone-mute"), Some(feature));
+    }
+
+    #[test]
+    fn the_meeting_indicator_display_lab_is_a_desktop_meetings_lab_off_by_default() {
+        let feature = Feature::MeetingIndicatorDisplay;
+        assert_eq!(feature.name(), "meeting-indicator-display");
+        assert_eq!(feature.group(), Group::Meetings);
+        assert_eq!(feature.audience(), Audience::Everyone);
+        assert_eq!(feature.oses(), &[Os::Macos, Os::Windows]);
+        assert_eq!(feature.added(), 20261124);
+        assert!(!feature.on(&AppSettings::default()));
+        assert_eq!(
+            feature.on_this_os(),
+            cfg!(any(target_os = "macos", target_os = "windows"))
+        );
+        assert_eq!(
+            Feature::from_name("meeting-indicator-display"),
+            Some(feature)
+        );
+    }
+
+    #[test]
+    fn the_choose_meeting_audio_lab_ships_on_every_os_and_is_off_by_default() {
+        let feature = Feature::MeetingAudioSource;
+        assert_eq!(feature.name(), "meeting-audio-source");
+        assert_eq!(feature.group(), Group::Meetings);
+        assert_eq!(feature.audience(), Audience::Everyone);
+        assert_eq!(feature.oses(), &[Os::Macos, Os::Windows, Os::Linux]);
+        assert_eq!(feature.added(), 20261124);
+        assert!(!feature.on(&AppSettings::default()));
+        assert!(feature.on_this_os());
+        assert_eq!(
+            Feature::from_name("meeting-audio-source"),
+            Some(feature),
+            "hex labs on meeting-audio-source takes its CLI name"
+        );
+        assert_eq!(
+            feature.extra_settings_keys(),
+            ["labs.meeting_audio_source_choice"]
+        );
+    }
+
+    #[test]
     fn the_stop_any_call_recording_lab_ships_on_every_os_and_is_off_by_default() {
         let feature = Feature::StopAnyCallRecording;
         assert_eq!(feature.name(), "stop-any-call-recording");
@@ -711,6 +806,10 @@ mod tests {
         assert_eq!(
             labs.signature_text,
             crate::dictation::signature::DEFAULT_TEXT
+        );
+        assert_eq!(
+            labs.clipboard_phrase_text,
+            crate::dictation::clipboard_phrase::DEFAULT_PHRASE
         );
     }
 }

@@ -1,10 +1,13 @@
 //! Number formatting that follows the interface language: its decimal
 //! separator and its thousands separator.
 
-use super::{FRENCH_COLUMN, PORTUGUESE_COLUMN, RUSSIAN_COLUMN, column_for_code, current};
+use super::{
+    FRENCH_COLUMN, HUNGARIAN_COLUMN, PORTUGUESE_COLUMN, RUSSIAN_COLUMN, column_for_code, current,
+};
 
 /// Whether the active language writes a decimal fraction with a comma:
-/// German, Spanish, French, Polish, Portuguese, Russian, and Ukrainian.
+/// German, Spanish, French, Hungarian, Polish, Portuguese, Russian, and
+/// Ukrainian.
 pub(crate) fn decimal_comma() -> bool {
     let column = current();
     column == column_for_code("de")
@@ -12,14 +15,15 @@ pub(crate) fn decimal_comma() -> bool {
         || column == column_for_code("pl")
         || column == column_for_code("uk")
         || column == FRENCH_COLUMN
+        || column == HUNGARIAN_COLUMN
         || column == PORTUGUESE_COLUMN
         || column == RUSSIAN_COLUMN
 }
 
 /// A count with its thousands grouped for the active language: `1,284` in
 /// English and Chinese or Japanese, `1.284` in German, Spanish, and
-/// Portuguese, and `1 284` with a narrow no-break space in French, Polish,
-/// Russian, and Ukrainian.
+/// Portuguese, and `1 284` with a narrow no-break space in French,
+/// Hungarian, Polish, Russian, and Ukrainian.
 pub(crate) fn grouped(value: u64) -> String {
     let separator = thousands_separator();
     let digits = value.to_string();
@@ -43,6 +47,7 @@ fn thousands_separator() -> &'static str {
     } else if column == column_for_code("pl")
         || column == column_for_code("uk")
         || column == FRENCH_COLUMN
+        || column == HUNGARIAN_COLUMN
         || column == RUSSIAN_COLUMN
     {
         "\u{202f}"
@@ -70,6 +75,7 @@ mod tests {
             ("de", true),
             ("es", true),
             ("fr", true),
+            ("hu", true),
             ("pl", true),
             ("pt", true),
             ("ru", true),
@@ -94,6 +100,7 @@ mod tests {
             ("es", "1.284"),
             ("pt", "1.284"),
             ("fr", "1\u{202f}284"),
+            ("hu", "1\u{202f}284"),
             ("pl", "1\u{202f}284"),
             ("ru", "1\u{202f}284"),
             ("uk", "1\u{202f}284"),

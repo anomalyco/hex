@@ -7,6 +7,10 @@ dest.mkdir(parents=True, exist_ok=True)
 rate = 16000
 with open(Path(__file__).with_name("corpus.tsv"), encoding="utf8") as src:
     rows = list(csv.DictReader(src, delimiter="\t"))
+# score.py's prompted clips (README, A prompt on a short clip), made as the corpus's clean clips are, after them.
+from score import PROMPTED
+rows += [{"id": id, "voice": voice, "wpm": wpm, "snr_db": "clean", "reference": said, "before": before, "after": after}
+         for id, _, voice, wpm, said, before, after, _ in PROMPTED]
 for row in rows:
     with tempfile.TemporaryDirectory(dir=dest) as tmp:
         aiff = Path(tmp) / "voice.aiff"
@@ -16,7 +20,7 @@ for row in rows:
     if not samples or max(samples) < 500:
         raise ValueError("Empty synthesis: " + row["id"])
     voice_rms = math.sqrt(sum(s*s for s in samples)/len(samples))
-    samples = [0]*3200 + list(samples) + [0]*6400
+    samples = [0]*(row.get("before", 200)*16) + list(samples) + [0]*(row.get("after", 400)*16)
     if row["snr_db"] != "clean":
         tones = (261.63, 329.63, 392.00, 493.88, 220.00, 261.63, 329.63, 440.00)
         bed = []
@@ -35,3 +39,14 @@ for row in rows:
         out.setparams((1,2,rate,0,"NONE","not compressed"))
         out.writeframes(array.array("h",(round(s*gain) for s in samples)).tobytes())
     print(row["id"], len(samples), hashlib.sha256(wav.read_bytes()).hexdigest(), sep="\t")
+# The long clips (long.tsv): those utterances joined end to end, for the encoder-window check.
+with open(Path(__file__).with_name("long.tsv"), encoding="utf8") as src:
+    for row in csv.DictReader(src, delimiter="\t"):
+        joined = b""
+        for part in row["clips"].split(","):
+            with wave.open(str(dest / (part+".wav"))) as w: joined += w.readframes(w.getnframes())
+        wav = dest / (row["id"]+".wav")
+        with wave.open(str(wav), "wb") as out:
+            out.setparams((1,2,rate,0,"NONE","not compressed"))
+            out.writeframes(joined)
+        print(row["id"], len(joined)//2, hashlib.sha256(wav.read_bytes()).hexdigest(), sep="\t")

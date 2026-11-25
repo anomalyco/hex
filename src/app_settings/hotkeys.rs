@@ -1301,6 +1301,9 @@ pub struct RuntimeHotkeys {
     pub typed_text: Option<RuntimeHotkey>,
     /// Labs › Second dictation shortcut, while it is on and bound.
     pub second_dictation: Option<RuntimeHotkey>,
+    /// Labs › Model switch shortcut, while it is on and bound to a saved
+    /// other model.
+    pub model_switch: Option<RuntimeHotkey>,
     /// Labs › More dictation shortcuts (macOS), while the Lab is on and each
     /// row is bound and shares no key.
     pub extra_dictation: [Option<RuntimeHotkey>; MAX_EXTRA_DICTATION_SHORTCUTS],
@@ -1314,7 +1317,7 @@ pub struct RuntimeHotkeys {
 
 impl RuntimeHotkeys {
     /// The shortcuts [`Self::all`] lists by name, before the extra rows.
-    const NAMED: usize = 7;
+    const NAMED: usize = 8;
 
     /// Every shortcut Hex matches, for suppression and chord evidence.
     pub fn all(self) -> [Option<RuntimeHotkey>; Self::NAMED + MAX_EXTRA_DICTATION_SHORTCUTS] {
@@ -1326,6 +1329,7 @@ impl RuntimeHotkeys {
             self.raw_dictation,
             self.typed_text,
             self.second_dictation,
+            self.model_switch,
         ];
         let mut all = [None; Self::NAMED + MAX_EXTRA_DICTATION_SHORTCUTS];
         all[..named.len()].copy_from_slice(&named);
@@ -1344,6 +1348,7 @@ impl Default for RuntimeHotkeys {
             raw_dictation: None,
             typed_text: None,
             second_dictation: None,
+            model_switch: None,
             extra_dictation: [None; MAX_EXTRA_DICTATION_SHORTCUTS],
             extra_dictation_modes: [ExtraDictationMode::HoldOrDoubleTap;
                 MAX_EXTRA_DICTATION_SHORTCUTS],

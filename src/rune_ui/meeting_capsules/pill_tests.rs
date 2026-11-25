@@ -10,6 +10,26 @@ fn laid_out(rt: &Runtime<Capsule>, key: &str) -> [f32; 4] {
         .rect
 }
 
+/// The room the discard ✕ holds in the header of a surface `width` by
+/// `height` whose time is `longer` than five digits: none at rest, all of
+/// it a row taller, and never the resting field's own width.
+fn discard_room_at(width: f32, height: f32, longer: f32) -> f32 {
+    let grown = (width - REST_WIDTH - longer).max(0.);
+    (panel::DISCARD_ROOM * ((height - REST_HEIGHT) / ROW_HEIGHT).clamp(0., 1.)).min(grown)
+}
+
+/// Between the field's end and the time: the meter's gap, the recording dot,
+/// and the dot's gap.
+const CLOCK_LEAD: f32 = METER_GAP + REC_DOT + METER_GAP;
+
+/// The field across the open header, clear of the time and the ✕.
+const OPEN_FIELD: f32 = PANEL_WIDTH - 2. * REST_PX - METER_GAP - TIMER_WIDTH - panel::DISCARD_ROOM;
+
+/// Halfway from the resting field to `wide`, give or take half a point.
+fn halfway(wide: f32) -> f32 {
+    (waveform::WIDTH + wide) / 2. + 0.5
+}
+
 fn recording_in(corner: MeetingIndicatorCorner) -> Runtime<Capsule> {
     let (mut rt, _, _) = runtime(live_recording("pill"), false, true, RECORDING);
     rt.update(move |c, tx| {
@@ -28,7 +48,7 @@ fn recording_in(corner: MeetingIndicatorCorner) -> Runtime<Capsule> {
 fn the_header_keeps_the_rows_inset_at_rest_open_and_finished() {
     use MeetingIndicatorCorner::*;
     let inset = PANEL_PAD + ROW_PX;
-    assert_eq!((REST_PX, REST_WIDTH), (14., 151.));
+    assert_eq!((REST_PX, REST_WIDTH), (16., 168.));
     for corner in [TopLeft, TopRight, BottomLeft, BottomRight] {
         let mut rt = recording_in(corner);
         let [px, _, pw, ph] = laid_out(&rt, "pill");
@@ -54,14 +74,24 @@ fn the_header_keeps_the_rows_inset_at_rest_open_and_finished() {
         if corner.is_right() {
             assert_eq!((tx, tw), rest, "{corner:?}: the time moved as the pill opened");
         }
-        let open = (tx, tw);
         let [gx, _, _, _] = laid_out(&rt, "glyph");
         let [hx, _, hw, _] = laid_out(&rt, "hint");
         // The rows' icons and their trailing words are that far in too.
         assert_eq!((gx - px, px + pw - (hx + hw)), (inset, inset), "{corner:?} open");
-        assert_eq!(tx + tw, hx + hw, "{corner:?}: the time and the hint end apart");
-        let [fx, _, _, _] = laid_out(&rt, "meeting-listening-field");
-        assert_eq!(fx, gx, "{corner:?}: the field and the icons start apart");
+        // The ✕ is centred on the icons' spine on the field's free side, and
+        // the field and time keep clear of it.
+        let [dx, _, dw, _] = laid_out(&rt, "discard-slot");
+        let [fx, _, fw, _] = laid_out(&rt, "meeting-listening-field");
+        if corner.is_right() {
+            assert_eq!(dx + dw / 2. - px, panel::SPINE, "{corner:?}: the ✕ off the spine");
+            assert_eq!(tx + tw, hx + hw, "{corner:?}: the time and the hint end apart");
+            assert_eq!(fx, dx + dw, "{corner:?}: the field and the ✕ apart");
+        } else {
+            assert_eq!(px + pw - (dx + dw / 2.), panel::SPINE, "{corner:?}: the ✕ off the spine");
+            assert_eq!(tx + tw, dx, "{corner:?}: the time and the ✕ apart");
+            assert_eq!(fx, gx, "{corner:?}: the field and the icons start apart");
+        }
+        assert_eq!(fw, PANEL_WIDTH - 2. * REST_PX - METER_GAP - TIMER_WIDTH - panel::DISCARD_ROOM);
 
         rt.update(|c, tx| {
             c.capture_stopped();
@@ -72,12 +102,13 @@ fn the_header_keeps_the_rows_inset_at_rest_open_and_finished() {
             tx.instant();
         });
         landed(&mut rt);
-        let [px, _, pw, _] = laid_out(&rt, "pill");
-        let [lx, _, lw, _] = laid_out(&rt, "title");
-        assert_eq!((lx - px, px + pw - (lx + lw)), (inset, inset), "{corner:?} finished");
-        let [tx, _, tw, _] = laid_out(&rt, "elapsed");
-        assert_eq!((tx, tw), open, "{corner:?}: the time moved at Stop");
-        assert_eq!(tx + tw, lx + lw, "{corner:?}: the length and the title end apart");
+        // Finished, the title and its length are one link on the rows'
+        // text edge, the length 2 pt under the title.
+        let [px, _, _, _] = laid_out(&rt, "pill");
+        let [lx, ly, _, lh] = laid_out(&rt, "title");
+        assert_eq!(lx - px, inset, "{corner:?} finished");
+        let [tx, ty, _, _] = laid_out(&rt, "elapsed");
+        assert_eq!((tx, ty), (lx, ly + lh + 2.), "{corner:?}: the length off the title");
     }
 }
 
@@ -115,15 +146,15 @@ fn rows_that_can_both_be_filled_are_one_gap_apart() {
 #[test]
 fn the_field_widens_with_the_wall_one_whole_column_at_a_time() {
     let pitch = crate::rune_hud::dot_scope::Tuning::default().spacing;
-    let wide = PANEL_WIDTH - 2. * REST_PX - METER_GAP - TIMER_WIDTH;
-    assert_eq!((waveform::WIDTH, wide), (78., 179.));
+    let wide = PANEL_WIDTH - 2. * REST_PX - METER_GAP - TIMER_WIDTH - panel::DISCARD_ROOM;
+    assert_eq!((waveform::WIDTH, wide), (78., 140.));
     for name in ["whole", "interrupted", "close", "hundred", "notice", "reduced"] {
         let shots = replayed(name);
         let (mut widest, mut flights) = (0f32, 0);
         for (frame, pair) in shots.windows(2).enumerate() {
             let (was, shot) = (&pair[0], &pair[1]);
             let frame = frame + 1;
-            let (Some([x, _, w, _]), Some([px, _, pw, _]), Some([tx, ..])) =
+            let (Some([x, _, w, _]), Some([px, _, pw, ph]), Some([tx, ..])) =
                 (shot.field_at, shot.pill, shot.elapsed)
             else {
                 continue;
@@ -133,7 +164,7 @@ fn the_field_widens_with_the_wall_one_whole_column_at_a_time() {
             }
             widest = widest.max(w);
             // It ends beside the time, which never moves.
-            assert!((x + w + METER_GAP - tx).abs() < 0.02, "{name} f{frame}: {x} + {w}, time {tx}");
+            assert!((x + w + CLOCK_LEAD - tx).abs() < 0.02, "{name} f{frame}: {x} + {w}, time {tx}");
             // It starts no nearer the wall than the rows' icons do.
             assert!(x - px > REST_PX - 0.02, "{name} f{frame}: {} from the wall", x - px);
             assert!(
@@ -161,9 +192,9 @@ fn the_field_widens_with_the_wall_one_whole_column_at_a_time() {
             if flying {
                 flights += 1;
                 // A sixth digit is 7.8 pt wide and counted as 8.
-                let slack = if name == "hundred" { 0.25 } else { 0.03 };
+                let (slack, longer) = if name == "hundred" { (0.25, 8.) } else { (0.03, 0.) };
                 assert!(
-                    (x - px - REST_PX).abs() < slack,
+                    (x - px - REST_PX - discard_room_at(pw, ph, longer)).abs() < slack,
                     "{name} f{frame}: {} from the wall",
                     x - px
                 );
@@ -171,17 +202,20 @@ fn the_field_widens_with_the_wall_one_whole_column_at_a_time() {
         }
         match name {
             "hundred" => assert!((widest - (wide - 8.)).abs() < 0.01, "{widest}"),
+            // Turned round before the surface was a row taller, the ✕'s
+            // room had not all arrived.
+            "interrupted" => assert!(widest > wide - 1. && widest <= wide, "{widest}"),
             _ => assert!((widest - wide).abs() < 0.01, "{name}: {widest}"),
         }
         assert!(name == "notice" || name == "reduced" || flights > 12, "{name}: {flights}");
     }
-    // Another digit on the time costs the open field three columns.
+    // Another digit on the time costs the open field its 8 pt in columns.
     let columns = |name, rest: usize, open: usize| {
         let shots = replayed(name);
         (shots[rest].columns.0, shots[open].columns.0)
     };
-    assert_eq!(columns("whole", 171, 250), (31, 69));
-    assert_eq!(columns("hundred", 19, 85), (31, 66));
+    assert_eq!(columns("whole", 171, 250), (31, 54));
+    assert_eq!(columns("hundred", 19, 85), (31, 51));
 }
 
 /// In a left corner the field kept its resting 78 pt in the open header and
@@ -189,12 +223,16 @@ fn the_field_widens_with_the_wall_one_whole_column_at_a_time() {
 #[test]
 fn a_left_corners_field_fills_the_header_and_the_time_rides_the_wall() {
     let pitch = crate::rune_hud::dot_scope::Tuning::default().spacing;
-    let wide = PANEL_WIDTH - 2. * REST_PX - METER_GAP - TIMER_WIDTH;
+    let wide = PANEL_WIDTH - 2. * REST_PX - METER_GAP - TIMER_WIDTH - panel::DISCARD_ROOM;
     for name in ["left", "left-stop", "left-notice"] {
         let shots = replayed(name);
         let (mut widest, mut flights, mut was) = (0f32, 0, None::<f32>);
         for (frame, shot) in shots.iter().enumerate() {
-            let (Some([px, _, pw, _]), Some([tx, _, tw, _])) = (shot.pill, shot.elapsed) else {
+            // Published, the length moves under the title (checked above).
+            if matches!(shot.phase, "published" | "summary") {
+                continue;
+            }
+            let (Some([px, _, pw, ph]), Some([tx, _, tw, _])) = (shot.pill, shot.elapsed) else {
                 continue;
             };
             // It stays in the corner the pill rests in.
@@ -211,7 +249,10 @@ fn a_left_corners_field_fills_the_header_and_the_time_rides_the_wall() {
             // whether the pointer opened it or capture ended.
             if pw > REST_WIDTH + 0.5 && pw < PANEL_WIDTH - 0.5 {
                 flights += 1;
-                assert!((wall - REST_PX - (tx + tw)).abs() < 0.03, "{name} f{frame}");
+                assert!(
+                    (wall - REST_PX - discard_room_at(pw, ph, 0.) - (tx + tw)).abs() < 0.03,
+                    "{name} f{frame}"
+                );
             }
             let Some([x, _, w, _]) = shot.field_at else {
                 continue;
@@ -219,7 +260,7 @@ fn a_left_corners_field_fills_the_header_and_the_time_rides_the_wall() {
             widest = widest.max(w);
             // The field starts at the rows' inset and ends beside the time.
             assert!((x - px - REST_PX).abs() < 0.02, "{name} f{frame}: {} from the wall", x - px);
-            assert!((x + w + METER_GAP - tx).abs() < 0.02, "{name} f{frame}: {x} + {w}, time {tx}");
+            assert!((x + w + CLOCK_LEAD - tx).abs() < 0.02, "{name} f{frame}: {x} + {w}, time {tx}");
             let (columns, shift, _) = shot.columns;
             assert_eq!(columns, (w / pitch + 1e-3).floor() as usize + 1, "{name} f{frame}: {w}");
             assert!(shift <= 0. && shift > -pitch / 2. - 1e-3, "{name} f{frame}: {shift}");
@@ -230,16 +271,20 @@ fn a_left_corners_field_fills_the_header_and_the_time_rides_the_wall() {
                 // words stay where they were, ending at the inset.
                 assert!((lane[0] - (tx + tw)).abs() < 0.02, "{name} f{frame}: {lane:?}");
                 assert!((words[0] + words[2] - (wall - REST_PX)).abs() < 0.02, "{name} f{frame}");
-                assert!(w < 129. || shown < 0.01, "f{frame}: {shown} beside a field {w} wide");
+                assert!(w < halfway(wide) || shown < 0.01, "f{frame}: {shown} beside a field {w} wide");
             }
         }
         assert!((widest - wide).abs() < 0.01, "{name}: {widest}");
         assert!(name == "left-notice" || flights > 12, "{name}: {flights}");
     }
-    // Stop pressed in the open panel: the time keeps its place to the end.
+    // Stop pressed in the open panel: the time keeps its place until the
+    // meeting is published.
     let shots = replayed("left-stop");
     let held = shots[79].elapsed.unwrap()[0];
-    assert!(shots[79..].iter().all(|s| (s.elapsed.unwrap()[0] - held).abs() < 0.03));
+    assert!(shots[79..]
+        .iter()
+        .take_while(|s| !matches!(s.phase, "published" | "summary"))
+        .all(|s| (s.elapsed.unwrap()[0] - held).abs() < 0.03));
     let shots = replayed("left-notice");
     assert!(shots[19].notice.is_some_and(|n| n.2 == 1.), "a notice at rest");
     assert!(shots[60].notice.is_none(), "the notice under an open field");
@@ -276,8 +321,8 @@ fn the_field_keeps_its_light_through_the_opening() {
         }
         assert!(lit(shot) > 0.5 * lit(was), "f{frame}");
     }
-    assert!(arrived > 6, "{arrived}");
-    assert_eq!(shots[231].columns.0, 69);
+    assert!(arrived >= 5, "{arrived}");
+    assert_eq!(shots[231].columns.0, 54);
 }
 
 /// With a notice the resting pill is already the panel's width. The field
@@ -293,7 +338,7 @@ fn the_field_wipes_the_headers_notice_and_never_draws_over_it() {
         let [x, _, w, _] = shot.field_at.unwrap();
         let Some((lane, words, shown)) = shot.notice else {
             // Gone only once the field is across the header.
-            assert!(w > 178.9, "f{frame}: no notice beside a field {w} wide");
+            assert!(w > OPEN_FIELD - 0.1, "f{frame}: no notice beside a field {w} wide");
             continue;
         };
         // What shows of it ends where the field begins.
@@ -301,7 +346,7 @@ fn the_field_wipes_the_headers_notice_and_never_draws_over_it() {
         // Its words stay where they were, cut where they were.
         assert_eq!((words[0], words[2]), (rest.1[0], rest.1[2]), "f{frame}");
         // It has gone by the time the field is halfway across.
-        assert!(w < 129. || shown < 0.01, "f{frame}: {shown} beside a field {w} wide");
+        assert!(w < halfway(OPEN_FIELD) || shown < 0.01, "f{frame}: {shown} beside a field {w} wide");
         wiped += usize::from(frame < 90 && shown > 0.05 && shown < 0.95);
         back += usize::from(frame >= 90 && shown > 0.05 && shown < 0.95);
     }
@@ -330,9 +375,16 @@ fn stops_row_has_gone_before_the_heading_arrives_and_neither_moves() {
                 }
                 None => 0.,
             };
-            if let Some(rect) = shot.title_at {
+            // Published, the title is the finished meeting's link (its own
+            // layout, checked in the header test).
+            if let Some(rect) = shot.title_at.filter(|_| shot.phase == "transcribing") {
                 let x = *heading.get_or_insert(rect[0]);
-                assert!((rect[0] - x).abs() < 0.02, "{name} f{frame}: the heading moved");
+                assert!(
+                    (rect[0] - x).abs() < 0.02,
+                    "{name} f{frame} {}: the heading moved {x} → {rect:?}, pill {:?}",
+                    shot.phase,
+                    shot.pill
+                );
             }
             // Whichever is arriving waits until the other no longer reads.
             assert!(

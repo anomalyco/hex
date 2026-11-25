@@ -23,6 +23,7 @@ const FINAL_PENDING_FILE: &str = "final.pending";
 /// as an import the launch sweep may remove once its lock is free.
 const IMPORT_PENDING_FILE: &str = "import.pending";
 
+pub(crate) mod audio_source;
 mod capture;
 mod chapters;
 mod chunk_level;
@@ -77,7 +78,7 @@ mod turn;
 mod warning;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod watcher;
-pub use capture::track_levels;
+pub use capture::{microphone_muted, track_levels};
 #[cfg(all(debug_assertions, target_os = "macos"))]
 pub use chapters::chapters_file;
 #[cfg(target_os = "macos")]
@@ -189,6 +190,9 @@ pub enum MeetingRequest {
         id: String,
         entries: Vec<TranscriptEntryKey>,
     },
+    /// Leave Hex's microphone out of the recording under way, or put it back
+    /// (macOS; Labs › Mute the microphone while recording).
+    SetMicrophoneMuted(bool),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -239,12 +243,11 @@ pub struct MeetingManifest {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub chapters_refined: bool,
     /// Recorded since retention began: until the user chooses one, it is
-    /// kept 24 hours by default. Older meetings stay until then.
+    /// kept 7 days by default. Older meetings stay until then.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub retention_applies: bool,
-    /// SHA-256 of the exported Markdown as Hex last wrote it. Expiry moves
-    /// that file to the Trash only while it still matches, so a copy the
-    /// user edited stays.
+    /// SHA-256 of the exported Markdown as Hex last wrote it, so Hex's own
+    /// rewrites know the copy is still the one it wrote.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub export_sha256: Option<String>,
     /// The notes file beside the transcript while Separate notes file
@@ -252,8 +255,8 @@ pub struct MeetingManifest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes_export_path: Option<PathBuf>,
     /// SHA-256 of the notes file as Hex last wrote it. A later notes
-    /// regeneration rewrites it only while it still matches, and expiry moves
-    /// it only then, so a copy the user edited stays.
+    /// regeneration rewrites it only while it still matches, so a copy the
+    /// user edited stays.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes_export_sha256: Option<String>,
     /// The tracked notes file was deleted outside Hex. Hex forgets its path
@@ -468,9 +471,13 @@ pub fn root() -> Result<PathBuf> {
     Ok(crate::app_paths::support_dir()?.join("meetings"))
 }
 
+/// Records a meeting until `shutdown`, then transcribes it. With `discard`
+/// set by then, it skips the final pass and returns the stopped recording
+/// for its caller to move to the Trash.
 pub fn record(
     start: MeetingStart,
     shutdown: &AtomicBool,
+    discard: Option<&AtomicBool>,
     updates: Option<SyncSender<RecordingUpdate>>,
 ) -> Result<MeetingManifest> {
     if crate::desktop::process_exit::quitting() {
@@ -575,6 +582,8 @@ pub fn record(
             sender: sender.clone(),
             drops: drops.clone(),
             clock: capture_clock,
+            // The system supervisor fills this in with its own watch.
+            system_silence: None,
         };
         // Each source recovers on its own: losing system audio (for example
         // when ScreenCaptureKit loses its display) never stops the microphone.
@@ -642,6 +651,15 @@ pub fn record(
         manifest.system = stats.system;
         manifest.microphone = stats.microphone;
         manifest.microphone.warning = microphone_warnings.persisted();
+        if discard.is_some_and(|discard| discard.load(Ordering::Relaxed)) {
+            // Discarded from its capsule: no final pass, and the caller moves
+            // the folder to the Trash once this returns and frees its lock.
+            drop(rolling.finish());
+            manifest.status = MeetingStatus::Interrupted;
+            write_manifest(&meeting_dir, &manifest)?;
+            tracing::info!(meeting = manifest.id, "meeting recording discarded");
+            return Ok(manifest);
+        }
         if crate::desktop::process_exit::quitting() && has_recorded_audio(&manifest) {
             // Final transcription would outlast quitting's drain.
             drop(rolling.finish());

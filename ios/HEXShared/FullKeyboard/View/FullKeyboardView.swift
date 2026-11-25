@@ -41,11 +41,6 @@ final class FullKeyboardView: UIView {
     let callout = KeyCalloutView()
     let accentCallout = AccentCalloutView()
     let hexKey = HexKeyControl()
-    /// A theme's own opaque panel behind every key and the strip, at the glass panel's own
-    /// frame and top corners (`KeyboardThemePanelView`): this view's own background stays
-    /// clear, since filling its whole rect would draw square corners over the app. Hidden
-    /// under Automatic, which leaves iOS's glass exactly as it was.
-    let themePanel = KeyboardThemePanelView()
     let globeButton = UIButton(type: .custom)
     /// The words' side of the soft edge the recording bar's dots come out of the Hex key behind
     /// (`StripRevealMask`); only while the bar is coming, shown, or going.
@@ -121,7 +116,7 @@ final class FullKeyboardView: UIView {
     /// Settings › Experiments › Emoji shortcodes, cached by `syncEmojiShortcodes`: the strip
     /// offers emoji for a ":name" and the closing ":" completes one while it is on.
     private(set) var emojiShortcodesEnabled = false
-    /// Settings › Experiments › Keyboard themes: Automatic keeps iOS's glass; another theme
+    /// Settings › Experiments › Key colors: Automatic keeps iOS's glass; another theme
     /// paints the keyboard's own colours. Read again by `syncSettings`, which rebuilds the
     /// palette when it changes.
     private var keyboardTheme = FullKeyboardSettings().effectiveKeyboardTheme
@@ -135,8 +130,13 @@ final class FullKeyboardView: UIView {
 
     /// The keys' target: the field, or the emoji search while you search.
     let routedTarget: EmojiRoutedTarget
-    /// Fixtures turn the emoji experiment on or off; otherwise the App Group's switch.
+    /// Fixtures turn the emoji key, and with it the emoji suggestions, on or off; otherwise the
+    /// App Group's switches.
     var emojiOverride: Bool? { didSet { refreshEmojiKey() } }
+    /// Fixtures and tests turn the emoji suggestions alone on or off.
+    var emojiSuggestionsOverride: Bool? { didSet { refreshEmojiKey() } }
+    /// The strip offers emoji here: Emoji suggestions on, in a field that takes emoji.
+    var showsEmojiSuggestions = false
     /// Fixtures and tests turn the ABC experiment on or off; otherwise the App Group's switch.
     var emojiLettersUnderEmojiKeyOverride: Bool? { didSet { setNeedsLayout() } }
     /// Where emoji use is kept; fixtures give a seeded store.
@@ -163,9 +163,6 @@ final class FullKeyboardView: UIView {
         super.init(frame: .zero)
         backgroundColor = .clear
 
-        // Under the glass panel's rim, under every key: the keys' pop-ups overflow this
-        // view, which must never clip them, so the panel is a subview, not this view's fill.
-        insertSubview(themePanel, at: 0)
         addSubview(stripView)
         addSubview(plane)
         addSubview(selectionStrip)
@@ -188,10 +185,11 @@ final class FullKeyboardView: UIView {
         stripView.onUndoDictation = { [weak self] in self?.undoDictation() }
         stripView.onPaste = { [weak self] in self?.pasteFromClipboard() }
         stripView.onOpenHexFromHint = { [weak self] in self?.openSetupFromHint() }
-        stripView.onDismissNotice = { [weak self] in self?.dismissModelNotice() }
+        stripView.onDismissNotice = { [weak self] in self?.dismissStripNotice() }
         stripView.onOpenNotice = { [weak self] in
             guard let self else { return }
             self.keyFeedback()
+            if self.dictationBlockNotice != nil { return self.model.openHexForDictationBlock() }
             if self.showsAllowPasteHint {
                 self.openPasteSettingsFromHint()
                 return
@@ -679,8 +677,7 @@ final class FullKeyboardView: UIView {
     func textDidChange() {
         applyAppearance()
         let field = engine.field
-        let route = KeyboardFieldRouting.route(for: engine.target.keyboardType)
-        let routeField: KeyboardFieldKind = if case .keys(let kind, _) = route { kind } else { .text }
+        let routeField = KeyboardFieldRouting.route(for: engine.target.keyboardType).field
         // While you search emoji the keys still type the query, whatever the host changed.
         if routedTarget.isSearching {
             refreshReturnKey()
@@ -762,8 +759,6 @@ final class FullKeyboardView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        // A theme's panel keeps the glass panel's corners, 1 pt inside its rim.
-        themePanel.place(in: bounds)
         syncPosture()
         let isLandscape = orientation == .landscape
         engine.typingLog?.viewGeometry(size: bounds.size, safeArea: safeAreaInsets)
@@ -838,12 +833,8 @@ final class FullKeyboardView: UIView {
         let isDark = appearanceOverride
             ?? FullKeyboardPalette.isDark(traits: traitCollection)
         let next = FullKeyboardPalette(isDark: isDark, theme: keyboardTheme)
-        // A theme paints its own opaque panel, so the system glass behind the keys never
-        // shows through. The panel, not this view, keeps the glass panel's corners;
-        // Automatic leaves both clear as before.
+        // iOS's glass is the background, with or without a theme: a theme colours the keys.
         backgroundColor = drawsBackdrop ? next.backdrop : .clear
-        themePanel.isHidden = !next.drawsOwnBackground
-        themePanel.backgroundColor = next.drawsOwnBackground ? next.backdrop : .clear
         stripView.inSystemPlatter = !drawsBackdrop
         guard next != palette || !didApplyPalette else { return }
         didApplyPalette = true
@@ -873,6 +864,7 @@ final class FullKeyboardView: UIView {
 
     private func refreshFromModel() {
         hexKey.isWarm = model.dictatesThroughHex
+        hexKey.opensHexToDictate = model.dictationTapOpensHex
         hexKey.translatingTo = model.translatingTo
         syncGlobe()
         let recording = model.stagePhase == .starting || model.stagePhase == .recording || model.stagePhase == .transcribing
@@ -930,7 +922,7 @@ final class FullKeyboardView: UIView {
         )
         // A dictation that didn't go in by itself comes before a copy, but not in a code field.
         if model.hasFullAccess, model.offeredDictation != nil {
-            if case .code = clipboardOffer {} else { clipboardOffer = .dictation }
+            if clipboardOffer?.leadsToAppleKeyboard != true { clipboardOffer = .dictation }
         }
         stripOffer = clipboardOffer
         var suggestions = withStripEmoji(engine.suggestions, quiet: lastDictation != nil || status != nil || clipboardOffer != nil)
@@ -949,8 +941,25 @@ final class FullKeyboardView: UIView {
             statusText: status,
             clipboard: clipboardOffer,
             fullAccessHint: showsFullAccessHint && !model.hasFullAccess,
-            notice: allowPasteNotice ?? vocabularyNotice ?? stoppedNotice ?? translationNotice ?? modelNotice
+            notice: dictationBlockNotice ?? allowPasteNotice ?? vocabularyNotice ?? stoppedNotice ?? translationNotice ?? modelNotice
         )
+    }
+
+    /// Why the Hex key can't dictate here, from iOS 26 (`KeyboardDictationBlock`): one line, Open
+    /// Hex, and ✕.
+    var dictationBlockNotice: KeyboardStripNotice? {
+        guard model.hasFullAccess, let block = model.dictationBlock else { return nil }
+        return KeyboardStripNotice(title: block.line, detail: "", button: block.opensHex ? String(localized: "Open Hex") : "", dismissible: true)
+    }
+
+    /// The notice's ✕ puts away the notice that shows.
+    func dismissStripNotice() {
+        if dictationBlockNotice != nil { return model.dismissDictationBlock() }
+        if (allowPasteNotice ?? vocabularyNotice ?? stoppedNotice) == nil, translationNotice != nil {
+            model.onDismissTranslationNote?()
+            return
+        }
+        dismissModelNotice()
     }
 
     /// A dictation the keyboard closing cut short: where it stopped, why, and Paste.
@@ -963,7 +972,7 @@ final class FullKeyboardView: UIView {
     /// the fix, and Open Hex, which opens Settings › Dictation.
     private var translationNotice: KeyboardStripNotice? {
         guard model.hasFullAccess, let note = model.translationNote else { return nil }
-        return KeyboardStripNotice(title: TranslationFailure.note, detail: note.fix, button: String(localized: "Open Hex"))
+        return KeyboardStripNotice(title: TranslationFailure.note, detail: note.fix, button: String(localized: "Open Hex"), dismissible: true)
     }
 
     func refreshRecordingPanel() {
@@ -1124,9 +1133,10 @@ final class FullKeyboardView: UIView {
             dictatingFromHexKey = true
             model.onLocalDictateTap?()
         case .needsModel, .opensHex:
-            typingLog?.ui(source, [TypingLogField("dictation", .string("open_hex"))])
+            // From iOS 26 the strip says why with Open Hex; before, Hex opens to record.
+            typingLog?.ui(source, [TypingLogField("dictation", .string(model.dictationTapOpensHex ? "open_hex" : "blocked"))])
             dictatingFromHexKey = false
-            model.onOpenURL?(model.coldStartURL)
+            model.dictateWhereUnavailable()
         }
     }
 
@@ -1260,6 +1270,11 @@ final class FullKeyboardView: UIView {
             self?.typingLog?.ui("translate", [TypingLogField("target", .string(target))])
             self?.model.onTranslationTargetSelected?(target)
             self?.dismissStyleMenu()
+        }
+        menu.onOpenHex = { [weak self] in
+            self?.typingLog?.ui("open_hex", [TypingLogField("from", .string("hex_menu"))])
+            self?.dismissStyleMenu()
+            self?.model.onOpenURL?(KeyboardLaunchRequest.home.url)
         }
         menu.onStyle = { [weak self] style in
             self?.typingLog?.ui("style", [

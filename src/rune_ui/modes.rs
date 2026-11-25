@@ -408,6 +408,28 @@ impl ModesPane {
         self.icon(&crate::application_catalog::find(applications, id)?.path)
     }
 
+    /// The display name for an application by its bundle ID or executable.
+    #[cfg(hex_capture)]
+    pub(super) fn app_name(&self, id: &str) -> Option<&str> {
+        let Applications::Loaded(applications) = &self.applications else {
+            return None;
+        };
+        Some(
+            crate::application_catalog::find(applications, id)?
+                .name
+                .as_str(),
+        )
+    }
+
+    /// Installed applications once loaded, or empty while loading.
+    #[cfg(hex_capture)]
+    pub(super) fn loaded_applications(&self) -> &[InstalledApplication] {
+        match &self.applications {
+            Applications::Loaded(applications) => applications,
+            _ => &[],
+        }
+    }
+
     pub(super) fn ensure_applications(&mut self) {
         if matches!(self.applications, Applications::NotLoaded) {
             let (sender, receiver) = sync_channel(1);

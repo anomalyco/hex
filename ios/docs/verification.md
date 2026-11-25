@@ -107,7 +107,20 @@ What the simulator proves and what only a physical iPhone can.
   QWERTZ rows and held vowels, typing through them in a `FullKeyboardView`, and its accent
   fixes are unit tests too (`testHungariansRowsAndHoldMatchItsLayout`,
   `testHungarianTypesAndSwitches`, `testHungarianRestoresMissingDiacritics`); no
-  simulator or iPhone typed on its keys for this change. Checked live in
+  simulator or iPhone typed on its keys for this change. Swedish's keys, holds and quotes
+  were read from Apple's Swedish keyboard on iOS 26.5 and 27.2 simulators (the capture tool's
+  geometry, every key held, the quote keys typed), its `sv_SE` dictionary probed on both (it
+  rejects gibberish and offers the marked spelling for a word typed without å ä ö), and they
+  are unit-tested (`testLetterRowsMatchApplesLayouts`, `testAccentsMatchEachLanguage`,
+  `testTypesOnTheSwedishLayout`, `testSmartQuotesFollowTheKeysLanguage`,
+  `testSwedishUsesTheIPhonesDictionaryAndNeverAnotherLanguages`). Slovak's keys, holds and typing
+  rules were read from Apple's Slovak keyboard on iOS 26.5 and 27.2 simulators (the capture
+  tool's geometry, real-touch key sequences, every key held and screenshotted), and are
+  unit-tested (`testCzechsRowsAndPagesMatchApples`, `testSlovakTypesOnCzechKeys`,
+  `testSlovakFollowsCzechAndGuessesNothingWithoutADictionary`). Dutch's rows, Apple's holds
+  (from the runtime's Keyboard-nl.plist), typing ë ï and j́ through a `FullKeyboardView`
+  and its diaeresis fixes are unit tests too (`testLetterRowsMatchApplesLayouts`,
+  `testDutchTypesAndSwitches`, `testDutchRestoresAMissingDiaeresis`). Checked live in
   Messages in the simulator (English, Français, Русский). Memory (Release, iPhone 17 Pro
   simulator, iOS 27.2, Full Access, three runs, `footprint` after typing a sentence): Français
   alone 28.7–28.8 MB, with English beside it 29.7–29.9 MB; English alone 28.9–29.9 MB, with
@@ -123,8 +136,8 @@ What the simulator proves and what only a physical iPhone can.
   hide-keyboard key, targets); `AutocorrectEngineTests` and
   `FullKeyboardEngineTests` check typing, dictionaries and English-only fixes.
   Whether the simulator or an iPhone has a `UITextChecker` dictionary for
-  `nb` decides Norwegian autocorrect; how good those corrections are is
-  unmeasured.
+  `nb` decides Norwegian autocorrect, and `sv` Swedish's; how good those corrections are is
+  unmeasured beyond the simulator's words in the Swedish pull request.
 - **Learn how I type:** Dictation edit inference (span location, word diff,
   outcomes, the learning threshold, and applying fixes) is covered by unit
   tests only. How much `documentContextBeforeInput` and

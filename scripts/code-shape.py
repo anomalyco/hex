@@ -6,9 +6,13 @@ Rules:
   - Prefix families (x.rs or x/ beside 2+ x_*.rs siblings, or 3+ x_*.rs alone;
     same for x-*.ts) fail and belong in x/.
   - Folders warn above 40 non-test source files and fail above 60.
+  - Design tokens in src/rune_ui/ (outside tests, onboarding, and playgrounds):
+    no TextStyle::new(, .mono(), or local PADDING/MODAL_WIDTH/STATS_WIDTH
+    outside controls; no literal .radius(>= 3); no off-scale spacing literals.
 
-Existing violations live in scripts/file-size-exceptions.txt and
-scripts/folder-shape-exceptions.txt with ceilings that only ratchet down.
+Existing violations live in scripts/file-size-exceptions.txt,
+scripts/folder-shape-exceptions.txt, and scripts/design-token-exceptions.txt
+with ceilings that only ratchet down.
 
 Usage:
   python3 scripts/code-shape.py [--check] [--warn-only] [--update-exceptions [--allow-raise]]
@@ -31,6 +35,25 @@ FOLDER_FAIL = 60
 
 SIZE_EXC = "scripts/file-size-exceptions.txt"
 FOLDER_EXC = "scripts/folder-shape-exceptions.txt"
+DESIGN_EXC = "scripts/design-token-exceptions.txt"
+
+DESIGN_SKIP_RE = re.compile(
+    r"(^|/)(tests?|onboarding_kit|playground)/|"
+    r"(_tests?\.rs$|/tests?\.rs$|/onboarding\.rs$|/scenes\.rs$|"
+    r"/hud_lab\.rs$|/hud_stories\.rs$|/playground\.rs$|"
+    r"/replay_fixture\.rs$|/editor\.rs$)"
+)
+DESIGN_CONTROLS_RE = re.compile(r"^src/rune_ui/controls(\.rs|/)")
+DESIGN_TEXT_STYLE_RE = re.compile(r"TextStyle::new\(")
+DESIGN_MONO_RE = re.compile(r"\.mono\(\)")
+DESIGN_CONST_RE = re.compile(r"\bconst\s+(PADDING|MODAL_WIDTH|STATS_WIDTH)\b")
+DESIGN_RADIUS_RE = re.compile(r"\.radius\(\s*(\d+(?:\.\d+)?)\s*\)")
+DESIGN_SPACING_RE = re.compile(
+    r"\.(?:px|py|pt|pb|pl|pr|padding|gap|mx|my|mt|mb|ml|mr)\(\s*-?(\d+(?:\.\d+)?)\s*\)"
+)
+SPACING_SCALE = frozenset(
+    {0.0, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0, 20.0, 24.0, 32.0, 40.0, 48.0}
+)
 
 SOURCE_RE = re.compile(r"\.(rs|tsx?|swift)$")
 SKIPPED_RE = re.compile(
@@ -64,7 +87,67 @@ class ShapeReport:
     tests: list[Offender]
     families: list[Offender]
     folders: list[Offender]
+    tokens: list[Offender]
     excepted: int
+
+
+def is_design_checked(path: str) -> bool:
+    return (
+        path.startswith("src/rune_ui/")
+        and path.endswith(".rs")
+        and not is_test(path)
+        and not bool(DESIGN_SKIP_RE.search(path))
+    )
+
+
+def non_test_rust_lines(text: str) -> list[str]:
+    lines = [line.rstrip("\r") for line in text.split("\n")]
+    if lines and lines[-1] == "":
+        lines.pop()
+    out: list[str] = []
+    state = 0
+    depth = 0
+    for line in lines:
+        if state == 0:
+            if CFG_TEST_RE.match(line):
+                state = 1
+            else:
+                out.append(line)
+            continue
+        if state == 1:
+            if ATTR_RE.match(line):
+                continue
+            d = braces(line)
+            if d > 0 or "{" in line:
+                depth = d
+                state = 2 if depth > 0 else 0
+            elif SEMI_END_RE.search(line):
+                state = 0
+            continue
+        depth += braces(line)
+        if depth <= 0:
+            state = 0
+    return out
+
+
+def count_design_token_violations(path: str, text: str) -> int:
+    if not is_design_checked(path):
+        return 0
+    is_controls = bool(DESIGN_CONTROLS_RE.search(path))
+    count = 0
+    for line in non_test_rust_lines(text):
+        code = re.sub(r"//.*", "", line)
+        if not is_controls:
+            count += len(DESIGN_TEXT_STYLE_RE.findall(code))
+            count += len(DESIGN_MONO_RE.findall(code))
+            count += len(DESIGN_CONST_RE.findall(code))
+        for m in DESIGN_RADIUS_RE.finditer(code):
+            if float(m.group(1)) >= 3.0:
+                count += 1
+        for m in DESIGN_SPACING_RE.finditer(code):
+            if float(m.group(1)) not in SPACING_SCALE:
+                count += 1
+    return count
 
 
 def is_source(path: str) -> bool:
@@ -223,6 +306,7 @@ def code_shape(
     files: list[str],
     lines_map: dict[str, tuple[int, int]],
     configs: dict[str, str],
+    design_map: dict[str, int] | None = None,
 ) -> ShapeReport:
     sources = [p for p in files if is_source(p)]
     code = [p for p in sources if not is_test(p)]
@@ -231,6 +315,7 @@ def code_shape(
         WILDCARD_SUFFIX_RE.sub("", path): ceiling
         for path, ceiling in parse_exceptions(configs.get(FOLDER_EXC, ""))
     }
+    design_exc = dict(parse_exceptions(configs.get(DESIGN_EXC, "")))
 
     excepted = 0
 
@@ -305,12 +390,18 @@ def code_shape(
             sep = "_" if lang == "rs" else "-"
             family_offenders.append(Offender(f"{base}{sep}*", count, True))
 
+    token_offenders: list[Offender] = []
+    for path, count in (design_map or {}).items():
+        if count > 0 and not allowed(design_exc, path, count):
+            token_offenders.append(Offender(path, count, True))
+
     return ShapeReport(
         sources=len(sources),
         files=sort_offenders(file_offenders),
         tests=sort_offenders(test_offenders),
         families=sort_offenders(family_offenders),
         folders=sort_offenders(folder_offenders),
+        tokens=sort_offenders(token_offenders),
         excepted=excepted,
     )
 
@@ -347,6 +438,11 @@ def hard_summary(report: ShapeReport) -> str | None:
         parts.append(
             f"{plural(len(folders), 'folder')} over {FOLDER_FAIL} files "
             f"{worst(folders, lambda o: f'{o.path} {o.count}')}"
+        )
+    if report.tokens:
+        parts.append(
+            f"{plural(len(report.tokens), 'file')} with design-token violations "
+            f"{worst(report.tokens, lambda o: f'{o.path} ×{o.count}')}"
         )
     return "; ".join(parts) if parts else None
 
@@ -396,6 +492,11 @@ def format_report(report: ShapeReport) -> str:
         f"Folders (warn over {FOLDER_WARN} non-test sources, fail over {FOLDER_FAIL})",
         report.folders,
         "files",
+    )
+    section(
+        "Design tokens (use METRICS, MODAL, CAPSULE, and Paint helpers)",
+        report.tokens,
+        "violations",
     )
     return "\n".join(out)
 
@@ -456,13 +557,19 @@ def main(argv: list[str]) -> int:
 
     files = tracked_files(root)
     lines_map: dict[str, tuple[int, int]] = {}
+    design_map: dict[str, int] = {}
     for path in files:
         if is_source(path) and os.path.exists(path):
             with open(path, encoding="utf-8", errors="replace") as fh:
-                lines_map[path] = measure(path, fh.read())
+                text = fh.read()
+            lines_map[path] = measure(path, text)
+            if is_design_checked(path):
+                count = count_design_token_violations(path, text)
+                if count > 0:
+                    design_map[path] = count
 
     configs: dict[str, str] = {}
-    for cfg in (SIZE_EXC, FOLDER_EXC):
+    for cfg in (SIZE_EXC, FOLDER_EXC, DESIGN_EXC):
         if os.path.exists(cfg):
             with open(cfg, encoding="utf-8") as fh:
                 configs[cfg] = fh.read()
@@ -471,6 +578,7 @@ def main(argv: list[str]) -> int:
         size_v, folder_v = collect_raw_violations(files, lines_map)
         size_existing = dict(parse_exceptions(configs.get(SIZE_EXC, "")))
         folder_existing = dict(parse_exceptions(configs.get(FOLDER_EXC, "")))
+        design_existing = dict(parse_exceptions(configs.get(DESIGN_EXC, "")))
         n_size = write_ratcheted(
             SIZE_EXC,
             [
@@ -491,10 +599,22 @@ def main(argv: list[str]) -> int:
             folder_existing,
             allow_raise,
         )
-        print(f"wrote {SIZE_EXC} ({n_size} entries), {FOLDER_EXC} ({n_folder} entries)")
+        n_design = write_ratcheted(
+            DESIGN_EXC,
+            [
+                "# <path> <ceiling>: existing design-token violations in src/rune_ui/ (see scripts/code-shape.py). Ceilings only go down.",
+                "# Refresh with python3 scripts/code-shape.py --update-exceptions.",
+            ],
+            design_map,
+            design_existing,
+            allow_raise,
+        )
+        print(
+            f"wrote {SIZE_EXC} ({n_size} entries), {FOLDER_EXC} ({n_folder} entries), {DESIGN_EXC} ({n_design} entries)"
+        )
         return 0
 
-    report = code_shape(files, lines_map, configs)
+    report = code_shape(files, lines_map, configs, design_map)
     print(format_report(report))
     if warn_only or hard_summary(report) is None:
         return 0

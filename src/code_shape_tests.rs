@@ -6,6 +6,24 @@ const FILE_FAIL: usize = 1500;
 const FOLDER_FAIL: usize = 60;
 const SIZE_EXC: &str = "scripts/file-size-exceptions.txt";
 const FOLDER_EXC: &str = "scripts/folder-shape-exceptions.txt";
+const DESIGN_EXC: &str = "scripts/design-token-exceptions.txt";
+
+const DESIGN_SKIP_DIRS: &[&str] = &["onboarding_kit", "playground"];
+const DESIGN_SKIP_FILES: &[&str] = &[
+    "onboarding.rs",
+    "scenes.rs",
+    "hud_lab.rs",
+    "hud_stories.rs",
+    "playground.rs",
+    "replay_fixture.rs",
+    "editor.rs",
+];
+const SPACING_METHODS: &[&str] = &[
+    "px", "py", "pt", "pb", "pl", "pr", "padding", "gap", "mx", "my", "mt", "mb", "ml", "mr",
+];
+const SPACING_SCALE: &[f64] = &[
+    0.0, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0, 20.0, 24.0, 32.0, 40.0, 48.0,
+];
 
 const SKIPPED_DIRS: &[&str] = &[
     "node_modules",
@@ -199,6 +217,173 @@ fn parse_exceptions(text: &str, strip_wildcard: bool) -> HashMap<String, Option<
     out
 }
 
+fn is_design_checked(path: &str) -> bool {
+    if !path.starts_with("src/rune_ui/") || !path.ends_with(".rs") || is_test(path) {
+        return false;
+    }
+    let name = path.rsplit('/').next().unwrap_or(path);
+    if DESIGN_SKIP_FILES.contains(&name) {
+        return false;
+    }
+    !path
+        .split('/')
+        .rev()
+        .skip(1)
+        .any(|seg| DESIGN_SKIP_DIRS.contains(&seg))
+}
+
+fn is_design_controls(path: &str) -> bool {
+    path == "src/rune_ui/controls.rs" || path.starts_with("src/rune_ui/controls/")
+}
+
+fn non_test_rust_lines(text: &str) -> Vec<&str> {
+    let mut lines: Vec<&str> = text
+        .split('\n')
+        .map(|l| l.strip_suffix('\r').unwrap_or(l))
+        .collect();
+    if lines.last() == Some(&"") {
+        lines.pop();
+    }
+    let mut out = Vec::with_capacity(lines.len());
+    let mut state = 0_u8;
+    let mut depth = 0_isize;
+    for line in lines {
+        let trimmed = line.trim_start();
+        if state == 0 {
+            if trimmed.starts_with("#[cfg(test)]") {
+                state = 1;
+            } else {
+                out.push(line);
+            }
+            continue;
+        }
+        if state == 1 {
+            if trimmed.starts_with("#[") {
+                continue;
+            }
+            let d = braces(line);
+            if d > 0 || line.contains('{') {
+                depth = d;
+                state = if depth > 0 { 2 } else { 0 };
+            } else if line.trim_end().ends_with(';') {
+                state = 0;
+            }
+            continue;
+        }
+        depth += braces(line);
+        if depth <= 0 {
+            state = 0;
+        }
+    }
+    out
+}
+
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+fn parse_single_number_arg(after_paren: &str, allow_neg: bool) -> Option<f64> {
+    let mut s = after_paren.trim_start();
+    if allow_neg && let Some(rest) = s.strip_prefix('-') {
+        s = rest;
+    }
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i == 0 {
+        return None;
+    }
+    if i < bytes.len() && bytes[i] == b'.' {
+        let after_dot = i + 1;
+        let mut j = after_dot;
+        while j < bytes.len() && bytes[j].is_ascii_digit() {
+            j += 1;
+        }
+        if j > after_dot {
+            i = j;
+        }
+    }
+    let rest = s[i..].trim_start();
+    if !rest.starts_with(')') {
+        return None;
+    }
+    s[..i].parse::<f64>().ok()
+}
+
+fn count_banned_consts(code: &str) -> usize {
+    let bytes = code.as_bytes();
+    let mut count = 0;
+    let mut pos = 0;
+    while let Some(rel) = code[pos..].find("const") {
+        let start = pos + rel;
+        let after = start + "const".len();
+        pos = after;
+        if start > 0 && is_ident_byte(bytes[start - 1]) {
+            continue;
+        }
+        if after >= bytes.len() || !bytes[after].is_ascii_whitespace() {
+            continue;
+        }
+        let rest = code[after..].trim_start();
+        for name in ["PADDING", "MODAL_WIDTH", "STATS_WIDTH"] {
+            if let Some(tail) = rest.strip_prefix(name)
+                && tail.as_bytes().first().is_none_or(|&b| !is_ident_byte(b))
+            {
+                count += 1;
+                break;
+            }
+        }
+    }
+    count
+}
+
+fn count_design_token_violations(path: &str, text: &str) -> usize {
+    if !is_design_checked(path) {
+        return 0;
+    }
+    let controls = is_design_controls(path);
+    let mut count = 0;
+    for line in non_test_rust_lines(text) {
+        let code = line.split("//").next().unwrap_or("");
+        if !controls {
+            count += code.matches("TextStyle::new(").count();
+            count += code.matches(".mono()").count();
+            count += count_banned_consts(code);
+        }
+        let bytes = code.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'.' {
+                let name_start = i + 1;
+                let mut name_end = name_start;
+                while name_end < bytes.len() && is_ident_byte(bytes[name_end]) {
+                    name_end += 1;
+                }
+                if name_end < bytes.len() && bytes[name_end] == b'(' {
+                    let method = &code[name_start..name_end];
+                    let after_paren = &code[name_end + 1..];
+                    if method == "radius" {
+                        if let Some(val) = parse_single_number_arg(after_paren, false)
+                            && val >= 3.0
+                        {
+                            count += 1;
+                        }
+                    } else if SPACING_METHODS.contains(&method)
+                        && let Some(val) = parse_single_number_arg(after_paren, true)
+                        && !SPACING_SCALE.contains(&val)
+                    {
+                        count += 1;
+                    }
+                }
+            }
+            i += 1;
+        }
+    }
+    count
+}
+
 fn dir_of(path: &str) -> &str {
     match path.rfind('/') {
         Some(idx) => &path[..idx],
@@ -209,8 +394,10 @@ fn dir_of(path: &str) -> &str {
 fn check_hard_violations(
     files: &[String],
     code_lines: &HashMap<String, usize>,
+    design_violations: &HashMap<String, usize>,
     size_exc_text: &str,
     folder_exc_text: &str,
+    design_exc_text: &str,
 ) -> Vec<String> {
     let sources: Vec<&str> = files
         .iter()
@@ -220,6 +407,7 @@ fn check_hard_violations(
     let code: Vec<&str> = sources.iter().copied().filter(|p| !is_test(p)).collect();
     let size_exc = parse_exceptions(size_exc_text, false);
     let folder_exc = parse_exceptions(folder_exc_text, true);
+    let design_exc = parse_exceptions(design_exc_text, false);
 
     let allowed = |exc: &HashMap<String, Option<usize>>, key: &str, count: usize| -> bool {
         match exc.get(key) {
@@ -317,6 +505,18 @@ fn check_hard_violations(
         }
     }
 
+    let mut design_paths: Vec<&String> = design_violations.keys().collect();
+    design_paths.sort();
+    for path in design_paths {
+        let count = design_violations[path];
+        if count > 0 && !allowed(&design_exc, path, count) {
+            let limit = design_exc.get(path).and_then(|c| *c).unwrap_or(0);
+            failures.push(format!(
+                "design-token violations: {path} has {count} (limit {limit})"
+            ));
+        }
+    }
+
     failures
 }
 
@@ -346,18 +546,33 @@ fn repo_satisfies_code_shape() {
         .collect();
 
     let mut code_lines = HashMap::new();
+    let mut design_violations = HashMap::new();
     for path in &files {
         if is_source(path)
             && let Ok(bytes) = fs::read(root.join(path))
         {
             let text = String::from_utf8_lossy(&bytes);
             code_lines.insert(path.clone(), measure_code_lines(path, &text));
+            if is_design_checked(path) {
+                let count = count_design_token_violations(path, &text);
+                if count > 0 {
+                    design_violations.insert(path.clone(), count);
+                }
+            }
         }
     }
 
     let size_exc = fs::read_to_string(root.join(SIZE_EXC)).unwrap_or_default();
     let folder_exc = fs::read_to_string(root.join(FOLDER_EXC)).unwrap_or_default();
-    let failures = check_hard_violations(&files, &code_lines, &size_exc, &folder_exc);
+    let design_exc = fs::read_to_string(root.join(DESIGN_EXC)).unwrap_or_default();
+    let failures = check_hard_violations(
+        &files,
+        &code_lines,
+        &design_violations,
+        &size_exc,
+        &folder_exc,
+        &design_exc,
+    );
     assert!(
         failures.is_empty(),
         "code-shape check failed (run `python3 scripts/code-shape.py --check`):\n  {}",
@@ -403,12 +618,96 @@ fn prefix_families_and_size_ceilings_are_enforced() {
     lines.insert("src/foo_two.rs".to_owned(), 20);
     lines.insert("src/big.rs".to_owned(), 1600);
 
-    let failures = check_hard_violations(&files, &lines, "", "");
+    let empty_design = HashMap::new();
+    let failures = check_hard_violations(&files, &lines, &empty_design, "", "", "");
     assert_eq!(failures.len(), 2, "{failures:?}");
 
-    let allowed = check_hard_violations(&files, &lines, "src/big.rs 1600\n", "src/foo_* 2\n");
+    let allowed = check_hard_violations(
+        &files,
+        &lines,
+        &empty_design,
+        "src/big.rs 1600\n",
+        "src/foo_* 2\n",
+        "",
+    );
     assert!(allowed.is_empty(), "{allowed:?}");
 
-    let exceeded = check_hard_violations(&files, &lines, "src/big.rs 1599\n", "src/foo_* 1\n");
+    let exceeded = check_hard_violations(
+        &files,
+        &lines,
+        &empty_design,
+        "src/big.rs 1599\n",
+        "src/foo_* 1\n",
+        "",
+    );
     assert_eq!(exceeded.len(), 2, "{exceeded:?}");
+}
+
+#[test]
+fn design_token_violations_and_ceilings_are_enforced() {
+    let sample = "\
+const PADDING: f32 = 18.0;
+const MODAL_WIDTH: f32 = 460.0;
+fn view() {
+    let _ = TextStyle::new(13.0, 500.0).mono();
+    // comment .radius(12.0) .gap(14.0)
+    let _ = col().gap(14.0).px(16.0).radius(8.0).radius(2.0);
+}
+#[cfg(test)]
+mod tests {
+    const STATS_WIDTH: f32 = 460.0;
+    fn t() { let _ = col().gap(14.0).radius(12.0); }
+}
+";
+    // 2 consts + TextStyle::new + .mono() + .gap(14.0) + .radius(8.0) = 6
+    assert_eq!(
+        count_design_token_violations("src/rune_ui/example.rs", sample),
+        6
+    );
+    // controls.rs exempts TextStyle::new, .mono(), and const names; keeps spacing + radius = 2
+    assert_eq!(
+        count_design_token_violations("src/rune_ui/controls.rs", sample),
+        2
+    );
+    // onboarding and tests are skipped entirely
+    assert_eq!(
+        count_design_token_violations("src/rune_ui/onboarding_kit/foo.rs", sample),
+        0
+    );
+    assert_eq!(
+        count_design_token_violations("src/rune_ui/example_tests.rs", sample),
+        0
+    );
+
+    let files = vec!["src/rune_ui/example.rs".to_owned()];
+    let lines = HashMap::from([("src/rune_ui/example.rs".to_owned(), 20)]);
+    let design = HashMap::from([("src/rune_ui/example.rs".to_owned(), 6)]);
+
+    assert_eq!(
+        check_hard_violations(&files, &lines, &design, "", "", "").len(),
+        1
+    );
+    assert!(
+        check_hard_violations(
+            &files,
+            &lines,
+            &design,
+            "",
+            "",
+            "src/rune_ui/example.rs 6\n"
+        )
+        .is_empty()
+    );
+    assert_eq!(
+        check_hard_violations(
+            &files,
+            &lines,
+            &design,
+            "",
+            "",
+            "src/rune_ui/example.rs 5\n"
+        )
+        .len(),
+        1
+    );
 }

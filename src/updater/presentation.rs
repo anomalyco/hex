@@ -3,6 +3,8 @@
 
 use crate::app_settings::UpdateChannel;
 use crate::desktop::host::{DesktopAction, DesktopUpdateStatus};
+#[cfg(any(target_os = "macos", test))]
+use crate::desktop::i18n::menu_label;
 use crate::desktop::i18n::{tr, tr_named};
 
 /// Why Restart to update waits while a meeting is active: relaunching would
@@ -29,6 +31,7 @@ pub(crate) struct UpdateOffer {
 
 impl UpdateOffer {
     /// Whether a recording meeting currently blocks this offer.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub(crate) fn is_held(&self, meeting_recording: bool) -> bool {
         meeting_recording && self.held_by_meeting
     }
@@ -47,24 +50,45 @@ fn switch_label(channel: &str, version: &str) -> String {
     )
 }
 
+/// Whether `status`'s offer must wait while a meeting is recording.
+/// Exhaustive over [`DesktopUpdateStatus`] so new variants cannot silently
+/// drift across surfaces.
+const fn held_by_meeting(status: &DesktopUpdateStatus) -> bool {
+    match status {
+        DesktopUpdateStatus::ReadyToRestart => true,
+        DesktopUpdateStatus::Available
+        | DesktopUpdateStatus::SwitchAvailable { .. }
+        | DesktopUpdateStatus::Unavailable
+        | DesktopUpdateStatus::Managed
+        | DesktopUpdateStatus::Checking
+        | DesktopUpdateStatus::Current
+        | DesktopUpdateStatus::Failed
+        | DesktopUpdateStatus::Downloading
+        | DesktopUpdateStatus::SourceBuild
+        | DesktopUpdateStatus::PackageManager
+        | DesktopUpdateStatus::PackageUpdate { .. } => false,
+    }
+}
+
 /// The actionable update offer for `status`, if one is waiting for the user.
 /// Exhaustive over [`DesktopUpdateStatus`] so new variants cannot silently
 /// drift across surfaces.
 pub(crate) fn offer(status: &DesktopUpdateStatus) -> Option<UpdateOffer> {
+    let held_by_meeting = held_by_meeting(status);
     match status {
         DesktopUpdateStatus::ReadyToRestart => Some(UpdateOffer {
             label: tr("Restart to update").to_owned(),
             #[cfg(any(target_os = "macos", test))]
-            menu_title: macos_menu_label("Restart to Update", tr("Restart to update")),
+            menu_title: menu_label("Restart to Update", tr("Restart to update")),
             action: DesktopAction::RestartIntoUpdate,
-            held_by_meeting: true,
+            held_by_meeting,
         }),
         DesktopUpdateStatus::Available => Some(UpdateOffer {
             label: tr("Download update").to_owned(),
             #[cfg(any(target_os = "macos", test))]
-            menu_title: macos_menu_label("Download Update…", tr("Download update")),
+            menu_title: menu_label("Download Update…", tr("Download update")),
             action: DesktopAction::OpenUpdate,
-            held_by_meeting: false,
+            held_by_meeting,
         }),
         DesktopUpdateStatus::SwitchAvailable { channel, version } => {
             let label = switch_label(channel, version);
@@ -75,7 +99,7 @@ pub(crate) fn offer(status: &DesktopUpdateStatus) -> Option<UpdateOffer> {
                 #[cfg(any(target_os = "macos", test))]
                 menu_title,
                 action: DesktopAction::ConfirmUpdateSwitch,
-                held_by_meeting: false,
+                held_by_meeting,
             })
         }
         DesktopUpdateStatus::Unavailable
@@ -95,9 +119,7 @@ pub(crate) fn offer_hold(
     status: &DesktopUpdateStatus,
     meeting_recording: bool,
 ) -> Option<&'static str> {
-    offer(status)
-        .is_some_and(|offer| offer.is_held(meeting_recording))
-        .then_some(MEETING_RESTART_HOLD)
+    (meeting_recording && held_by_meeting(status)).then_some(MEETING_RESTART_HOLD)
 }
 
 /// The macOS menu-bar title for `status`: the active offer's menu title, or
@@ -105,7 +127,7 @@ pub(crate) fn offer_hold(
 #[cfg(any(target_os = "macos", test))]
 pub(crate) fn menu_title(status: &DesktopUpdateStatus) -> String {
     offer(status).map_or_else(
-        || macos_menu_label("Check for Updates…", tr("Check for updates")),
+        || menu_label("Check for Updates…", tr("Check for updates")),
         |offer| offer.menu_title,
     )
 }
@@ -114,17 +136,6 @@ pub(crate) fn menu_title(status: &DesktopUpdateStatus) -> String {
 #[cfg(any(target_os = "macos", test))]
 pub(crate) fn menu_action(status: &DesktopUpdateStatus) -> DesktopAction {
     offer(status).map_or(DesktopAction::CheckForUpdates, |offer| offer.action)
-}
-
-#[cfg(any(target_os = "macos", test))]
-fn macos_menu_label(english_title: &str, translated: &str) -> String {
-    if crate::desktop::i18n::english() {
-        return english_title.into();
-    }
-    match english_title.strip_suffix('…') {
-        Some(_) if !translated.ends_with('…') => format!("{translated}…"),
-        _ => translated.into(),
-    }
 }
 
 #[cfg(test)]

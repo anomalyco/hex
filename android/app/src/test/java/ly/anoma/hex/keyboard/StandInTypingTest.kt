@@ -13,8 +13,8 @@ import ly.anoma.hex.typing.Suggestion
 import ly.anoma.hex.typing.TypingModel
 import ly.anoma.hex.typing.TypingWord
 
-/** English's word list standing in for a dictation language with no model of its own (Português, Nederlands,
- * Polski, Русский): your personal dictionary and its replacements stay, English's words do not. */
+/** English's word list standing in for a dictation language with no model of its own (Nederlands, Polski,
+ * Русский): your personal dictionary and its replacements stay, English's words do not. */
 class StandInTypingTest {
     private fun word(standIn: Boolean = false): TypingWord {
         val model = TypingModel.file(File("src/main/assets/typing/en.hextm"), "en")
@@ -64,6 +64,8 @@ class StandInTypingTest {
         standIn.type("dont")
         assertNull(standIn.replacement())
         assertNull(standIn.finish(' '))
+        // Nor does a mark, from the letters or the ?123 page (Русский, Polski, Nederlands, Português: #2603).
+        for (mark in ",.!?;:)\"") { standIn.reset(); standIn.type("teh"); assertNull("$mark", standIn.finish(mark)) }
         // Nothing changes what you typed on space or a mark, your own spellings included.
         standIn.reset(); standIn.type("zorbex")
         assertNull(standIn.replacement())

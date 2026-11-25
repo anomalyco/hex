@@ -204,7 +204,7 @@ On Linux                                 // capture.linux
 │   each with Hex's own Ctrl+V (linux/paste). An app that takes no image (a
 │   terminal) gets only the summary, which names the contact sheet; the Mac
 │   pastes a terminal the sheet's path instead
-├── Finished capsule -> "Annotation" with Paste and, if there are destinations, Send to…;
+├── Finished capsule -> "Annotation copied" with Paste and, if there are destinations, Send to…;
 │   unlike the Mac, a guess doesn't open its suggestions by itself
 │   (Flow::suggesting_on_route(false)): Send to… is a click away
 ├── Shortcuts -> F9 (tap to start and stop, hold to draw) through the
@@ -294,12 +294,23 @@ On Windows                               // capture.windows
 │   a dictation records, Escape cancels that first, as it does everywhere on
 │   Windows, so it never reaches the search. Check:
 │   `windows::input::capsule`'s mapping tests; not observed on a Windows PC
-└── Gaps: no `hex annotate` (Windows has no control transport yet), no
-    iPhone, keys pressed in the app are not logged. Checked only by
+├── CLI -> `hex annotate` (start, stop, cancel, toggle, status, list, show,
+│   send, undo, route) runs through the running Hex's `/control` endpoint
+│   (`WindowsControl::annotate`); `inspect`, `zoom`, `frames`, and `skill` run
+│   directly in the CLI process
+└── Gaps: no iPhone, keys pressed in the app are not logged. Checked only by
     cross-compiling (`cargo xwin clippy`, x86_64 and aarch64); never run on
     a Windows machine
 
-Settings › Annotate                      // capture.pane
+Annotate pane                            // capture.pane
+├── Header switch: `Annotations | Settings` (`Captures | Settings` while Labs ›
+│   Screenshots is on; hidden while both Annotate and Screenshots are off),
+│   matching Meetings' `Recordings | Settings` segmented switch. There is no
+│   separate Captures sidebar item
+│   ├── Annotations / Captures tab -> past annotations (and Screenshots shots /
+│   │   recordings while that Lab is on) from the last 30 days, searchable with
+│   │   Copy, Show in Finder, and two-step Move to Trash (rune_ui::captures)
+│   └── Settings tab ->
 ├── Annotate (capture.enabled, default on) -> off: no host, shortcut,
 │   input, retention, or folder, and the pane shows only the top card. On
 │   (with shortcuts), its second line names the bound shortcut ("Tap ⌥⇧S,
@@ -347,6 +358,10 @@ Settings › Annotate                      // capture.pane
 │   │   windows and a recording capture
 │   └── Replay last 15 s (capture.replay_hotkey, when Labs › Annotate last
 │       15 seconds is on)
+├── macOS menu bar (`macos_rune/status_item.rs`) -> `Annotate` (showing the
+│   saved shortcut, e.g. `⌥⇧S`, or `Stop Annotating` while recording) beside
+│   Paste Last Dictation whenever `capture.enabled` is on and Scrawl.app is not
+│   running; clicking toggles recording just like `hex annotate toggle`
 ├── Scrawl.app running -> "Scrawl is running" card + Use Hex for captures
 │   └── Click -> asks Scrawl to quit (nothing else quits it); Hex takes the
 │       shortcut within 2 s of Scrawl leaving
@@ -514,12 +529,13 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   recording still shows, but never over a newer recording, and a capture
 │   already under way that fails in the background never takes it over
 ├── Permission helper (capture.permission) -> "Hex needs Screen Recording ·
-│   to see your screen · Allow ✕" (Microphone, Accessibility alike)
+│   Allow ✕" (Microphone adds "to hear you", Accessibility "to follow your clicks")
 │   ├── Allow -> macOS's microphone prompt, else System Settings with the
 │   │   floating guide beside it (permission_guide), never at launch
 │   ├── Followed once a second (feed::watch_grant, screen_access_watched) ->
-│   │   "… is on · Restart Hex" when macOS needs one, then "… is on ·
-│   │   Capture ⌥⇧S"; Capture or the shortcut records the pointer's display
+│   │   "… allowed · restart Hex to start annotating · Restart Hex" when macOS
+│   │   needs one, then "… is on · Annotate ⌥⇧S"; Annotate or the shortcut
+│   │   records the pointer's display
 │   ├── ✕ closes it; unanswered it folds after 2 min; the shortcut brings it
 │   │   back as it stood
 │   ├── A capture written with no frames -> sent with only the voice and
@@ -557,12 +573,13 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 ├── Routing (Scrawl's routing.md) -> `last.route` once its answer arrives; the
 │   capsule follows refinements and delivery separately, including Queued
 │   (then Sent), how an Undo ended, and a failed send
-│   ├── A saved rule -> "Sending to X" and Undo, whose ring drains through the
-│   │   Undo window (5 s) and is gone when Undo is; no words count it down.
-│   │   A repository awaiting its session shows the repository name. Undo
-│   │   cancels before posting. The capsule remains visible until delivery;
-│   │   then it reads "Sent to X" and plays the Sent tone. A picked send still
-│   │   goes immediately, with the same ring on its Undo. No runner-up chip for a rule;
+│   ├── A saved rule or confident Jev pick (when `Auto-send with Jev` is on) ->
+│   │   "Sending to X" in primary ink, subtle muted provenance ("Rule" or "Jev"),
+│   │   and Undo whose ring drains through the 3 s hold (`SEND_HOLD`) and is gone
+│   │   when Undo is; no words count it down. A repository awaiting its session
+│   │   shows the repository name. Undo cancels before posting. The capsule remains
+│   │   visible until delivery; then it reads "Sent to X" and plays the Sent tone.
+│   │   A picked send goes immediately with the same ring on its Undo. No runner-up chip for a rule;
 │   │   after delivery and the Undo window, the capsule leaves by
 │   │   itself (with the list open it stays; the pointer on it holds it, and a
 │   │   folded list gives it a brief hold). Picking the rule's own session there (without
@@ -590,25 +607,45 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   │   started with. A suggestion like any other, never sent by itself
 │   │   ├── OpenCode's home screen (`OpenCode`) or a plain shell -> the
 │   │   │   folder and the title's words are clues, as before
-│   │   ├── ⇧ (a folder that isn't home or `/`) -> the rule is
+│   │   ├── ⇧ (a folder that isn't home or a filesystem root) -> the rule is
 │   │   │   `routing.terminals` keyed on the folder's project root ("hex
 │   │   │   terminal" in the header and the footer's app badge), naming the
 │   │   │   session picked; it covers that folder and everything under it (the
 │   │   │   longest key wins) and sends like a site rule. Ghostty itself stays
-│   │   │   a general app, so no rule ever sends all of Ghostty
+│   │   │   a general app, so no rule ever sends all of Ghostty (nor all of
+│   │   │   `ghostty.exe`, Ghostty's name on Windows)
 │   │   └── Checks -> `look::tests` (TUI session first, command-line
 │   │       fallback, home screen, home folder, terminal rule),
 │   │       `look::terminal::tests`, `policy` and `config` rule keys, and
 │   │       `capture_host::routing` `an_always_rule_from_a_terminal_keys_on_its_folder`.
 │   │       The process walk was measured once against a real Ghostty; no
 │   │       end-to-end capture of a TUI was run
-├── A finished capture reads "Annotation". While routing is pending it reads
-│   "Looking for sessions…" instead. Copy failure has its own warning
-│   ├── Anything else with somewhere to go (a guess, nothing fitting, no
-│   │   answer) -> macOS: "Annotation", Paste, a magnifier and ✕. The
-│   │   magnifier is named Search with the current binding. Suggestions open under
-│   │   it; nothing sends until Kit picks. Linux: closed,
-│   │   with Paste and Send to…, which opens them on a click
+├── A finished capture with no suggestion (or when OpenCode isn't running) reads
+│   "Annotation copied" with Paste and ✕. While routing is pending it reads
+│   "Looking for sessions…" instead. Copy failure warns "Couldn't copy" with
+│   "Try again" (never offers Paste) and Inspect
+│   ├── Saved with a suggestion (`Route::Guess`, default `list` flow) ->
+│   │   compact bar: `[thumb] Copied  [→ X  ⌄]  ✕` (one unified split-chip fill,
+│   │   no divider; clicking left sends to X at once, `⌄` or pressing the Annotate
+│   │   shortcut again opens the searchable Send-to list whose footer carries
+│   │   `All rules…` opening Settings › Annotate › Auto-send rules). Once search
+│   │   is already open, pressing the shortcut again starts a new recording.
+│   │   Clipboard-only (no sessions) and unreachable capsules never claim the
+│   │   shortcut. Nothing sends until picked; `Shift`-click in the list still
+│   │   saves a rule.
+│   ├── Queued (`RouteDelivery::Queued`) -> `[thumb] Queued  [⏱ X  ⌄]  ✕`
+│   │   naming the target session, with the hover tooltip carrying `why`, and `⌄`
+│   │   or pressing the Annotate shortcut again opening the Send-to list to
+│   │   redirect or `Cancel send`
+│   ├── Post-send `Always…` configurator -> on a manual send without an existing
+│   │   rule (`[thumb] Sent to X  [Always…]  [Undo]  ✕`), clicking `Always…`
+│   │   pauses dismiss/countdown and opens an inline popover under the capsule:
+│   │   "When I annotate" (subpath vs whole site, defaulting to subpath on shared
+│   │   hosts like `github.com/org/repo`; terminal working folder only, never
+│   │   "any Ghostty window"; non-general apps only), "Send to" ("This session,
+│   │   always" vs "The project's newest session"), and footer ("All rules…" ->
+│   │   `Modal::RoutingRules` + "Save rule" persisting to `capture.routing` and
+│   │   updating the capsule to "Rule saved")
 │   │   ├── "Send to" over up to five rows, suggested then the newest
 │   │   │   sessions, with no numbers and no footer; "⇧-click to always send
 │   │   │   [site] here" appears on hover when a pick can save a rule.
@@ -1087,9 +1124,21 @@ Where it goes                            // capture.route; capture.routing's aut
 │   `last.route` follows: Looking -> Rule | ResolvingRule | Guess | Nothing |
 │   NoAnswer | Unreachable. Background refinements preserve an open search and
 │   selected session; a pick or Undo cancels them
-│   ├── Rule -> only a rule the person saved (`routing.sites`, `routing.apps`,
-│   │   `routing.terminals`, a Shift pick's): a three-second countdown begins
-│   │   when the rule is shown. A folder
+│   ├── Auto-send rules UI (`Settings › Annotate › After an annotation › Auto-send rules`,
+│   │   `Modal::RoutingRules` in `rune_ui/scrawl/routing_rules.rs`) -> row shows
+│   │   stacked rule-type icons + rule count; sheet shows one `Auto-send with Jev`
+│   │   toggle card only when Jev has an active credential (otherwise omitted,
+│   │   leaving Rules + the 3-second Undo hold note), plus CRUD for site/subpath,
+│   │   terminal-folder, and non-general app rules targeting a session or project
+│   │   folder. Turning it on sets AutoSend::Confident with jevRouting +
+│   │   smartRouting; turning it off returns autoSend to Rules and clears
+│   │   jevRouting (smartRouting stays: it only weighs evidence locally). The
+│   │   hosted Jev lookup runs only while the switch is on, so a settings file an
+│   │   older build left with jevRouting on and autoSend rules makes no request
+│   ├── Rule -> a saved rule (`routing.sites`, `routing.apps`, `routing.terminals`)
+│   │   or a confident Jev pick when `Auto-send with Jev` (`AutoSend::Confident`)
+│   │   is on: a three-second countdown begins when shown, with `AutoSendBy::Rule`
+│   │   or `AutoSendBy::Jev` provenance. A folder
 │   │   rule shows its repository while its session resolves; it sends once both
 │   │   the countdown and resolution finish. Undo during the countdown posts
 │   │   nothing. The capsule's `Hold` pauses the countdown while the pointer is
@@ -1108,9 +1157,10 @@ Where it goes                            // capture.route; capture.routing's aut
 │   │   reason as the row's word ("dev server", "same page", "mentioned"; none
 │   │   for Jev's pick or fallback), then
 │   │   the runners-up and recent sessions; nothing sent until one is picked.
-│   │   The deterministic guess publishes first. Model refinement has one
-│   │   three-second budget including recent messages and credential lookup;
-│   │   a timeout keeps the first guess. A later result cannot override a pick or Undo.
+│   │   The deterministic guess publishes first. With `Auto-send with Jev` on,
+│   │   model refinement has one three-second budget including recent messages and
+│   │   credential lookup; a timeout keeps the first guess. A later result cannot
+│   │   override a pick or Undo.
 │   │   `site` names what a Shift pick (Shift+click, ⇧⏎ in the list,
 │   │   or `send --always`) would save, after which that site's captures are Rules;
 │   │   ⇧⏎ in a Rule's list saves the rule for the session picked instead
@@ -1118,9 +1168,11 @@ Where it goes                            // capture.route; capture.routing's aut
 │   │   `why`, the router's leading reason; `hex capture route` prints it
 │   ├── Nothing / NoAnswer -> recent sessions only
 │   └── Unreachable -> the look read no sessions (OpenCode slow past the look's
-│       deadline, down, or refusing); a warning in process.log with the error, and
-│       the capsule reads "Couldn't reach OpenCode" with why ("OpenCode didn't
-│       answer"), or "OpenCode isn't running" alone, keeping Paste. A reason is
+│       deadline, down, or refusing); a warning in process.log with the error.
+│       When OpenCode simply isn't running and no send or rule was attempted,
+│       the capsule finishes cleanly as "Annotation copied" with Paste; other
+│       failures (timeout, auth refused) or a rule/explicit send that couldn't
+│       reach OpenCode warn on the capsule. A reason is
 │       shown only in plain words: one with a path, URL, OS error or code goes
 │       to process.log and the capsule shows none
 │       └── OpenCode refusing Hex's password (HTTP 401/403) -> "OpenCode needs a

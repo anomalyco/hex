@@ -29,6 +29,9 @@ pub(super) fn shortcuts(settings: &AppSettings) -> (LinuxHotkey, HotkeyOptions) 
         second_dictation: settings
             .active_second_dictation_hotkey()
             .map(LinuxHotkey::from),
+        // Labs › Model switch shortcut: off, unbound, or with no other model
+        // saved, it registers nothing.
+        model_switch: settings.active_model_switch_hotkey().map(LinuxHotkey::from),
         capture: settings
             .capture
             .enabled

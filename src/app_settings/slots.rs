@@ -20,6 +20,8 @@ pub enum HotkeySlot {
     CaptureReplay,
     /// Labs › Second dictation shortcut.
     SecondDictation,
+    /// Labs › Model switch shortcut.
+    ModelSwitch,
     /// Labs › More dictation shortcuts (macOS): row `index`'s binding.
     ExtraDictation(usize),
     /// Labs › Terminal paste shortcut (Windows, Linux).
@@ -42,10 +44,8 @@ pub struct SlotDescriptor {
     pub set: fn(&mut AppSettings, HotkeyBinding),
     /// Resets the slot to its default (or unbinds an optional slot with none).
     pub reset: fn(&mut AppSettings),
-    /// Whether plain ⌫ while recording in Settings turns this slot off.
-    pub can_turn_off: bool,
-    /// Unbinds the slot when `can_turn_off` allows it.
-    pub clear: fn(&mut AppSettings),
+    /// Unbinds the slot on plain ⌫ while recording in Settings, when allowed.
+    pub clear: Option<fn(&mut AppSettings)>,
     /// Whether this slot's binding counts as in use against `candidate_slot`.
     pub reserved_against: fn(&AppSettings, HotkeySlot) -> bool,
 }
@@ -60,8 +60,7 @@ impl HotkeySlot {
             get: |s| Some(&s.dictation_hotkey),
             set: |s, b| s.dictation_hotkey = b,
             reset: |s| s.dictation_hotkey = HotkeyBinding::default(),
-            can_turn_off: false,
-            clear: |_| {},
+            clear: None,
             reserved_against: |_, _| true,
         },
         SlotDescriptor {
@@ -70,8 +69,7 @@ impl HotkeySlot {
             get: |s| s.paste_last_hotkey.as_ref(),
             set: |s, b| s.paste_last_hotkey = Some(b),
             reset: |s| s.paste_last_hotkey = Some(HotkeyBinding::paste_last_default()),
-            can_turn_off: true,
-            clear: |s| s.paste_last_hotkey = None,
+            clear: Some(|s| s.paste_last_hotkey = None),
             reserved_against: |_, _| true,
         },
         SlotDescriptor {
@@ -80,8 +78,7 @@ impl HotkeySlot {
             get: |s| Some(&s.cancel_hotkey),
             set: |s, b| s.cancel_hotkey = b,
             reset: |s| s.cancel_hotkey = HotkeyBinding::cancel_default(),
-            can_turn_off: false,
-            clear: |_| {},
+            clear: None,
             reserved_against: |_, _| true,
         },
         SlotDescriptor {
@@ -90,8 +87,7 @@ impl HotkeySlot {
             get: |s| s.raw_dictation_hotkey.as_ref(),
             set: |s, b| s.raw_dictation_hotkey = Some(b),
             reset: |s| s.raw_dictation_hotkey = None,
-            can_turn_off: true,
-            clear: |s| s.raw_dictation_hotkey = None,
+            clear: Some(|s| s.raw_dictation_hotkey = None),
             reserved_against: |_, _| true,
         },
         SlotDescriptor {
@@ -100,8 +96,7 @@ impl HotkeySlot {
             get: |s| s.second_dictation_hotkey.as_ref(),
             set: |s, b| s.second_dictation_hotkey = Some(b),
             reset: |s| s.second_dictation_hotkey = None,
-            can_turn_off: true,
-            clear: |s| s.second_dictation_hotkey = None,
+            clear: Some(|s| s.second_dictation_hotkey = None),
             // Linux and Windows register a key, so a keyless binding never
             // runs there and takes no key from another shortcut.
             reserved_against: |s, _| {
@@ -112,13 +107,29 @@ impl HotkeySlot {
             },
         },
         SlotDescriptor {
+            slot: Self::ModelSwitch,
+            key: "model_switch_hotkey",
+            get: |s| s.model_switch_hotkey.as_ref(),
+            set: |s, b| s.model_switch_hotkey = Some(b),
+            reset: |s| s.model_switch_hotkey = None,
+            clear: Some(|s| s.model_switch_hotkey = None),
+            // Every OS matches it as a key press, so a keyless binding never
+            // runs and takes no key from another shortcut.
+            reserved_against: |s, _| {
+                s.labs.model_switch_shortcut
+                    && s.model_switch_other.is_some()
+                    && s.model_switch_hotkey
+                        .as_ref()
+                        .is_some_and(|b| b.key.is_some())
+            },
+        },
+        SlotDescriptor {
             slot: Self::TypedText,
             key: "typed_text_hotkey",
             get: |s| s.typed_text_hotkey.as_ref(),
             set: |s, b| s.typed_text_hotkey = Some(b),
             reset: |s| s.typed_text_hotkey = None,
-            can_turn_off: true,
-            clear: |s| s.typed_text_hotkey = None,
+            clear: Some(|s| s.typed_text_hotkey = None),
             reserved_against: |s, _| cfg!(target_os = "linux") && s.labs.typed_text,
         },
         SlotDescriptor {
@@ -127,8 +138,7 @@ impl HotkeySlot {
             get: |s| s.terminal_paste_hotkey.as_ref(),
             set: |s, b| s.terminal_paste_hotkey = Some(b),
             reset: |s| s.terminal_paste_hotkey = None,
-            can_turn_off: true,
-            clear: |s| s.terminal_paste_hotkey = None,
+            clear: Some(|s| s.terminal_paste_hotkey = None),
             reserved_against: |s, _| {
                 cfg!(any(target_os = "windows", target_os = "linux"))
                     && s.labs.terminal_paste_shortcut
@@ -140,8 +150,7 @@ impl HotkeySlot {
             get: |s| Some(&s.screenshots.hotkey),
             set: |s, b| s.screenshots.hotkey = b,
             reset: |s| s.screenshots.hotkey = HotkeyBinding::screenshot_default(),
-            can_turn_off: false,
-            clear: |_| {},
+            clear: None,
             reserved_against: |s, _| cfg!(target_os = "macos") && s.labs.screenshots,
         },
         SlotDescriptor {
@@ -150,8 +159,7 @@ impl HotkeySlot {
             get: |s| s.screenshots.record_hotkey.as_ref(),
             set: |s, b| s.screenshots.record_hotkey = Some(b),
             reset: |s| s.screenshots.record_hotkey = None,
-            can_turn_off: false,
-            clear: |_| {},
+            clear: None,
             // A saved record shortcut and Annotate's own capture shortcuts
             // never share a key while Labs › Screenshots is on, even with
             // Annotate off; for every other shortcut it counts only while
@@ -172,8 +180,7 @@ impl HotkeySlot {
             get: |s| Some(&s.capture.hotkey),
             set: |s, b| s.capture.hotkey = b,
             reset: |s| s.capture.hotkey = HotkeyBinding::capture_default(),
-            can_turn_off: false,
-            clear: |_| {},
+            clear: None,
             // The record shortcut counts Annotate's capture shortcuts always
             // on macOS, even with Annotate off, so turning Annotate on never
             // collides with a saved record shortcut.
@@ -188,8 +195,7 @@ impl HotkeySlot {
             get: |s| s.capture.replay_hotkey.as_ref(),
             set: |s, b| s.capture.replay_hotkey = Some(b),
             reset: |s| s.capture.replay_hotkey = None,
-            can_turn_off: false,
-            clear: |_| {},
+            clear: None,
             reserved_against: |s, candidate| {
                 cfg!(target_os = "macos")
                     && ((s.capture_on() && s.labs.annotate_replay)
@@ -273,15 +279,13 @@ impl HotkeySlot {
 
     /// Whether plain ⌫ while recording in Settings turns this shortcut off.
     pub fn can_turn_off(self) -> bool {
-        self.descriptor().is_some_and(|desc| desc.can_turn_off)
+        self.descriptor().is_some_and(|desc| desc.clear.is_some())
     }
 
     /// Turns off a shortcut `can_turn_off` allows; others keep their binding.
     pub fn turn_off(self, settings: &mut AppSettings) {
-        if let Some(desc) = self.descriptor()
-            && desc.can_turn_off
-        {
-            (desc.clear)(settings);
+        if let Some(clear) = self.descriptor().and_then(|desc| desc.clear) {
+            clear(settings);
         }
     }
 

@@ -205,8 +205,10 @@ nonisolated struct KeyboardLayerState: Equatable, Sendable {
 nonisolated enum KeyboardFieldRoute: Equatable, Sendable {
     /// Hex's keys, with this field kind and first page.
     case keys(KeyboardFieldKind, initialLayer: KeyboardLayer)
-    /// Number pads go to the next keyboard; Hex shows 123 in case there is none.
-    case handOff
+
+    var field: KeyboardFieldKind {
+        switch self { case .keys(let kind, _): kind }
+    }
 }
 
 nonisolated enum KeyboardFieldRouting {
@@ -218,20 +220,18 @@ nonisolated enum KeyboardFieldRouting {
             return .keys(.email, initialLayer: .letters)
         case .webSearch?:
             return .keys(.webSearch, initialLayer: .letters)
-        case .numberPad?, .decimalPad?, .asciiCapableNumberPad?, .phonePad?, .namePhonePad?:
-            return .handOff
+        // Hex's own pad (`KeyboardNumberPad`). iOS brings its own keyboard to `.phonePad` fields
+        // and Apple's letters to `.namePhonePad` ones (iOS 26.5 and 27.2), so Hex never sees them.
+        case .numberPad?, .asciiCapableNumberPad?, .phonePad?:
+            return .keys(.numberPad, initialLayer: .numbers)
+        case .decimalPad?:
+            return .keys(.decimalPad, initialLayer: .numbers)
+        case .namePhonePad?:
+            return .keys(.text, initialLayer: .letters)
         case .numbersAndPunctuation?:
             return .keys(.text, initialLayer: .numbers)
         default:
             return .keys(.text, initialLayer: .letters)
         }
-    }
-
-    /// Whether a number pad (`.handOff`) goes to the next keyboard: where iOS asks for a globe,
-    /// except where Apple's keyboard is split (the Duo unfolded and upright). There iOS 27.2's
-    /// switch to the next keyboard can end the app being typed in (TestFlight build 121,
-    /// `InputModeListTouch`), so Hex stays on its 123 page.
-    static func handsOffNumberPad(needsInputModeSwitchKey: Bool, posture: KeyboardPosture) -> Bool {
-        needsInputModeSwitchKey && !posture.splitsKeyboard
     }
 }

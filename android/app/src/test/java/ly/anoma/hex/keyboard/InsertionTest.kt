@@ -433,6 +433,17 @@ class InsertionTest {
         assertEquals(false, SpaceRules.separates("\nfox"))
         assertEquals(false, SpaceRules.separates("fox"))
         assertEquals(false, SpaceRules.separates(null))
+        // A picked word's space (Gboard adds one in Chrome's address bar too): a clause mark takes it anywhere, and in
+        // a URL field so do . / and the other joiners ("github." and "github/", never "github /").
+        for (mark in ",.!?;:)") {
+            assertEquals("$mark", true, SpaceRules.takesPickedSpace(mark, url = false))
+            assertEquals("$mark", true, SpaceRules.takesPickedSpace(mark, url = true))
+        }
+        assertEquals(false, SpaceRules.takesPickedSpace('/', url = false))
+        assertEquals(true, SpaceRules.takesPickedSpace('/', url = true))
+        assertEquals(true, SpaceRules.takesPickedSpace('-', url = true))
+        assertEquals(false, SpaceRules.takesPickedSpace('(', url = true))
+        assertEquals(false, SpaceRules.takesPickedSpace('w', url = true))
     }
     // iOS CleanupTaggerTests' English examples and its hand-written set, met with rules (no tagger).
     @Test fun englishCleanupRulesMeetTheTaggersExamples() {
@@ -532,7 +543,7 @@ class InsertionTest {
         assertEquals(DictationLanguage.Portuguese, DictationLanguage.automatic(null, listOf("pt")))
         assertEquals(DictationLanguage.Portuguese, DictationLanguage.automatic(null, listOf("pt", "en")))
         assertEquals(DictationLanguage.Portuguese, DictationLanguage.matching("pt"))
-        assertEquals(null, DictationLanguage.Portuguese.layout)
+        assertEquals(Spoken.Portuguese, DictationLanguage.Portuguese.layout)
         fun format(text: String, style: Style) = SpokenText.format(text, SpeechOptions(style, DictationLanguage.Portuguese,
             clean = true, translate = false, formatLists = true, spokenPunctuation = true))
         // English cleanup would drop "um" (a filler there, "a" here) and read "no" as a correction.
@@ -565,9 +576,10 @@ class InsertionTest {
         assertEquals("Москва большая", SpokenText.continuing("Москва большая", "и", "ru"))
     }
     @Test fun aDictationLanguageWithoutItsOwnLayoutHasNoTypingModel() {
-        // Português keeps English's keys and accents, but its typing model would be English's: until a
+        // Nederlands keeps English's keys and accents, but its typing model would be English's: until a
         // layout is pinned, English's word list only stands in for the keys' geometry and your own words.
-        assertEquals(null, typingLayout(null, DictationLanguage.Portuguese))
+        // Português has a model of its own (Brazil's).
+        assertEquals(Spoken.Portuguese, typingLayout(null, DictationLanguage.Portuguese))
         assertEquals(null, typingLayout(null, DictationLanguage.Dutch))
         assertEquals(null, typingLayout(null, DictationLanguage.Polish))
         assertEquals(null, typingLayout(null, DictationLanguage.Russian))
@@ -580,14 +592,13 @@ class InsertionTest {
     @Test fun aSwipeNamesTheDictationLanguageWithoutATypingModel() {
         // A swipe there types nothing, so the strip says swipes aren't available in the language, as the space bar names it.
         assertEquals("Nederlands", swipeUnreadableIn(null, DictationLanguage.Dutch)?.label)
-        assertEquals("Português", swipeUnreadableIn(null, DictationLanguage.Portuguese)?.label)
         assertEquals("Polski", swipeUnreadableIn(null, DictationLanguage.Polish)?.label)
         assertEquals("Русский", swipeUnreadableIn(null, DictationLanguage.Russian)?.label)
         // A pinned layout's model reads swipes, and so does a dictation language with its own: nothing to say.
         assertEquals(null, swipeUnreadableIn(Spoken.English, DictationLanguage.Dutch))
         assertEquals(null, swipeUnreadableIn(Spoken.German, DictationLanguage.Polish))
         for (language in listOf(DictationLanguage.English, DictationLanguage.Spanish, DictationLanguage.German,
-                DictationLanguage.Norwegian, DictationLanguage.French, DictationLanguage.Italian))
+                DictationLanguage.Norwegian, DictationLanguage.French, DictationLanguage.Italian, DictationLanguage.Portuguese))
             assertEquals(null, swipeUnreadableIn(null, language))
     }
     // Batch 3 (Rollover, holds, field kinds). These belong in a KeyboardTouchTest once new test files are agreed.
@@ -617,12 +628,16 @@ class InsertionTest {
         // Off, every key offers exactly what it did: accents alone, and none on a letter without them.
         assertEquals(LetterFeedback.options('a', "en"), LetterFeedback.holds('a', "en", null))
         assertEquals(emptyList<String>(), LetterFeedback.holds('m', "en", null))
-        // On, a second or third row key offers its symbol first, then the same accents after it.
+        // On, a key without a digit offers its symbol first, then the same accents after it.
         val a = LetterFeedback.holds('a', "en", null, symbolsOnLetters = true)
         assertEquals("@", a.first())
         assertEquals(LetterFeedback.options('a', "en"), a.drop(1))
-        assertEquals(listOf("/"), LetterFeedback.holds('m', "en", null, symbolsOnLetters = true))
+        assertEquals(listOf("?"), LetterFeedback.holds('m', "en", null, symbolsOnLetters = true))
         assertEquals(LetterFeedback.options('e', "en"), LetterFeedback.holds('e', "en", null, symbolsOnLetters = true))
+        // On the top row, with the number row hiding its digit, a letter offers Gboard's symbol first.
+        assertEquals(listOf("%"), LetterFeedback.holds('q', "en", null, symbolsOnLetters = true, topRow = true))
+        assertEquals(listOf("|") + LetterFeedback.options('e', "en"),
+            LetterFeedback.holds('e', "en", null, symbolsOnLetters = true, topRow = true))
         // A capital offers the same symbol, and row 1 keeps its digit first.
         assertEquals("@", LetterFeedback.holds('A', "en", null, symbolsOnLetters = true).first())
         assertEquals("1", LetterFeedback.holds('q', "en", '1', symbolsOnLetters = true).first())
@@ -813,5 +828,15 @@ class InsertionTest {
         retries.tookBack("there", "Hello world ")
         retries.forget()
         assertEquals(readings, retries.typing(readings, "Hello world "))
+    }
+
+    // Labs › Keyboard › Delete swiped words letter by letter: on, delete after a swipe is an ordinary one.
+    @Test fun deleteTakesASwipedWordBackOnlyWhereTheSwipeLeftItAndOnlyWithTheLabOff() {
+        assertTrue(SwipeText.takesBack("Hello world", "Hello world", "world", letterByLetter = false))
+        assertFalse(SwipeText.takesBack("Hello world", "Hello world", "world", letterByLetter = true))
+        // The text changed or the cursor moved since the swipe: the word is ordinary text by then.
+        assertFalse(SwipeText.takesBack("Hello worl", "Hello world", "world", letterByLetter = false))
+        assertFalse(SwipeText.takesBack("Hello world", null, "world", letterByLetter = false))
+        assertFalse(SwipeText.takesBack("Hello world!", "Hello world!", "world", letterByLetter = false))
     }
 }

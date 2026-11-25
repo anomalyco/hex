@@ -179,7 +179,7 @@ impl CallProvider {
     }
 
     /// The service a recorded meeting's app names: the exact label detection
-    /// or a calendar reminder records (`Zoom`, `Slack Huddle`), or a browser
+    /// or a calendar reminder records (`Zoom`, `Slack huddle`), or a browser
     /// call's website host, which matches a service's host or its
     /// subdomains. `None` for any other app or website.
     pub fn from_meeting_app(app: &str) -> Option<Self> {
@@ -194,7 +194,7 @@ impl CallProvider {
         let site = app.strip_prefix("www.").unwrap_or(app);
         ALL.into_iter().find(|provider| {
             app == provider.label()
-                || (*provider == Self::Slack && app == "Slack Huddle")
+                || (*provider == Self::Slack && (app == "Slack huddle" || app == "Slack Huddle"))
                 || provider
                     .detection_keys()
                     .iter()

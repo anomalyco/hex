@@ -6,8 +6,8 @@ use crate::meeting::detection::MeetingSource;
 use rune::Transition;
 
 const ICON: f32 = 24.0;
-const H: f32 = 28.0 + 2.0 * ACTIONS_INSET;
-const START: f32 = 10.0;
+const H: f32 = CAPSULE.banner_h;
+const START: f32 = CAPSULE.row_px;
 const MARK_GAP: f32 = 5.0;
 const GROUP_GAP: f32 = 16.0;
 
@@ -85,7 +85,7 @@ impl Presentation {
         stage::Outline {
             w: width,
             h: H,
-            radius: rune_theme_opencode::kit(true).radius.md + ACTIONS_INSET,
+            radius: CAPSULE.radius,
             dark: 0.0,
         }
     }
@@ -337,7 +337,7 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
             if top_corner { 0.0 } else { h - height },
         )
     };
-    let (_, title, sub, actions) = offer::actions(p, id, candidate, rules);
+    let (title, sub, actions) = offer::actions(p, id, candidate, rules);
     let lines = col()
         .w(a.lines[i])
         .items_start()

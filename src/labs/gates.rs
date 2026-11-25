@@ -41,6 +41,24 @@ pub fn stop_any_call_recording() -> bool {
     feature_on(Feature::StopAnyCallRecording)
 }
 
+/// A meeting recording can mute Hex's microphone without stopping: its
+/// packets stay the same length and go silent, so the call's audio keeps
+/// recording and no "You" line is produced (macOS; read as each microphone
+/// packet reaches the track, so turning the lab off restores audio at once,
+/// once per controller pass, which clears the switch, and where the pane and
+/// menu bar offer the switch and the capsule shows its notice).
+pub fn meeting_microphone_mute() -> bool {
+    feature_on(Feature::MeetingMicrophoneMute)
+}
+
+/// Labs › Indicator on any display: a released meeting capsule lands in
+/// the corner of the display under the pointer, and the capsules show on the
+/// display they were dragged to instead of only the primary display (macOS
+/// and Windows; read as each capsule draws and as each drag ends).
+pub fn meeting_indicator_display() -> bool {
+    feature_on(Feature::MeetingIndicatorDisplay)
+}
+
 /// The playground in the window.
 pub fn playground() -> bool {
     feature_on(Feature::Playground)
@@ -123,13 +141,8 @@ pub(crate) fn copy_dictation_audio_enabled_under(
     settings: &AppSettings,
     policy: crate::policy::Policy,
 ) -> bool {
-    let on = |feature: Feature| {
-        feature.on(settings)
-            && feature.shipped()
-            && feature.on_this_os()
-            && policy.labs_lock(feature).is_none()
-    };
-    on(Feature::CopyDictationAudio) && on(Feature::KeepRecordings)
+    Feature::CopyDictationAudio.enabled_under(settings, policy)
+        && Feature::KeepRecordings.enabled_under(settings, policy)
 }
 
 /// A pasted dictation stays on the clipboard rather than the previous
@@ -252,13 +265,8 @@ pub(crate) fn history_stats_strip_enabled_under(
     settings: &AppSettings,
     policy: crate::policy::Policy,
 ) -> bool {
-    let on = |feature: Feature| {
-        feature.on(settings)
-            && feature.shipped()
-            && feature.on_this_os()
-            && policy.labs_lock(feature).is_none()
-    };
-    on(Feature::HistoryStatsStrip) && on(Feature::HistoryStats)
+    Feature::HistoryStatsStrip.enabled_under(settings, policy)
+        && Feature::HistoryStats.enabled_under(settings, policy)
 }
 
 /// The menu bar's Copy Recent Dictation submenu (macOS; read each time the
@@ -492,6 +500,36 @@ pub fn signature_text() -> String {
         .read()
         .unwrap_or_else(|error| error.into_inner())
         .clone()
+}
+
+/// Labs › Clipboard phrase: a spoken phrase inside a normal dictation becomes
+/// the clipboard's text in double quotes before it is pasted, kept in
+/// History, and remembered for Paste Last (every OS; read as each output
+/// commits).
+pub fn clipboard_phrase() -> bool {
+    feature_on(Feature::ClipboardPhrase)
+}
+
+/// The words replaced with the clipboard while [`clipboard_phrase`] is on
+/// (read as each output commits, only while the gate is on).
+pub fn clipboard_phrase_text() -> String {
+    ensure_loaded();
+    CLIPBOARD_PHRASE_TEXT
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
+/// Labs › Choose meeting audio: the app or output a meeting's computer
+/// audio records, or None while the lab is off (every OS; read by each
+/// system capture source as it opens and on its route check).
+pub fn meeting_audio_source() -> Option<crate::meeting::audio_source::SourceChoice> {
+    feature_on(Feature::MeetingAudioSource).then(|| {
+        MEETING_AUDIO_SOURCE_CHOICE
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    })
 }
 
 /// Labs › Dictation style: the style each normal dictation is written as,

@@ -86,8 +86,9 @@ pub(super) struct WatchedPass {
     /// Whether the app counts as present: on the microphone, playing output
     /// while a stop could count it (muting keeps a call on the microphone in
     /// some apps and off it in others, but its output stays open until
-    /// hang-up, #835), or a read that failed, so an error never ends a
-    /// recording.
+    /// hang-up, #835; a browser seems to keep its output open past its call
+    /// while the Mac is locked, #2685), or a read that failed, so an error
+    /// never ends a recording.
     pub(super) present: bool,
     /// A successful read found it on the microphone. Only this, never
     /// playback or a failed read, marks the app seen for
@@ -95,11 +96,16 @@ pub(super) struct WatchedPass {
     pub(super) on_microphone: bool,
 }
 
-/// Reads the call app `application` for one pass. `auto_stop` says whether a
-/// stop could be armed, so playback counts as present only when it could;
-/// `playing` is the app's own audio-output read.
+/// Reads the call app `application` for one pass. `locked` says the session
+/// is locked or the Mac is asleep, where a browser's playback stops counting:
+/// it seems to keep its output stream open after its call then (#2685). A
+/// native call app keeps its playback counting, since some drop the
+/// microphone on mute (#835). `auto_stop` says whether a stop could be
+/// armed, so playback counts as present only when it could; `playing` is the
+/// app's own audio-output read, made only when it could matter.
 pub(super) fn watched_pass(
     application: &str,
+    locked: bool,
     auto_stop: bool,
     applications: &Result<Vec<ActiveMicrophoneApplication>>,
     playing: impl FnOnce(&str) -> bool,
@@ -115,8 +121,13 @@ pub(super) fn watched_pass(
             None
         }
     };
+    // A browser seems to keep its output stream open after its call while the
+    // Mac is locked (#2685), so its playback stops counting there. A native
+    // call app keeps it: some drop the microphone on mute (#835).
+    let playback_counts =
+        auto_stop && !(locked && crate::microphone_activity::is_browser_id(Some(application)));
     WatchedPass {
-        present: on_microphone.unwrap_or(true) || (auto_stop && playing(application)),
+        present: on_microphone.unwrap_or(true) || (playback_counts && playing(application)),
         on_microphone: on_microphone == Some(true),
     }
 }
@@ -215,9 +226,13 @@ mod tests {
         // The app plays audio — a Zoom window waiting to join, a Slack
         // notification — but has not taken the microphone: present to the
         // controller, still not seen, so 33 more seconds count nothing.
-        let playing = watched_pass("com.tinyspeck.slackmacgap", true, &Ok(zoom.clone()), |_| {
-            true
-        });
+        let playing = watched_pass(
+            "com.tinyspeck.slackmacgap",
+            false,
+            true,
+            &Ok(zoom.clone()),
+            |_| true,
+        );
         assert!(playing.present, "playback keeps the call present");
         assert!(!playing.on_microphone);
         for _ in 0..66 {
@@ -226,14 +241,14 @@ mod tests {
         // A read that failed is present too, and never marks the app seen.
         let failed: Result<Vec<ActiveMicrophoneApplication>> =
             Err(color_eyre::eyre::eyre!("no audio"));
-        let unread = watched_pass("us.zoom.xos", true, &failed, |_| false);
+        let unread = watched_pass("us.zoom.xos", false, true, &failed, |_| false);
         assert!(unread.present);
         assert!(!unread.on_microphone);
         assert!(!watch.counts_absence(CallEndStop::OnRequest, true, unread.on_microphone));
 
         // The app joins, then leaves: its absence counts from then on, and
         // the call coming back keeps counting after it leaves again.
-        let joined = watched_pass("us.zoom.xos", true, &Ok(zoom), |_| false);
+        let joined = watched_pass("us.zoom.xos", false, true, &Ok(zoom), |_| false);
         assert!(joined.on_microphone);
         assert!(watch.counts_absence(CallEndStop::OnRequest, true, joined.on_microphone));
         assert!(watch.counts_absence(CallEndStop::OnRequest, true, false));
@@ -247,6 +262,67 @@ mod tests {
         let mut automatic = CallWatch::default();
         assert!(automatic.counts_absence(CallEndStop::Automatic, true, false));
         assert!(automatic.counts_absence(CallEndStop::Automatic, false, false));
+    }
+
+    #[test]
+    fn a_locked_mac_stops_only_a_browser_s_playback_counting() {
+        let none: Result<Vec<ActiveMicrophoneApplication>> = Ok(Vec::new());
+        // A browser seems to keep its output stream open after its call while
+        // the Mac is locked, and its microphone is already released: the call
+        // ended.
+        let mut played = 0;
+        let locked = watched_pass("company.thebrowser.Browser", true, true, &none, |_| {
+            played += 1;
+            true
+        });
+        assert!(
+            !locked.present,
+            "a browser's playback kept its call present while the Mac was locked"
+        );
+        assert_eq!(played, 0, "playback was read when it could not matter");
+        assert!(!locked.on_microphone);
+
+        // A native call app keeps its playback: some drop the microphone on
+        // mute (#835).
+        let mut played = 0;
+        let native = watched_pass("us.zoom.xos", true, true, &none, |_| {
+            played += 1;
+            true
+        });
+        assert!(
+            native.present,
+            "a native call app's playback stopped counting while locked"
+        );
+        assert_eq!(played, 1);
+
+        // Locked with the browser still on the microphone: present, not ended.
+        let held = watched_pass(
+            "company.thebrowser.Browser",
+            true,
+            true,
+            &Ok(vec![microphone("company.thebrowser.Browser", "Arc")]),
+            |_| false,
+        );
+        assert!(held.present, "the microphone still counts while locked");
+        assert!(held.on_microphone);
+
+        // Unlocked, a browser's playback counts while a stop could be armed...
+        let mut played = 0;
+        let awake = watched_pass("company.thebrowser.Browser", false, true, &none, |_| {
+            played += 1;
+            true
+        });
+        assert!(awake.present);
+        assert_eq!(played, 1);
+
+        // ...and is not read when none could.
+        let mut played = 0;
+        let idle = watched_pass("company.thebrowser.Browser", false, false, &none, |_| {
+            played += 1;
+            true
+        });
+        assert!(!idle.present);
+        assert_eq!(played, 0);
     }
 
     #[test]
@@ -326,7 +402,7 @@ mod tests {
                 microphone("com.tinyspeck.slackmacgap.helper", "Slack Helper"),
                 microphone("com.tinyspeck.slackmacgap", "Slack"),
             ]),
-            Some(("com.tinyspeck.slackmacgap".into(), "Slack Huddle".into()))
+            Some(("com.tinyspeck.slackmacgap".into(), "Slack huddle".into()))
         );
         // Two calls Hex can't tell apart: neither is watched.
         assert_eq!(

@@ -101,7 +101,7 @@ impl Listed {
 
 #[derive(Default)]
 pub(super) struct CapturesPane {
-    #[cfg(target_os = "macos")]
+    pub(super) view: super::scrawl::View,
     pub(super) confirm_trash: Option<(u64, PathBuf)>,
     pub(super) entries: Vec<Listed>,
     search: TextEdit,
@@ -459,8 +459,8 @@ pub(super) fn reveal(ui: &mut Ui, id: u64) {
     }
 }
 
-/// Moves entry `id`'s file, or an annotation's whole bundle, to the Trash;
-/// it leaves the list at once.
+/// Arms two-step delete confirmation on the first click, and moves entry
+/// `id`'s file or annotation bundle to the Trash on the confirming click.
 pub(super) fn trash(ui: &mut Ui, id: u64) {
     let Some(at) = ui
         .captures
@@ -470,44 +470,53 @@ pub(super) fn trash(ui: &mut Ui, id: u64) {
     else {
         return;
     };
-    #[cfg(target_os = "macos")]
-    if ui.history.unified.enabled {
-        let entry = &ui.captures.entries[at];
-        let target = (
-            id,
-            match entry {
-                Listed::Annotated(a) => a.bundle.clone(),
-                Listed::Saved(e) => e.file.clone(),
-            },
-        );
-        if ui.captures.confirm_trash.take().as_ref() != Some(&target) {
-            ui.captures.confirm_trash = Some(target);
-            return;
-        }
+    let entry = &ui.captures.entries[at];
+    let target = (
+        id,
+        match entry {
+            Listed::Annotated(a) => a.bundle.clone(),
+            Listed::Saved(e) => e.file.clone(),
+        },
+    );
+    if ui.captures.confirm_trash.take().as_ref() != Some(&target) {
+        ui.captures.confirm_trash = Some(target);
+        return;
     }
     let path = match ui.captures.entries.remove(at) {
         Listed::Saved(entry) => entry.file,
         Listed::Annotated(annotation) => annotation.bundle,
     };
-    super::screenshot_thumbnail::files::trash(path);
+    if !ui.captures.fixture {
+        super::screenshot_thumbnail::files::trash(path);
+    }
 }
 
 /// The search over the list, or the empty state.
 pub(super) fn pane(ui: &Ui, p: Paint) -> El {
     let pane = &ui.captures;
+    let screenshots = ui.settings.labs.screenshots;
     let searching = !pane.searched.trim().is_empty();
     if pane.entries.is_empty() && !searching {
-        return ld::empty_state(
-            p,
-            "captures-empty",
-            &CAPTURES_ICON,
-            tr("No captures yet."),
-            Some(tr(
-                "Shots, recordings, and annotations from the last 30 days show here.",
-            )),
-        );
+        let (icon, title, detail) = if screenshots {
+            (
+                &CAPTURES_ICON,
+                tr("No captures yet."),
+                tr("Shots, recordings, and annotations from the last 30 days show here."),
+            )
+        } else {
+            (
+                &super::sidebar::SCRAWL_ICON,
+                tr("No annotations yet."),
+                tr("Annotations from the last 30 days show here."),
+            )
+        };
+        return ld::empty_state(p, "captures-empty", icon, title, Some(detail));
     }
-    let mut list = col().key("captures-list").label(tr("Captures"));
+    let mut list = col().key("captures-list").label(if screenshots {
+        tr("Captures")
+    } else {
+        tr("Annotations")
+    });
     let count = pane.entries.len();
     for (index, entry) in pane.entries.iter().enumerate() {
         list = list.child(item(ui, p, entry).position_in_set(index + 1, count));
@@ -517,12 +526,20 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
             p,
             "captures-empty",
             ld::SEARCH_ICON,
-            tr("No captures match."),
+            if screenshots {
+                tr("No captures match.")
+            } else {
+                tr("No annotations match.")
+            },
             None,
         ));
     }
     let search = TextInput::new(&pane.search)
-        .placeholder(tr("Search captures"))
+        .placeholder(if screenshots {
+            tr("Search captures")
+        } else {
+            tr("Search annotations")
+        })
         .width(None)
         .leading_icon(p.k.glyph.search)
         .on_edit(|ui: &mut Ui| &mut ui.captures.search)
@@ -613,14 +630,12 @@ pub(super) fn item(ui: &Ui, p: Paint, entry: &Listed) -> El {
             move |ui: &mut Ui, _| trash(ui, id),
         ),
     ];
-    #[cfg(target_os = "macos")]
-    let actions = if ui.history.unified.enabled
-        && ui
-            .captures
-            .confirm_trash
-            .as_ref()
-            .is_some_and(|(armed, _)| *armed == id)
-    {
+    let confirming = ui
+        .captures
+        .confirm_trash
+        .as_ref()
+        .is_some_and(|(armed, _)| *armed == id);
+    let actions = if confirming {
         vec![
             ld::row_action(
                 p,
@@ -640,26 +655,29 @@ pub(super) fn item(ui: &Ui, p: Paint, entry: &Listed) -> El {
     } else {
         actions
     };
-    let end = el()
-        .key("end")
-        .child(
-            text(time.clone())
-                .key("time")
-                .font(p.k.ty.small)
-                .color(p.faint())
-                .align(Align::End)
-                .a11y_hidden()
-                .group_opacity(1.0, 0.0),
-        )
-        .child(
-            row()
-                .key("hover")
-                .gap(2.0)
-                .center_y()
-                .pin(None, Some(-5.0), Some(ld::row_action_inset(p)), None)
-                .group_opacity(0.0, 1.0)
-                .children(actions),
-        );
+    let time_el = text(time.clone())
+        .key("time")
+        .font(p.k.ty.small)
+        .color(p.faint())
+        .align(Align::End)
+        .a11y_hidden();
+    let time_el = if confirming {
+        time_el.opacity(0.0)
+    } else {
+        time_el.group_opacity(1.0, 0.0)
+    };
+    let hover_el = row()
+        .key("hover")
+        .gap(2.0)
+        .center_y()
+        .pin(None, Some(-5.0), Some(ld::row_action_inset(p)), None)
+        .children(actions);
+    let hover_el = if confirming {
+        hover_el.opacity(1.0)
+    } else {
+        hover_el.group_opacity(0.0, 1.0)
+    };
+    let end = el().key("end").child(time_el).child(hover_el);
     let row_el = row()
         .key(format!("capture{id}"))
         .role("listitem")
@@ -746,5 +764,26 @@ mod tests {
             timed,
             "a model's own times stay"
         );
+    }
+
+    #[test]
+    fn deleting_a_capture_always_requires_confirmation() {
+        let mut ui = super::super::scenes::portal_fixture();
+        ui.captures = CapturesPane::fixture();
+        let before = ui.captures.entries.len();
+        let id = ui.captures.entries[0].id();
+
+        // First click arms confirmation and keeps the row.
+        trash(&mut ui, id);
+        assert_eq!(ui.captures.entries.len(), before);
+        assert_eq!(
+            ui.captures.confirm_trash.as_ref().map(|(a, _)| *a),
+            Some(id)
+        );
+
+        // Second click on the same row removes it and disarms.
+        trash(&mut ui, id);
+        assert_eq!(ui.captures.entries.len(), before - 1);
+        assert!(ui.captures.confirm_trash.is_none());
     }
 }

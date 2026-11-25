@@ -121,7 +121,7 @@ fn play(revision: u64, clip: Clip) {
         .then(|| compute_peaks(&samples, WAVEFORM_BARS));
     let duration =
         Duration::from_secs_f64(samples.len() as f64 / f64::from(HEX_MICROPHONE_SAMPLE_RATE));
-    let Ok(mut sink) = rodio::DeviceSinkBuilder::open_default_sink() else {
+    let Ok(mut sink) = crate::audio::open_default_output_sink() else {
         return;
     };
     sink.log_on_drop(false);

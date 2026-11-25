@@ -8,23 +8,20 @@ import UIKit
 /// and doesn't send them again when only its style changes, so after switching apps it
 /// could still say light in dark mode (TestFlight build 29).
 struct FullKeyboardPalette: Equatable {
+    /// Light or dark, as iOS's glass behind the keyboard is: everything drawn on the glass
+    /// follows it, with or without a theme.
     let isDark: Bool
-    /// Settings › Experiments › Keyboard themes: Automatic keeps iOS's glass, every other
-    /// theme supplies its own opaque colours.
+    /// Settings › Experiments › Key colors: the keys' own colours. Automatic keeps
+    /// iOS's light or dark keys; a theme changes the keys and nothing on the glass around them.
     let theme: KeyboardTheme
 
     init(isDark: Bool, theme: KeyboardTheme = .automatic) {
         self.theme = theme
-        // A theme decides light or dark for itself: White is light whatever the field asked
-        // for, and every dark theme is dark.
-        self.isDark = theme.colors?.isDark ?? isDark
+        self.isDark = isDark
     }
 
-    /// The theme's colours, nil for Automatic.
+    /// The theme's key colours, nil for Automatic.
     private var colors: KeyboardThemeColors? { theme.colors }
-
-    /// The keyboard draws an opaque panel behind its keys instead of showing iOS's glass.
-    var drawsOwnBackground: Bool { theme.colors != nil }
 
     static func isDark(traits: UITraitCollection) -> Bool {
         traits.userInterfaceStyle == .dark
@@ -40,19 +37,38 @@ struct FullKeyboardPalette: Equatable {
     }
 
     /// The panel behind the keys: a stand-in for the system Liquid Glass platter in standalone
-    /// snapshot scenes, or a theme's own opaque background.
-    var backdrop: UIColor { colors?.background ?? (isDark ? Self.rgb(0x17181A) : Self.rgb(0xDFE1E6)) }
+    /// snapshot scenes. A theme never changes it.
+    var backdrop: UIColor { isDark ? Self.rgb(0x17181A) : Self.rgb(0xDFE1E6) }
 
+    /// Text and marks on the glass: the strip, the emoji panel, menus.
     var textBase: UIColor { isDark ? .white : .black }
     var textMuted: UIColor { isDark ? UIColor(white: 1, alpha: 0.56) : Self.rgb(0x525763) }
+
+    /// Whether the keys are dark under light labels: Automatic's in Dark Mode, and every theme
+    /// but White. Decides the labels and the emoji key's face.
+    var keysAreDark: Bool { colors.map { !$0.hasDarkLabels } ?? isDark }
+    /// A label or symbol on a key, its pop-up or the accent callout.
+    var keyText: UIColor { keysAreDark ? .white : .black }
+    /// The space bar's language name. On a tinted key, white at 0.7 keeps 5:1 or more where
+    /// Automatic's 0.56 over grey keys would drop under 4.5:1.
+    var keyTextMuted: UIColor {
+        guard let colors else { return textMuted }
+        return colors.hasDarkLabels ? Self.rgb(0x525763) : UIColor(white: 1, alpha: 0.7)
+    }
 
     /// Unified iOS 26 Liquid Glass keycap fill across letters and modifiers:
     /// `white @ 0.16` composites to `(61,61,63)` on dark `(23,24,26)` and `(94,94,96)` on dark-field `(64,64,66)`.
     var keyFill: UIColor { colors?.keyFill ?? (isDark ? UIColor(white: 1, alpha: 0.16) : .white) }
-    var keyPressedFill: UIColor { colors?.keyPressedFill ?? (isDark ? UIColor(white: 1, alpha: 0.28) : Self.rgb(0xD8DCE4)) }
+    var keyPressedFill: UIColor { colors?.keyPressedFill ?? systemPressedFill }
+    /// Automatic's pressed key, for what's pressed on the glass rather than on a key: a menu
+    /// row, the Hex mark in the strip.
+    var systemPressedFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.28) : Self.rgb(0xD8DCE4) }
     /// A held key on the key plane, under its pop-up: Apple's grey (222 on white keys; 105 on
     /// dark ones, iOS 27.2).
-    var keyHeldFill: UIColor { colors?.keyHeldFill ?? (isDark ? UIColor(white: 1, alpha: 0.32) : Self.rgb(0xDEDEDE)) }
+    var keyHeldFill: UIColor { colors?.keyHeldFill ?? systemHeldFill }
+    /// Automatic's held key, for what's held on the glass rather than on a key: the number
+    /// pad's delete and separator.
+    var systemHeldFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.32) : Self.rgb(0xDEDEDE) }
     /// A held shift, delete, globe, emoji or return key: Apple's darker grey (197, 197, 201;
     /// 131 on dark keys).
     var functionHeldFill: UIColor { colors?.functionHeldFill ?? (isDark ? UIColor(white: 1, alpha: 0.44) : Self.rgb(0xC5C5C9)) }
@@ -60,10 +76,11 @@ struct FullKeyboardPalette: Equatable {
     var spaceHeldFill: UIColor { colors?.spaceHeldFill ?? (isDark ? UIColor(white: 1, alpha: 0.1) : Self.rgb(0xF2F2F7)) }
     /// Secondary fill for non-key chips and the recording panel's cancel pill.
     var functionFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.09) : UIColor(white: 0, alpha: 0.065) }
-    var keyShadow: UIColor { colors?.keyShadow ?? .clear }
+    /// Flat keycaps, with or without a theme.
+    var keyShadow: UIColor { .clear }
 
     /// Opaque so balloons and menus float cleanly over the strip and neighbouring keys.
-    var popupFill: UIColor { colors?.popupFill ?? (isDark ? Self.rgb(0x4E5056) : .white) }
+    var popupFill: UIColor { isDark ? Self.rgb(0x4E5056) : .white }
     /// The key pop-up's and the accent callout's bubble: white, or in dark Apple's neutral grey
     /// (63 at its top, lightening downward).
     var bubbleFill: UIColor { colors?.bubbleFill ?? (isDark ? Self.rgb(0x3F3F41) : .white) }
@@ -84,11 +101,8 @@ struct FullKeyboardPalette: Equatable {
     /// (235,237,240) under (44,46,49).
     var stripText: UIColor { isDark ? UIColor(white: 1, alpha: 0.58) : UIColor(white: 0, alpha: 0.67) }
     var stripDivider: UIColor { isDark ? UIColor(white: 1, alpha: 0.075) : UIColor(white: 0, alpha: 0.066) }
-    /// A pending autocorrection's or pressed word's capsule. White's own light grey comes from
-    /// the theme, since Automatic's translucent white would vanish on its white bar.
-    var stripPillFill: UIColor {
-        colors?.stripPillFill ?? (isDark ? UIColor(white: 1, alpha: 0.37) : UIColor(white: 1, alpha: 0.33))
-    }
+    /// A pending autocorrection's or pressed word's capsule.
+    var stripPillFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.37) : UIColor(white: 1, alpha: 0.33) }
     /// A pressed word gets the same capsule (measured the same on Apple's bar).
     var stripPillPressedFill: UIColor { stripPillFill }
     var stripPillText: UIColor { isDark ? .white : UIColor(white: 0, alpha: 0.81) }
@@ -98,9 +112,12 @@ struct FullKeyboardPalette: Equatable {
     var actionPressedFill: UIColor { colors?.actionPressedFill ?? Self.rgb(0x0062CC) }
     /// A send, go or search key that's off while the field is empty: Apple's grey (191, 192, 197;
     /// 121 on dark, iOS 27.2).
-    var actionDisabledFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.39) : Self.rgb(0xBFC0C5) }
+    /// With a theme, a step lighter than its keys, so it stays one of them.
+    var actionDisabledFill: UIColor {
+        colors?.keyHeldFill ?? (isDark ? UIColor(white: 1, alpha: 0.39) : Self.rgb(0xBFC0C5))
+    }
     /// An off return key's glyph: barely there (10% of the label colour on Apple's, light or dark).
-    var returnDisabledInk: UIColor { textBase.withAlphaComponent(0.1) }
+    var returnDisabledInk: UIColor { keyText.withAlphaComponent(0.1) }
     var warmCore: UIColor { Self.rgb(0xFF9500) }
 
     static let cornerRadius: CGFloat = 8.5

@@ -545,17 +545,32 @@ impl LinearResampler {
 
 const INSTALLED_DRIVER_PATH: &str = "/Library/Audio/Plug-Ins/HAL/HexMicrophone.driver";
 const EXPECTED_DRIVER_BUNDLE_ID: &str = "anomaly.hex.microphone.driver";
+/// A Developer ID application from Anomaly's team (`5NZ4Q7NXJ4`) named
+/// `anomaly.hex.microphone.driver`: what `app/update-requirement.txt`
+/// requires of `Hex.app`, minus `notarized`, since notarization is the
+/// app's and a nested plug-in has no ticket of its own. The release build
+/// signs the driver with the same identity it signs `Hex.app` with.
+const DRIVER_REQUIREMENT: &str = include_str!("../../app/driver-requirement.txt");
 
-/// Fixed AppleScript for driver installation. No user input is ever interpolated
-/// into this script; `osascript` receives the verified bundled `.driver` path
-/// via `argv` and quotes it with `quoted form of (item 1 of argv)`.
+/// Fixed AppleScript for driver installation. Nothing from the machine is
+/// interpolated into the script: `osascript` receives the bundled `.driver`
+/// path and the code-signing requirement (empty when this build does not
+/// verify) via `argv` and quotes each with `quoted form of`.
+///
+/// The root shell refuses a symlinked or non-directory source, copies the
+/// bundle into a staging folder without ACLs or quarantine flags, gives it to
+/// `root:wheel` with no group or other write, and, when it was given a
+/// requirement, checks the staging copy's signature as root. Only then does it
+/// replace the installed driver and restart coreaudiod, so a bundle swapped in
+/// while the authorization prompt was up never lands in the HAL folder.
 #[cfg(target_os = "macos")]
 const INSTALL_DRIVER_APPLESCRIPT: &str = r#"on run argv
     set srcPath to quoted form of (item 1 of argv)
+    set requirement to quoted form of (item 2 of argv)
     set dstDir to "'/Library/Audio/Plug-Ins/HAL'"
     set dstPath to "'/Library/Audio/Plug-Ins/HAL/HexMicrophone.driver'"
     set tmpPath to "'/Library/Audio/Plug-Ins/HAL/.HexMicrophone.driver.staging'"
-    do shell script "/bin/mkdir -p " & dstDir & " && /bin/rm -rf " & tmpPath & " && /usr/bin/ditto " & srcPath & " " & tmpPath & " && /usr/sbin/chown -R root:wheel " & tmpPath & " && /bin/chmod -R a+rX " & tmpPath & " && /bin/rm -rf " & dstPath & " && /bin/mv " & tmpPath & " " & dstPath & " && (/bin/launchctl kickstart -k system/com.apple.audio.coreaudiod || /usr/bin/killall coreaudiod)" with administrator privileges
+    do shell script "/bin/mkdir -p " & dstDir & " && /bin/rm -rf " & tmpPath & " && if [ -d " & srcPath & " ] && [ ! -L " & srcPath & " ]; then :; else echo 'The bundled driver is not a directory' 1>&2; exit 1; fi && /usr/bin/ditto --noacl --noqtn " & srcPath & " " & tmpPath & " && /usr/sbin/chown -R root:wheel " & tmpPath & " && /bin/chmod -R u+rwX,go+rX,go-w " & tmpPath & " && if [ -n " & requirement & " ]; then /usr/bin/codesign --verify --deep --strict -R=" & requirement & " " & tmpPath & " || { echo \"The driver is not signed by Anomaly's Developer ID\" 1>&2; /bin/rm -rf " & tmpPath & "; exit 1; }; fi && /bin/rm -rf " & dstPath & " && /bin/mv " & tmpPath & " " & dstPath & " && (/bin/launchctl kickstart -k system/com.apple.audio.coreaudiod || /usr/bin/killall coreaudiod)" with administrator privileges
 end run"#;
 
 /// Fixed AppleScript for driver removal. Takes no arguments and touches only
@@ -661,30 +676,213 @@ fn validate_driver_bundle(bundle_dir: &std::path::Path) -> Result<String, String
         .ok_or_else(|| "Driver Info.plist is missing or invalid".into())
 }
 
-fn bundled_driver_path() -> Option<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(contents_dir) = exe.parent().and_then(|p| p.parent())
-    {
-        candidates.push(contents_dir.join("Library/HexMicrophone.driver"));
-        candidates.push(contents_dir.join("Resources/HexMicrophone.driver"));
-    }
-    if let Some(home) = dirs::home_dir() {
-        candidates.push(home.join("Library/Caches/hex-mic/HexMicrophone.driver"));
-    }
-    candidates.push(PathBuf::from(
-        "/Applications/Hex.app/Contents/Library/HexMicrophone.driver",
-    ));
-    candidates
-        .into_iter()
-        .find(|candidate| validate_driver_bundle(candidate).is_ok())
+/// Where an installable `HexMicrophone.driver` is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DriverLocation {
+    /// A copy inside an `Hex.app` bundle.
+    Bundle,
+    /// `scripts/build-hex-microphone-driver.sh`'s output in the user's cache,
+    /// which any process running as this user may replace.
+    Cache,
 }
 
+/// What one candidate path holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DriverCandidate {
+    Missing,
+    /// Present, but Hex will not install it, and why.
+    Invalid(String),
+    Installable,
+}
+
+/// Whether this build was published to a channel (stable or dev) rather than
+/// made on this machine. A published build requires the driver to carry
+/// Anomaly's Developer ID signature, and never installs the build script's
+/// cache output; a local build (debug, test, `HEX_LOCAL_BUILD`,
+/// `HEX_TEST_BUILD`, or an unmarked `-dev` checkout) keeps installing
+/// whatever the script produced, ad-hoc signed or another team's included.
+/// The dev channel is published and signed, so it is not local.
+fn shipped_build() -> bool {
+    !crate::dev_build::is_local_build()
+}
+
+/// The requirement the root copy re-checks, empty when this build does not
+/// verify signatures (a local build), so installing the driver it built keeps
+/// working.
+#[cfg(target_os = "macos")]
+fn driver_signature_requirement() -> &'static str {
+    if shipped_build() {
+        DRIVER_REQUIREMENT.trim()
+    } else {
+        ""
+    }
+}
+
+/// Checks the bundle the way the updater checks a downloaded `Hex.app`
+/// (`codesign --verify --deep --strict -R`), before the admin prompt copies
+/// it into the HAL folder.
+#[cfg(target_os = "macos")]
+fn verify_driver_signature(bundle: &std::path::Path) -> Result<(), String> {
+    crate::codesign::verify(bundle, DRIVER_REQUIREMENT).map_err(|detail| {
+        // codesign can explain across lines; Settings shows one.
+        let detail: String = detail.split_whitespace().collect::<Vec<_>>().join(" ");
+        let detail: String = detail.chars().take(200).collect();
+        format!("code signature is not Anomaly's Developer ID: {detail}")
+    })
+}
+
+/// What `path` holds. `verify_signature` also checks a bundle copy against
+/// Anomaly's requirement; only the install worker asks for it, so reading the
+/// bundled version never spawns `codesign`. The cache only ever reaches a
+/// local build.
+fn inspect_driver_candidate(
+    location: DriverLocation,
+    path: &std::path::Path,
+    verify_signature: bool,
+) -> DriverCandidate {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return DriverCandidate::Invalid("Driver bundle is a symlink".into());
+        }
+        Ok(metadata) if !metadata.is_dir() => {
+            return DriverCandidate::Invalid("Driver bundle is not a directory".into());
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return DriverCandidate::Missing;
+        }
+        Err(error) => {
+            return DriverCandidate::Invalid(format!("Driver bundle cannot be read: {error}"));
+        }
+    }
+    if let Err(reason) = validate_driver_bundle(path) {
+        return DriverCandidate::Invalid(reason);
+    }
+    #[cfg(target_os = "macos")]
+    if verify_signature
+        && location == DriverLocation::Bundle
+        && let Err(reason) = verify_driver_signature(path)
+    {
+        return DriverCandidate::Invalid(reason);
+    }
+    // Only macOS installs this driver, so nothing verifies it elsewhere.
+    #[cfg(not(target_os = "macos"))]
+    let _ = (location, verify_signature);
+    DriverCandidate::Installable
+}
+
+/// Every place the install path looks, in order: the app bundle's own copies,
+/// then the build script's cache output, then the installed app.
+fn driver_candidate_paths() -> Vec<(DriverLocation, PathBuf)> {
+    let mut paths = Vec::new();
+    if let Some(contents_dir) = running_bundle_contents() {
+        paths.push((
+            DriverLocation::Bundle,
+            contents_dir.join("Library/HexMicrophone.driver"),
+        ));
+        paths.push((
+            DriverLocation::Bundle,
+            contents_dir.join("Resources/HexMicrophone.driver"),
+        ));
+    }
+    if let Some(home) = crate::app_paths::home_dir() {
+        paths.push((
+            DriverLocation::Cache,
+            home.join("Library/Caches/hex-mic/HexMicrophone.driver"),
+        ));
+    }
+    paths.push((
+        DriverLocation::Bundle,
+        PathBuf::from("/Applications/Hex.app/Contents/Library/HexMicrophone.driver"),
+    ));
+    paths
+}
+
+/// The `Contents` folder of the `Hex.app` this executable runs from, if it
+/// runs from one: a `.app` bundle with an `Info.plist`, never just any two
+/// folders up from the executable.
+fn running_bundle_contents() -> Option<PathBuf> {
+    let executable = std::env::current_exe().ok()?.canonicalize().ok()?;
+    let contents = executable.parent()?.parent()?;
+    let bundle = contents.parent()?;
+    (contents.file_name() == Some(std::ffi::OsStr::new("Contents"))
+        && bundle
+            .extension()
+            .is_some_and(|extension| extension == "app")
+        && bundle.join("Contents/Info.plist").is_file())
+    .then(|| contents.to_path_buf())
+}
+
+/// Picks the driver bundle to install from `candidates`, in order.
+///
+/// A bundle copy that is present but unusable fails the install instead of
+/// falling through: the cache is user-writable, so a damaged or tampered
+/// in-bundle driver must never make Hex install a different one with
+/// administrator privileges. A shipped (stable or dev channel) build never
+/// installs the cache at all.
+fn select_driver_candidate(
+    candidates: impl IntoIterator<Item = (DriverLocation, PathBuf, DriverCandidate)>,
+    shipped: bool,
+) -> Result<PathBuf, String> {
+    let mut cache_failure = None;
+    for (location, path, candidate) in candidates {
+        match (location, candidate) {
+            (DriverLocation::Bundle, DriverCandidate::Installable) => return Ok(path),
+            (DriverLocation::Bundle, DriverCandidate::Invalid(reason)) => {
+                return Err(format!(
+                    "Bundled HexMicrophone.driver is not installable: {reason}"
+                ));
+            }
+            (DriverLocation::Bundle, DriverCandidate::Missing) => {}
+            (DriverLocation::Cache, DriverCandidate::Installable) if !shipped => return Ok(path),
+            (DriverLocation::Cache, DriverCandidate::Invalid(reason)) if !shipped => {
+                cache_failure.get_or_insert(reason);
+            }
+            (DriverLocation::Cache, _) => {}
+        }
+    }
+    match cache_failure {
+        Some(reason) => Err(format!(
+            "The cached HexMicrophone.driver is not installable: {reason}"
+        )),
+        None if shipped => Err("Bundled HexMicrophone.driver was not found in Hex.app".into()),
+        None => {
+            Err("HexMicrophone.driver was not found in Hex.app or ~/Library/Caches/hex-mic".into())
+        }
+    }
+}
+
+/// The candidate paths, inspected in the install's order.
+/// `verify_signatures` checks bundle copies against Anomaly's requirement (a
+/// `codesign` spawn); only the install worker sets it.
+fn driver_candidates(
+    verify_signatures: bool,
+) -> impl Iterator<Item = (DriverLocation, PathBuf, DriverCandidate)> {
+    driver_candidate_paths()
+        .into_iter()
+        .map(move |(location, path)| {
+            let candidate = inspect_driver_candidate(location, &path, verify_signatures);
+            (location, path, candidate)
+        })
+}
+
+/// The driver bundle `install_driver_async` copies into the HAL folder, or why
+/// there is none Hex will install. This is the one path that checks code
+/// signatures, on the install worker and before the admin prompt.
+fn bundled_driver_path() -> Result<PathBuf, String> {
+    let shipped = shipped_build();
+    select_driver_candidate(driver_candidates(shipped), shipped)
+}
+
+/// The bundled driver's version for the pane. It reads no code signature:
+/// `status()` asks for it on the UI thread, and `codesign` is a process
+/// spawn. Candidate order and the cache policy are the install's.
 fn bundled_driver_version() -> String {
     static CACHED: OnceLock<String> = OnceLock::new();
     CACHED
         .get_or_init(|| {
-            bundled_driver_path()
+            select_driver_candidate(driver_candidates(false), shipped_build())
+                .ok()
                 .and_then(|path| read_driver_bundle_version(&path))
                 .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
         })
@@ -720,15 +918,13 @@ fn classify_osascript_failure(stderr: &str, stdout: &str) -> DriverActionState {
 #[cfg(target_os = "macos")]
 fn run_driver_osascript(
     script: &str,
-    arg: Option<&std::path::Path>,
+    args: &[&std::ffi::OsStr],
     settled: impl Fn(&HexMicrophoneStatus) -> bool,
     done: impl FnOnce() -> DriverActionState,
 ) -> DriverActionState {
     let mut command = std::process::Command::new("/usr/bin/osascript");
     command.arg("-e").arg(script);
-    if let Some(arg) = arg {
-        command.arg(arg);
-    }
+    command.args(args);
     match command.output() {
         Ok(out) if out.status.success() => {
             crate::audio::notify_audio_service_restarted();
@@ -760,11 +956,16 @@ pub fn install_driver_async() {
         let _ = thread::Builder::new()
             .name("hex-mic-install".into())
             .spawn(|| {
-                let Some(src_bundle) = bundled_driver_path() else {
-                    set_driver_action_state(DriverActionState::Failed(
-                        "Bundled HexMicrophone.driver was not found in Hex.app".into(),
-                    ));
-                    return;
+                let src_bundle = match bundled_driver_path() {
+                    Ok(path) => path,
+                    Err(reason) => {
+                        tracing::warn!(
+                            error = %reason,
+                            "refusing to install the Hex Microphone driver"
+                        );
+                        set_driver_action_state(DriverActionState::Failed(reason));
+                        return;
+                    }
                 };
                 let version = match validate_driver_bundle(&src_bundle) {
                     Ok(v) => v,
@@ -775,7 +976,10 @@ pub fn install_driver_async() {
                 };
                 let state = run_driver_osascript(
                     INSTALL_DRIVER_APPLESCRIPT,
-                    Some(&src_bundle),
+                    &[
+                        src_bundle.as_os_str(),
+                        std::ffi::OsStr::new(driver_signature_requirement()),
+                    ],
                     |st| st.driver_loaded,
                     || {
                         DriverActionState::DoneInstalled(
@@ -802,7 +1006,7 @@ pub fn uninstall_driver_async() {
             .spawn(|| {
                 let state = run_driver_osascript(
                     UNINSTALL_DRIVER_APPLESCRIPT,
-                    None,
+                    &[],
                     |st| !st.driver_bundle_installed && !st.driver_loaded,
                     || DriverActionState::DoneUninstalled,
                 );
@@ -1522,6 +1726,239 @@ mod tests {
         };
         assert!(!current_status.needs_update());
         assert!(current_status.is_up_to_date());
+    }
+
+    #[test]
+    fn a_shipped_build_installs_only_a_valid_bundle_copy() {
+        let bundle = PathBuf::from("/Applications/Hex.app/Contents/Library/HexMicrophone.driver");
+        let cache = PathBuf::from("/Users/kit/Library/Caches/hex-mic/HexMicrophone.driver");
+        let select = |candidates: Vec<(DriverLocation, PathBuf, DriverCandidate)>, shipped| {
+            select_driver_candidate(candidates, shipped)
+        };
+
+        // A shipped build installs the app bundle's own copy.
+        assert_eq!(
+            select(
+                vec![(
+                    DriverLocation::Bundle,
+                    bundle.clone(),
+                    DriverCandidate::Installable
+                )],
+                true
+            ),
+            Ok(bundle.clone())
+        );
+        // It never installs the user-writable cache, even when the bundle has
+        // no driver at all.
+        let error = select(
+            vec![
+                (
+                    DriverLocation::Bundle,
+                    bundle.clone(),
+                    DriverCandidate::Missing,
+                ),
+                (
+                    DriverLocation::Cache,
+                    cache.clone(),
+                    DriverCandidate::Installable,
+                ),
+            ],
+            true,
+        )
+        .unwrap_err();
+        assert!(error.contains("not found in Hex.app"), "{error}");
+        // A bundle copy that is there but does not validate fails the install
+        // rather than falling through to the cache, in any build.
+        for shipped in [true, false] {
+            let error = select(
+                vec![
+                    (
+                        DriverLocation::Bundle,
+                        bundle.clone(),
+                        DriverCandidate::Invalid(
+                            "code signature is not Anomaly's Developer ID".into(),
+                        ),
+                    ),
+                    (
+                        DriverLocation::Cache,
+                        cache.clone(),
+                        DriverCandidate::Installable,
+                    ),
+                ],
+                shipped,
+            )
+            .unwrap_err();
+            assert!(
+                error.contains("Bundled HexMicrophone.driver is not installable"),
+                "{error}"
+            );
+            assert!(error.contains("Developer ID"), "{error}");
+        }
+        // A local build still installs the driver its build script wrote …
+        assert_eq!(
+            select(
+                vec![
+                    (
+                        DriverLocation::Bundle,
+                        bundle.clone(),
+                        DriverCandidate::Missing
+                    ),
+                    (
+                        DriverLocation::Cache,
+                        cache.clone(),
+                        DriverCandidate::Installable
+                    ),
+                ],
+                false,
+            ),
+            Ok(cache.clone())
+        );
+        // … and a broken cache copy still lets the installed app's driver win.
+        assert_eq!(
+            select(
+                vec![
+                    (
+                        DriverLocation::Cache,
+                        cache.clone(),
+                        DriverCandidate::Invalid("Driver executable is missing from bundle".into()),
+                    ),
+                    (
+                        DriverLocation::Bundle,
+                        bundle.clone(),
+                        DriverCandidate::Installable
+                    ),
+                ],
+                false,
+            ),
+            Ok(bundle.clone())
+        );
+    }
+
+    /// A directory that looks like a driver bundle: the right name, a binary,
+    /// and an Info.plist naming the driver.
+    fn minimal_driver_bundle(root: &std::path::Path, name: &str) -> PathBuf {
+        let bundle = root.join(name);
+        std::fs::create_dir_all(bundle.join("Contents/MacOS")).unwrap();
+        std::fs::write(bundle.join("Contents/MacOS/HexMicrophoneDriver"), []).unwrap();
+        std::fs::write(
+            bundle.join("Contents/Info.plist"),
+            format!(
+                "<plist><dict><key>CFBundleIdentifier</key>\
+                 <string>{EXPECTED_DRIVER_BUNDLE_ID}</string>\
+                 <key>CFBundleShortVersionString</key><string>9.9.9</string></dict></plist>"
+            ),
+        )
+        .unwrap();
+        bundle
+    }
+
+    #[test]
+    fn a_driver_without_anomalys_signature_is_refused_only_when_verified() {
+        let root = std::env::temp_dir().join(format!("hex-mic-candidate-{}", std::process::id()));
+        let bundle = minimal_driver_bundle(&root, "HexMicrophone.driver");
+
+        // The bundle looks right and carries no signature at all: reading it
+        // without a signature check (a local build, and the version read on
+        // the UI thread) accepts it, while the install's check refuses it.
+        assert_eq!(
+            inspect_driver_candidate(DriverLocation::Bundle, &bundle, false),
+            DriverCandidate::Installable
+        );
+        #[cfg(target_os = "macos")]
+        assert!(matches!(
+            inspect_driver_candidate(DriverLocation::Bundle, &bundle, true),
+            DriverCandidate::Invalid(_)
+        ));
+
+        // A missing path is not an error by itself; a broken bundle is.
+        assert_eq!(
+            inspect_driver_candidate(
+                DriverLocation::Bundle,
+                &root.join("Elsewhere.driver"),
+                false
+            ),
+            DriverCandidate::Missing
+        );
+        std::fs::remove_file(bundle.join("Contents/MacOS/HexMicrophoneDriver")).unwrap();
+        assert!(matches!(
+            inspect_driver_candidate(DriverLocation::Bundle, &bundle, false),
+            DriverCandidate::Invalid(_)
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_symlinked_or_non_directory_driver_candidate_fails_closed() {
+        let root = std::env::temp_dir().join(format!("hex-mic-links-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+
+        // A regular file named like the bundle is not one.
+        let file = root.join("file/HexMicrophone.driver");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, []).unwrap();
+        assert!(matches!(
+            inspect_driver_candidate(DriverLocation::Bundle, &file, false),
+            DriverCandidate::Invalid(_)
+        ));
+
+        #[cfg(unix)]
+        {
+            let real = minimal_driver_bundle(&root.join("real"), "HexMicrophone.driver");
+            // A symlink to a valid bundle is refused, so a link swapped into
+            // the app bundle is never followed.
+            let link = root.join("link/HexMicrophone.driver");
+            std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+            std::os::unix::fs::symlink(&real, &link).unwrap();
+            assert!(matches!(
+                inspect_driver_candidate(DriverLocation::Bundle, &link, false),
+                DriverCandidate::Invalid(_)
+            ));
+            // A dangling symlink fails closed instead of reading as missing,
+            // so it cannot fall through to the cache.
+            let dangling = root.join("dangling/HexMicrophone.driver");
+            std::fs::create_dir_all(dangling.parent().unwrap()).unwrap();
+            std::os::unix::fs::symlink(root.join("nowhere"), &dangling).unwrap();
+            assert!(matches!(
+                inspect_driver_candidate(DriverLocation::Bundle, &dangling, false),
+                DriverCandidate::Invalid(_)
+            ));
+            // The real bundle still passes.
+            assert_eq!(
+                inspect_driver_candidate(DriverLocation::Bundle, &real, false),
+                DriverCandidate::Installable
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_driver_requirement_pins_anomalys_team_and_the_driver_identifier() {
+        fn team_id(requirement: &str) -> Option<&str> {
+            let marker = "leaf[subject.OU] = \"";
+            let start = requirement.find(marker)? + marker.len();
+            let end = requirement[start..].find('"')?;
+            Some(&requirement[start..start + end])
+        }
+
+        assert!(
+            DRIVER_REQUIREMENT.contains(&format!("identifier \"{EXPECTED_DRIVER_BUNDLE_ID}\"")),
+            "{DRIVER_REQUIREMENT}"
+        );
+        let update = include_str!("../../app/update-requirement.txt");
+        assert_eq!(team_id(DRIVER_REQUIREMENT), team_id(update));
+        assert_eq!(team_id(DRIVER_REQUIREMENT), Some("5NZ4Q7NXJ4"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_driver_requirement_compiles() {
+        let status = std::process::Command::new("/usr/bin/csreq")
+            .arg(format!("-r={}", DRIVER_REQUIREMENT.trim()))
+            .arg("-t")
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success());
     }
 
     #[cfg(target_os = "macos")]

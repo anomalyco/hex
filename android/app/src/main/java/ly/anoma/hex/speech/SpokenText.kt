@@ -2,14 +2,20 @@ package ly.anoma.hex.speech
 
 import java.util.Locale
 
-/** iOS's DictationPipeline and TranscriptFormatter: string rules only, no learned or remote rewriting. */
+/** iOS's DictationPipeline and TranscriptFormatter: string rules and Labs › Learn from my fixes' local word
+ * pairs, no remote rewriting. */
 internal object SpokenText {
-    /** Custom vocabulary, spoken symbols and counts, cleanup, the style, the vocabulary's spellings
-     * again (a style can capitalize "iPhone"), then Lowercase, the same wherever Hex dictates.
+    /** Custom vocabulary's Word replacements, Labs › Learn from my fixes' fixes (a Word replacement wins over a fix
+     * for the same heard words), custom vocabulary, spoken symbols and counts, cleanup, the style,
+     * the vocabulary's spellings again (a style can capitalize "iPhone"), then Lowercase, the same wherever Hex
+     * dictates. Fixes go first, on the raw transcript, so a learned spelling reaches every later stage unchanged.
      * Translation already happened in Whisper, so a translated dictation is English. */
     fun format(raw: String, options: SpeechOptions): String {
         val language = if (options.translate) "en" else options.spoken.code
-        val spelled = VocabularySpelling.apply(options.vocabulary, raw)
+        // A translated dictation is the model's English: none of this phone's Word replacements or learned fixes touch it.
+        val fixed = if (options.translate) raw else DictationFixes.apply(
+            WordReplacements.without(options.fixes, options.replacements), WordReplacements.apply(options.replacements, raw))
+        val spelled = VocabularySpelling.apply(options.vocabulary, fixed)
         if (options.style == Style.Verbatim || raw.isBlank()) return finished(style(spelled, options.style, language), options)
         val spoken = SpokenCleanup.counts(SpokenCleanup.symbols(spelled.trim(), language), language)
         val cleaned = if (options.clean) SpokenCleanup.clean(spoken, language) else spoken

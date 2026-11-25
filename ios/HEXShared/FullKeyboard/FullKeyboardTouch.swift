@@ -37,6 +37,9 @@ extension FullKeyboardEngine {
         var claimed = false
         /// Where the finger went down, before a strip touch moved onto row 1 (Adaptive touch).
         var downPoint: CGPoint = .zero
+        /// A docked iPad key pulled down (`KeyboardFlicks`): how far its character has come, 0 to 1;
+        /// nil until the finger goes down more than across.
+        var flick: CGFloat?
     }
 
     /// A press that types the character key it slides onto: 123, ABC and #+= (with a page to

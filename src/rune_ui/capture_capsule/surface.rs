@@ -18,6 +18,7 @@ use super::notch;
 use super::tuning::{self, CapsuleFlow};
 use crate::desktop::i18n::tr;
 use crate::rune_hud::spring::REDUCED_FADE;
+use crate::rune_ui::controls::{CAPSULE, Paint};
 
 /// The overlay's panel: wide enough for the open list, and tall enough for
 /// it and the shadow under it.
@@ -26,8 +27,8 @@ pub(crate) const PANEL_H: f32 = 424.0;
 /// Panel points the capsule is centred on, and its top.
 pub(crate) const CX: f32 = PANEL_W * 0.5;
 pub(crate) const TOP: f32 = 22.0;
-pub(crate) const ISLAND_H: f32 = 40.0;
-pub(crate) const ISLAND_INSET: f32 = 4.0;
+pub(crate) const ISLAND_H: f32 = CAPSULE.island_h;
+pub(crate) const ISLAND_INSET: f32 = CAPSULE.chip_inset;
 pub(crate) const CHIP_H: f32 = ISLAND_H - 2.0 * ISLAND_INSET;
 /// The red dot's ink spans 12…20 of the lead's 32 pt square; the timer
 /// starts 8 pt after it.
@@ -77,13 +78,16 @@ pub(crate) const SEG_ICON_GAP: f32 = 5.0;
 const SEG_PX: f32 = 10.0;
 /// Between a chip's label and its shortcut.
 pub(crate) const HINT_GAP: f32 = 6.0;
+/// The split destination chip's leading icon and trailing `⌄` half.
+pub(crate) const SEND_ICON: f32 = 14.0;
+pub(crate) const CHEVRON_W: f32 = 24.0;
 
 /// The open capsule is as wide as the list under it; its field takes what
 /// the rest leaves.
 pub(crate) const LIST_W: f32 = 420.0;
 const FIELD_MIN: f32 = 120.0;
 pub(crate) const LIST_Y: f32 = TOP + ISLAND_H + 6.0;
-pub(crate) const LIST_PAD: f32 = 6.0;
+pub(crate) const LIST_PAD: f32 = CAPSULE.row_inset;
 pub(crate) const HEADER_H: f32 = 24.0;
 pub(crate) const ROW_H: f32 = 30.0;
 
@@ -95,9 +99,9 @@ pub(crate) const PICK_H: f32 = 32.0;
 pub(crate) const CARD_HINTS_H: f32 = 28.0;
 /// The capsule is a rounded rect, its corners the list's, so the two
 /// match and the square thumbnail sits in a corner that follows it.
-pub(crate) const SHELL_RADIUS: f32 = 14.0;
+pub(crate) const SHELL_RADIUS: f32 = CAPSULE.radius;
 /// A chip's corners, concentric with the shell's.
-pub(crate) const CHIP_RADIUS: f32 = SHELL_RADIUS - ISLAND_INSET;
+pub(crate) const CHIP_RADIUS: f32 = CAPSULE.inner(CAPSULE.chip_inset);
 /// The walls' corners never round more than the one-line capsule's, so
 /// the line grows into a card without its corners changing.
 pub(crate) fn corner(h: f32) -> f32 {
@@ -140,7 +144,7 @@ pub(crate) fn processing() -> &'static str {
 }
 /// Tabular digits, so a new second never changes the timer's width.
 pub(crate) fn clock_style() -> TextStyle {
-    medium().features("'tnum' 1")
+    Paint::new(false, 1.0).clock()
 }
 /// The hairline between the recording's tools and its stop and cancel.
 pub(crate) const DIVIDER_W: f32 = 1.0;
@@ -226,6 +230,22 @@ pub(crate) enum Id {
     Why,
     /// The Undo chip, while a send can be taken back.
     Undo,
+    /// The unified split destination chip (`[→ ACME ⌄]` or `[⏱ ACME ⌄]`).
+    Split,
+    /// Left half of the split chip: sends immediately to the top suggestion.
+    QuickSend,
+    /// Right `⌄` half of the split chip: opens the Send-to list.
+    More,
+    /// Post-send `Always…` button beside Undo.
+    Always,
+    /// Options inside the inline `Always…` configurator popover.
+    AlwaysScopeNarrow,
+    AlwaysScopeWide,
+    AlwaysToSession,
+    AlwaysToProject,
+    AlwaysSave,
+    /// Opens Hex's Settings window directly to `Modal::RoutingRules`.
+    OpenRules,
     /// Pastes the capture.
     Paste,
     /// The Send to… chip.
@@ -268,6 +288,16 @@ impl Id {
             Id::Done => "done",
             Id::Why => "why",
             Id::Undo => "undo",
+            Id::Split => "split",
+            Id::QuickSend => "quick-send",
+            Id::More => "more",
+            Id::Always => "always",
+            Id::AlwaysScopeNarrow => "always-scope-narrow",
+            Id::AlwaysScopeWide => "always-scope-wide",
+            Id::AlwaysToSession => "always-to-session",
+            Id::AlwaysToProject => "always-to-project",
+            Id::AlwaysSave => "always-save",
+            Id::OpenRules => "open-rules",
             Id::Paste => "paste",
             Id::Ask => "ask",
             Id::Search => "search",
@@ -294,25 +324,38 @@ impl Id {
     /// The space between `self` and the item after it. The finished
     /// capsule's label stands clear of its actions, and the actions and ✕
     /// sit together as one cluster, so Undo never floats between them.
-    fn gap_before(self, next: Id) -> f32 {
+    /// `self_active` / `next_active` distinguish a filled pill `Id::Ask`
+    /// (Allow, Restart Hex, Try again) from plain text asks.
+    fn gap_before(self, self_active: bool, next: Id, next_active: bool) -> f32 {
+        let next_button = matches!(next, Id::Paste | Id::Undo | Id::Split | Id::Always)
+            || (next == Id::Ask && next_active);
+        let self_button = matches!(self, Id::Paste | Id::Undo | Id::Split | Id::Always)
+            || (self == Id::Ask && self_active);
         match (self, next) {
             (Id::Done, Id::Why) => CHIP_GAP,
             // The field's well starts the label's trail after it: 12 pt,
             // as the lead's inset is.
             (Id::Done | Id::Why, Id::Field) => 0.0,
-            // Paste's fill starts 16 pt after the words, as far as the
-            // lead sits from the wall and ✕ from the other: the words'
-            // trail, this, and the fill's 2 pt inset in its chip.
-            (Id::Done, Id::Paste) => PASTE_LEAD - LEAD_TRAIL - BUTTON_INSET,
-            (Id::Why, Id::Paste) => PASTE_LEAD - LEAD_TRAIL * 0.5 - BUTTON_INSET,
+            // Button fills (Paste, Undo, Allow, Restart Hex, Try again)
+            // start 16 pt after the words, as far as the lead sits from the
+            // wall and ✕ from the other: the words' trail, this, and the
+            // box's 2 pt inset in its chip.
+            (Id::Done, _) if next_button => PASTE_LEAD - LEAD_TRAIL - BUTTON_INSET,
+            (Id::Why, _) if next_button => PASTE_LEAD - LEAD_TRAIL * 0.5 - BUTTON_INSET,
             // The label's trail and the action's padding already part
             // them.
             (Id::Done | Id::Why, _) => GROUP_GAP,
-            // ✕'s circle has air of its own, so it tucks into a worded
+            // Dividers breathe on both sides so a lit pen pill never crowds them.
+            (Id::Divider, _) | (_, Id::Divider) => GROUP_GAP,
+            // Stop and Discard sit slightly apart so destructive ✕ isn't flush beside ■.
+            (Id::Finish, Id::Cancel) => CHIP_GAP + 2.0,
+            // Boxed buttons and icons keep one even step beside ✕.
+            (_, Id::Close) if self_button => CHIP_GAP,
+            (Id::Inspect | Id::Search, Id::Close) => CHIP_GAP,
+            // ✕'s circle has air of its own, so it tucks into a plain worded
             // action's right padding; drawn later, it takes the overlap's
-            // presses. Icons beside ✕ keep one even step.
-            (Id::Undo | Id::Ask | Id::Next | Id::Pick(_), Id::Close) => -CLOSE_HUG,
-            (Id::Paste | Id::Inspect | Id::Search, Id::Close) => CHIP_GAP,
+            // presses.
+            (Id::Ask | Id::Next | Id::Pick(_), Id::Close) => -CLOSE_HUG,
             _ if self.group() == next.group() => CHIP_GAP,
             _ => GROUP_GAP,
         }
@@ -333,9 +376,19 @@ impl Id {
             Id::Cancel | Id::Keep => 9,
             Id::Finish | Id::Discard => 10,
             Id::Field => 11,
-            Id::Undo => 12,
-            Id::Paste => 13,
-            Id::Inspect => 14,
+            Id::Always => 12,
+            Id::Undo => 13,
+            Id::Split => 14,
+            Id::Paste => 14,
+            Id::Inspect => 15,
+            Id::QuickSend
+            | Id::More
+            | Id::AlwaysScopeNarrow
+            | Id::AlwaysScopeWide
+            | Id::AlwaysToSession
+            | Id::AlwaysToProject
+            | Id::AlwaysSave
+            | Id::OpenRules => 22,
             Id::Next => 15,
             Id::Pick(row) => 16 + row.min(1) as u8,
             Id::Ask | Id::Search => 18,
@@ -401,6 +454,16 @@ pub(crate) fn keycaps_chip_width(label: &str, style: TextStyle) -> f32 {
         + keycaps_inset()
 }
 
+/// Width of the left send/queued half inside the split destination chip.
+pub(crate) fn split_send_width(name: &str) -> f32 {
+    8.0 + SEND_ICON + 4.0 + measure(name, medium()) + 4.0
+}
+
+/// Total chip width of the split destination chip (one fill, no divider).
+pub(crate) fn split_width(name: &str) -> f32 {
+    split_send_width(name) + CHEVRON_W + 2.0 * BUTTON_INSET
+}
+
 /// A chip's label, then its shortcut in quiet text, or a plain chip
 /// without one.
 pub(crate) fn keyed_width(keys: &[&str], label: &str, style: TextStyle) -> f32 {
@@ -421,7 +484,7 @@ const ROW_MAX: f32 = PANEL_W - 32.0;
 fn row_width(raw: &[(Id, String, f32, bool)]) -> f32 {
     let gaps: f32 = raw
         .windows(2)
-        .map(|pair| pair[0].0.gap_before(pair[1].0))
+        .map(|pair| pair[0].0.gap_before(pair[0].3, pair[1].0, pair[1].3))
         .sum();
     raw.iter().map(|r| r.2).sum::<f32>() + gaps + 2.0 * ISLAND_INSET
 }
@@ -501,12 +564,29 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
             ));
         }
     }
+    if let Some(lit) = done.always_button {
+        let label = tr("Always…");
+        raw.push((
+            Id::Always,
+            label.into(),
+            keyed_width(&[], label, medium()),
+            lit,
+        ));
+    }
     if done.undo {
         raw.push((
             Id::Undo,
             String::new(),
             keyed_width(&[], undo_label(), medium()),
             false,
+        ));
+    } else if let Some(split) = &done.split {
+        let name = ellipsize(&split.name, medium(), cap);
+        raw.push((
+            Id::Split,
+            name.clone(),
+            split_width(&name),
+            split.kind == super::flow::SplitKind::Queued,
         ));
     } else {
         if done.paste {
@@ -518,13 +598,27 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
                 false,
             ));
         }
+        // A filled primary ask (Allow, Restart Hex, Try again) sits in
+        // Paste's slot before any icon button (Inspect).
+        if let Some(ask) = done
+            .ask
+            .as_ref()
+            .filter(|_| done.ask_button && (!listed || done.ask_keys))
+        {
+            let width = keyed_width(&[], ask, medium()).max(44.0);
+            raw.push((Id::Ask, ask.clone(), width, true));
+        }
         if done.inspect && !done.inspect_preview() {
             raw.push((Id::Inspect, String::new(), CHIP_H, false));
         }
         // Where to send it is a click away, beside Paste, never opened for you.
         // Over the suggestions it's Search, with the capture shortcut that
         // opens it.
-        if let Some(ask) = done.ask.as_ref().filter(|_| !listed || done.ask_keys) {
+        if let Some(ask) = done
+            .ask
+            .as_ref()
+            .filter(|_| !done.ask_button && (!listed || done.ask_keys))
+        {
             if listed && done.ask_keys {
                 raw.push((Id::Search, ask.clone(), CHIP_H, false));
             } else {
@@ -701,7 +795,7 @@ fn line(pres: &Pres, clock: &str, metered: bool) -> ([f32; 4], Vec<Item>) {
         }
         Pres::Done(done) => done_items(done, &mut raw),
     }
-    let gap_after = |i: usize| raw[i].0.gap_before(raw[i + 1].0);
+    let gap_after = |i: usize| raw[i].0.gap_before(raw[i].3, raw[i + 1].0, raw[i + 1].3);
     let mut widths: Vec<f32> = raw.iter().map(|r| r.2).collect();
     let span = |widths: &[f32], from: usize| -> f32 {
         widths[from..].iter().sum::<f32>()
@@ -1200,6 +1294,7 @@ mod tests {
                     target: Some(0),
                     footer: Footer::Search { remember: false },
                     always: None,
+                    queued: false,
                 },
             )),
             ..Done::plain(Lead::Check, "")
@@ -1518,10 +1613,20 @@ mod tests {
             );
             for pair in items.windows(2) {
                 let gap = pair[1].rect[0] - pair[0].rect[0] - pair[0].rect[2];
-                let want = pair[0].id.gap_before(pair[1].id);
+                let want = pair[0]
+                    .id
+                    .gap_before(pair[0].active, pair[1].id, pair[1].active);
                 assert!((gap - want).abs() < 1e-3, "{gap} != {want}");
                 assert!(
-                    [CHIP_GAP, GROUP_GAP, 0.0, -CLOSE_HUG].contains(&want),
+                    [
+                        CHIP_GAP,
+                        CHIP_GAP + 2.0,
+                        GROUP_GAP,
+                        PASTE_LEAD - LEAD_TRAIL * 0.5 - BUTTON_INSET,
+                        0.0,
+                        -CLOSE_HUG,
+                    ]
+                    .contains(&want),
                     "{want}"
                 );
             }

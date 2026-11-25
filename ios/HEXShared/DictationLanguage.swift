@@ -20,6 +20,9 @@ nonisolated struct LanguageSettings {
         static let speechModuleFailed = "settings.dictationLanguage.speechModuleFailed"
         static let unavailable = "settings.dictationLanguage.unavailable"
         static let keyboardNeedsHex = "settings.dictationLanguage.keyboardNeedsHex"
+        /// Set with `keyboardNeedsHex` when Hex found Apple has no speech model for the
+        /// language on this iPhone, rather than one the keyboard couldn't get.
+        static let keyboardLanguageUnavailable = "settings.dictationLanguage.keyboardNeedsHex.unavailable"
         /// First failures, which set nothing aside until a second in a row.
         static let speechModuleStrikes = "settings.dictationLanguage.speechModuleStrikes"
         static let unavailableStrikes = "settings.dictationLanguage.unavailableStrikes"
@@ -172,27 +175,33 @@ nonisolated struct LanguageSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.dictationFollowsKeyboard) }
     }
 
-    /// What Automatic dictates in while the keyboard switches between two or more languages:
-    /// the one the space bar shows now, in the iPhone's region where Apple Speech has it
-    /// (`KeyboardLanguage.dictationLanguage`), as the iPhone's own keyboards take dictation
-    /// with them, so Spanish speech is never transcribed as English, nor English as Spanish.
-    /// A variant picked by hand for that language's keyboard wins over the preferred
-    /// languages, so swiping back to Español returns to the Spanish picked last. Nil with a
-    /// dictation language picked by hand, with one keyboard language, and while the iPhone's
-    /// own language (what Automatic picks otherwise) has no layout to type it (Hebrew), where
-    /// dictating is how that language gets written, unless Switch dictation too asks for it.
+    /// What Automatic dictates in while the keyboard switches between two or more languages
+    /// and Switch dictation too is on: the one the space bar shows now, in the iPhone's region
+    /// where Apple Speech has it (`KeyboardLanguage.dictationLanguage`), so Spanish speech is
+    /// never transcribed as English, nor English as Spanish. A variant picked by hand for that
+    /// language's keyboard wins over the preferred languages, so swiping back to Español
+    /// returns to the Spanish picked last. Nil with a dictation language picked by hand, with
+    /// one keyboard language, and with Switch dictation too off: from iOS 26, where Settings
+    /// offers that switch, dictation then stays on Automatic's own language (TestFlight build
+    /// 150: with English and Deutsch ticked and the keyboard left on Deutsch, English speech
+    /// came out as German). Before iOS 26 the switch and the Dictation language menu aren't
+    /// offered, so Automatic still follows the keyboard there, except where the iPhone's own
+    /// language has no layout to type it (Hebrew) and dictating is how it gets written.
     func keyboardDictationLanguage(
         preferred: [String] = Locale.preferredLanguages,
-        region: String? = Locale.current.region?.identifier
+        region: String? = Locale.current.region?.identifier,
+        osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
     ) -> String? {
         guard dictationLanguage == nil else { return nil }
         let chosen = keyboardLanguages
         guard chosen.count > 1 else { return nil }
         let koreanEnabled = KoreanKeyboardExperiment.isEnabled(in: defaults)
-        if !dictationFollowsKeyboard,
-           let own = automaticDictationLanguage ?? preferred.first,
-           KeyboardLanguage.matching(own, koreanEnabled: koreanEnabled) == nil {
-            return nil
+        if !dictationFollowsKeyboard {
+            if osMajorVersion >= 26 { return nil }
+            if let own = automaticDictationLanguage ?? preferred.first,
+               KeyboardLanguage.matching(own, koreanEnabled: koreanEnabled) == nil {
+                return nil
+            }
         }
         let list = KeyboardLanguageList.resolve(chosen: chosen, stored: currentKeyboardLanguage, automatic: .english)
         return dictationLanguage(for: list.current, preferred: preferred, region: region)
@@ -249,11 +258,19 @@ nonisolated struct LanguageSettings {
     static let keyboardNeedsHexDuration: TimeInterval = 24 * 60 * 60
 
     /// In-keyboard dictation couldn't get its speech model ready (an asset released or
-    /// removed since Hex downloaded it, a download the keyboard couldn't finish), so the Hex
-    /// key opens Hex, which downloads it in the foreground. Until a model installs
-    /// (`SpeechModelInstall`), a language is chosen, or a day passes.
-    func markKeyboardNeedsHex(at now: Date = Date()) {
+    /// removed since Hex downloaded it, a download the keyboard couldn't finish), so a
+    /// dictation tap says so with Open Hex, which downloads it in the foreground; or, with
+    /// `unavailable`, Hex found Apple has no model for the language on this iPhone, which
+    /// the tap says without Open Hex. Until a model installs (`SpeechModelInstall`), a
+    /// language is chosen, or a day passes.
+    func markKeyboardNeedsHex(at now: Date = Date(), unavailable: Bool = false) {
         defaults?.set(now.timeIntervalSince1970, forKey: Key.keyboardNeedsHex)
+        defaults?.set(unavailable, forKey: Key.keyboardLanguageUnavailable)
+    }
+
+    /// `keyboardNeedsHex` is because Apple has no speech model for the language here.
+    var keyboardLanguageUnavailable: Bool {
+        defaults?.bool(forKey: Key.keyboardLanguageUnavailable) ?? false
     }
 
     func keyboardNeedsHex(now: Date = Date()) -> Bool {
@@ -267,6 +284,7 @@ nonisolated struct LanguageSettings {
         }
         guard defaults?.object(forKey: Key.keyboardNeedsHex) != nil else { return }
         defaults?.removeObject(forKey: Key.keyboardNeedsHex)
+        defaults?.removeObject(forKey: Key.keyboardLanguageUnavailable)
     }
 
     /// How long a first failure waits for a second before it no longer counts.

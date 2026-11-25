@@ -13,6 +13,14 @@ impl Flow {
             self.uncopied = true;
             return actions;
         }
+        if input == Input::Copied {
+            self.uncopied = false;
+            return actions;
+        }
+        if let Input::RuleMatch(rule_match) = input {
+            self.rule_match = rule_match;
+            return actions;
+        }
         if let Input::Drawing(on) = input {
             self.drawing = on;
             return actions;
@@ -20,6 +28,7 @@ impl Flow {
         if input == Input::Stage(Stage::Recording) {
             self.silent = false;
             self.uncopied = false;
+            self.rule_match = None;
             if !matches!(self.phase, Phase::Recording { .. }) {
                 self.drawing = false;
             }
@@ -191,18 +200,53 @@ impl Flow {
             // and `hex capture send` still offer the capture.
             (Phase::Dismissed, Input::Routed(_) | Input::Delivered(_)) => Phase::Dismissed,
             // A queued send went on a retry: Hex can't take it back.
-            (_, Input::Delivered(delivered)) => match delivered {
+            (prev, Input::Delivered(delivered)) => match delivered {
                 Delivered::Sent { to } => Phase::Sent(Sent {
                     undoable: false,
-                    ..Sent::picked(&Dest::new(to, ""), false, now, None)
+                    ..Sent::picked(&Dest::new(to, ""), false, now, None, None)
                 }),
-                Delivered::Queued { why, .. } => Phase::Queued { why, at: now },
+                Delivered::Queued { to, why } => {
+                    let (session, back) = match prev {
+                        Phase::Sent(sent) => (Some(sent.session), sent.back),
+                        Phase::Routed(routed) => (
+                            rule_to(&routed.route).map(|d| d.session.clone()),
+                            Some(routed.route),
+                        ),
+                        Phase::Queued { session, back, .. } => (session, back),
+                        _ => (None, None),
+                    };
+                    Phase::Queued {
+                        to,
+                        session,
+                        why,
+                        at: now,
+                        back,
+                    }
+                }
+            },
+            (
+                Phase::Routed(Routed {
+                    route: Route::ResolvingRule { name },
+                    taken_back: false,
+                    ..
+                }),
+                Input::Refined(Route::Unreachable { why }),
+            ) => Phase::Failed {
+                at: now,
+                what: Failure::Send(name),
+                why: plain_reason(&why),
             },
             (Phase::Routed(routed), Input::Refined(route)) if !routed.taken_back => {
                 Phase::Routed(routes::refine(routed, route, now, self.suggest_on_route))
             }
             (_, Input::Routed(route)) => {
+                // In the default List flow, finished capsules stay compact
+                // (`Copied [→ ACME ⌄] ✕` with a suggestion, or `Annotation copied
+                // [Paste] ✕` without one) until `⌄` or `Send to…` is clicked.
+                // Experimental flows (Toast, MenuBar, Cursor, Notch) keep
+                // auto-opening their suggestions.
                 let suggests = self.suggest_on_route
+                    && tuning::get().flow != CapsuleFlow::List
                     && !matches!(
                         route,
                         Route::Rule { .. }
@@ -219,6 +263,7 @@ impl Flow {
                     taken_from: None,
                     delivered: false,
                     sending: false,
+                    queued: false,
                 })
             }
             (Phase::Routed(routed), Input::OpenList)
@@ -226,14 +271,47 @@ impl Flow {
             {
                 Phase::Routed(routed)
             }
-            // The capture shortcut over the suggestions searches every
-            // session; in the search it records anew, which the listener
-            // does itself.
+            // The capture shortcut over a compact finished capsule or open
+            // suggestions opens session search; once search is already open it
+            // records anew, which the listener does itself.
             (Phase::Routed(routed), Input::Record)
-                if routed.open.as_ref().is_some_and(|open| !open.typing) =>
+                if routed.open.as_ref().is_some_and(|open| !open.typing)
+                    || routed.compact_searchable() =>
             {
                 self.phase = Phase::Routed(routed);
                 return self.step(Input::OpenList, now);
+            }
+            (phase @ Phase::Queued { .. }, Input::Record) => {
+                self.phase = phase;
+                return self.step(Input::OpenList, now);
+            }
+            (
+                Phase::Queued {
+                    to, session, back, ..
+                },
+                Input::OpenList,
+            ) => {
+                let route = back.unwrap_or_else(|| Route::Nothing {
+                    recent: vec![
+                        Dest::new(to.clone(), tr("queued")).session(session.unwrap_or(to)),
+                    ],
+                });
+                let mut routed = Routed {
+                    route,
+                    at: now,
+                    open: Some(Open {
+                        typing: true,
+                        ..Open::suggesting()
+                    }),
+                    taken_back: false,
+                    already_with: None,
+                    taken_from: None,
+                    delivered: false,
+                    sending: false,
+                    queued: true,
+                };
+                clamp(&mut routed);
+                Phase::Routed(routed)
             }
             (Phase::Routed(mut routed), Input::OpenList) => {
                 match &mut routed.open {
@@ -288,11 +366,23 @@ impl Flow {
             }
             (Phase::Routed(routed), Input::Send { always }) => {
                 let selected = routed.open.as_ref().map(|open| open.selected);
-                send(routed, selected, always, now, &mut actions)
+                send(
+                    routed,
+                    selected,
+                    always,
+                    now,
+                    self.rule_match.clone(),
+                    &mut actions,
+                )
             }
-            (Phase::Routed(routed), Input::SendRow(row)) => {
-                send(routed, Some(row), false, now, &mut actions)
-            }
+            (Phase::Routed(routed), Input::SendRow(row)) => send(
+                routed,
+                Some(row),
+                false,
+                now,
+                self.rule_match.clone(),
+                &mut actions,
+            ),
             (Phase::Routed(mut routed), Input::Cycle(by)) => {
                 let rows = routed
                     .open
@@ -333,13 +423,18 @@ impl Flow {
             // Taken back, folding it starts its hold: it leaves like any
             // finished capsule, and Send to… brings it back.
             (Phase::Routed(mut routed), Input::ClickAway) if !self.hovered => {
-                if routed.taken_back {
-                    routed.at = now;
-                }
                 if routed.open.take().is_some() {
+                    if routed.taken_back {
+                        routed.at = now;
+                    }
                     self.fold_hold(now);
                 }
                 Phase::Routed(routed)
+            }
+            (Phase::Sent(mut sent), Input::ClickAway) if !self.hovered && sent.always.is_some() => {
+                sent.always = None;
+                self.fold_hold(now);
+                Phase::Sent(sent)
             }
             (phase, Input::ClickAway) => phase,
             // Taken back, ✕ (or Escape in its open list) is the dismissal:
@@ -378,6 +473,13 @@ impl Flow {
                         actions
                     };
                 }
+                if routed.queued {
+                    actions.push(Action::Undo { to: String::new() });
+                    return {
+                        self.phase = Phase::TakenBack { at: now };
+                        actions
+                    };
+                }
                 // The chip is there until the router posts the send; a click
                 // that lands as it goes says nothing, since Undo stops a
                 // send and never chases one that went.
@@ -398,6 +500,11 @@ impl Flow {
                 });
                 let from = sent.from();
                 taking_back(sent.back, &from, now)
+            }
+            (Phase::Sent(mut sent), Input::Escape) if sent.always.is_some() => {
+                sent.always = None;
+                self.fold_hold(now);
+                Phase::Sent(sent)
             }
             // Nothing to list: dismissing says where the bundle is.
             (Phase::TakenBack { .. }, Input::Dismiss) => Phase::Kept { at: now },

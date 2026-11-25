@@ -42,7 +42,8 @@ hex
 ├── transcribe <file> [--model <id>] [--language L]  print an audio or video file's transcript
 ├── meetings
 │   ├── record [--title T]         as the menu bar's Record Meeting; needs meetings.enabled
-│   ├── stop                       Stop & Transcribe
+│   │                              (busy while the last meeting stops or transcribes)
+│   ├── stop                       Stop & Transcribe; unchanged once it is stopping
 │   ├── copy-last                  copy the last meeting transcript to the clipboard
 │   ├── delete <id>                move a finished meeting's Markdown and recording to the Trash
 │   └── list | show | search       read-only (docs/transcript-cli.md)
@@ -237,6 +238,19 @@ downloads or repairs one (`model install` does). It keeps that model's own
 remembered language, as the menu bar does; `--language`
 overrides only the language, and must be one the model supports.
 
+`model switch` asks the running Hex to swap the dictation model and
+language with the other choice Labs › Model switch shortcut saved
+(`model_switch_other`), exactly as its key does, through the same
+installed-only preparation as `model use`. It answers `busy` while Hex
+records or has accepted dictation jobs pending, and once the new model loads
+both selections are saved together;
+a failed preparation keeps the active model and the saved choice. Pressing
+the key again, or running it again, swaps back. It never downloads: an other
+model that isn't installed answers `not-installed`, a current model that
+can't be the saved other choice (Apple Speech) answers `unavailable`, the
+selection already running answers `changed: false`, and with the Lab off it
+answers `unavailable`.
+
 `vocabulary` edits the [shared vocabulary](features/vocabulary.md) through the
 running Hex, which saves settings and reloads them as a window edit would.
 Terms match in any case; `add` of a term already listed only merges new
@@ -325,8 +339,17 @@ folder while Labs › Install agent skill from Annotate is on.
 
 A CLI-started meeting is the same recording the menu bar starts: the menu-bar
 state, the recording capsule, and Stop & Transcribe all apply to it.
-`meetings record` replies once the recording has started (or after 8 s);
-`meetings stop` replies once transcription has begun.
+`meetings record` replies once the recording has started (or after 8 s), and
+`meetings stop` replies once the recorder is transcribing or has discarded a
+recording with no speech (macOS answers a failure with its error; Linux and
+Windows answer a stop that ends without transcribing as done); after 8 s it
+answers anyway, and `meeting.state` may still read `stopping`. A stop leaves
+the recorder finishing that meeting before it takes another — including a
+stop asked while it is still starting — so until then `meeting.state` reads
+`stopping` and `record` is refused with `busy` (exit 1), never "Already
+recording" or "already starting". Once `meeting.state` is `transcribing`,
+`record` is refused the same way, naming the transcription; only `idle`
+starts a new recording.
 
 `meetings delete <id>` is the Meetings pane's Delete, carried out by the
 running Hex on every OS: it moves the meeting's exported Markdown, any
@@ -484,7 +507,10 @@ listener.shortcuts  Wayland portal only: [{"name": "Dictation", "trigger": "Supe
                     granted (changed in its settings or not); trigger null when it refused one
 capture.state       idle | recording | transcribing | unknown (the listener didn't answer or stopped)
 capture.recording   dictation | service | null
-meeting.state       idle | starting | recording | transcribing
+meeting.state       idle | starting | recording | stopping | transcribing
+                    (stopping: stop was asked and the recorder is finishing that
+                    meeting, or the one it was still starting; a new recording
+                    can start once it reads idle)
 model               the saved selection; installed is about that model
 model.backend       {"kind", "device", "crash_fallback"} for the model actually loaded, or null before a
                     load and once it unloads; kind is cpu, vulkan, cuda, rocm, metal, or another backend's
@@ -528,9 +554,10 @@ not-installed          `model use` on a model that isn't downloaded (`hex model 
 feature-off            the command needs an opt-in that is off (Meetings)
 disabled               a Labs toggle the command needs is off (the message names it)
 not-ready              Hex is waiting for setup (permissions or the dictation model)
-meeting-active         quit/restart while a meeting records (pass --force)
-busy                   something is in progress (recording, transcribing, a full queue),
-                       or the listener couldn't confirm it's idle
+meeting-active         quit/restart while a meeting records, stops, or transcribes (pass --force)
+busy                   something is in progress (recording, a meeting stopping or
+                       transcribing, a full queue), or the listener couldn't confirm
+                       it's idle
 resource-exhausted     a running Hex refused a `hex transcribe` piece as too large or too long
 discarded              `stop` dropped the clip: no audio yet, or silent; nothing transcribes
 no-speech              `dictation start --print` or `stop --print` heard no speech, or `hex transcribe`'s file had none; nothing printed (exit 4)
@@ -611,6 +638,13 @@ support this lab.
   `labs.second_dictation_shortcut` is on (`hex labs on
   second-dictation-shortcut`) and shares no key with another shortcut. Linux
   and Windows need a key in it, as every shortcut there does.
+- `model_switch_hotkey` (unbound by default; `none` clears it) swaps the
+  dictation model and language with `model_switch_other`, and back. It acts
+  only while `labs.model_switch_shortcut` is on
+  (`hex labs on model-switch-shortcut`) and `model_switch_other` names an
+  installed model and language, and shares no key with another shortcut.
+  Every OS needs a key in it. Hex never downloads the other model for it:
+  while it is missing, the key does nothing and says so.
 - `extra_dictation_hotkeys` (macOS, an empty array by default) holds up to
   four more dictation shortcuts, each `{"binding": ..., "mode": ...}`. A row
   acts only while `labs.more_dictation_shortcuts` is on (`hex labs on
@@ -622,10 +656,11 @@ support this lab.
 - `json` settings (modes, extra dictation shortcuts, meeting providers,
   excluded calendars) take the JSON value the file stores.
 - `ui_language` takes `en`, `pl`, `zh` (Simplified Chinese), `zh-Hant`
-  (Traditional Chinese), `ja`, `de`, `es`, `uk`, `pt`, `fr`, `ru`, or `none`
-  (follow the system language), the same languages Settings offers. Following
-  the system, a Chinese locale with the Hant script or the TW, HK, or MO
-  region shows Traditional Chinese; other Chinese locales show Simplified.
+  (Traditional Chinese), `ja`, `de`, `es`, `uk`, `pt`, `fr`, `ru`, `hu`, or
+  `none` (follow the system language), the same languages Settings offers.
+  Following the system, a Chinese locale with the Hant script or the TW, HK,
+  or MO region shows Traditional Chinese; other Chinese locales show
+  Simplified.
 - `updates.channel` takes `stable`, `dev`, or `none` (follow the build: the
   channel it was published on), and checks for updates at once. Choosing
   another channel than the build's offers that channel's current release
@@ -643,9 +678,10 @@ support this lab.
   capture shortcuts need a key, and `capture.enabled on` needs both free; on
   a Mac whose Paste Last is still ⌥⇧V, rebind one of the two first.
 - `meetings.retention` is `day`, `week`, `month`, `forever`, or `none` (the
-  default: meetings recorded since the default began are kept 24 hours, and
+  default: meetings recorded since the default began are kept 7 days, and
   older ones stay until you choose). Hex moves meetings that ended longer
-  ago than that to the Trash at launch and hourly, Meetings on or off, and
+  ago than that to the Trash at launch and hourly (their recording folder; the
+  exported Markdown stays), Meetings on or off, and
   `hex meetings` and `hex mcp` no longer list them.
 - `meetings.audio_retention` is `day`, `week`, `month`, `forever`, or `none`
   (the default; Meetings › Settings › After a meeting › Keep audio). A
@@ -665,7 +701,8 @@ Writable keys: `release_microphone_while_idle`,
 `sound_effects`, `sound_effect_volume`, `sound_theme`, `microphone`,
 `avoid_bluetooth_microphone`, `recording_audio_behavior`, `recording_duck_volume`, `double_tap_lock`, `double_tap_only`,
 `shortcut_mode`, `dictation_hotkey`, `paste_last_hotkey`, `raw_dictation_hotkey`,
-`second_dictation_hotkey`, `extra_dictation_hotkeys`, `labs.second_dictation_shortcut`,
+`second_dictation_hotkey`, `model_switch_hotkey`, `model_switch_other`,
+`labs.model_switch_shortcut`, `extra_dictation_hotkeys`, `labs.second_dictation_shortcut`,
 `labs.more_dictation_shortcuts`, `labs.standalone_special_keys`, `labs.app_model_switching`, `show_dock_icon`, `vocabulary_boost`,
 `labs.keep_microphone_open`, `labs.keep_microphone_open_seconds`,
 `labs.hud_height`, `labs.hud_bottom_gap`,

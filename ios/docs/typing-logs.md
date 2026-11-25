@@ -180,7 +180,7 @@ cursor, for every `edit` (and `dictation`) line remove `deleted` (a string;
 
 | `op` | fields |
 | --- | --- |
-| `insert` | `inserted`, `src`: `key` (a character or space), `accent` (long-press pick), `slide` (hold 123, slide, let go), `bar` (the dictation bar's space) |
+| `insert` | `inserted`, `src`: `key` (a character or space), `accent` (long-press pick), `slide` (hold 123, slide, let go), `flick` (a docked iPad key pulled down: the character over its letter), `bar` (the dictation bar's space) |
 | `delete` | `deleted` (the character), `src`: `key` (on press), `repeat` (held, 75 ms), `repeat_fast` (after 0.85 s, two at a time), `bar`, `selection` (Two-thumb selection's Delete), `selection_cut`, `selection_dictate` (its Dictate, when the dictation's words arrive and replace the range; `deletedCount` when the range is longer than 80 characters) |
 | `delete_word` | `deleted`, `src`: `repeat_word` (held past 1.4 s) |
 | `autocorrect` | `from`, `to`, `deleted` (= `from`), `inserted` (`to` + space). Applied on space. |
@@ -221,6 +221,8 @@ Taps that aren't text: `action`:
 
 - `accent_open` (`id`, `key`, `options`), `accent_pick` (`id`, `index`, `chosen`,
   `rollover` when another key committed it), `accent_cancel`;
+- `flick` (`key`, the pulled key's label; `chosen`, what went in): a docked iPad key let go
+  past half its pull (Settings › Keyboard › Key flicks), followed by an `insert` with `src: flick`;
 - `trackpad_start` (`id`; `hold: true`, as only holding the space bar starts it;
   older logs without it had a 10 pt slide start it), `trackpad_end` (`id`, `offset`: total
   UTF-16 units; with Two-thumb selection on, the space bar's own lift writes it even while the
@@ -244,6 +246,7 @@ Taps that aren't text: `action`:
 - `hex_key` (`dictation`: `warm`, `keyboard`, `open_hex`), `hex_menu`, `style`
   (`style`, `from`: `hex_menu` or `recording_panel`),
   `dictation_language` (`language`: BCP 47 or `automatic`, from the Hex menu),
+  `open_hex` (`from: hex_menu`, the menu's Open Hex row),
   `dictation_stop` (`from: hex_key_release` when lifting a push-to-talk hold
   ends it), `dictation_cancel`;
 - `next_keyboard` (strip chip), `globe`, `undo_dictation` (`applied: false` when

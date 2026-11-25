@@ -106,19 +106,19 @@ final class KeyboardLocalDictation {
     private enum ArmedState {
         case capturing(CapturingState)
         /// A failure while armed, shown only if the touch is kept: a slide to the menu drops it.
-        case failed(job: Job, requestedAt: TimeInterval, failure: KeyboardLocalCapturePhase.ArmedFailure)
+        case failed(job: Job, requestedAt: TimeInterval, message: String, detail: String?)
 
         var job: Job {
             switch self {
             case .capturing(let state): state.job
-            case .failed(let job, _, _): job
+            case .failed(let job, _, _, _): job
             }
         }
 
         var requestedAt: TimeInterval {
             switch self {
             case .capturing(let state): state.requestedAt
-            case .failed(_, let requestedAt, _): requestedAt
+            case .failed(_, let requestedAt, _, _): requestedAt
             }
         }
     }
@@ -137,28 +137,13 @@ final class KeyboardLocalDictation {
             case .idle:
                 return .idle
             case .armed(.capturing(let state)):
-                let readiness: KeyboardLocalCapturePhase.ArmedReadiness
-                switch state.resources {
-                case .awaitingAudioSession:
-                    readiness = .starting(.awaitingAudioSession)
-                case .awaitingPage:
-                    readiness = .starting(.awaitingPage)
-                case .awaitingFirstAudio:
-                    readiness = .starting(.awaitingFirstAudio)
-                case .streaming(_, let audioStartedAt):
-                    readiness = .receivingAudio(startedAt: audioStartedAt)
-                }
-                return .armed(jobID: state.job.id, requestedAt: state.requestedAt, readiness: readiness)
-            case .armed(.failed(let job, let requestedAt, let failure)):
-                return .armed(jobID: job.id, requestedAt: requestedAt, readiness: .failed(failure))
+                return .armed(jobID: state.job.id, failed: false)
+            case .armed(.failed(let job, _, _, _)):
+                return .armed(jobID: job.id, failed: true)
             case .active(let state):
                 switch state.resources {
-                case .awaitingAudioSession:
-                    return .starting(jobID: state.job.id, requestedAt: state.requestedAt, stage: .awaitingAudioSession)
-                case .awaitingPage:
-                    return .starting(jobID: state.job.id, requestedAt: state.requestedAt, stage: .awaitingPage)
-                case .awaitingFirstAudio:
-                    return .starting(jobID: state.job.id, requestedAt: state.requestedAt, stage: .awaitingFirstAudio)
+                case .awaitingAudioSession, .awaitingPage, .awaitingFirstAudio:
+                    return .starting(jobID: state.job.id)
                 case .streaming(_, let audioStartedAt):
                     return .recording(jobID: state.job.id, startedAt: audioStartedAt)
                 }
@@ -528,11 +513,11 @@ final class KeyboardLocalDictation {
     private func keepArmed() {
         guard case .armed(let armed) = session else { return }
         switch armed {
-        case .failed(_, _, let failure):
+        case .failed(_, _, let message, let detail):
             endCaptureOwnership()
             releaseAudioSession()
-            KeyboardProbeLog.shared.write("FAILED: \(failure.detail ?? failure.message) \(KeyboardProbeLog.memory())")
-            setSession(.failed(message: failure.message, until: Date().timeIntervalSince1970 + 6))
+            KeyboardProbeLog.shared.write("FAILED: \(detail ?? message) \(KeyboardProbeLog.memory())")
+            setSession(.failed(message: message, until: Date().timeIntervalSince1970 + 6))
         case .capturing(let state):
             setSession(.active(state))
             let liveLabel = state.resources.isStreaming ? "already live" : "waiting for first audio"
@@ -1162,8 +1147,7 @@ final class KeyboardLocalDictation {
             }
             endCaptureOwnership()
             releaseAudioSession()
-            let failure = KeyboardLocalCapturePhase.ArmedFailure(message: message, detail: detail)
-            setSession(.armed(.failed(job: armed.job, requestedAt: armed.requestedAt, failure: failure)))
+            setSession(.armed(.failed(job: armed.job, requestedAt: armed.requestedAt, message: message, detail: detail)))
             KeyboardProbeLog.shared.write("FAILED at touch-down (held): \(detail ?? message) \(KeyboardProbeLog.memory())")
             return
         }

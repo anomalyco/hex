@@ -27,9 +27,11 @@ use super::{SharedOutcomes, lock};
 
 mod opencode;
 mod preparation;
+pub(crate) mod rule_match;
 mod send;
 mod session_name;
 
+pub use rule_match::{AutoSendBy, RuleMatch};
 use send::{Clock, DeliverOutcome, PickAction, SavedRule, SendState, Sent, UndoPlan};
 
 #[cfg(test)]
@@ -63,6 +65,9 @@ pub struct CaptureRoute {
     /// capture went, as two sends agreed: `Send { to: <that session>,
     /// always: true }` saves it.
     pub offer: Option<String>,
+    /// Structured match scope for the post-send `Always…` configurator
+    /// (site subpath vs whole host, terminal folder, or non-general app).
+    pub rule_match: Option<RuleMatch>,
 }
 
 impl CaptureRoute {
@@ -71,6 +76,7 @@ impl CaptureRoute {
             answer,
             delivery: None,
             offer: None,
+            rule_match: None,
         }
     }
 
@@ -114,6 +120,7 @@ pub enum RouteAnswer {
         suggested: Vec<RouteDest>,
         recent: Vec<RouteDest>,
         site: Option<String>,
+        by: AutoSendBy,
     },
     /// Guesses, best first: everything else the router found (Jev's pick,
     /// HOME when Jev couldn't tell, a dev server's port, a page or its
@@ -204,9 +211,17 @@ fn opencode_managed() -> bool {
     crate::policy::Policy::current().locks(crate::policy::Lock::OpenCodeProcessing)
 }
 
+/// Whether Jev has an active credential available (`$OPENCODE_API_KEY` or
+/// OpenCode's credential) within `budget`. Blocks; call it off the UI thread.
+pub fn jev_available(budget: Duration) -> bool {
+    if opencode_managed() || std::env::var_os("SCRAWL_NO_OPENCODE").is_some() {
+        return false;
+    }
+    router().run(|| jev::available(budget))
+}
+
 /// Open OpenCode sessions, newest first, as Send to… lists them, read
 /// within `budget`. Blocks; call it off the UI thread.
-#[cfg(target_os = "macos")]
 pub fn recent_sessions(budget: Duration) -> anyhow::Result<Vec<RouteDest>> {
     anyhow::ensure!(!opencode_managed(), "OpenCode is turned off here");
     let read = router().run(|| {
@@ -307,6 +322,11 @@ pub(super) enum Job {
     Send {
         to: String,
         always: bool,
+    },
+    SaveRule {
+        kind: RuleKind,
+        key: String,
+        target: String,
     },
     Undo,
     /// The pointer is on the capsule (`true`) or left it: a rule's send
@@ -420,8 +440,11 @@ struct Routed {
     router: Router,
     url: Option<String>,
     app: Option<String>,
+    bundle_id: Option<String>,
     /// What an always-rule would match.
     rule: Option<(RuleKind, String)>,
+    /// Structured match scope for the post-send `Always…` configurator.
+    rule_match: Option<RuleMatch>,
     candidates: Vec<smart::Candidate>,
     answer: RouteAnswer,
     /// The send, hold, delivery, and undo lifecycle; [`CaptureRoute::delivery`]
@@ -435,6 +458,7 @@ impl Routed {
             answer: self.answer.clone(),
             delivery: self.send.delivery(),
             offer: self.send.offer_site(),
+            rule_match: self.rule_match.clone(),
         }
     }
 
@@ -507,6 +531,7 @@ impl Worker {
         match job {
             Job::Written { bundle, look } => self.written(bundle, look),
             Job::Send { to, always } => self.chosen(&to, always),
+            Job::SaveRule { kind, key, target } => self.save_rule(kind, key, target),
             Job::Undo => self.undo(),
             Job::Hold(on) => self.hold(on),
             Job::SendBundle {
@@ -590,117 +615,22 @@ impl Worker {
         }
     }
 
-    #[cfg(test)]
-    fn written_before(&mut self, bundle: PathBuf, look: Look) {
-        let started = Instant::now();
-        let Look {
-            router,
-            seen,
-            until,
-            model,
-            ..
-        } = look;
-        let live = seen
-            .recv_timeout(until.saturating_duration_since(Instant::now()))
-            .unwrap_or_else(|error| {
-                match error {
-                    RecvTimeoutError::Timeout => {
-                        tracing::warn!("looking for a capture's route took too long");
-                    }
-                    RecvTimeoutError::Disconnected => {
-                        tracing::error!("looking for a capture's route panicked");
-                    }
-                }
-                None
-            });
-        let waited = started.elapsed();
-        let loaded = scrawl_capture::handoff::load_bundle(&bundle)
-            .map(|(_, loaded)| loaded)
-            .inspect_err(|error| tracing::warn!(error = %format!("{error:#}"), "could not read a capture to route"))
-            .ok();
-        let candidates = live
-            .as_ref()
-            .map(|live| live.candidates.clone())
-            .unwrap_or_default();
-        if let Some(live) = &live
-            && let Some(error) = &live.error
-        {
-            tracing::warn!(
-                bundle = %bundle_name(&bundle),
-                error,
-                read = live.candidates.len(),
-                "a capture's look couldn't read all of OpenCode's sessions"
-            );
-            if auth_refused(error) {
-                tracing::warn!("{AUTH_HINT}");
-            }
-        }
-        let unread = live.as_ref().and_then(sessions_unread);
-        let terminal = live.as_ref().and_then(|live| live.terminal.clone());
-        // Judged even without the sessions: a rule, page, or publisher names
-        // one outright, and the record keeps what was seen for a replay.
-        let (decision, url) = router.run(|| match (live, &loaded) {
-            (Some(live), Some(loaded)) => {
-                let (judgement, url) = routing::judge_capture_with(&bundle, loaded, live, &model);
-                (judged(judgement.decision, unread.as_deref()), url)
-            }
-            (Some(live), None) => (Decided::Failed, live.url),
-            (None, _) => (Decided::Failed, None),
-        });
-        let bundle_id = loaded
-            .as_ref()
-            .and_then(|loaded| loaded.target.bundle_id.clone());
-        let app = loaded.as_ref().and_then(|loaded| loaded.target.app.clone());
-        let rule = policy::rule_key(url.as_deref(), terminal.as_deref(), bundle_id.as_deref());
-        let site = rule.as_ref().map(|rule| match rule {
-            (RuleKind::Site, key) => key
-                .split_once("://")
-                .map_or(key.as_str(), |(_, host)| host)
-                .to_owned(),
-            (RuleKind::App, key) => app.clone().unwrap_or_else(|| key.clone()),
-            (RuleKind::Terminal, _) => site_of(rule),
-        });
-        let Answered {
-            answer,
-            send: rule_send,
-            shown,
-        } = answer_for(decision, url.as_deref(), site, &candidates, now_ms());
-        tracing::info!(
-            bundle = %bundle_name(&bundle),
-            answer = answer_kind(&answer),
-            why = shown.as_ref().map(|shown| shown.why.as_str()),
-            look_wait_ms = waited.as_millis() as u64,
-            judge_ms = started.elapsed().saturating_sub(waited).as_millis() as u64,
-            "capture routed"
-        );
-        if let Some(shown) = &shown
-            && let Err(error) = routing::record_shown(&bundle, shown)
-        {
-            tracing::warn!(error = %format!("{error:#}"), "could not record how a capture's route was shown");
-        }
-        self.current = Some(Routed {
-            bundle,
-            router,
-            url,
-            app,
-            rule,
-            candidates,
-            answer,
-            send: SendState::Idle,
-        });
-        self.publish();
-        // A saved rule sends at once; the capsule's Undo takes it back.
-        if let Some(dest) = rule_send {
-            self.send_current(dest, None, None);
-        }
-    }
-
     /// The capsule's pick: sends the newest capture to `to` now, after
     /// taking back a send elsewhere. `always` also saves a rule for its
     /// site or app.
     fn chosen(&mut self, to: &str, always: bool) {
         if let Some(dest) = self.resolve(to) {
             self.choose(dest, always);
+        }
+    }
+
+    /// Saves a rule chosen from the post-send `Always…` configurator and
+    /// attaches it to the current capture so Undo can also revert it.
+    fn save_rule(&mut self, kind: RuleKind, key: String, target: String) {
+        if let Some(saved) = persist_rule((kind, key, target))
+            && let Some(current) = self.current.as_mut()
+        {
+            current.send.attach_saved_rule(saved);
         }
     }
 
@@ -1028,8 +958,6 @@ enum Decided {
     Judged(smart::Decision),
     /// OpenCode's sessions couldn't be read: why, in a few words.
     Unreachable(String),
-    #[cfg(test)]
-    Failed,
 }
 
 /// Why a look read no sessions at all, when its read failed.
@@ -1227,6 +1155,7 @@ fn answer_for(
     site: Option<String>,
     candidates: &[smart::Candidate],
     now_ms: u64,
+    jev_auto_send: bool,
 ) -> Answered {
     let scored = |scored: &smart::Scored| {
         let dest = smart::destination_of(scored, url);
@@ -1251,17 +1180,18 @@ fn answer_for(
             shown: Some(Shown::guess(why)),
         }
     };
+    let auto_by = |to: &smart::Scored| match to.lead().map(|r| r.basis) {
+        Some(smart::Basis::Clue(
+            smart::Source::Rule | smart::Source::AppRule | smart::Source::TerminalRule,
+        )) => Some(AutoSendBy::Rule),
+        Some(smart::Basis::Jev) if jev_auto_send => Some(AutoSendBy::Jev),
+        _ => None,
+    };
     let mut answered = match decided {
-        // The router also trusts a page naming its session. In Hex, only the
-        // user's saved site, terminal or app rule authorizes an automatic send.
-        Decided::Judged(smart::Decision::Send { to, instead })
-            if matches!(
-                to.lead().map(|r| r.basis),
-                Some(smart::Basis::Clue(
-                    smart::Source::Rule | smart::Source::AppRule | smart::Source::TerminalRule
-                ))
-            ) =>
-        {
+        // Saved site, terminal, or app rules always auto-send; confident Jev
+        // picks auto-send only when `Auto-send with Jev` is enabled.
+        Decided::Judged(smart::Decision::Send { to, instead }) if auto_by(&to).is_some() => {
+            let by = auto_by(&to).expect("checked");
             let dest = smart::destination_of(&to, url);
             let shown = Shown::rule(lead_why(&to));
             let to = scored(&to);
@@ -1275,6 +1205,7 @@ fn answer_for(
                     suggested,
                     recent,
                     site,
+                    by,
                 },
                 send: Some(dest),
                 shown: Some(shown),
@@ -1293,10 +1224,6 @@ fn answer_for(
             recent: recent(&[]),
         }),
         Decided::Unreachable(why) => Answered::of(RouteAnswer::Unreachable { why }),
-        #[cfg(test)]
-        Decided::Failed => Answered::of(RouteAnswer::NoAnswer {
-            recent: recent(&[]),
-        }),
     };
     // The early local read, a saved rule, or a list read without a title can
     // leave a `ses…` id where a name goes; the capsule and the bundle say the
@@ -1346,10 +1273,7 @@ fn recent(candidates: &[smart::Candidate], shown: &[&str], now_ms: u64) -> Vec<R
         .map(|candidate| RouteDest {
             session: candidate.id.clone(),
             name: candidate.label().to_owned(),
-            why: format!(
-                "{} ago",
-                smart::ago_text(now_ms.saturating_sub(candidate.updated_ms))
-            ),
+            why: crate::desktop::i18n::event_age_at(candidate.updated_ms, now_ms),
             directory: candidate.directory.clone(),
         })
         .collect()
@@ -1596,6 +1520,10 @@ mod tests {
     }
 
     fn sent_by(basis: smart::Basis, why: &str) -> Answered {
+        sent_by_with_jev(basis, why, false)
+    }
+
+    fn sent_by_with_jev(basis: smart::Basis, why: &str, jev_auto_send: bool) -> Answered {
         answer_for(
             Decided::Judged(smart::Decision::Send {
                 to: scored_by("ses_a", "Alpha", basis, why),
@@ -1608,6 +1536,7 @@ mod tests {
                 candidate("ses_c", "Gamma", 0),
             ],
             0,
+            jev_auto_send,
         )
     }
 
@@ -1668,6 +1597,7 @@ mod tests {
                 None,
                 &[candidate("ses_seer", "SEER", 0)],
                 0,
+                false,
             )
         };
         for answered in [rule(""), rule("ses_seer")] {
@@ -1691,6 +1621,7 @@ mod tests {
             None,
             &[],
             0,
+            false,
         );
         let RouteAnswer::Guess { suggested, .. } = &answered.answer else {
             panic!("not a guess: {:?}", answered.answer);
@@ -1764,11 +1695,30 @@ mod tests {
                 Some("ses_a".into()),
                 "{why}: sent at once"
             );
-            assert!(
-                matches!(answered.answer, RouteAnswer::Rule { ref to, .. } if to.why == "rule")
-            );
+            assert!(matches!(
+                answered.answer,
+                RouteAnswer::Rule {
+                    ref to,
+                    by: AutoSendBy::Rule,
+                    ..
+                } if to.why == "rule"
+            ));
             assert_eq!(answered.shown, Some(Shown::rule(why)));
         }
+        // With Auto-send with Jev on, Jev's confident pick auto-sends with
+        // Jev provenance; JevHome fallback and non-rule clues still suggest.
+        let jev_send = sent_by_with_jev(Basis::Jev, "Jev gave it 0.96", true);
+        assert!(jev_send.send.is_some());
+        assert!(matches!(
+            jev_send.answer,
+            RouteAnswer::Rule {
+                by: AutoSendBy::Jev,
+                ..
+            }
+        ));
+        let jev_home = sent_by_with_jev(Basis::JevHome, "Jev couldn't tell, so HOME", true);
+        assert!(jev_home.send.is_none());
+        assert!(matches!(jev_home.answer, RouteAnswer::Guess { .. }));
     }
 
     #[test]
@@ -1792,6 +1742,7 @@ mod tests {
             None,
             &candidates,
             63_000,
+            false,
         );
         assert_eq!(send.map(|dest| dest.session), Some("ses_a".into()));
         let RouteAnswer::Rule {
@@ -1811,7 +1762,7 @@ mod tests {
             vec![RouteDest {
                 session: "ses_b".into(),
                 name: "Beta".into(),
-                why: "1 min ago".into(),
+                why: "1m ago".into(),
                 directory: Some("/tmp/ses_b".into()),
             }]
         );
@@ -1828,6 +1779,7 @@ mod tests {
             Some("example.com".into()),
             &candidates,
             0,
+            false,
         );
         assert!(send.is_none());
         assert!(matches!(
@@ -1835,9 +1787,6 @@ mod tests {
             RouteAnswer::Guess { ref suggested, ref recent, site: Some(ref site) }
                 if suggested.len() == 1 && recent.is_empty() && site == "example.com"
         ));
-        let Answered { answer, send, .. } = answer_for(Decided::Failed, None, None, &candidates, 0);
-        assert!(send.is_none());
-        assert!(matches!(answer, RouteAnswer::NoAnswer { ref recent } if recent.len() == 1));
     }
 
     /// The Air's first sends: Studio's OpenCode couldn't read the contact
@@ -1935,6 +1884,7 @@ mod tests {
             None,
             &[],
             0,
+            false,
         );
         assert!(send.is_none());
         assert_eq!(
@@ -2593,114 +2543,6 @@ mod tests {
             std::fs::remove_dir_all(bundle.parent().unwrap()).unwrap();
         }
 
-        #[test]
-        #[ignore = "paired wall-clock benchmark; fake 60 ms remote and 2.5 s routing model"]
-        fn paired_written_to_route_and_send() {
-            fn remote(path: &str, budget: Duration) -> anyhow::Result<Vec<u8>> {
-                std::thread::sleep(Duration::from_millis(60));
-                sessions(path, budget)
-            }
-            fn old_send(path: &Path, id: &str) -> anyhow::Result<scrawl_capture::handoff::Posted> {
-                // Light copy, idle check, post: three serialized round trips.
-                std::thread::sleep(Duration::from_millis(180));
-                posted(path, id)
-            }
-            fn new_send(path: &Path, id: &str) -> anyhow::Result<scrawl_capture::handoff::Posted> {
-                // Idle check and post; copying is no longer on this path.
-                std::thread::sleep(Duration::from_millis(120));
-                posted(path, id)
-            }
-            fn model(_: &[u8], _: Duration) -> anyhow::Result<Vec<u8>> {
-                std::thread::sleep(Duration::from_millis(2500));
-                Ok(serde_json::to_vec(&serde_json::json!({
-                    "model": "fixture", "answers": {
-                        "target": {"type":"choice", "choice":"targets.t1", "confidence":0.95, "probabilities":{"targets.t1":0.95,"targets.t2":0.05}},
-                        "any_fits": {"type":"noul", "noul":0.95}
-                    }
-                }))?)
-            }
-            for (name, target) in [
-                ("session", Some("ses_board")),
-                ("folder", Some("/p/board")),
-                ("guess", None),
-            ] {
-                for after in [false, true] {
-                    let mut shown = Vec::new();
-                    let mut sent = Vec::new();
-                    for sample in 0..8 {
-                        let router = router_with(|c| {
-                            c.smart_routing = true;
-                            c.jev_routing = target.is_none();
-                            if let Some(target) = target {
-                                c.apps.insert("com.example.board".into(), target.into());
-                            }
-                        });
-                        let mut senses = senses(no_tab);
-                        senses.hooks.api = remote;
-                        let context = RouteContext {
-                            front_bundle_id: None,
-                            captured_bundle_id: Some("com.example.board".into()),
-                            app_pid: None,
-                        };
-                        let mut look = look_with(context, router, senses).unwrap();
-                        if after {
-                            // Preparation completes during the recording, before Written.
-                            let live = look.seen.recv_timeout(Duration::from_secs(5)).unwrap();
-                            let (tx, rx) = mpsc::sync_channel(1);
-                            tx.send(live).unwrap();
-                            look.seen = rx;
-                        }
-                        look.model.ask = model;
-                        let bundle = written("com.example.board");
-                        let outcomes = SharedOutcomes::default();
-                        lock(&outcomes).fail(bundle.clone(), "test".into());
-                        let mut worker = worker(outcomes.clone());
-                        worker.forward = if after { new_send } else { old_send };
-                        let started = Instant::now();
-                        let observer = std::thread::spawn(move || {
-                            loop {
-                                if lock(&outcomes)
-                                    .last
-                                    .as_ref()
-                                    .and_then(|c| c.route.as_ref())
-                                    .is_some_and(|r| r.answer != RouteAnswer::Looking)
-                                {
-                                    return started.elapsed();
-                                }
-                                assert!(started.elapsed() < Duration::from_secs(10));
-                                std::thread::park_timeout(Duration::from_millis(1));
-                            }
-                        });
-                        if after {
-                            worker.written(bundle.clone(), look);
-                        } else {
-                            worker.written_before(bundle.clone(), look);
-                        }
-                        settle_with_clock(&mut worker, false);
-                        let elapsed = started.elapsed();
-                        let first = observer.join().unwrap();
-                        if sample > 0 {
-                            shown.push(first.as_millis());
-                            if target.is_some() {
-                                sent.push(elapsed.saturating_sub(first).as_millis());
-                            }
-                        }
-                        let _ = std::fs::remove_dir_all(bundle.parent().unwrap());
-                    }
-                    shown.sort();
-                    sent.sort();
-                    eprintln!(
-                        "METRIC {name}_{}_written_to_shown_ms={} range={}-{} routed_to_sent_ms={:?}",
-                        if after { "after" } else { "before" },
-                        shown[3],
-                        shown[0],
-                        shown[6],
-                        sent.get(3)
-                    );
-                }
-            }
-        }
-
         /// What the worker answers for a capture of `bundle_id` looked at
         /// with `senses`, and the session it was sent to at once, if any.
         fn route(
@@ -3163,6 +3005,47 @@ mod tests {
                     "{auto_send:?}: {answer:?}"
                 );
                 assert_eq!(sent, None, "nothing is sent until it's picked");
+            }
+        }
+
+        /// The hosted Jev lookup runs only while `Auto-send with Jev` is on, so a
+        /// settings file left with `jevRouting` on and `autoSend` back at
+        /// `rules` never reaches Jev.
+        #[test]
+        fn only_an_on_auto_send_with_jev_asks_jev() {
+            static ASKED: AtomicU64 = AtomicU64::new(0);
+            fn ask(_: &[u8], _: Duration) -> anyhow::Result<Vec<u8>> {
+                ASKED.fetch_add(1, Ordering::Relaxed);
+                anyhow::bail!("test Jev")
+            }
+            for (auto_send, asks) in [
+                (policy::AutoSend::Rules, 0),
+                (policy::AutoSend::Confident, 1),
+            ] {
+                ASKED.store(0, Ordering::Relaxed);
+                let router = router_with(|c| {
+                    c.smart_routing = true;
+                    c.jev_routing = true;
+                    c.auto_send = auto_send;
+                });
+                let live = look::Live {
+                    candidates: vec![
+                        candidate("ses_board", "BOARD", 30),
+                        candidate("ses_home", "HOME", 20),
+                    ],
+                    ..look::Live::default()
+                };
+                let (mut look, found) = held_look(router, live.clone());
+                look.model.ask = ask;
+                let outcomes = SharedOutcomes::default();
+                let mut worker = worker(outcomes.clone());
+                let bundle = written("com.example.board");
+                lock(&outcomes).fail(bundle.clone(), "test".into());
+                worker.written(bundle.clone(), look);
+                found.send(Some(live)).unwrap();
+                settle(&mut worker);
+                assert_eq!(ASKED.load(Ordering::Relaxed), asks, "{auto_send:?}");
+                std::fs::remove_dir_all(bundle.parent().unwrap()).unwrap();
             }
         }
 

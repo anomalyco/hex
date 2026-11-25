@@ -515,6 +515,75 @@ extension FullKeyboardEngineTests {
         XCTAssertNil(view.engine.layout.key(.character("ˇ")), "English has no ˇ key")
     }
 
+    /// Slovak types on Czech's keys, as Apple's Slovak keyboard does, and its ´ and ˇ do as
+    /// Apple's do with real touches (iOS 26.5 and 27.2 simulators): each accents the letter right
+    /// before it (dˇ is ď, lˇ ľ, l´ ĺ, A´ Á), except that ˇ after u, o or a types itself (no ů, no
+    /// ring on a held ˇ); ô and ä are held on o and a. The space bar says "Slovenčina", there is
+    /// no typing model, and Switch dictation too dictates sk-SK.
+    func testSlovakTypesOnCzechKeys() {
+        let settings = LanguageSettings(defaults: defaults)
+        settings.keyboardLanguages = [.english, .slovak]
+        settings.dictationFollowsKeyboard = true
+        settings.supportedDictationLanguages = ["en-US", "sk-SK"]
+        let field = FixtureTextTarget()
+        field.autocapitalizationType = UITextAutocapitalizationType.none
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: field)
+        view.languageSettings = settings
+        view.frame = CGRect(x: 0, y: 0, width: 402, height: 262)
+        view.layoutIfNeeded()
+        view.engine.autocorrect.isEnabled = false
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .slovak)
+        XCTAssertEqual(view.plane.spaceLabel, "Slovenčina")
+        XCTAssertNil(view.engine.autocorrect.decoder, "no Slovak typing model")
+        XCTAssertEqual(settings.keyboardDictationLanguage(), "sk-SK")
+        var id = 700
+        func tap(_ kind: KeyKind) {
+            let key = view.engine.layout.key(kind)!
+            let centre = CGPoint(x: key.frame.midX, y: key.frame.midY)
+            id += 1
+            view.engine.touchBegan(id: id, at: centre)
+            view.engine.touchEnded(id: id, at: centre)
+        }
+        func type(_ keys: String) {
+            for character in keys { tap(character == " " ? .space : .character(String(character))) }
+        }
+        func hold(_ character: String, pick: String) {
+            let key = view.engine.layout.key(.character(character))!
+            id += 1
+            view.engine.touchBegan(id: id, at: CGPoint(x: key.frame.midX, y: key.frame.midY))
+            XCTAssertTrue(view.engine.openAccentMenuIfEligible(forTouch: id), character)
+            guard let menu = view.engine.activeAccentMenu, let index = menu.options.firstIndex(of: pick) else {
+                return XCTFail("\(character): no \(pick)")
+            }
+            let cell = menu.cellFrames[index]
+            view.engine.touchMoved(id: id, to: CGPoint(x: cell.midX, y: cell.midY))
+            view.engine.touchEnded(id: id, at: CGPoint(x: cell.midX, y: cell.midY))
+        }
+        tap(.shift)
+        type("dˇakujem lˇudia ")
+        XCTAssertEqual(field.text, "Ďakujem ľudia ")
+        type("k")
+        hold("o", pick: "ô")
+        type("nˇ pa´ c´ lˇ l´ ")
+        hold("a", pick: "ä")
+        XCTAssertEqual(field.text, "Ďakujem ľudia kôň pá ć ľ ĺ ä")
+        XCTAssertEqual(field.text.unicodeScalars.count, field.text.count, "precomposed letters, no combining marks")
+        while field.hasText { tap(.delete) }
+        type("uˇ oˇ aˇ ˇ ")
+        XCTAssertEqual(field.text, "uˇ oˇ aˇ ˇ ", "no ů, ô or ä from ˇ")
+        let caron = view.engine.layout.key(.character("ˇ"))!
+        id += 1
+        view.engine.touchBegan(id: id, at: CGPoint(x: caron.frame.midX, y: caron.frame.midY))
+        XCTAssertFalse(view.engine.openAccentMenuIfEligible(forTouch: id), "a held ˇ offers nothing")
+        view.engine.touchEnded(id: id, at: CGPoint(x: caron.frame.midX, y: caron.frame.midY))
+        tap(.shift)
+        type("a´")
+        tap(.shift)
+        type("tˇ")
+        XCTAssertTrue(field.text.hasSuffix("ÁŤ"), field.text)
+    }
+
     /// Settings › Keyboard › Languages with English and Hungarian: the space bar says "Magyar",
     /// the keys are the standard Hungarian QWERTZ (Z ends row 1, Y starts row 3), its nine
     /// accented vowels are all on held keys (á é í ó ö ő ú ü ű, ő and ű the double-acute letters),
@@ -596,11 +665,81 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(view.engine.layout.key(.character("y"))?.row, 0, "English is QWERTY again")
     }
 
+    /// Settings › Keyboard › Languages with English and Dutch: the space bar says "Nederlands",
+    /// the keys are the English letters (Apple's Dutch keyboard is QWERTY), its accents are on
+    /// held keys as Apple's are (ë on E, ï on I, é on E, and j́ on J for a stressed íj́, its
+    /// combining acute kept on the j), English is its bilingual partner, and Switch dictation
+    /// too dictates nl-NL.
+    func testDutchTypesAndSwitches() {
+        let settings = LanguageSettings(defaults: defaults)
+        settings.keyboardLanguages = [.english, .dutch]
+        settings.dictationFollowsKeyboard = true
+        settings.supportedDictationLanguages = ["en-US", "nl-NL"]
+        let model = KeyboardViewModel()
+        let field = FixtureTextTarget()
+        field.autocapitalizationType = UITextAutocapitalizationType.none
+        let view = FullKeyboardView(model: model, target: field)
+        view.languageSettings = settings
+        view.frame = CGRect(x: 0, y: 0, width: 402, height: 262)
+        view.layoutIfNeeded()
+        view.engine.autocorrect.isEnabled = false
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .dutch)
+        XCTAssertEqual(view.plane.spaceLabel, "Nederlands")
+        XCTAssertNil(view.engine.autocorrect.decoder, "no Dutch typing model: the dictionary engine")
+        XCTAssertEqual(settings.keyboardDictationLanguage(), "nl-NL")
+        XCTAssertEqual(view.engine.layout.key(.character("y"))?.row, 0, "QWERTY")
+        var id = 900
+        func tap(_ kind: KeyKind) {
+            let key = view.engine.layout.key(kind)!
+            let centre = CGPoint(x: key.frame.midX, y: key.frame.midY)
+            id += 1
+            view.engine.touchBegan(id: id, at: centre)
+            view.engine.touchEnded(id: id, at: centre)
+        }
+        func type(_ keys: String) {
+            for character in keys { tap(character == " " ? .space : .character(String(character))) }
+        }
+        func hold(_ character: String, pick: String) {
+            let key = view.engine.layout.key(.character(character))!
+            id += 1
+            view.engine.touchBegan(id: id, at: CGPoint(x: key.frame.midX, y: key.frame.midY))
+            XCTAssertTrue(view.engine.openAccentMenuIfEligible(forTouch: id), character)
+            guard let menu = view.engine.activeAccentMenu, let index = menu.options.firstIndex(of: pick) else {
+                return XCTFail("\(character): no \(pick)")
+            }
+            // As Hungarian's: slide from the highlighted base cell to the picked one.
+            let base = menu.cellFrames[menu.selectedIndex]
+            view.engine.touchMoved(id: id, to: CGPoint(x: base.midX, y: base.midY))
+            let cell = menu.cellFrames[index]
+            view.engine.touchMoved(id: id, to: CGPoint(x: cell.midX, y: cell.midY))
+            view.engine.touchEnded(id: id, at: CGPoint(x: cell.midX, y: cell.midY))
+        }
+        type("idee")
+        hold("e", pick: "ë")
+        type("n zijn ge")
+        hold("i", pick: "ï")
+        type("nteresseerd in ")
+        tap(.shift)
+        type("belgi")
+        hold("e", pick: "ë")
+        XCTAssertEqual(field.text, "ideeën zijn geïnteresseerd in België")
+        type(" v")
+        hold("i", pick: "í")
+        hold("j", pick: "j\u{0301}")
+        type("f")
+        XCTAssertEqual(field.text, "ideeën zijn geïnteresseerd in België víj́f")
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .english)
+        XCTAssertEqual(view.plane.spaceLabel, "English")
+        XCTAssertNil(AccentCatalog.options(for: "j", uppercase: false, language: view.engine.language), "English holds nothing on J")
+    }
+
     /// Settings › Keyboard › Languages with English, French and Russian: the space bar names
     /// the keyboard's language, switching changes the letters (AZERTY, ЙЦУКЕН), the accents and
     /// autocorrect (French with English beside it, Russian alone), and the keyboard comes back
-    /// in the language it was left in. Dictation follows on Automatic; Switch dictation too
-    /// puts a language picked by hand back on Automatic.
+    /// in the language it was left in. Dictation follows on Automatic only with Switch dictation
+    /// too on, which also puts a language picked by hand back on Automatic.
     func testTheSpaceBarSwitchesBetweenTheChosenLanguages() {
         let settings = LanguageSettings(defaults: defaults)
         settings.keyboardLanguages = [.english, .french, .russian]
@@ -627,7 +766,10 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(settings.currentKeyboardLanguage, .french)
 
         settings.supportedDictationLanguages = ["en-US", "fr-FR", "ru-RU"]
-        XCTAssertEqual(settings.keyboardDictationLanguage(), "fr-FR", "Automatic follows the keyboard")
+        XCTAssertNil(settings.keyboardDictationLanguage(osMajorVersion: 27), "Switch dictation too off: Automatic stays")
+        settings.dictationFollowsKeyboard = true
+        XCTAssertEqual(settings.keyboardDictationLanguage(), "fr-FR", "on: Automatic follows the keyboard")
+        settings.dictationFollowsKeyboard = false
         settings.dictationLanguage = "de-DE"
         var picked: [String?] = []
         model.onLanguageSelected = { picked.append($0) }
@@ -661,10 +803,12 @@ extension FullKeyboardEngineTests {
     /// English and Spanish chosen together type on the first one's keys, as Apple's bilingual
     /// English & Spanish keyboard does: English first, QWERTY without the ñ key (ñ on a held n)
     /// in both, the space bar still switching the language it names, autocorrects and
-    /// dictates in; Spanish first, its ñ key in both; Spanish alone, its own.
+    /// dictates in (with Switch dictation too on); Spanish first, its ñ key in both; Spanish
+    /// alone, its own.
     func testEnglishAndSpanishShareTheFirstLanguagesKeys() {
         let settings = LanguageSettings(defaults: defaults)
         settings.keyboardLanguages = [.english, .spanish]
+        settings.dictationFollowsKeyboard = true
         settings.supportedDictationLanguages = ["en-US", "es-ES"]
         let view = FullKeyboardView(model: KeyboardViewModel(), target: target)
         view.languageSettings = settings

@@ -65,6 +65,10 @@ struct MacOutputAdapter<'a, F> {
 }
 
 impl<F: FnMut(&str, PasteMode) -> Result<String>> OutputAdapter for MacOutputAdapter<'_, F> {
+    fn clipboard_text(&mut self) -> Option<String> {
+        crate::dictation::clipboard_phrase::system_text()
+    }
+
     fn insert(&mut self, text: &str, plan: InsertPlan) -> Result<InsertResult, String> {
         let (mode, send) = match plan {
             InsertPlan::CopyOnly => (PasteMode::CopyOnly, false),
@@ -80,8 +84,12 @@ impl<F: FnMut(&str, PasteMode) -> Result<String>> OutputAdapter for MacOutputAda
                 send: false,
                 standalone: false,
             } => (PasteMode::Continue, false),
-            InsertPlan::None => return Ok(InsertResult::default()),
         };
+        // A posting refusal means no keystroke can land, so say so before
+        // another app is brought forward (macOS 27.3's keystroke grant).
+        if !matches!(mode, PasteMode::CopyOnly) {
+            crate::paste::ensure_keystroke_access().map_err(|error| error.to_string())?;
+        }
         // Labs › Return to app: the app the capture started in comes back
         // first. When it can't, nothing is pasted; the shared delivery policy
         // keeps the text for Paste last dictation and skips History.

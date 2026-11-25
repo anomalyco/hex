@@ -83,7 +83,7 @@ impl MeetingsPane {
                 transcript: Transcript::Loaded(Vec::new()),
                 chapters: Vec::new(),
                 imported: false,
-                kept_for: Some("24 hours"),
+                kept_for: Some("7 days"),
             };
         let mut live = meeting(
             "preview-live",
@@ -148,7 +148,7 @@ impl MeetingsPane {
         for (id, title, app) in [
             ("preview-meet", "Weekly sync", "Google Meet"),
             ("preview-teams", "Vendor check-in", "teams.microsoft.com"),
-            ("preview-huddle", "Release huddle", "Slack Huddle"),
+            ("preview-huddle", "Release huddle", "Slack huddle"),
         ] {
             let mut meeting = pane.meetings[2].clone();
             meeting.id = id.into();
