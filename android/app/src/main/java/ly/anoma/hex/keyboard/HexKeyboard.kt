@@ -117,7 +117,9 @@ class HexKeyboard : InputMethodService() {
         if (key == TypingPreferences.KEYBOARD_TOOLS) { engine.keyboardToolsChanged(); watchClipboard() }
         if (key == TypingPreferences.VOICE_ONLY) modeChanged()
         if (key == TypingPreferences.PASSWORD_MANAGER_SUGGESTIONS) clearInline()
+        if (key == TypingPreferences.HEIGHT) resize()
         if (key == TypingPreferences.ADAPTIVE_TOUCH) engine.adaptiveTouchChanged()
+        if (key == TypingPreferences.HEX_KEY_LEFT) view?.hexKeySideChanged()
     }
     // The strip's Paste tool comes and goes with the clipboard (Labs › Keyboard › Keyboard tools): the
     // listener exists only while the lab is on and the input view is shown.
@@ -210,6 +212,8 @@ class HexKeyboard : InputMethodService() {
             viewing = true
             return
         }
+        // Settings › Keyboard › Height changed while a dictation ran: the new keys now, before they show.
+        if (view?.sized(feedback.height) == false) setInputView(inputView())
         view?.cancelGestures()
         // Another type in the same box: back to its keys, as a new field opens (configureTyping draws them).
         if (typeChanged) view?.closeMenu(configure = false)
@@ -296,6 +300,17 @@ class HexKeyboard : InputMethodService() {
     internal fun openKeyboardSettings() = startActivity(Intent(this, MainActivity::class.java)
         .putExtra(MainActivity.EXTRA_PAGE, MainActivity.PAGE_KEYBOARD)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
+
+    /** Settings › Keyboard › Height changed: the keys are built again at the new size, at once unless a
+     * dictation is running (its bar stays until it ends; the next time the keyboard opens has them). */
+    private fun resize() {
+        val old = view ?: return
+        if (old.sized(feedback.height) || capture.phase != SpeechPhase.Idle) return
+        old.cancelGestures(); old.reset()
+        setInputView(inputView())
+        if (isInputViewShown) { engine.configureTyping(keepWord = true); view?.status(capture.phase, idleHint()) }
+    }
+
     internal fun nextIme() {
         capture.cancel()
         if (!switchToNextInputMethod(false)) getSystemService(InputMethodManager::class.java).showInputMethodPicker()

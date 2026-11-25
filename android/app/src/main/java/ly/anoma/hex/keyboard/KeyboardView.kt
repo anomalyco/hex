@@ -16,8 +16,10 @@ import ly.anoma.hex.typing.Suggestion
 /** The keyboard's root view: the strip, then the keys or the Hex menu in their place. */
 internal class KeyboardView(context: Context, private val ime: HexKeyboard) : LinearLayout(context), KeyboardSurface {
     private val feedback = LetterFeedback(this)
+    /** The rows' height these keys were built at (Settings › Keyboard › Height on this screen). */
+    private val size = KeySize.of(resources, ime.feedback.height)
     private val strip = StripView(context, ime, this)
-    private val keys = KeyPlaneView(context, ime, this, feedback)
+    private val keys = KeyPlaneView(context, ime, this, feedback, size)
     private val menu: SpeechMenu
     private var phase = SpeechPhase.Idle
     /** Where the key held for More characters was, so TalkBack's focus can go back to it. */
@@ -47,6 +49,9 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
         addView(menu, LayoutParams(-1, keys.menuHeight))
         status(SpeechPhase.Idle, context.getString(R.string.keyboard_hint_hold))
     }
+
+    /** Whether these keys are still the size Settings asks for: a new height needs a new view. */
+    fun sized(height: KeyboardHeight) = size.height == height
 
     override fun showPage(page: KeyboardPage) {
         keys.showPage(page)
@@ -135,6 +140,8 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
         }
         tap(context, ime.feedback.haptics, cue)
     }
+    /** Labs › Keyboard › Hex key on the left changed: the strip moves its Hex key to that end. */
+    fun hexKeySideChanged() = strip.placeHexKey()
     fun setLevel(value: Float) = strip.setLevel(value)
     fun cancelGestures() { strip.cancelGestures(); keys.cancelGestures() }
     /** The editor went away: the next one starts on the letters. */

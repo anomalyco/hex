@@ -44,6 +44,7 @@ import ly.anoma.hex.diagnostics.DiagnosticsPage
 import ly.anoma.hex.feedback.Feedback
 import ly.anoma.hex.feedback.FeedbackForm
 import ly.anoma.hex.keyboard.VoiceOnly
+import ly.anoma.hex.keyboard.KeyboardHeight
 import ly.anoma.hex.speech.*
 import ly.anoma.hex.typing.AdaptiveTouchModel
 import ly.anoma.hex.typing.AdaptiveTouchStore
@@ -57,14 +58,15 @@ import ly.anoma.hex.words.WordsStore
 private enum class Page(val title: Int) {
     Home(R.string.app_name), Dictation(R.string.settings_dictation), Keyboard(R.string.settings_keyboard), Privacy(R.string.settings_privacy),
     Labs(R.string.settings_labs),
-    Language(R.string.settings_dictation_language), Layout(R.string.settings_keyboard_layout), Styles(R.string.settings_style),
+    Language(R.string.settings_dictation_language), Layout(R.string.settings_keyboard_layout), Height(R.string.settings_keyboard_height),
+    Styles(R.string.settings_style),
     Policy(R.string.settings_privacy_policy), Licences(R.string.settings_licences), Licence(R.string.settings_licences),
     Feedback(R.string.feedback_send_feedback), Diagnostics(R.string.diagnostics),
     Replacements(R.string.words_replacements), WordsFile(R.string.words_file);
     val parent get() = when (this) {
         Diagnostics -> Labs
         Language, Styles, Replacements, WordsFile -> Dictation
-        Layout -> Keyboard
+        Layout, Height -> Keyboard
         Policy, Licences -> Privacy
         Licence -> Licences
         else -> Home
@@ -77,6 +79,17 @@ internal val Style.label get() = when (this) {
     Style.Casual -> R.string.style_casual
     Style.Notes -> R.string.style_notes
     Style.Verbatim -> R.string.style_verbatim
+}
+
+/** A Settings › Keyboard › Height step's name, as Gboard names its keyboard heights. */
+internal val KeyboardHeight.label get() = when (this) {
+    KeyboardHeight.ExtraShort -> R.string.keyboard_height_extra_short
+    KeyboardHeight.Short -> R.string.keyboard_height_short
+    KeyboardHeight.MidShort -> R.string.keyboard_height_mid_short
+    KeyboardHeight.Normal -> R.string.keyboard_height_normal
+    KeyboardHeight.MidTall -> R.string.keyboard_height_mid_tall
+    KeyboardHeight.Tall -> R.string.keyboard_height_tall
+    KeyboardHeight.ExtraTall -> R.string.keyboard_height_extra_tall
 }
 
 /** Licence files the credits name, in the order they appear in assets/licenses. */
@@ -115,8 +128,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val listening = selectedLanguage == null && automaticChoices.size > 1
     val languageList = automaticChoices.joinToString(stringResource(R.string.language_list_separator)) { it.label }
     val selectedLayout = remember(revision) { typing.layout }
+    val height = remember(revision) { typing.height }
     val style = remember(revision) { speech.style }
     val translate = remember(revision) { speech.translation }
+    val translatable = remember(revision, LocalConfiguration.current) { speech.translatable }
     val clean = remember(revision) { speech.clean }
     val lowercase = remember(revision) { speech.lowercase }
     val endWithPeriod = remember(revision) { speech.endWithPeriod }
@@ -152,6 +167,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     var resettingTouch by remember { mutableStateOf(false) }
     val passwordManager = remember(revision) { typing.passwordManagerSuggestions }
     val voiceOnly = remember(revision) { typing.voiceOnly }
+    val hexKeyLeft = remember(revision) { typing.hexKeyLeft }
     // Labs › Dictate from Quick Settings is the tile service's enabled state, not a preference.
     var quickDictation by remember { mutableStateOf(QuickDictation.enabled(context)) }
     // A hidden field or leaving Labs shows the saved line again, never an unsaved draft.
@@ -290,7 +306,13 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 selectedLanguage?.label ?: stringResource(R.string.settings_automatic), { open(Page.Language) })
                         }
                         Card {
-                            Toggle(stringResource(R.string.settings_translate), stringResource(R.string.settings_translate_detail), translate) { speech.translation = it }
+                            // Whisper translates only into English, and Hex offers it only for Spanish: say which pair, and when
+                            // the Dictation language means the switch does nothing.
+                            Toggle(stringResource(R.string.settings_translate), stringResource(when {
+                                !translatable -> R.string.settings_translate_needs_spanish
+                                listening -> R.string.settings_translate_heard
+                                else -> R.string.settings_translate_detail
+                            }), translate, noteLines = 3) { speech.translation = it }
                             Rule(); Toggle(stringResource(R.string.settings_clean), stringResource(R.string.settings_clean_detail), clean) { speech.clean = it }
                             Rule(); Toggle(stringResource(R.string.dictation_vocabulary), stringResource(R.string.dictation_vocabulary_detail),
                                 customVocabulary) { speech.customVocabulary = it }
@@ -321,6 +343,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             Entry(stringResource(R.string.settings_keyboard_layout),
                                 if (selectedLayout == null) stringResource(R.string.settings_layout_follows, automatic.label) else null,
                                 selectedLayout?.label ?: stringResource(R.string.settings_automatic), { open(Page.Layout) })
+                            Rule(); Entry(stringResource(R.string.settings_keyboard_height), value = stringResource(height.label), action = { open(Page.Height) })
                             Rule(); Toggle(stringResource(R.string.settings_auto_capitalisation), stringResource(R.string.settings_auto_capitalisation_detail),
                                 autoCapitalize) { typing.autoCapitalize = it }
                             Rule(); Toggle(stringResource(R.string.settings_autocorrect), stringResource(R.string.settings_autocorrect_detail), autocorrect) { typing.autocorrect = it }
@@ -525,6 +548,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 Rule()
                                 Toggle(stringResource(R.string.voice_only_mode), stringResource(R.string.voice_only_detail),
                                     voiceOnly) { typing.voiceOnly = it; VoiceOnly.setEnabledFromSettings(context, it) }
+                                Rule()
+                                // Labs › Keyboard › Hex key on the left: off, the Hex key stays at the strip's right end.
+                                Toggle(stringResource(R.string.hex_key_left), stringResource(R.string.hex_key_left_detail),
+                                    hexKeyLeft) { typing.hexKeyLeft = it }
                             }
                             // Hex Preview and debug builds only.
                             if (BuildConfig.DIAGNOSTICS) {
@@ -535,6 +562,13 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                         action = { open(Page.Diagnostics) })
                                 }
                             }
+                        }
+                    }
+                    // Gboard's list of heights, Normal in the middle; the keyboard changes the next time it opens.
+                    Page.Height -> Card {
+                        KeyboardHeight.entries.forEachIndexed { i, it ->
+                            if (i != 0) Rule()
+                            Entry(stringResource(it.label), value = if (it == height) "✓" else "", action = { typing.height = it; open(Page.Keyboard) })
                         }
                     }
                     Page.Styles -> Card {

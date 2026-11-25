@@ -87,7 +87,9 @@
     <string name="dictation_end_with_period">End with a period</string>
     <string name="dictation_end_with_period_detail">Off drops the final period, keeps ? and !</string>
     <string name="settings_translate">Translate what I say</string>
-    <string name="settings_translate_detail">Dictate in Spanish, write in English</string>
+    <string name="settings_translate_detail">Speak Spanish, Hex writes English</string>
+    <string name="settings_translate_heard">Spanish Hex hears is written in English; other languages as spoken</string>
+    <string name="settings_translate_needs_spanish">Spanish to English only. Set Dictation language to Español to use it</string>
     <string name="settings_clean">Clean up what I say</string>
     <string name="settings_clean_detail">Drops ums, repeats and corrected words</string>
     <string name="dictation_vocabulary">Custom vocabulary</string>
@@ -96,6 +98,14 @@
     <string name="settings_keyboard_layout">Keyboard layout</string>
     <string name="settings_layout_follows">Follows dictation · %1$s</string>
     <string name="settings_layout_automatic_detail">Follows your dictation language</string>
+    <string name="settings_keyboard_height">Height</string>
+    <string name="keyboard_height_extra_short">Extra short</string>
+    <string name="keyboard_height_short">Short</string>
+    <string name="keyboard_height_mid_short">Mid-short</string>
+    <string name="keyboard_height_normal">Normal</string>
+    <string name="keyboard_height_mid_tall">Mid-tall</string>
+    <string name="keyboard_height_tall">Tall</string>
+    <string name="keyboard_height_extra_tall">Extra tall</string>
     <string name="settings_autocorrect">Autocorrect</string>
     <string name="settings_autocorrect_detail">Fixes typos when you press space</string>
     <string name="settings_spatial">Spatial autocorrect</string>
@@ -174,6 +184,8 @@
     <string name="password_manager_suggestions_detail">Show logins, codes and cards from your autofill service in the suggestion strip</string>
     <string name="voice_only_mode">Voice-only mode</string>
     <string name="voice_only_detail">Lets you switch to Hex just to dictate from another keyboard, then switches back</string>
+    <string name="hex_key_left">Hex key on the left</string>
+    <string name="hex_key_left_detail">Moves the Hex key you hold to talk to the left end of the suggestion strip</string>
     <!-- Hex words files and Custom vocabulary's Word replacements (docs/specs/hex-words.md). -->
     <string name="words_open_label">Add to Hex</string>
     <string name="words_replacements">Word replacements</string>
