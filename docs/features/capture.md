@@ -350,7 +350,12 @@ Annotate pane                            // capture.pane
 │   with its keys. Check: rune_ui::scrawl tests
 ├── After an annotation (on) -> Keep (capture.media_days / bundle_days;
 │   Scrawl's presets or imported days), then Folder (capture.folder, default
-│   Scrawl's; path on the second line, Reveal | Change…)
+│   Scrawl's; path on the second line, Reveal | Change…). Change… opens the
+│   native folder chooser ("Annotations folder") on every OS: macOS's host
+│   saves the pick, Linux and Windows save it from the window; a cancel
+│   changes nothing, and a chooser that couldn't open or a refused save shows
+│   under the row. Check: rune_ui::scrawl::folder tests (the save, cancel,
+│   and error; no live dialog)
 ├── Advanced (on, macOS) -> a fold, closed until pressed (not saved):
 │   ├── Transcriber (capture.transcriber) -> Parakeet (default) | Apple
 │   ├── Show Hex in screen recordings (capture.show_overlays_in_recordings,
