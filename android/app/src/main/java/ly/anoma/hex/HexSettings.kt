@@ -51,6 +51,7 @@ import ly.anoma.hex.typing.AdaptiveTouchModel
 import ly.anoma.hex.typing.AdaptiveTouchStore
 import ly.anoma.hex.typing.TypingPreferences
 import ly.anoma.hex.updates.Updates
+import ly.anoma.hex.words.ImportedWordsRows
 import ly.anoma.hex.words.WordReplacementsPage
 import ly.anoma.hex.words.WordsFilePage
 import ly.anoma.hex.words.WordsRows
@@ -526,6 +527,8 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 Rule()
                                 Toggle(stringResource(R.string.swipe_delete_letters), stringResource(R.string.swipe_delete_letters_detail),
                                     swipeDeleteLetters) { typing.swipeDeleteLetters = it }
+                                Rule()
+                                ImportedWordsRows(typing, revision)
                                 Rule()
                                 // Labs › Keyboard › Adaptive touch: off, the keys read the drawn centres and learn nothing;
                                 // what was learned stays on the phone until Reset touch learning or Delete what Hex learned.

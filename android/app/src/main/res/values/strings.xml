@@ -186,6 +186,30 @@
     <string name="smart_quotes_detail">Types ’ ‘ “ ” for \' and \"</string>
     <string name="swipe_delete_letters">Delete swiped words letter by letter</string>
     <string name="swipe_delete_letters_detail">Delete after a swipe removes one letter, not the word</string>
+    <string name="imported_words">SwiftKey words</string>
+    <string name="imported_words_detail">Suggests the words SwiftKey learned from you, from its export. Stays on this phone.</string>
+    <string name="imported_words_import">Import words…</string>
+    <string name="imported_words_import_detail">The ZIP from SwiftKey’s data portal (View data › Export all), or a plain list of words</string>
+    <string name="imported_words_none">No words found in this file</string>
+    <string name="imported_words_remove">Remove imported words</string>
+    <string name="imported_words_remove_confirm">Remove imported words?</string>
+    <string name="imported_words_remove_action">Remove</string>
+    <plurals name="imported_words_added">
+        <item quantity="one">Added %s new word.</item>
+        <item quantity="other">Added %s new words.</item>
+    </plurals>
+    <plurals name="imported_words_already">
+        <item quantity="one">%s was already here.</item>
+        <item quantity="other">%s were already here.</item>
+    </plurals>
+    <plurals name="imported_words_full">
+        <item quantity="one">%s left out: the list is full.</item>
+        <item quantity="other">%s left out: the list is full.</item>
+    </plurals>
+    <plurals name="imported_words_kept">
+        <item quantity="one">%s word imported</item>
+        <item quantity="other">%s words imported</item>
+    </plurals>
     <string name="adaptive_touch">Adaptive touch</string>
     <string name="adaptive_touch_detail">Learns where you tap each key. Stays on this phone and keeps averages, never what you type.</string>
     <string name="adaptive_touch_learning">Learning: %1$d of %2$d taps</string>

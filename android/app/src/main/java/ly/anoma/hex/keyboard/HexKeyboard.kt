@@ -46,6 +46,7 @@ import ly.anoma.hex.speech.keepAwake
 import ly.anoma.hex.speech.swipeUnreadableIn
 import ly.anoma.hex.speech.typingLayout
 import ly.anoma.hex.typing.AdaptiveTouchStore
+import ly.anoma.hex.typing.ImportedWords
 import ly.anoma.hex.typing.PersonalWords
 import ly.anoma.hex.typing.SpatialDecoder
 import ly.anoma.hex.typing.TypingModel
@@ -105,7 +106,8 @@ class HexKeyboard : InputMethodService() {
     internal val engine by lazy {
         KeyboardEngine(InputConnectionTarget(this), feedback, { layoutLanguage }, { typingLanguage },
             { SpatialDecoder(TypingModel.asset(assets, it)) },
-            readPersonal = { PersonalWords.read(contentResolver, it) }, background = words,
+            readPersonal = { PersonalWords.read(contentResolver, it, if (feedback.importedWords) ImportedWords.read(this) else emptyList()) },
+            background = words,
             emoji = EmojiWords(assets, words),
             learned = { if (preferences.learnFixes) fixes.record(it) },
             adaptiveTouch = { if (feedback.adaptiveTouch) AdaptiveTouchStore.get(this) else null },
@@ -123,6 +125,7 @@ class HexKeyboard : InputMethodService() {
         if (key == TypingPreferences.HEIGHT) resize()
         if (key == TypingPreferences.ADAPTIVE_TOUCH) engine.adaptiveTouchChanged()
         if (key == TypingPreferences.HEX_KEY_LEFT) view?.hexKeySideChanged()
+        if (key == TypingPreferences.USE_IMPORTED_WORDS || key == TypingPreferences.IMPORTED_WORDS) engine.personalWordsChanged()
     }
     // The strip's Paste tool comes and goes with the clipboard (Labs › Keyboard › Keyboard tools): the
     // listener exists only while the lab is on and the input view is shown.
