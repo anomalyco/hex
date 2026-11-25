@@ -362,6 +362,15 @@ struct KeyboardParakeetStatus: View {
                             .foregroundStyle(HexTheme.textBase)
                             .accessibilityIdentifier("keyboard-parakeet-try-again")
                     }
+                    // Only beside a load that failed, which the keyboard doesn't try again in that
+                    // process by itself.
+                    if line == Self.unavailableLine(.loadFailed) {
+                        Button("Try again") { Self.retryInKeyboard() }
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(HexTheme.textBase)
+                            .buttonStyle(MultilingualStatusButtonStyle())
+                            .accessibilityIdentifier("keyboard-parakeet-retry-load")
+                    }
                     if offersMobileData, !multilingual, download.state == .idle, !download.isDownloaded,
                        download.hold == .notOnWiFi {
                         Button("Use mobile data") { download.useMobileData() }
@@ -386,6 +395,7 @@ struct KeyboardParakeetStatus: View {
                 isDownloaded: download.isDownloaded,
                 hold: download.hold,
                 keyboardState: settings.keyboardState,
+                reason: settings.unavailableReason,
                 now: now
             )
         }
@@ -394,8 +404,17 @@ struct KeyboardParakeetStatus: View {
             takesLanguage: MultilingualParakeetSettings().language() != nil,
             fitsKeyboard: settings.keyboardLimit.map { $0 >= KeyboardParakeetBudget.requiredLimit } ?? true,
             keyboardState: settings.keyboardStateIsMultilingual ? settings.keyboardState : nil,
+            reason: settings.keyboardStateIsMultilingual ? settings.unavailableReason : nil,
             now: now
         )
+    }
+
+    /// Try again beside "The keyboard couldn't load it": the keyboard drops its compiled copies
+    /// and loads it again the next time it opens, even in the process that set it aside;
+    /// meanwhile the row says it gets it ready then.
+    static func retryInKeyboard(_ settings: KeyboardParakeetSettings = KeyboardParakeetSettings()) {
+        settings.purgesCompiled = true
+        settings.setKeyboardState(nil)
     }
 
     /// Under Model: Multilingual. Its download says where it stands itself
@@ -405,6 +424,7 @@ struct KeyboardParakeetStatus: View {
         takesLanguage: Bool,
         fitsKeyboard: Bool,
         keyboardState: (state: KeyboardParakeetSettings.KeyboardState, at: Date)?,
+        reason: KeyboardParakeetSettings.UnavailableReason? = nil,
         now: Date
     ) -> String? {
         guard isDownloaded else { return nil }
@@ -412,7 +432,7 @@ struct KeyboardParakeetStatus: View {
             return String(localized: "Not for this dictation language, so the keyboard uses Apple's speech recognition.")
         }
         guard fitsKeyboard else { return line(for: .keyboardTooSmall) }
-        return keyboardLine(keyboardState, now: now)
+        return keyboardLine(keyboardState, reason: reason, now: now)
     }
 
     /// What the row says. The keyboard's word is about English: dictating in another language
@@ -423,6 +443,7 @@ struct KeyboardParakeetStatus: View {
         isDownloaded: Bool,
         hold: KeyboardParakeetDownload.Hold?,
         keyboardState: (state: KeyboardParakeetSettings.KeyboardState, at: Date)?,
+        reason: KeyboardParakeetSettings.UnavailableReason? = nil,
         now: Date
     ) -> String? {
         switch state {
@@ -434,23 +455,41 @@ struct KeyboardParakeetStatus: View {
             break
         }
         guard isDownloaded, hold != .notEnglish else { return line(for: hold) }
-        return keyboardLine(keyboardState, now: now)
+        return keyboardLine(keyboardState, reason: reason, now: now)
     }
 
-    /// What the keyboard did with a downloaded model, while its word is fresh.
+    /// What the keyboard did with a downloaded model, while its word is fresh. "Getting ready"
+    /// lasts 3 minutes; the rest stand until the keyboard says something else, so each says
+    /// what happens next rather than that it's so now.
     private static func keyboardLine(
         _ keyboardState: (state: KeyboardParakeetSettings.KeyboardState, at: Date)?,
+        reason: KeyboardParakeetSettings.UnavailableReason?,
         now: Date
     ) -> String {
         switch keyboardState {
         case (.preparing, let at)? where now.timeIntervalSince(at) < 180:
-            return String(localized: "Getting ready in the keyboard")
+            return String(localized: "Getting ready in the keyboard. After a download or an update, this takes a little longer.")
         case (.ready, _)?:
             return String(localized: "Ready in the keyboard")
         case (.unavailable, _)?:
-            return String(localized: "The keyboard can't use it right now, so it uses Apple's speech recognition.")
+            return unavailableLine(reason)
         default:
             return String(localized: "Downloaded. The keyboard gets it ready the next time it opens.")
+        }
+    }
+
+    /// Why the keyboard couldn't use it (`KeyboardParakeetSettings.UnavailableReason`).
+    static func unavailableLine(_ reason: KeyboardParakeetSettings.UnavailableReason?) -> String {
+        switch reason {
+        case .shortOfMemory?:
+            String(localized: "Not enough free memory when the keyboard last opened, so it used Apple's speech recognition. It tries again the next time it opens.")
+        case .noNeuralEngine?:
+            String(localized: "This iPhone can't run it in the keyboard, so the keyboard uses Apple's speech recognition.")
+        case .notOnNeuralEngine?, .loadFailed?:
+            String(localized: "The keyboard couldn't load it, so it uses Apple's speech recognition.")
+        case nil:
+            // Said by an older keyboard, which didn't say why.
+            String(localized: "The keyboard couldn't use it when it last opened, so it used Apple's speech recognition. It tries again the next time it opens.")
         }
     }
 
@@ -461,7 +500,7 @@ struct KeyboardParakeetStatus: View {
         case .keyboardNotMeasured:
             String(localized: "Downloads after you first use the Hex keyboard.")
         case .keyboardTooSmall:
-            String(localized: "The keyboard can't use it right now, so it uses Apple's speech recognition.")
+            String(localized: "This iPhone's keyboard doesn't have the memory for it, so it uses Apple's speech recognition.")
         case .notOnWiFi:
             String(localized: "Downloads on Wi-Fi.")
         case .needsSpace:

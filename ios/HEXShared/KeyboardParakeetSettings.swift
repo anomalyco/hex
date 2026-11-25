@@ -14,6 +14,8 @@ nonisolated struct KeyboardParakeetSettings {
     static let keyboardStateAtKey = "experiments.keyboardParakeet.keyboardStateAt"
     /// Whether that state is the multilingual model's (Parakeet Ultra) rather than V2's.
     static let keyboardStateMultilingualKey = "experiments.keyboardParakeet.keyboardStateMultilingual"
+    /// Why the keyboard said `.unavailable` (`UnavailableReason`); none from builds before 1.0.5.
+    static let keyboardStateReasonKey = "experiments.keyboardParakeet.keyboardStateReason"
     /// The keyboard's memory limit on this iPhone, as the keyboard measured it.
     static let keyboardLimitKey = "experiments.keyboardParakeet.keyboardLimit"
     static let keyboardLimitNotification = "anomaly.hex.keyboardParakeet.keyboardLimit"
@@ -25,8 +27,21 @@ nonisolated struct KeyboardParakeetSettings {
         /// Neural Engine. The keyboard dictates with Apple's speech recognition meanwhile.
         case preparing
         case ready
-        /// This keyboard can't use it (its memory limit, no Neural Engine, a load that failed).
+        /// This keyboard can't use it (`UnavailableReason` says why).
         case unavailable
+    }
+
+    /// Why the keyboard couldn't use it, so Settings › Dictation can say so and what happens next.
+    enum UnavailableReason: String {
+        /// Too little memory left when the keyboard opened (`KeyboardParakeetBudget.allowsLoad`).
+        /// For now: the keyboard tries again the next time it opens.
+        case shortOfMemory
+        /// No Neural Engine on this device. For good.
+        case noNeuralEngine
+        /// It loaded, but not on the Neural Engine. Set aside in that keyboard process.
+        case notOnNeuralEngine
+        /// The load threw. Set aside in that keyboard process until Try again (`purgesCompiled`).
+        case loadFailed
     }
 
     private let defaults: UserDefaults?
@@ -77,8 +92,9 @@ nonisolated struct KeyboardParakeetSettings {
         multilingual ? "experiments.keyboardParakeet.loadedOnce.ultra" : "experiments.keyboardParakeet.loadedOnce.v2"
     }
 
-    /// Hex removed a model the keyboard may have compiled: the keyboard clears its compiled
-    /// copies the next time it starts, before it loads the picked one (`KeyboardParakeet`).
+    /// Hex removed a model the keyboard may have compiled, or Try again was tapped after a load
+    /// that failed: the keyboard clears its compiled copies the next time it starts, before it
+    /// loads the picked one, and tries again a model it had set aside (`KeyboardParakeet`).
     static let purgeCompiledKey = "experiments.keyboardParakeet.purgeCompiled"
 
     var purgesCompiled: Bool {
@@ -91,10 +107,24 @@ nonisolated struct KeyboardParakeetSettings {
         defaults?.bool(forKey: Self.keyboardStateMultilingualKey) == true
     }
 
-    func setKeyboardState(_ state: KeyboardState?, multilingual: Bool = false, now: Date = Date()) {
+    func setKeyboardState(
+        _ state: KeyboardState?,
+        multilingual: Bool = false,
+        reason: UnavailableReason? = nil,
+        now: Date = Date()
+    ) {
         defaults?.set(state?.rawValue, forKey: Self.keyboardStateKey)
         defaults?.set(multilingual, forKey: Self.keyboardStateMultilingualKey)
         defaults?.set(now.timeIntervalSince1970, forKey: Self.keyboardStateAtKey)
+        defaults?.set(state == .unavailable ? reason?.rawValue : nil, forKey: Self.keyboardStateReasonKey)
+    }
+
+    /// Why the keyboard last said `.unavailable`; nil for any other state, or one written
+    /// without a reason (a keyboard from before 1.0.5).
+    var unavailableReason: UnavailableReason? {
+        guard keyboardState?.state == .unavailable,
+              let raw = defaults?.string(forKey: Self.keyboardStateReasonKey) else { return nil }
+        return UnavailableReason(rawValue: raw)
     }
 
     /// The keyboard's memory limit (bytes), nil until the keyboard first opened on this iPhone.

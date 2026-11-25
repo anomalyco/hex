@@ -4697,16 +4697,6 @@
         }
       }
     },
-    "Getting ready in the keyboard" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在键盘中准备"
-          }
-        }
-      }
-    },
     "Ready in the keyboard" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4733,16 +4723,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "切换到下一个键盘，iOS 会在那里提供你存储的密码"
-          }
-        }
-      }
-    },
-    "The keyboard can't use it right now, so it uses Apple's speech recognition." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "键盘暂时无法使用它，因此使用 Apple 的语音识别。"
           }
         }
       }
@@ -6163,6 +6143,66 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 项替换不写入任何内容，或只写入空格或换行，这台 iPhone 暂时做不到：%@"
+          }
+        }
+      }
+    },
+    "Getting ready in the keyboard. After a download or an update, this takes a little longer." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在键盘中准备。下载或更新后，这一步会久一点。"
+          }
+        }
+      }
+    },
+    "Not enough free memory when the keyboard last opened, so it used Apple's speech recognition. It tries again the next time it opens." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "键盘上次打开时可用内存不足，因此使用了 Apple 的语音识别。下次打开时会再试一次。"
+          }
+        }
+      }
+    },
+    "This iPhone can't run it in the keyboard, so the keyboard uses Apple's speech recognition." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPhone 无法在键盘中运行它，因此键盘使用 Apple 的语音识别。"
+          }
+        }
+      }
+    },
+    "The keyboard couldn't load it, so it uses Apple's speech recognition." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "键盘未能载入它，因此使用 Apple 的语音识别。"
+          }
+        }
+      }
+    },
+    "The keyboard couldn't use it when it last opened, so it used Apple's speech recognition. It tries again the next time it opens." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "键盘上次打开时无法使用它，因此使用了 Apple 的语音识别。下次打开时会再试一次。"
+          }
+        }
+      }
+    },
+    "This iPhone's keyboard doesn't have the memory for it, so it uses Apple's speech recognition." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPhone 的键盘内存不够运行它，因此使用 Apple 的语音识别。"
           }
         }
       }
