@@ -87,6 +87,14 @@ struct PrivacySettingsPage: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 16)
             }
+
+            // The one request Hex makes by itself, said as Android's Privacy page says its
+            // update check: the model downloads (Parakeet's files, from Hugging Face).
+            Text("Hex downloads its own speech models from Hugging Face; that request carries nothing about you or what you say, though Hugging Face sees your internet address, as with any website.")
+                .font(.system(size: 12))
+                .foregroundStyle(HexTheme.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 16)
         }
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: learnTyping)
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: typingLogs)

@@ -5117,6 +5117,16 @@
         }
       }
     },
+    "Hex downloads its own speech models from Hugging Face; that request carries nothing about you or what you say, though Hugging Face sees your internet address, as with any website." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 会从 Hugging Face 下载自己的语音模型；这个请求不包含任何关于你或你所说内容的信息，不过和访问任何网站一样，Hugging Face 会看到你的网络地址。"
+          }
+        }
+      }
+    },
     "With an email, the team can reply. Without one, your feedback is anonymous." : {
       "localizations" : {
         "zh-Hans" : {
