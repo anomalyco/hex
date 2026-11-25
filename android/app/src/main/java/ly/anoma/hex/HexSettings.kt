@@ -402,9 +402,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                     }
                     Page.Privacy -> {
                         // A statement, not rows that look tappable.
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Image(painterResource(R.drawable.ic_lock), null, Modifier.size(15.dp), colorFilter = ColorFilter.tint(colorResource(R.color.ink)))
-                            Spacer(Modifier.width(8.dp)); Label(stringResource(R.string.settings_privacy_line), weight = FontWeight.Medium)
+                        // The promise is never cut short: it wraps, with the lock beside its first line.
+                        Row(verticalAlignment = Alignment.Top) {
+                            Image(painterResource(R.drawable.ic_lock), null, Modifier.padding(top = 3.dp).size(15.dp), colorFilter = ColorFilter.tint(colorResource(R.color.ink)))
+                            Spacer(Modifier.width(8.dp)); Label(stringResource(R.string.settings_privacy_line), weight = FontWeight.Medium, lines = Int.MAX_VALUE)
                         }
                         Label(stringResource(R.string.settings_privacy_detail), muted = true, size = 14, lines = Int.MAX_VALUE)
                         // What each lab keeps, one row per lab under its own name: rows with no arrow, so they read as a
