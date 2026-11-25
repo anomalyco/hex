@@ -43,6 +43,7 @@ import ly.anoma.hex.speech.SpeechModel
 import ly.anoma.hex.speech.SpeechPreferences
 import ly.anoma.hex.speech.Spoken
 import ly.anoma.hex.speech.keepAwake
+import ly.anoma.hex.speech.swipeUnreadableIn
 import ly.anoma.hex.speech.typingLayout
 import ly.anoma.hex.typing.AdaptiveTouchStore
 import ly.anoma.hex.typing.PersonalWords
@@ -107,7 +108,8 @@ class HexKeyboard : InputMethodService() {
             readPersonal = { PersonalWords.read(contentResolver, it) }, background = words,
             emoji = EmojiWords(assets, words),
             learned = { if (preferences.learnFixes) fixes.record(it) },
-            adaptiveTouch = { if (feedback.adaptiveTouch) AdaptiveTouchStore.get(this) else null })
+            adaptiveTouch = { if (feedback.adaptiveTouch) AdaptiveTouchStore.get(this) else null },
+            swipeUnavailable = ::swipeUnavailable)
     }
     private val typingChanged = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == TypingPreferences.SUGGEST_SWEAR_WORDS) engine.swearWordsChanged()
@@ -320,6 +322,13 @@ class HexKeyboard : InputMethodService() {
         checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED -> R.string.keyboard_hint_microphone
         else -> R.string.keyboard_hint_hold
     })
+    /** A swipe in a dictation language without a typing model types nothing: the strip names the language until typing
+     * starts, a tap or its ✕ (in place of Hex Preview's update line, which comes back in the next field). */
+    private fun swipeUnavailable() {
+        val language = swipeUnreadableIn(feedback.layout, preferences.spoken) ?: return
+        view?.notice(StripNotice(getString(R.string.keyboard_note_swipe, language.label), getString(R.string.keyboard_note_dismiss),
+            tap = {}, dismiss = {}))
+    }
     internal fun beginSpeech(): Boolean {
         if (engine.secure || currentInputConnection == null || !capture.canStart ||
             checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
