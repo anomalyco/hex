@@ -834,16 +834,27 @@ Tap, Paste Last menu, or hex paste-last → newest ready, noncancelled dictation
 Hold 200 ms on the Mac event tap → up to eight recent items, without taking focus
 ├── Rows are read from the press, so the picker fades in as the hold passes
 ├── Centred on the display under the pointer; stays open once the keys come up
+├── Rows down a rail (a capture's picture or a dictation's mark, first words, kind · age)
+│   beside the selected row's preview: a capture's first keyframe (else its contact
+│   sheet) over its words, or a dictation's whole text; then app · length · model
 ├── Initially select what tap would paste; with only Cancelled rows select nothing
 ├── Show all History → open the searchable archive, not a paste
-├── Click a row → recheck that item and paste it once into the original field
+├── Click a row → select it; click the selected row (so a double click on any row),
+│   or Paste → recheck that item and paste it once into the original field
 ├── ↑/↓, Tab, or Paste Last's key again (with or without ⌥⇧) → move; its repeats do nothing
 ├── Return or keypad Enter → paste the selected item into the original field
+├── Copy → a dictation's text, or a capture as Annotate copies it, on the clipboard; closes
+├── Open in Editor, or a click on a capture's picture → close, and open the capture as
+│   History's Open in Editor does (its movie to trim, else its picture); not a paste
 └── Escape, a click outside the card, another key, or changed focus → close without touching the clipboard
 ```
 
-Check: `a_tap_pastes_and_a_hold_opens_a_picker_that_stays_until_escape` in
-[paste/browse.rs](../../src/paste/browse.rs). Scene: `mac-paste-picker`.
+Check: `a_tap_pastes_and_a_hold_opens_a_picker_that_stays_until_escape` and
+`a_click_selects_a_second_pastes_and_a_capture_opens_in_its_editor` in
+[paste/browse.rs](../../src/paste/browse.rs). Scenes: `mac-paste-picker` (a
+capture selected) and `mac-paste-picker-dictation`, on fixture rows and drawn
+pictures. Not yet run natively: a real capture's picture loading from its
+bundle, Copy, and Open in Editor from the picker.
 
 With it on, the Mac History puts dictations, annotations, screenshots and
 screen recordings in one list. All types is the default. Search works inside the

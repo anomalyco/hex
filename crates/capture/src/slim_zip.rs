@@ -33,8 +33,8 @@ const STORED: u16 = 0;
 const VERSION: u16 = 20;
 /// `version made by`: Unix (3), so external attributes are read as a mode.
 const MADE_BY: u16 = (3 << 8) | VERSION;
-/// `-rw-r--r--`.
-const FILE_MODE: u32 = 0o100_644;
+/// `-rw-------`, also when the recipient unpacks the archive.
+const FILE_MODE: u32 = 0o100_600;
 
 /// `<folder name>.slim.zip` inside `bundle_dir`.
 pub fn path_in(bundle_dir: &Path) -> Result<PathBuf> {
@@ -52,11 +52,8 @@ pub fn write(bundle_dir: &Path) -> Result<PathBuf> {
     let (directory, bundle) = crate::handoff::load_bundle(bundle_dir)?;
     let destination = path_in(&directory)?;
     let temp = directory.join(format!(
-        "{}.tmp",
-        destination
-            .file_name()
-            .and_then(|name| name.to_str())
-            .context("Light copy has no name")?
+        ".{}{SLIM_ZIP_TEMP_SUFFIX}",
+        crate::pipeline::make_bundle_id()
     ));
     let entries = entries(&directory, &bundle)?;
     let written = write_zip(&temp, &entries)
@@ -162,6 +159,10 @@ fn collect(root: &Path, relative: &Path, out: &mut Vec<Entry>) -> Result<()> {
 /// earlier copy.
 fn excluded(name: &str) -> bool {
     HEAVY_MEDIA.contains(&name)
+        || name == "frames-clean"
+        || name == ".hex-annotate-v1"
+        || name.starts_with(".annotation.json.")
+        || name.starts_with("..deliver.json.")
         || name == crate::recover::PARTIAL_AUDIO
         || name == MEDIA_PENDING
         || name == MEDIA_SENDING
@@ -202,8 +203,13 @@ fn write_zip(path: &Path, entries: &[Entry]) -> Result<()> {
         total < u64::from(u32::MAX),
         "The capture's light files are too large for one zip"
     );
-    let mut file =
-        File::create(path).with_context(|| format!("Could not write {}", path.display()))?;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut file = options
+        .open(path)
+        .with_context(|| format!("Could not write {}", path.display()))?;
     let mut offset = 0_u64;
     let mut central = Vec::with_capacity(entries.len() * 64);
     for entry in entries {
@@ -518,6 +524,36 @@ mod tests {
     }
 
     #[test]
+    fn hex_annotation_light_zip_has_the_reader_manifest_not_a_receipt_or_movie() {
+        let fixture = Fixture::new();
+        let dir = fixture.0.join("fixture.hexannotation");
+        fs::create_dir(&dir).unwrap();
+        let b = serde_json::from_slice(include_bytes!(
+            "../../../tests/fixtures/annotations/marked-v1.json"
+        ))
+        .unwrap();
+        crate::bundle::publish(&dir, &b).unwrap();
+        for name in [
+            "recording.mp4",
+            "audio.wav",
+            ".hex-annotate-v1",
+            "contact-sheet.png",
+        ] {
+            fs::write(dir.join(name), name).unwrap();
+        }
+        let zip = write(&dir).unwrap();
+        assert_eq!(zip.file_name().unwrap(), "fixture.hexannotation.slim.zip");
+        let entries = read_zip(&zip);
+        let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["annotation.json", "contact-sheet.png", "summary.md"]
+        );
+        let value: serde_json::Value = serde_json::from_slice(&entries[0].data).unwrap();
+        assert_eq!(value["annotation"]["marks"][0]["id"], "m1");
+    }
+
+    #[test]
     fn a_light_copy_carries_the_summary_and_leaves_the_media_out() {
         let fixture = Fixture::new();
         let bundle = fixture.bundle();
@@ -527,7 +563,11 @@ mod tests {
             Some("1234.scrawl.slim.zip")
         );
         assert_eq!(zip.parent(), Some(bundle.canonicalize().unwrap().as_path()));
-        assert!(!bundle.join("1234.scrawl.slim.zip.tmp").exists());
+        assert_eq!(
+            fs::read(bundle.join("1234.scrawl.slim.zip.tmp")).unwrap(),
+            b"partial copy",
+            "do not overwrite a previous writer's staging file"
+        );
 
         let entries = read_zip(&zip);
         let names: Vec<_> = entries.iter().map(|entry| entry.name.as_str()).collect();

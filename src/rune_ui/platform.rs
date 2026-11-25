@@ -277,6 +277,9 @@ pub(super) enum ScrawlRequest {
     /// ever quits it.
     QuitScrawl,
     RevealFolder,
+    /// Open the captures folder chooser. Linux and Windows open it from the
+    /// window (`scrawl::folder`), which saves their settings.
+    #[cfg(target_os = "macos")]
     ChooseFolder,
 }
 
@@ -850,8 +853,8 @@ fn scrawl_poll(state: &mut PlatformState) -> bool {
     true
 }
 
-/// Reveals the captures folder; choosing another is set in `settings.json`
-/// (`capture.folder`) for now.
+/// Reveals the captures folder. Choosing another is the window's own
+/// (`scrawl::folder`), since it saves the settings here.
 #[cfg(not(target_os = "macos"))]
 fn scrawl_request(request: ScrawlRequest) {
     if request == ScrawlRequest::RevealFolder {

@@ -1,15 +1,16 @@
 //! A Rune pointer press against the real mixed projection in an isolated
 //! document. Rendering is optional; no global input, clipboard, app launch,
 //! microphone, screen recording, router or settings are reached.
+use super::view::{self, Act, Shown};
 use super::*;
 use crate::app_settings::RuntimeHotkey;
 use crate::audio::CaptureInstant;
 use crate::capture_host::paste_source::{Scope, mark_ready};
 use crate::history::{HistoryDraft, HistoryKind, HistoryRetention, HistoryStore};
 use crate::paste::gesture::{Effect, Gesture};
-use crate::paste::recent::{self, Output};
+use crate::paste::recent::{self, Entry, Output};
 use crate::rune_ui::offscreen;
-use rune::{Cx, Env, Runtime, render::Gpu, text::TextSystem};
+use rune::{Cx, Env, Runtime, col, el, render::Gpu, text, text::TextSystem};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -25,7 +26,7 @@ const URL: &str = "https://example.org/design";
 struct Doc {
     root: PathBuf,
     store: crate::history::History,
-    rows: Vec<Row>,
+    rows: Vec<Entry>,
     body: String,
     board: objc2::rc::Retained<objc2_app_kit::NSPasteboard>,
 }
@@ -99,7 +100,23 @@ fn view(doc: &Doc, cx: &mut Cx<Doc>) -> El {
             .color(p.text()),
         );
     if !doc.rows.is_empty() {
-        page = page.child(card(&doc.rows, 0, NOW, p, choose));
+        page = page.child(view::card(
+            &Shown {
+                rows: &doc.rows,
+                cursor: 0,
+                now: NOW,
+                trigger: &[],
+            },
+            p,
+            &|_, _| None,
+            // Row 1 is not the selection, so its click only selects on the
+            // picker; here every click chooses, as the picker's Paste does.
+            |doc: &mut Doc, act, _| {
+                if let Act::Select(id) | Act::Paste(id) = act {
+                    choose(doc, id);
+                }
+            },
+        ));
     }
     page
 }
@@ -138,15 +155,11 @@ fn a_held_shortcut_browses_real_rows_and_clicks_choose_the_original_item() {
             120_000,
         )
         .unwrap();
-    let dir = root.join("125000.scrawl");
+    let dir = root.join("125000.hexannotation");
     fs::create_dir(&dir).unwrap();
-    let manifest = serde_json::json!({"version":1,"id":"125000","createdAtMs":150000,"durationMs":4000,"target":{"mode":"display","displayId":1,"frame":{"x":0,"y":0,"width":240,"height":160,"scale":1}},"transcript":{"source":"hex","text":ANNOTATION,"segments":[],"words":[]},"strokes":[],"marks":[],"events":[],"keyframes":[{"index":1,"t":0,"reason":"initial","file":"frames/frame-01.png","event":"Chart","said":ANNOTATION}],"contactSheet":"contact-sheet.png"});
+    let manifest: scrawl_capture::model::ScrawlBundle = serde_json::from_value(serde_json::json!({"version":1,"id":"125000","createdAtMs":150000,"durationMs":4000,"target":{"mode":"display","displayId":1,"frame":{"x":0,"y":0,"width":240,"height":160,"scale":1}},"transcript":{"source":"hex","text":ANNOTATION,"segments":[],"words":[]},"strokes":[],"marks":[],"events":[],"keyframes":[{"index":1,"t":0,"reason":"initial","file":"frames/frame-01.png","event":"Chart","said":ANNOTATION}],"contactSheet":"contact-sheet.png"})).unwrap();
     rune::render::write_png(&dir.join("contact-sheet.png"), 8, 8, &[200; 256]).unwrap();
-    fs::write(
-        dir.join("scrawl.json"),
-        serde_json::to_vec(&manifest).unwrap(),
-    )
-    .unwrap();
+    scrawl_capture::bundle::publish(&dir, &manifest).unwrap();
     mark_ready(&dir, 150_000).unwrap();
     let out = std::env::var_os("HEX_PASTE_RENDER_DIR").map(PathBuf::from);
     for (theme, dark) in [("dark", true), ("light", false)] {
@@ -191,8 +204,11 @@ fn a_held_shortcut_browses_real_rows_and_clicks_choose_the_original_item() {
             Effect::Browse
         );
         let scope = Scope::new(&root, Some(7));
-        rt.state.rows = recent::snapshot(&rt.state.store, Some(&scope), 8, NOW);
-        assert_eq!(rt.state.rows[0].preview, ANNOTATION);
+        rt.state.rows = recent::snapshot(&rt.state.store, Some(&scope), 8, NOW)
+            .into_iter()
+            .map(Entry::from)
+            .collect();
+        assert_eq!(rt.state.rows[0].row.preview, ANNOTATION);
         render(&mut rt, out.as_deref(), &format!("{theme}-picker"));
         assert!(rt.state.body.is_empty());
         assert_eq!(rt.state.board.changeCount(), copied);

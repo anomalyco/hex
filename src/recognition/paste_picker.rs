@@ -170,6 +170,12 @@ impl Picker {
                     id: Some(id),
                     target: inv.target,
                 }),
+                Choice::Open(id) => {
+                    if let Some(bundle) = recent::capture_bundle(&id) {
+                        crate::rune_ui::paste_picker::open_in_editor(&bundle);
+                    }
+                    Ok(())
+                }
             };
         }
         let effect = self.hold.tick(CaptureInstant::now());

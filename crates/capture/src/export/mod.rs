@@ -82,7 +82,13 @@ pub fn default_output(bundle_dir: &Path) -> PathBuf {
         .unwrap_or("scrawl");
     scrawl_router::user_dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("Movies/Scrawl")
+        .join(
+            if crate::bundle::manifest_name(bundle_dir) == Some(crate::bundle::MANIFEST) {
+                "Movies/Hex"
+            } else {
+                "Movies/Scrawl"
+            },
+        )
         .join(format!("{name}.mp4"))
 }
 

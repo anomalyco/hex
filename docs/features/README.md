@@ -1173,7 +1173,10 @@ Pause media + Also pause the browser     // browser_media
 ├── No browser process has its audio output open -> leave it alone (no tap)
 ├── Listen to those processes' own output (private process tap), 3 windows of 100 ms
 │   └── Any window at or below -60 dBFS, or no level -> leave it alone
-├── Send the system pause command (MediaRemote 1; never the toggle)
+├── Send pause (MediaRemote 1; never the toggle) to each browser with open output, by bundle ID
+│   ├── Not the Now Playing app: that is whichever app started last, often a player Hex resumed (#2825)
+│   ├── This macOS cannot send by name, or the playing browsers cannot be listed -> the system pause command
+│   └── No browser took it by name (an error, no answer in 500 ms, or no handler status 0) -> the system pause command
 ├── Poll 5 windows of 100 ms
 │   ├── 2 windows in a row below -90 dBFS -> Hex paused it
 │   └── Otherwise (another tab, a sound that ended later, or the pause went elsewhere) -> no play later
@@ -1182,7 +1185,7 @@ Pause media + Also pause the browser     // browser_media
     ├── No level, a browser runs and every one has closed its output -> still paused: play
     │   (a pause longer than about 10 s closes the output; a tap on it delivers nothing)
     ├── No level otherwise (browser quit, tap failed) -> no play
-    └── Otherwise -> send the system play command (MediaRemote 0), then poll 20 windows of 100 ms
+    └── Otherwise -> send play (MediaRemote 0) only to the browsers Hex paused (the system play only when this macOS cannot send by name or none was recorded; a play no browser took by name goes nowhere), then poll 20 windows of 100 ms
         ├── A window above -60 dBFS -> resumed
         ├── No level before the first level (the output is opening again) -> keep polling
         ├── No level after a level -> stop listening
@@ -3672,6 +3675,31 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   alternating, 20 of 20 in their own language, one process, no crash; ✕ while recording and while
 │   transcribing left the field empty; custom vocabulary "stadium" on a 1.6 s clip was decoded again
 │   without it and stayed English. All voices are synthetic.
+├── Labs > Dictation > Pick the English model for this phone (off, L135) -> Hex times English
+│   dictations on the standard model and chooses faster English dictation where they are slow.
+│   It measures only while faster English dictation is off, with the dictation's own durations
+│   (`MicCapture` hands them to `Recognizer.timed`): a dictation that went in and would go to the
+│   faster model were it on (English, not translated, Automatic with one candidate), with at least
+│   6 s kept, the model loaded before ✓ (already loaded, or loaded while the person spoke) and no
+│   second decode without the custom words, counts its decode's wall time per second kept. Once the
+│   median of the last 5 is at least 0.5 and the last 20 dictations would all have gone English,
+│   `ModelChoice.after` records the choice and its date, once. The keyboard only records: the next
+│   time Hex opens (`MainActivity.onResume`, `ModelChoice.whenOpened`) it turns faster English
+│   dictation on and starts its 135 MB download, which, like the first model's, waits for Wi-Fi on a
+│   metered network (a hand tap too: "135 MB. Starts by itself on Wi-Fi." with Use mobile data).
+│   Dictation's speech model card says what is true: waiting, downloading with its percentage,
+│   stopped, or "English uses faster dictation, chosen for this phone." Turning faster English
+│   dictation off by hand, or Delete download, sets `fastEnglishOffByHand`, and the rule never turns
+│   it on again; turning the lab on, a new request, clears an earlier one. Kept: the private `modelChoice` preferences (last 5 ratios, English dictations in
+│   a row up to 20, counts by reason, the choice's date and median); turning the lab off deletes the
+│   file and leaves a setting or download it made. Diagnostics' "Model choice:" line gives the
+│   median and the ratios it is taken over, the threshold, the decision and date, "N of 20 English dictations
+│   in a row", and the counts not counted by reason. Debug builds only: `setprop
+│   log.tag.HexDecodeScale DEBUG` (×10) or `VERBOSE` (×0.5) scales the measured time; the minified
+│   release and preview dex don't contain the tag. Checks: `ModelChoiceTest` in SignatureTest.kt
+│   (20 tests: the OnePlus 12's two reports, the OnePlus 13's range and the emulator's speed as
+│   dictation sequences, each thing it must never do); emulator results are in
+│   the pull request.
 └── Labs > Dictation > Learn from my fixes (off) -> an Android-only port of iPhone Hex's dictation
     correction learning, with no typing side. Off, the keyboard tracks nothing, applies nothing and
     adds no hints. On, each keyboard dictation in a non-secure words field that the field lets Hex

@@ -220,6 +220,7 @@ impl CapturesPane {
             PathBuf::from("/Users/alex/Library/Application Support/Scrawl/captures/1.scrawl");
         let annotation = Annotation {
             id: 4,
+            manifest_id: "1".into(),
             movie: Some(bundle.join("recording.mp4")),
             bundle,
             at_ms: now - 20 * 60_000,
@@ -354,40 +355,52 @@ pub(super) fn open(ui: &mut Ui, id: u64) {
         return;
     };
     #[cfg(target_os = "macos")]
-    {
-        use super::screenshot_thumbnail::editor;
-        let words = |text: &str, timed: &[CaptureWord], duration_ms: u64| {
-            words_for_editor(text, timed, duration_ms)
-                .into_iter()
-                .map(|word| editor::clip::Word {
-                    t0: word.t0,
-                    t1: word.t1,
-                    text: word.text,
-                })
-                .collect()
-        };
-        match entry {
-            Listed::Saved(entry) => match entry.kind {
+    match entry {
+        Listed::Saved(entry) => {
+            use super::screenshot_thumbnail::editor;
+            match entry.kind {
                 CaptureKind::Shot => editor::open_with(entry.file.clone(), entry.words.clone()),
                 CaptureKind::Recording => editor::open_recording(
                     entry.file.clone(),
-                    words(&entry.words, &entry.timed, entry.duration_ms),
+                    editor_words(&entry.words, &entry.timed, entry.duration_ms),
                 ),
-            },
-            Listed::Annotated(annotation) => {
-                if let Some(movie) = &annotation.movie {
-                    editor::open_recording(
-                        movie.clone(),
-                        words(&annotation.words, &annotation.timed, annotation.duration_ms),
-                    );
-                } else if let Some(picture) = &annotation.picture {
-                    editor::open_with(picture.clone(), annotation.words.clone());
-                }
             }
         }
+        Listed::Annotated(annotation) => open_annotation(annotation),
     }
     #[cfg(not(target_os = "macos"))]
     let _ = entry;
+}
+
+/// Opens an annotation in the editor: its movie to trim, or its picture
+/// once the movie has expired. Safe from any thread.
+#[cfg(target_os = "macos")]
+pub(super) fn open_annotation(annotation: &Annotation) {
+    use super::screenshot_thumbnail::editor;
+    if let Some(movie) = &annotation.movie {
+        editor::open_recording(
+            movie.clone(),
+            editor_words(&annotation.words, &annotation.timed, annotation.duration_ms),
+        );
+    } else if let Some(picture) = &annotation.picture {
+        editor::open_with(picture.clone(), annotation.words.clone());
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn editor_words(
+    text: &str,
+    timed: &[CaptureWord],
+    duration_ms: u64,
+) -> Vec<super::screenshot_thumbnail::editor::clip::Word> {
+    words_for_editor(text, timed, duration_ms)
+        .into_iter()
+        .map(|word| super::screenshot_thumbnail::editor::clip::Word {
+            t0: word.t0,
+            t1: word.t1,
+            text: word.text,
+        })
+        .collect()
 }
 
 /// An entry's words for the editor: its own when the model timed them, else

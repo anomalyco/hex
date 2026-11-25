@@ -117,8 +117,8 @@ pub(crate) fn is_browser_id(canonical_bundle_id: Option<&str>) -> bool {
 }
 
 /// One of the browsers Hex knows, or one of their audio helpers.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn browser_bundle(bundle_id: &str, name: Option<&str>) -> bool {
+#[cfg(test)]
+fn browser_bundle(bundle_id: &str, name: Option<&str>) -> bool {
     is_browser_id(canonical_bundle_id_for(bundle_id, name))
 }
 
@@ -144,6 +144,28 @@ impl BrowserProcesses {
 #[cfg(target_os = "macos")]
 /// The Core Audio process objects of the running browsers, Hex excluded.
 pub(crate) fn browser_process_objects(which: BrowserProcesses) -> Result<Vec<AudioObjectID>> {
+    Ok(browser_processes(which)?
+        .into_iter()
+        .map(|(object, _)| object)
+        .collect())
+}
+
+#[cfg(target_os = "macos")]
+/// The canonical bundle IDs of the running browsers, Hex excluded, each
+/// once: the apps a media command can be sent to by name.
+pub(crate) fn browser_applications(which: BrowserProcesses) -> Result<Vec<&'static str>> {
+    let mut applications: Vec<_> = browser_processes(which)?
+        .into_iter()
+        .map(|(_, application)| application)
+        .collect();
+    applications.sort_unstable();
+    applications.dedup();
+    Ok(applications)
+}
+
+#[cfg(target_os = "macos")]
+/// Each browser process object with the canonical bundle ID of its browser.
+fn browser_processes(which: BrowserProcesses) -> Result<Vec<(AudioObjectID, &'static str)>> {
     objc2::rc::autoreleasepool(|_| {
         let own_pid = std::process::id() as i32;
         let process_objects = property_vec::<AudioObjectID>(
@@ -152,29 +174,24 @@ pub(crate) fn browser_process_objects(which: BrowserProcesses) -> Result<Vec<Aud
         )?;
         Ok(process_objects
             .into_iter()
-            .filter(|&process_object| {
-                let Ok(pid) = property_value::<i32>(process_object, kAudioProcessPropertyPID)
-                else {
-                    return false;
-                };
-                let Some(bundle_id) =
-                    property_cf_string(process_object, kAudioProcessPropertyBundleID)
-                else {
-                    return false;
-                };
+            .filter_map(|process_object| {
+                let pid = property_value::<i32>(process_object, kAudioProcessPropertyPID).ok()?;
+                let bundle_id = property_cf_string(process_object, kAudioProcessPropertyBundleID)?;
                 // Safari plays through a WebKit process told apart only by its name.
                 let name = bundle_id
                     .eq_ignore_ascii_case("com.apple.WebKit.GPU")
                     .then(|| running_application_info(pid))
                     .flatten()
                     .and_then(|(_, name)| name);
-                pid != own_pid
-                    && browser_bundle(&bundle_id, name.as_deref())
+                let application = canonical_bundle_id_for(&bundle_id, name.as_deref())
+                    .filter(|&application| is_browser_id(Some(application)))?;
+                (pid != own_pid
                     && which.includes(
                         property_value::<u32>(process_object, kAudioProcessPropertyIsRunningOutput)
                             .ok()
                             .map(|running| running != 0),
-                    )
+                    ))
+                .then_some((process_object, application))
             })
             .collect())
     })

@@ -119,10 +119,16 @@ pub fn reveal_path(target: &Path) -> Result<()> {
 }
 
 pub fn resolve_bundle_dir(path_or_id: &Path) -> Result<PathBuf> {
+    if path_or_id.is_absolute() {
+        return scrawl_router::bundle::resolve_bundle_dir_in(None, path_or_id);
+    }
     scrawl_router::bundle::resolve_bundle_dir_in(Some(&default_captures_dir()), path_or_id)
 }
 
 pub fn load_bundle(bundle_dir: &Path) -> Result<(PathBuf, ScrawlBundle)> {
+    if bundle_dir.is_absolute() {
+        return scrawl_router::bundle::load_bundle_in(None, bundle_dir);
+    }
     scrawl_router::bundle::load_bundle_in(Some(&default_captures_dir()), bundle_dir)
 }
 

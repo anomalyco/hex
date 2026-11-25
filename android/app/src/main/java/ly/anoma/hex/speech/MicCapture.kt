@@ -223,7 +223,12 @@ internal class MicCapture(
             val next = queue.removeFirst()
             if (!next.left) shown = next.note ?: shown
             next.text?.let { insert(it, next.heard ?: it, next.written ?: next.options, next.field) }
-            next.spent?.let { lastDictation.value = durations(next, it, if (next.text != null) System.nanoTime() else 0L) }
+            next.spent?.let {
+                val times = durations(next, it, if (next.text != null) System.nanoTime() else 0L)
+                lastDictation.value = times
+                // Labs › Pick the English model for this phone: numbers only, and never at a dictation's cost.
+                try { recognizer.timed(times, next.options) } catch (_: Exception) {}
+            }
         }
         publish(current(), shown)
     }

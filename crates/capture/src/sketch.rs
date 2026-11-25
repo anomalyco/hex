@@ -2114,8 +2114,10 @@ mod tests {
             windows: Vec::new(),
             cursor: Vec::new(),
             autocrop: None,
+            clean_frames: None,
             destination: None,
             no_screen: None,
+            extra: Default::default(),
         };
         let tl = timeline(&bundle).join("\n");
         assert!(tl.find("0:03 “").unwrap() < tl.find("0:04 · pressed").unwrap());
