@@ -389,7 +389,10 @@ pub fn near_pointer(screen: &Screen, content: Content, pointer: (f64, f64)) -> P
         frame.top() - window_height / 2.0,
     );
     Placed {
-        top_left: (window_x - window_width / 2.0, window_y + window_height / 2.0),
+        top_left: (
+            window_x - window_width / 2.0,
+            window_y + window_height / 2.0,
+        ),
         layout: Layout {
             center: [(x - window_x) as f32, (window_y - y) as f32],
             ..Layout::default()
@@ -967,9 +970,15 @@ mod tests {
                     let placed = near_pointer(&screen, CONTENT, pointer);
                     let (x, y) = plate(&placed);
                     assert!(x - half.0 >= visible.x - 1e-9, "{pointer:?}");
-                    assert!(x + half.0 <= visible.x + visible.width + 1e-9, "{pointer:?}");
+                    assert!(
+                        x + half.0 <= visible.x + visible.width + 1e-9,
+                        "{pointer:?}"
+                    );
                     assert!(y - half.1 >= visible.y.max(frame.y) - 1e-9, "{pointer:?}");
-                    assert!(y + half.1 <= visible.top().min(frame.top()) + 1e-9, "{pointer:?}");
+                    assert!(
+                        y + half.1 <= visible.top().min(frame.top()) + 1e-9,
+                        "{pointer:?}"
+                    );
                     let (left, top) = placed.top_left;
                     assert!(left >= frame.x && left + CONTENT.window.0 <= frame.x + frame.width);
                     assert!(top <= frame.top() && top - CONTENT.window.1 >= frame.y);

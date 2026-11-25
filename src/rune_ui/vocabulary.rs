@@ -185,6 +185,9 @@ fn budget_note(ui: &Ui) -> Option<String> {
 pub(crate) fn open(ui: &mut Ui) {
     ui.open_modal(Modal::Vocabulary);
     ui.vocabulary.status = None;
+    // The field typed in last time keeps its focus flag after the sheet
+    // closes, so without this it reopens showing a caret nobody put there.
+    blur(ui);
     if ui.vocabulary.rows.is_empty() {
         add_row(ui);
     }
@@ -204,11 +207,15 @@ pub(super) fn on_close(ui: &mut Ui) {
         .retain(|row| !row.term.text.trim().is_empty() || !row.sounds_like.text.trim().is_empty());
 }
 
-fn add_row(ui: &mut Ui) -> u64 {
+fn blur(ui: &mut Ui) {
     for row in &mut ui.vocabulary.rows {
         row.term.focused = false;
         row.sounds_like.focused = false;
     }
+}
+
+fn add_row(ui: &mut Ui) -> u64 {
+    blur(ui);
     let mut term = TextEdit::default();
     term.focused = true;
     ui.vocabulary.push(term, TextEdit::default())
@@ -765,6 +772,21 @@ mod tests {
 
         open(&mut ui);
         assert_eq!(ui.vocabulary.rows.len(), 1);
+    }
+
+    #[test]
+    fn reopening_the_sheet_focuses_no_field() {
+        let mut ui = ui();
+        open(&mut ui);
+        ui.vocabulary.rows[0].term.text = "pure win".into();
+        ui.vocabulary.rows[0].sounds_like.focused = true;
+        ui.vocabulary.rows[0].term.focused = false;
+        close(&mut ui);
+
+        open(&mut ui);
+        assert_eq!(ui.vocabulary.rows.len(), 1);
+        assert!(!ui.vocabulary.rows[0].term.focused);
+        assert!(!ui.vocabulary.rows[0].sounds_like.focused);
     }
 
     #[test]
