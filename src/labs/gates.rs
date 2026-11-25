@@ -332,6 +332,14 @@ pub fn hud_bottom_gap() -> f64 {
     }
 }
 
+/// Labs › Indicator follows mouse: a shown HUD sits beside the pointer
+/// instead of at its Top or Bottom position (macOS; read each time the HUD is
+/// placed, which is every frame while it shows).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn indicator_follows_mouse() -> bool {
+    feature_on(Feature::IndicatorFollowsMouse)
+}
+
 /// Dictation's microphone opens through Apple's voice processing, so Control
 /// Center's Mic Mode can offer Voice Isolation (macOS; read as each dictation
 /// stream opens, and when an idle one may be replaced).

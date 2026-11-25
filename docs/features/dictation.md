@@ -3156,6 +3156,10 @@ keeping its shadow padding. The plate only moves up inside the window once the
 raised window would reach the visible top (a gap above the visible height
 minus 104 pt), which within 0–400 only happens on a very short visible frame,
 and placement clamps it under the menu bar or notch.
+With Labs › Indicator follows mouse on, either visible position instead puts
+the plate just below the pointer (above it near the screen's bottom), inside
+the pointer screen's visible frame, while the HUD shows
+([labs.md](labs.md)).
 The HUD is
 also pinned to the pointer screen's `NSScreenNumber` with a display-local rect;
 that resolves to the same frame as the global `Primary` rect, so the pin is

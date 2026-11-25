@@ -396,7 +396,14 @@ impl Hud {
             &metrics,
             content,
         );
-        let placed = ears.unwrap_or_else(|| {
+        // Labs › Indicator follows mouse takes any shown position, the notch
+        // included; Hidden never reaches here. The pump places a shown HUD on
+        // every frame, so it follows the pointer while it moves.
+        let follow = crate::labs::indicator_follows_mouse().then(|| {
+            let pointer = NSEvent::mouseLocation();
+            hud_placement::near_pointer(&metrics, content, (pointer.x, pointer.y))
+        });
+        let placed = follow.or(ears).unwrap_or_else(|| {
             hud_placement::place(
                 tuning.placement,
                 &metrics,

@@ -640,6 +640,11 @@ pub(super) const KEYS: &[Key] = &[
         "Points the dictation HUD sits above the Dock or the screen's bottom edge at the Bottom position while Labs: HUD height is on; 24 by default, and 0 to 400 (macOS)",
     ),
     key(
+        "labs.indicator_follows_mouse",
+        Kind::Bool,
+        "Labs: while a dictation records and processes, the recording indicator sits just below the mouse pointer, or above it near the screen's bottom, and stays inside the screen; Hidden still hides it, and turning it off restores the Top or Bottom position (macOS)",
+    ),
+    key(
         "labs.skip_pauses",
         Kind::Bool,
         "Labs: a dictation transcribed as a whole clip hears only the start and end of each long pause, so slow computers paste sooner (Linux and Windows)",

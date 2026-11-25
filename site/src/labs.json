@@ -918,6 +918,17 @@
       "title": "HUD height"
     },
     {
+      "added": "2026-11-25",
+      "group": "dictation",
+      "groupTitle": "Dictation",
+      "id": "indicator-follows-mouse",
+      "oses": [
+        "macos"
+      ],
+      "summary": "Show the dictation indicator next to your mouse pointer instead of at the top or bottom of the screen",
+      "title": "Indicator follows mouse"
+    },
+    {
       "added": "2026-11-22",
       "group": "dictation",
       "groupTitle": "Dictation",
