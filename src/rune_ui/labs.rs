@@ -682,6 +682,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
     rows.push(row(Feature::FasterLiveText, None));
     rows.push(row(Feature::FailureNotices, None));
     rows.push(row(Feature::StopPhrase, None));
+    rows.push(row(Feature::ConfirmLongCancels, None));
     if caps.os == super::platform::Os::Linux && ui.platform.wayland {
         let live_typing = row(Feature::LiveTyping, Some(&KEYBOARD));
         // An organization's lock and its note already say why the switch is
@@ -780,6 +781,8 @@ fn rows(ui: &Ui) -> Vec<Row> {
         if cfg!(target_os = "macos") {
             // Up to four more, each with its own activation mode.
             rows.push(row(Feature::MoreDictationShortcuts, Some(&KEYBOARD)));
+            // The event tap times a held middle button.
+            rows.push(row(Feature::MiddleMouseDictation, Some(&MOUSE)));
             // Reads the text before the cursor through macOS Accessibility.
             rows.push(row(Feature::SmartSpacing, None));
             // macOS's recorder reads each modifier key's side.
@@ -798,6 +801,8 @@ fn rows(ui: &Ui) -> Vec<Row> {
             rows.push(row(Feature::NotchIndicator, Some(&WAVE)));
             // macOS's HUD reads its bottom gap from the saved setting.
             rows.push(row(Feature::HudHeight, Some(&PANEL)));
+            // macOS's HUD reads the pointer from NSEvent as it places itself.
+            rows.push(row(Feature::IndicatorFollowsMouse, Some(&WAVE)));
             // Hex's session tap takes the shortcut; ScreenCaptureKit shoots.
             #[cfg(hex_capture)]
             rows.push(row(Feature::Screenshots, Some(&CAMERA)));
@@ -1114,8 +1119,10 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::VoicePrompt => "lab-voice-prompt",
         Feature::CursorContext => "lab-cursor-context",
         Feature::StopPhrase => "lab-stop-phrase",
+        Feature::ConfirmLongCancels => "lab-confirm-long-cancels",
         Feature::Signature => "lab-signature",
         Feature::HudHeight => "lab-hud-height",
+        Feature::IndicatorFollowsMouse => "lab-indicator-follows-mouse",
         Feature::VoiceIsolation => "lab-voice-isolation",
         Feature::HoldThroughKeys => "lab-hold-through-keys",
         Feature::ModesEditor => "lab-modes-editor",
@@ -1128,6 +1135,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::MeetingMicrophoneMute => "lab-meeting-microphone-mute",
         Feature::MeetingIndicatorDisplay => "lab-meeting-indicator-display",
         Feature::MeetingAudioSource => "lab-meeting-audio-source",
+        Feature::MiddleMouseDictation => "lab-middle-mouse-dictation",
     }
 }
 

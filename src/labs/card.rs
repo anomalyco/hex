@@ -93,13 +93,16 @@ impl Feature {
             Self::Signature => "Signature",
             Self::DictationStyle => "Dictation style",
             Self::HudHeight => "HUD height",
+            Self::IndicatorFollowsMouse => "Indicator follows mouse",
             Self::VoiceIsolation => "Voice isolation",
             Self::DictateWhileAnnotating => "Dictate while annotating",
             Self::StopAnyCallRecording => "Stop every call recording when the call ends",
             Self::ClipboardPhrase => "Clipboard phrase",
             Self::MeetingMicrophoneMute => "Mute the microphone while recording",
+            Self::ConfirmLongCancels => "Confirm long cancels",
             Self::MeetingIndicatorDisplay => "Indicator on any display",
             Self::MeetingAudioSource => "Choose meeting audio",
+            Self::MiddleMouseDictation => "Middle mouse dictation",
         }
     }
 
@@ -313,6 +316,9 @@ impl Feature {
             Self::StopPhrase => {
                 "Say a phrase to finish a hands-free dictation; the phrase isn't added to the text"
             }
+            Self::ConfirmLongCancels => {
+                "After 10 seconds, cancelling a dictation takes two presses, so one slip keeps your words"
+            }
             Self::HoldThroughKeys if cfg!(target_os = "windows") => {
                 "If a shortcut is made only of Ctrl, Alt, Shift, or the Windows key, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish"
             }
@@ -347,6 +353,9 @@ impl Feature {
             Self::HudHeight => {
                 "Choose how high the dictation HUD sits above the Dock when it's at the bottom"
             }
+            Self::IndicatorFollowsMouse => {
+                "Show the dictation indicator next to your mouse pointer instead of at the top or bottom of the screen"
+            }
             Self::VoiceIsolation => {
                 "Record dictation through Apple's voice processing so Mic Mode can turn on Voice Isolation and cut background noise."
             }
@@ -370,6 +379,9 @@ impl Feature {
             }
             Self::MeetingAudioSource => {
                 "Record one app or one output device in meetings instead of all computer audio"
+            }
+            Self::MiddleMouseDictation => {
+                "Hold the middle mouse button for half a second to start dictating hands-free, and again to finish. Escape cancels"
             }
         }
     }

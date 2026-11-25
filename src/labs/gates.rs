@@ -332,6 +332,14 @@ pub fn hud_bottom_gap() -> f64 {
     }
 }
 
+/// Labs › Indicator follows mouse: a shown HUD sits beside the pointer
+/// instead of at its Top or Bottom position (macOS; read each time the HUD is
+/// placed, which is every frame while it shows).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn indicator_follows_mouse() -> bool {
+    feature_on(Feature::IndicatorFollowsMouse)
+}
+
 /// Dictation's microphone opens through Apple's voice processing, so Control
 /// Center's Mic Mode can offer Voice Isolation (macOS; read as each dictation
 /// stream opens, and when an idle one may be replaced).
@@ -441,6 +449,14 @@ pub fn caps_lock_dictation() -> bool {
     feature_on(Feature::CapsLockDictation)
 }
 
+/// A half-second middle-button press starts or finishes a hands-free
+/// dictation, and Escape cancels any hands-free dictation (macOS; read by the
+/// event tap at each middle-button edge and by the listener on every pass).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn middle_mouse_dictation() -> bool {
+    feature_on(Feature::MiddleMouseDictation)
+}
+
 /// A spoken trigger phrase inside a dictation turns what follows it into a
 /// one-off instruction for the mode's OpenCode model (read as each
 /// dictation's processing starts). An organization's
@@ -463,6 +479,13 @@ pub fn voice_prompt_phrase() -> String {
         .read()
         .unwrap_or_else(|error| error.into_inner())
         .clone()
+}
+
+/// Labs › Confirm long cancels: a dictation's cancel shortcut asks for a
+/// second press once it has recorded for 10 seconds (read at each cancel
+/// press, by each OS's shortcut machine).
+pub fn confirm_long_cancels() -> bool {
+    feature_on(Feature::ConfirmLongCancels)
 }
 
 /// Labs › Stop phrase: a spoken phrase at the end of a hands-free dictation

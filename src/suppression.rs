@@ -104,7 +104,6 @@ unsafe extern "C" {
     fn CGEventGetFlags(event: EventRef) -> u64;
     fn CGEventGetTimestamp(event: EventRef) -> u64;
     fn CGEventGetIntegerValueField(event: EventRef, field: u32) -> i64;
-    #[cfg(hex_capture)]
     fn CGEventGetLocation(event: EventRef) -> CgPoint;
     #[cfg(hex_capture)]
     fn CGEventKeyboardGetUnicodeString(
@@ -115,7 +114,6 @@ unsafe extern "C" {
     );
 }
 
-#[cfg(hex_capture)]
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct CgPoint {
@@ -493,6 +491,13 @@ pub(crate) fn keyboard_is_neutral() -> bool {
     )
 }
 
+/// Whether the middle mouse button reads as held now (Labs › Middle mouse
+/// dictation checks before a long press counts).
+pub(crate) fn middle_button_down() -> bool {
+    crate::app_settings::HotkeyKey::mouse_code(crate::middle_mouse_dictation::MIDDLE_BUTTON)
+        .is_some_and(input_is_held)
+}
+
 /// The first key code that reads as held: what a pending resume is still
 /// waiting for, for its one slow warning.
 pub(crate) fn held_key_code() -> Option<u16> {
@@ -673,6 +678,8 @@ unsafe extern "C" fn event_callback(
     ) {
         // The key and modifier taps share this callback.
         reenable_disabled_taps(context, event_type, "session");
+        // A middle-button release may have gone missing with the tap.
+        crate::middle_mouse_dictation::reset();
         send_input(context, InputEvent::TapDisabled, CaptureInstant::ZERO);
         return event;
     }
@@ -695,6 +702,30 @@ unsafe extern "C" fn event_callback(
         } else {
             event
         };
+    }
+    // Labs › Middle mouse dictation: the gesture only watches the middle
+    // button, whose press, drag, and release still reach the app below. A
+    // middle button bound as a shortcut is that shortcut's alone.
+    // A press that drags (panning, autoscroll) is the app's, never a long
+    // press.
+    if matches!(
+        event_type,
+        EVENT_OTHER_MOUSE_DOWN | EVENT_OTHER_MOUSE_UP | EVENT_OTHER_MOUSE_DRAGGED
+    ) && crate::labs::middle_mouse_dictation()
+        // SAFETY: CoreGraphics supplied a valid mouse event.
+        && unsafe { CGEventGetIntegerValueField(event, MOUSE_EVENT_BUTTON_NUMBER) }
+            == i64::from(crate::middle_mouse_dictation::MIDDLE_BUTTON)
+        && !middle_button_bound(crate::app_settings::runtime_hotkeys())
+    {
+        // SAFETY: CoreGraphics supplied a valid mouse event.
+        let CgPoint { x, y } = unsafe { CGEventGetLocation(event) };
+        match event_type {
+            EVENT_OTHER_MOUSE_DOWN => {
+                crate::middle_mouse_dictation::press(CaptureInstant::now(), (x, y));
+            }
+            EVENT_OTHER_MOUSE_DRAGGED => crate::middle_mouse_dictation::drag((x, y)),
+            _ => crate::middle_mouse_dictation::reset(),
+        }
     }
     // Labs › Caps Lock dictation: every AlphaShift change, including Hex's
     // own lock reset, reaches the gate; no IOKit runs on this thread.

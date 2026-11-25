@@ -8,7 +8,9 @@ while the shortcut is still held past the hold threshold cancels it; a
 hands-free capture never takes Escape. Every other intentional dictation
 finishes and pastes. The other exception is a Labs › Caps Lock dictation
 capture on macOS: it is hands-free in every shortcut mode, so its own Escape
-binding cancels it even in Hold.
+binding cancels it even in Hold. With Labs › Confirm long cancels on, a dictation
+that has recorded 10 s or more asks for a second cancel press within 3 s
+before it is thrown away (see [labs.md](labs.md), #2837).
 
 This map covers the macOS release path. Linux shares the basic journey, not
 every timing, input, or recovery guarantee; see the
@@ -68,6 +70,20 @@ light and restores normal Caps Lock behaviour. The light needs Input Monitoring
 (which Hex already asks for); without it dictation still works and the light
 stays under macOS's control. Implemented November 7, 2026, not verified on
 hardware; details and checks in [labs.md](labs.md).
+
+macOS with Labs › Middle mouse dictation on (`labs.middle_mouse_dictation`, off
+by default, issue 2838): holding the middle mouse button for 500 ms starts a
+hands-free dictation while the button is still down, and the next long press
+finishes it. Shorter clicks do nothing, a press that drags the pointer more
+than a few points (panning, autoscroll) never counts, and every middle click,
+long or short, still reaches the app in front. A mouse-started capture is the dictation
+shortcut's, so its next press finishes it too; a long press finishes a capture
+the shortcut (or Caps Lock) locked, keeping that capture's output settings. A
+held press, a pending double tap, or an Annotate recording is left alone. While
+the lab is on, Escape cancels any hands-free dictation in every shortcut mode
+and is kept from the app in front, a terminal included; off, the usual cancel
+rules apply. Not verified on hardware; details and checks in
+[labs.md](labs.md).
 
 Wayland's XDG shortcut syntax has no mouse-button trigger. Use the desktop's
 mouse bindings to run `hex dictation start`/`stop` (hold) or `hex dictation toggle`
@@ -3156,6 +3172,10 @@ keeping its shadow padding. The plate only moves up inside the window once the
 raised window would reach the visible top (a gap above the visible height
 minus 104 pt), which within 0–400 only happens on a very short visible frame,
 and placement clamps it under the menu bar or notch.
+With Labs › Indicator follows mouse on, either visible position instead puts
+the plate just below the pointer (above it near the screen's bottom), inside
+the pointer screen's visible frame, while the HUD shows
+([labs.md](labs.md)).
 The HUD is
 also pinned to the pointer screen's `NSScreenNumber` with a display-local rect;
 that resolves to the same frame as the global `Primary` rect, so the pin is

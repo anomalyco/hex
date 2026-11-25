@@ -283,6 +283,12 @@ impl Hotkeys {
             machine.set_cancel(Some(extra_cancel));
             machine.set_cancel_in_any_mode(true);
         }
+        // Labs › Middle mouse dictation: Escape cancels any hands-free
+        // capture, whichever input started it.
+        let escape_cancels_lock = crate::labs::middle_mouse_dictation();
+        for machine in self.machines() {
+            machine.set_escape_cancels_lock(escape_cancels_lock);
+        }
         raw_cancelled || second_cancelled || extra_cancelled
     }
 
@@ -328,6 +334,30 @@ impl Hotkeys {
             self.begin_capture(Shortcut::CapsLock, false);
         }
         Some(action)
+    }
+
+    /// A middle-mouse long press (Labs › Middle mouse dictation). It
+    /// finishes whichever machine records hands-free, as that machine's own
+    /// press would, so a capture the dictation shortcut locked keeps its
+    /// output settings. From idle it locks the dictation machine, as
+    /// `hex dictation start` does, so the dictation shortcut's next press can
+    /// finish it too. A held press, another recording, or a pending double
+    /// tap is left alone.
+    pub(super) fn middle_mouse_press(&mut self) -> Option<(Shortcut, HotkeyAction)> {
+        if let Some(finished) = self.finish_hands_free() {
+            return Some(finished);
+        }
+        if self.any_recording()
+            || self.dictation.has_pending_gesture()
+            || self.pending_gesture_besides(Shortcut::Dictation)
+        {
+            return None;
+        }
+        if !self.dictation.lock() {
+            return None;
+        }
+        self.begin_capture(Shortcut::Dictation, false);
+        Some((Shortcut::Dictation, HotkeyAction::Start))
     }
 
     /// Stands a Caps Lock capture down when its lab turns off. Returns

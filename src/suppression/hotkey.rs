@@ -140,6 +140,14 @@ const HOLD_THROUGH_KEYS: fn() -> bool = if cfg!(test) {
     crate::labs::hold_through_keys
 };
 
+/// Labs › Confirm long cancels. Unit tests keep it off; its policy has its
+/// own tests (`dictation::cancel_confirm`).
+const CONFIRM_LONG_CANCELS: fn() -> bool = if cfg!(test) {
+    || false
+} else {
+    crate::labs::confirm_long_cancels
+};
+
 /// Keys and modifier sides currently tracked as held down, with when each went
 /// down. Kept together so every clear resets keys and modifier sides alike.
 #[derive(Default)]
@@ -227,6 +235,10 @@ pub struct DictationHotkey {
     /// Cancel works in every trigger mode, not only under Toggle: an extra
     /// dictation shortcut has its own mode and always takes its cancel key.
     cancel_in_any_mode: bool,
+    /// Labs › Middle mouse dictation: Escape cancels this machine's
+    /// hands-free capture in every trigger mode, and the tap keeps it from
+    /// the app in front.
+    escape_cancels_lock: bool,
     /// Labs › Tap or hold, read at each Toggle release: a press held past
     /// the hold threshold finishes on release instead of locking.
     tap_or_hold: fn() -> bool,
@@ -237,6 +249,12 @@ pub struct DictationHotkey {
     /// modifier-only capture: a second or more in, the key is the app's, not a
     /// chord.
     hold_through_keys: fn() -> bool,
+    /// Labs › Confirm long cancels, read at each cancel press: a long
+    /// capture's first press asks instead of cancelling.
+    confirm_long_cancels: fn() -> bool,
+    /// When this machine's capture started, and a cancel press waiting for
+    /// its second.
+    cancel_confirm: crate::dictation::cancel_confirm::CancelConfirm,
     binding: RuntimeHotkey,
     /// Toggle's cancel shortcut; `None` in Hold mode.
     cancel: Option<RuntimeHotkey>,
@@ -285,9 +303,12 @@ impl DictationHotkey {
             double_tap_only: false,
             toggle: false,
             cancel_in_any_mode: false,
+            escape_cancels_lock: false,
             tap_or_hold: TAP_OR_HOLD,
             double_tap_modifiers: DOUBLE_TAP_MODIFIERS,
             hold_through_keys: HOLD_THROUGH_KEYS,
+            confirm_long_cancels: CONFIRM_LONG_CANCELS,
+            cancel_confirm: Default::default(),
             binding,
             cancel: None,
             ignore_before: None,
@@ -324,10 +345,17 @@ impl DictationHotkey {
                 if now.duration_since(started_at) >= MINIMUM_HOLD_DURATION)
     }
 
+    /// Labs › Middle mouse dictation's cancel: Escape while this machine
+    /// records hands-free, whichever input locked it.
+    fn escape_cancels_locked(&self) -> bool {
+        self.escape_cancels_lock && self.is_locked()
+    }
+
     /// Whether the tap keeps Escape from the app in front at `now`: it
-    /// cancels this machine's held capture.
+    /// cancels this machine's held capture, or its hands-free one while
+    /// Labs › Middle mouse dictation is on.
     pub fn takes_escape(&self, now: CaptureInstant) -> bool {
-        self.escape_cancels_hold(now)
+        self.escape_cancels_hold(now) || self.escape_cancels_locked()
     }
 
     /// An Escape a recording machine saw and did nothing with, and why.
@@ -377,6 +405,7 @@ impl DictationHotkey {
         self.state = State::IDLE;
         self.stale_keys_neutral_since = None;
         self.chord_break_at = None;
+        self.cancel_confirm.ended();
         Some(HotkeyAction::Finish)
     }
 
@@ -427,6 +456,12 @@ impl DictationHotkey {
         self.cancel_in_any_mode = enabled;
     }
 
+    /// Whether Escape cancels a hands-free capture in every trigger mode
+    /// (Labs › Middle mouse dictation).
+    pub fn set_escape_cancels_lock(&mut self, enabled: bool) {
+        self.escape_cancels_lock = enabled;
+    }
+
     /// Toggle's or an extra shortcut's cancel shortcut, or `None` for no
     /// cancel.
     pub fn set_cancel(&mut self, cancel: Option<RuntimeHotkey>) {
@@ -455,6 +490,7 @@ impl DictationHotkey {
         self.held.clear();
         self.stale_keys_neutral_since = None;
         self.chord_break_at = None;
+        self.cancel_confirm.ended();
         was_recording.then_some(HotkeyAction::Cancel)
     }
 
@@ -469,6 +505,7 @@ impl DictationHotkey {
         self.held.clear();
         self.stale_keys_neutral_since = None;
         self.chord_break_at = None;
+        self.cancel_confirm.started(std::time::Instant::now());
         true
     }
 
@@ -704,7 +741,25 @@ impl DictationHotkey {
         let was_locked = matches!(self.state, State::Locked);
         let action = self.process_event(event, now);
         self.track_chord_break(event, now, action, was_locked);
+        match action {
+            Some(HotkeyAction::Start) => self.cancel_confirm.started(std::time::Instant::now()),
+            Some(
+                HotkeyAction::Finish
+                | HotkeyAction::Cancel
+                | HotkeyAction::CancelShortcut
+                | HotkeyAction::Discard(_),
+            ) => self.cancel_confirm.ended(),
+            Some(HotkeyAction::PasteLast | HotkeyAction::ModelSwitch) | None => {}
+        }
         action
+    }
+
+    /// Labs › Confirm long cancels: whether this cancel press discards the
+    /// capture now. A long capture's first press asks instead, shows the
+    /// notice, and leaves the capture recording.
+    fn cancel_confirmed(&mut self) -> bool {
+        self.cancel_confirm
+            .press_with_notice((self.confirm_long_cancels)(), std::time::Instant::now())
     }
 
     /// A bare modifier passes through to other apps, so a hold reads to them
@@ -854,6 +909,9 @@ impl DictationHotkey {
                 .cancel
                 .is_some_and(|cancel| cancel.matches_key_press(code, flags))
         {
+            if !self.cancel_confirmed() {
+                return None;
+            }
             self.state = State::Dirty;
             return Some(HotkeyAction::CancelShortcut);
         }
@@ -861,10 +919,24 @@ impl DictationHotkey {
             if let State::Recording { started_at, .. } = self.state
                 && self.escape_cancels_hold(now)
             {
+                if !self.cancel_confirmed() {
+                    return None;
+                }
                 tracing::info!(
                     shortcut = "dictation",
                     after_press_ms = signed_ms(now, started_at),
                     "dictation cancelled by Escape while held"
+                );
+                self.state = State::Dirty;
+                return Some(HotkeyAction::CancelShortcut);
+            }
+            if self.escape_cancels_locked() {
+                if !self.cancel_confirmed() {
+                    return None;
+                }
+                tracing::info!(
+                    shortcut = "dictation",
+                    "hands-free dictation cancelled by Escape"
                 );
                 self.state = State::Dirty;
                 return Some(HotkeyAction::CancelShortcut);

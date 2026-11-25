@@ -67,6 +67,9 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        saying the phrase at the end of a hands-free dictation finishes it, as if the
 │                                        shortcut were pressed again, and the phrase never reaches the pasted text;
 │                                        needs a speech model that streams on a GPU, as Live text does
+├── Confirm long cancels no labs.confirm_long_cancels        (every OS) once a dictation has recorded 10 s, its cancel shortcut's first press
+│                                        keeps recording and shows "Press again to discard this dictation" beside the HUD
+│                                        for 3 s; a second press inside that window cancels as before (#2837)
 ├── Failure notices no    labs.failure_notices                   when a dictation fails, its explanation sits beside the HUD for about 6 s, or until the next capture starts
 ├── Live typing     no    labs.live_typing                       (Linux Wayland) provisional words as an underlined input-method preedit in the focused field; the final text is committed there instead of pasted; on a compositor that offers no input method (GNOME) its card is disabled with a note and `hex labs` says so
 ├── Appearance      no    labs.appearance + labs.appearance_theme (system/light/dark, default system)  the main window is forced light or dark instead of following the system; the dictation HUD (including its onboarding and Sounds previews) and meeting recording pill remain dark. Other overlays follow the OS. On Windows the title bar follows too, through its background and light/dark mode; Windows 10 has no caption colour, so DWM keeps its own light or dark caption background (builds before 19041 keep the OS caption) while its text and buttons follow
@@ -151,6 +154,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Terminal paste shortcut no labs.terminal_paste_shortcut + terminal_paste_hotkey (Windows, Linux)
 │                                        another shortcut dictates like the main one and always pastes with Ctrl+Shift+V; General shows its recorder while on
 ├── Caps Lock dictation no labs.caps_lock_dictation + labs.caps_lock_light (macOS)   a Caps Lock press starts and stops hands-free dictation; its light waits for the microphone, then shows recording (steady or slow blink), processing, and off
+├── Middle mouse dictation no labs.middle_mouse_dictation (macOS) holding the middle button 500 ms starts a hands-free dictation and the next long press finishes it; clicks still reach the app; Escape cancels any hands-free dictation and stays out of the app (#2838)
 ├── Smart spacing   no    labs.smart_spacing           (macOS)   a dictation pasted right after a word gets one leading space (#632)
 ├── Left and right keys no labs.sided_modifier_chords (macOS) the recorder keeps each modifier's side in a modifier-only chord: R⌘ R⌥ (#710)
 ├── Tap or hold      no    labs.tap_or_hold             (macOS, Linux) in Toggle mode, a press held past 300 ms dictates until it lifts; a short tap still locks (#711, #1144)
@@ -278,6 +282,14 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // a_raised_bottom_gap_works_on_a_display_below_the_primary,
 │                                        // a_huge_bottom_gap_keeps_the_plate_inside_the_visible_frame,
 │                                        // a_bottom_gap_never_drops_the_window_below_the_visible_bottom (rune_hud/hud_placement.rs)
+├── Indicator follows mouse no labs.indicator_follows_mouse (macOS) while a dictation records and processes, the HUD's plate sits centred
+│                                        28 pt below the pointer (12 pt above it where the visible frame has no room below),
+│                                        on the pointer's screen, kept inside its visible frame and the window inside its frame;
+│                                        it takes the Top and Bottom positions, the notch indicator, and HUD Lab's placements;
+│                                        live text hangs beside it; Hidden still hides it; off, placement is exactly as before
+│                                        // checks: the_plate_follows_the_pointer_below_it_and_flips_above_near_the_bottom,
+│                                        // the_following_plate_stays_on_the_visible_screen_and_the_window_on_its_display
+│                                        // (rune_hud/hud_placement.rs)
 ├── Import audio    no    labs.meeting_import           (macOS)   Meetings offers Import audio…: a WAV, M4A, MP3, AIFF, or CAF
 │                                        file is decoded locally, transcribed with the selected model, saved as a normal
 │                                        meeting (Speaker turns), exported as Markdown, and given notes as a finished recording
@@ -1169,6 +1181,32 @@ in [control/settings.rs](../../src/control/settings.rs);
 [tests/panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
 dictation with the lab on, and a request against a live model; the Labs page
 goldens were regenerated for the new card.
+
+Confirm long cancels (`confirm-long-cancels`, every OS, #2837): a long
+dictation is no longer lost to one stray press of its cancel shortcut. Each
+OS's shortcut machine (macOS `DictationHotkey`, Windows' hook state, Linux's
+`ShortcutState`) keeps a `dictation::cancel_confirm::CancelConfirm` that learns
+when its capture starts and ends, and asks it before acting on a cancel press.
+
+```ts
+Cancel shortcut while a dictation records       // labs.confirm_long_cancels
+├── Lab off, or under 10 s recorded -> cancels at once, as before
+├── 10 s or more, first press -> keeps recording; the key stays Hex's (the app
+│   in front never sees it); the live-text plate says "Press again to discard
+│   this dictation" for 3 s, even with Failure notices off
+├── Second press within 3 s -> cancels: cancel tone, nothing pasted; the notice goes
+├── A press after the 3 s -> asks again
+└── hex dictation cancel, lost input, a suspended tap -> cancel at once, never ask
+```
+
+It covers Toggle's cancel shortcut on every OS, and on macOS also an extra
+dictation shortcut's cancel, Caps Lock dictation's Escape, and Hold's Escape
+past the hold threshold. Checks: the policy's tests in
+[cancel_confirm.rs](../../src/dictation/cancel_confirm.rs) and
+`a_long_toggled_recording_needs_a_second_cancel`
+([linux/input.rs](../../src/linux/input.rs)). The macOS and Windows wiring was
+not compiled or run from this Linux checkout, and no OS was tried with a real
+keyboard.
 
 Stop phrase (`stop-phrase`, every OS): while a hands-free dictation records,
 saying a configurable phrase at the end of your speech finishes it as if the
@@ -2120,6 +2158,61 @@ lock reset. Checks:
 with the lab on — no hardware run of the Caps Lock LED, the lock reset, the
 blink, Escape cancellation, or the off/quit cleanup. The `mac-labs` and
 `mac-labs-link` goldens were regenerated on Linux with the new row.
+
+Middle mouse dictation (`middle-mouse-dictation`, issue 2838, macOS): while
+on, holding the middle mouse button for 500 ms toggles a hands-free
+dictation. It is a narrower gesture than Labs › Mouse shortcuts: it needs no
+binding and leaves the dictation shortcut and its activation mode alone.
+
+```ts
+Labs › Middle mouse dictation on                     // labs.middle_mouse_dictation
+├── middle button held 500 ms, idle -> hands-free capture starts while the button is still down
+├── middle button held 500 ms, a hands-free capture running -> finishes and pastes normally
+├── a click shorter than 500 ms -> nothing; every middle click, long or short, still reaches the app
+├── a middle-button drag past 4 points (panning, autoscroll) -> the app's; that press never toggles dictation
+├── started by the mouse -> the dictation shortcut's next press finishes it too
+├── locked by the shortcut (Toggle, double tap, `hex dictation start`) or Caps Lock -> a long press finishes it, keeping that capture's output (Dictate without processing stays raw)
+├── a held press, a pending double tap (the dictation shortcut's or another's), Annotate recording -> a long press does nothing
+├── Escape while any hands-free capture records -> cancels, and the tap keeps Escape from the app (a terminal included), in every shortcut mode; with Labs › Confirm long cancels on, a capture past 10 s asks for a second Escape first
+├── the middle button bound as a shortcut (Labs › Mouse shortcuts) -> the gesture leaves it to that shortcut
+└── lab off -> no gesture, and Escape follows the usual cancel rules
+```
+
+The event tap ([suppression.rs](../../src/suppression.rs)) reports each
+middle-button press, drag, and release to
+[middle_mouse_dictation.rs](../../src/middle_mouse_dictation.rs) while the lab
+is on and never consumes them; a drag more than 4 points (`DRAG_SLOP`, from
+`CGEventGetLocation`) from where the press went down cancels that press. The listener
+([recognition.rs](../../src/recognition.rs)) asks on each pass (at most 20 ms
+apart) whether the held press just reached 500 ms, rechecks that the button
+still reads as down, and hands it to `Hotkeys::middle_mouse_press`
+([recognition/hotkeys.rs](../../src/recognition/hotkeys.rs)): finish the
+machine that records hands-free, or lock the dictation shortcut's machine as
+`hex dictation start` does. Escape is
+`DictationHotkey::set_escape_cancels_lock`
+([suppression/hotkey.rs](../../src/suppression/hotkey.rs)), set on every
+shortcut machine while the lab is on; `takes_escape` follows it, so the tap
+policy keeps that Escape from the app. Checks:
+`a_press_becomes_long_once_after_half_a_second`,
+`a_short_click_never_becomes_long`,
+`a_new_press_replaces_one_whose_release_was_missed`, and
+`a_dragged_press_never_becomes_long` in
+[middle_mouse_dictation.rs](../../src/middle_mouse_dictation.rs);
+`a_middle_mouse_capture_finishes_with_the_dictation_shortcut`,
+`a_middle_mouse_press_finishes_a_hands_free_capture_it_did_not_start`,
+`a_middle_mouse_press_leaves_a_held_capture_alone`,
+`a_middle_mouse_press_leaves_a_pending_double_tap_alone`, and
+`escape_cancels_a_hands_free_capture_only_with_middle_mouse_dictation` in
+[recognition.rs](../../src/recognition.rs), and
+`escape_on_a_long_hands_free_capture_asks_first_with_confirm_long_cancels`
+in [suppression/tests.rs](../../src/suppression/tests.rs) (macOS only; never
+built or run on a Mac: they were only type-checked by `cargo clippy` for
+`aarch64-apple-darwin` from Linux, against a downloaded SDK with stubbed
+Swift tooling and no transcription library);
+`the_middle_mouse_dictation_lab_is_a_macos_shortcuts_lab_off_by_default` in
+[labs.rs](../../src/labs.rs). Not yet observed: a real Mac with the lab on,
+a physical middle button, or Escape kept from a terminal. Its row is macOS
+builds only, so Linux renders of macOS scenes and their goldens leave it out.
 
 Smart spacing (`smart-spacing`, issue 632, macOS): while on, a dictation
 pasted right after typed text gets one leading space, so words don't merge
@@ -3211,6 +3304,31 @@ have no row, `hex labs on hud-height` doesn't know it there, and
 `hud_height_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs). Not yet observed: a real dictation at a
 raised gap on a Mac, and the card's controls with every language.
+
+Indicator follows mouse (`indicator-follows-mouse`, macOS only, #2839):
+for people who look where their pointer is rather than at the top or bottom
+of the screen. While on, `Hud::place_on_pointer_screen` in
+[rune_hud/macos.rs](../../src/rune_hud/macos.rs) reads `NSEvent.mouseLocation`
+and places the HUD with `hud_placement::near_pointer`: the plate centred
+under the pointer, its top `POINTER_BELOW` (28 pt) below the hotspot, or its
+bottom `POINTER_ABOVE` (12 pt) above it where the visible frame has no room
+below. The plate is clamped inside the pointer screen's `visibleFrame` (clear
+of the menu bar and the Dock) and the window inside the screen's frame, so its
+shadow padding never crosses onto a neighbouring display; where the window
+can't follow, `Layout.center` moves the plate inside it. The pump places a
+shown HUD every frame while it animates (recording and processing), and an
+unchanged placement is skipped, so the HUD follows the pointer, across
+displays too, and stays click-through and unfocused as before. It takes any
+shown position, the notch indicator, and HUD Lab's placements; live text
+hangs beside the plate (`beside_plate`); Hidden still hides it (the live text
+then sits under the menu bar as before); and turning it off restores the Top
+or Bottom placement from the next frame. Linux and Windows have no row.
+Checks:
+`the_plate_follows_the_pointer_below_it_and_flips_above_near_the_bottom` and
+`the_following_plate_stays_on_the_visible_screen_and_the_window_on_its_display`
+in [rune_hud/hud_placement.rs](../../src/rune_hud/hud_placement.rs). Not yet
+observed: a real dictation with the lab on, on one display or several. The row
+renders only in macOS builds, so no golden changes.
 
 Screenshots (`screenshots`, macOS only, group Annotate): for people who
 miss CleanShot's ⌘⇧4. While on, the shortcut (`screenshots.hotkey`,

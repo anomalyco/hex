@@ -411,6 +411,7 @@ pub fn log_launch() {
         cursor_context = cursor_context(),
         copy_dictation_audio = copy_dictation_audio(),
         hold_through_keys = hold_through_keys(),
+        confirm_long_cancels = confirm_long_cancels(),
         "labs"
     );
 }
@@ -592,6 +593,19 @@ mod tests {
         assert!(!feature.on(&AppSettings::default()));
         assert_eq!(feature.on_this_os(), cfg!(target_os = "macos"));
         assert_eq!(Feature::from_name("vocabulary-menu"), Some(feature));
+    }
+
+    #[test]
+    fn the_middle_mouse_dictation_lab_is_a_macos_shortcuts_lab_off_by_default() {
+        let feature = Feature::MiddleMouseDictation;
+        assert_eq!(feature.name(), "middle-mouse-dictation");
+        assert_eq!(feature.group(), Group::Shortcuts);
+        assert_eq!(feature.audience(), Audience::Everyone);
+        assert_eq!(feature.oses(), &[Os::Macos]);
+        assert_eq!(feature.added(), 20261125);
+        assert!(!feature.on(&AppSettings::default()));
+        assert_eq!(feature.on_this_os(), cfg!(target_os = "macos"));
+        assert_eq!(Feature::from_name("middle-mouse-dictation"), Some(feature));
     }
 
     #[test]

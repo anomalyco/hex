@@ -16,6 +16,7 @@ mod annotate_dictation;
 mod calls;
 mod clipboard_phrase;
 mod clock;
+mod confirm_cancel;
 mod failures;
 mod french;
 mod history;
@@ -26,6 +27,7 @@ mod meeting_audio_source;
 mod meeting_mute;
 mod meetings;
 mod menu;
+mod middle_mouse;
 mod model_switch;
 pub(crate) mod numbers;
 mod onboarding;
@@ -407,6 +409,8 @@ pub(super) fn all_translations() -> impl Iterator<Item = &'static (&'static str,
         .chain(labs::TRANSLATIONS)
         .chain(meeting_audio_source::TRANSLATIONS)
         .chain(meeting_mute::TRANSLATIONS)
+        .chain(confirm_cancel::TRANSLATIONS)
+        .chain(middle_mouse::TRANSLATIONS)
         .chain(style::TRANSLATIONS)
         .chain(signature::TRANSLATIONS)
         .chain(clipboard_phrase::TRANSLATIONS)
@@ -798,6 +802,29 @@ mod tests {
                 .all(|translation| !translation.is_empty()),
             "the refused paste notice is missing a language"
         );
+    }
+
+    /// Labs › Confirm long cancels' notice is looked up through a constant
+    /// too.
+    #[test]
+    fn the_confirm_cancel_notice_has_every_language() {
+        let table: std::collections::HashMap<_, _> = all_translations().copied().collect();
+        let translations = table
+            .get(crate::dictation::cancel_confirm::NOTICE)
+            .expect("the confirm cancel notice is translated");
+        assert!(
+            translations
+                .iter()
+                .all(|translation| !translation.is_empty())
+        );
+        for language in [
+            super::french::table(),
+            super::portuguese::table(),
+            super::russian::table(),
+            super::hungarian::table(),
+        ] {
+            assert!(language.contains_key(crate::dictation::cancel_confirm::NOTICE));
+        }
     }
 
     /// The sound picker translates each set's name and character, which are
