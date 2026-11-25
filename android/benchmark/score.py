@@ -108,4 +108,12 @@ if __name__=="__main__":
             if 2*len(h)>3*len(r): repeated.append(f'{id} prompted "{p}" ({len(h)} words for {len(r)})')
         print("prompted clips: none repeated" if not repeated else "prompted clips: repeated: "+", ".join(repeated),file=sys.stderr)
         failed=failed or bool(repeated)
+    # Labs › Automatic listens for the language (README): with a clip's own language as the keyboard's, no other language
+    # may take a clip over. switch.tsv is native.cpp's HEX_LANGS output: id, language, other, chosen, other's probability.
+    if (data/"switch.tsv").exists():
+        pairs=[x.split("\t") for x in (data/"switch.tsv").read_text().splitlines()]
+        switched=[f"{id} ({lang}) to {chosen}, {float(p):.3f}" for id,lang,other,chosen,p,_ in pairs if chosen!=lang]
+        print(f"automatic language: {len(pairs)-len(switched)} of {len(pairs)} pairs kept the clip's language" +
+              ("" if not switched else "; switched: "+", ".join(switched)),file=sys.stderr)
+        failed=failed or bool(switched)
     if failed: sys.exit(1)

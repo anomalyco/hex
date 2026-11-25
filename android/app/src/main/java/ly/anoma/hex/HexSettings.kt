@@ -121,11 +121,17 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
         onDispose { stores.forEach { it.unregisterOnSharedPreferenceChangeListener(changed) } }
     }
     val automatic = remember(revision, LocalConfiguration.current) { speech.spoken }
+    // What Automatic dictates in: one language, or with Labs › Automatic listens for the language those it chooses among.
+    val automaticChoices = remember(revision, LocalConfiguration.current) { speech.automaticCandidates }
+    val listenForLanguage = remember(revision) { speech.listenForLanguage }
     val selectedLanguage = remember(revision) { speech.language }
+    val listening = selectedLanguage == null && automaticChoices.size > 1
+    val languageList = automaticChoices.joinToString(stringResource(R.string.language_list_separator)) { it.label }
     val selectedLayout = remember(revision) { typing.layout }
     val height = remember(revision) { typing.height }
     val style = remember(revision) { speech.style }
     val translate = remember(revision) { speech.translation }
+    val translatable = remember(revision, LocalConfiguration.current) { speech.translatable }
     val clean = remember(revision) { speech.clean }
     val lowercase = remember(revision) { speech.lowercase }
     val endWithPeriod = remember(revision) { speech.endWithPeriod }
@@ -161,6 +167,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     var resettingTouch by remember { mutableStateOf(false) }
     val passwordManager = remember(revision) { typing.passwordManagerSuggestions }
     val voiceOnly = remember(revision) { typing.voiceOnly }
+    val hexKeyLeft = remember(revision) { typing.hexKeyLeft }
     // A hidden field or leaving Labs shows the saved line again, never an unsaved draft.
     LaunchedEffect(page, signature) { if (page != Page.Labs || !signature) signatureDraft = speech.signatureText }
     LaunchedEffect(page, learnFixes) { if (page != Page.Labs || !learnFixes) forgetting = false }
@@ -292,11 +299,18 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 spokenPunctuation) { speech.spokenPunctuation = it }
                             Rule(); Toggle(stringResource(R.string.dictation_end_with_period), stringResource(R.string.dictation_end_with_period_detail),
                                 endWithPeriod) { speech.endWithPeriod = it }
-                            Rule(); Entry(stringResource(R.string.settings_dictation_language), if (selectedLanguage == null) automatic.label else null,
+                            Rule(); Entry(stringResource(R.string.settings_dictation_language),
+                                if (selectedLanguage == null) languageList else null,
                                 selectedLanguage?.label ?: stringResource(R.string.settings_automatic), { open(Page.Language) })
                         }
                         Card {
-                            Toggle(stringResource(R.string.settings_translate), stringResource(R.string.settings_translate_detail), translate) { speech.translation = it }
+                            // Whisper translates only into English, and Hex offers it only for Spanish: say which pair, and when
+                            // the Dictation language means the switch does nothing.
+                            Toggle(stringResource(R.string.settings_translate), stringResource(when {
+                                !translatable -> R.string.settings_translate_needs_spanish
+                                listening -> R.string.settings_translate_heard
+                                else -> R.string.settings_translate_detail
+                            }), translate, noteLines = 3) { speech.translation = it }
                             Rule(); Toggle(stringResource(R.string.settings_clean), stringResource(R.string.settings_clean_detail), clean) { speech.clean = it }
                             Rule(); Toggle(stringResource(R.string.dictation_vocabulary), stringResource(R.string.dictation_vocabulary_detail),
                                 customVocabulary) { speech.customVocabulary = it }
@@ -316,7 +330,8 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             val action = modelAction(model)
                             Entry(stringResource(R.string.model_title), modelStatus(model), action?.let { stringResource(it) } ?: "",
                                 if (action != null) download else null)
-                            if (fastEnglish && english == ModelStore.State.Ready) {
+                            // Not while Automatic chooses among several languages: those dictations all use today's model.
+                            if (fastEnglish && english == ModelStore.State.Ready && !listening) {
                                 Rule(); Entry(stringResource(R.string.fast_english_in_use), action = { open(Page.Labs) })
                             }
                         }
@@ -385,7 +400,8 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                     Rule()
                                     // The download starts only on this tap, with its size on the row.
                                     when (english) {
-                                        ModelStore.State.Available -> Entry(stringResource(R.string.fast_english_download, size), value = "",
+                                        // Labs' download starts on the tap, on any network: it never waits for Wi-Fi.
+                                        ModelStore.State.Available, ModelStore.State.WaitingForWifi -> Entry(stringResource(R.string.fast_english_download, size), value = "",
                                             action = { ModelStore.english.download(context) })
                                         is ModelStore.State.Loading -> Entry(stringResource(R.string.fast_english_loading, size, english.percent))
                                         is ModelStore.State.Retry -> Entry(stringResource(when (english.problem) {
@@ -398,6 +414,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                             action = { ModelStore.english.delete(context); speech.fastEnglish = false })
                                     }
                                 }
+                                Rule()
+                                // Labs › Automatic listens for the language: off, Automatic dictates in one language, as before.
+                                Toggle(stringResource(R.string.listen_for_language), stringResource(R.string.listen_for_language_detail),
+                                    listenForLanguage, noteLines = Int.MAX_VALUE) { speech.listenForLanguage = it }
                                 Rule()
                                 // Labs › Learn from my fixes: off, the keyboard tracks nothing, applies nothing and
                                 // offers no hints; on, the learned word pairs are listed with a switch each.
@@ -521,6 +541,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 Rule()
                                 Toggle(stringResource(R.string.voice_only_mode), stringResource(R.string.voice_only_detail),
                                     voiceOnly) { typing.voiceOnly = it; VoiceOnly.setEnabledFromSettings(context, it) }
+                                Rule()
+                                // Labs › Keyboard › Hex key on the left: off, the Hex key stays at the strip's right end.
+                                Toggle(stringResource(R.string.hex_key_left), stringResource(R.string.hex_key_left_detail),
+                                    hexKeyLeft) { typing.hexKeyLeft = it }
                             }
                             // Hex Preview and debug builds only.
                             if (BuildConfig.DIAGNOSTICS) {
@@ -555,9 +579,11 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                         choices.forEachIndexed { i, (label, chosen, pick) ->
                             if (i != 0) Rule()
                             // Automatic dictates in one language it picks, never the one spoken: its entry says which, now.
+                            // With Labs › Automatic listens for the language, it lists the ones it chooses among.
                             Entry(label ?: stringResource(R.string.settings_automatic),
                                 if (label != null) null else if (layout) stringResource(R.string.settings_layout_automatic_detail)
-                                else automatic.label + " · " + stringResource(R.string.dictation_language_automatic_detail),
+                                else if (automaticChoices.size > 1) languageList
+                                else languageList + " · " + stringResource(R.string.dictation_language_automatic_detail),
                                 if (chosen) "✓" else "", { pick(); open(page.parent) })
                         }
                     }

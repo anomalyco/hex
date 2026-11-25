@@ -34,6 +34,7 @@ import ly.anoma.hex.keyboard.vibrates
 import ly.anoma.hex.speech.DictationPlace
 import ly.anoma.hex.speech.DictationTimes
 import ly.anoma.hex.speech.Engine
+import ly.anoma.hex.speech.LanguageChoice
 import ly.anoma.hex.speech.ModelAtTick
 import ly.anoma.hex.speech.ModelStore
 import ly.anoma.hex.speech.RanOn
@@ -569,6 +570,23 @@ internal fun lastDictationLines(t: DictationTimes?): String = buildString {
         append("  ").append(when (timings[9]) { 1L -> "repeated text"; 2L -> "no text"; 3L -> "only your words"; 4L -> "a phrase written twice"; else -> "text unusable" })
         append(", decoded again without your words: ${timings[8] / 1000} ms of the decode\n")
     }
+    t.choice?.let { append("  ").append(languageWords(it, t.keptMs)).append('\n') }
+}
+
+/** Labs › Automatic listens for the language in the last dictation: the language written, whether that kept the keyboard's
+ * (the first candidate) or switched from it, each candidate's probability against what a switch takes (hexspeech.cpp: 99%
+ * under 4 s of audio, 95% from 4 s; [keptMs] decides, as the audio decoded is the kept audio, padded to 1.1 s), and the
+ * choice's time. Language names and numbers only. */
+internal fun languageWords(c: LanguageChoice, keptMs: Long): String = buildString {
+    append("language ").append(c.language.label)
+    val probabilities = c.probabilities
+    if (probabilities == null) { append(", the only one listened for"); return@buildString }
+    append(if (c.chosen == 0) ", kept the keyboard's" else ", switched from ${c.candidates[0].label}")
+    append("; ").append(c.candidates.indices.joinToString(", ") {
+        String.format(Locale.ROOT, "%s %.1f%%", c.candidates[it].label, 100 * probabilities[it])
+    })
+    append(if (keptMs < 4000) ", switching takes 99%" else ", switching takes 95%")
+    append(String.format(Locale.ROOT, "; chosen in %.1f ms", c.micros / 1000.0))
 }
 
 /** The text the page shows and Copy copies. */

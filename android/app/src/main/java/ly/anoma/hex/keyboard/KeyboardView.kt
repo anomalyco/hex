@@ -140,6 +140,8 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
         }
         tap(context, ime.feedback.haptics, cue)
     }
+    /** Labs › Keyboard › Hex key on the left changed: the strip moves its Hex key to that end. */
+    fun hexKeySideChanged() = strip.placeHexKey()
     fun setLevel(value: Float) = strip.setLevel(value)
     fun cancelGestures() { strip.cancelGestures(); keys.cancelGestures() }
     /** The editor went away: the next one starts on the letters. */

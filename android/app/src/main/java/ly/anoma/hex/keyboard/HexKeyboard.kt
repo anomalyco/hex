@@ -119,6 +119,7 @@ class HexKeyboard : InputMethodService() {
         if (key == TypingPreferences.PASSWORD_MANAGER_SUGGESTIONS) clearInline()
         if (key == TypingPreferences.HEIGHT) resize()
         if (key == TypingPreferences.ADAPTIVE_TOUCH) engine.adaptiveTouchChanged()
+        if (key == TypingPreferences.HEX_KEY_LEFT) view?.hexKeySideChanged()
     }
     // The strip's Paste tool comes and goes with the clipboard (Labs › Keyboard › Keyboard tools): the
     // listener exists only while the lab is on and the input view is shown.

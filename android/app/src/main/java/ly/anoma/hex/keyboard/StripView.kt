@@ -30,7 +30,8 @@ import kotlin.math.ceil
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
-/** The strip above the keys, with the Hex mark at its trailing end where Gboard has its mic.
+/** The strip above the keys, with the Hex mark at its trailing end where Gboard has its mic (its leading end
+ * with Labs › Keyboard › Hex key on the left).
  * Idle it shows three suggestions (the likeliest, or the autocorrection in a small chip, in the
  * middle) or a hint and the Hex menu button. Dictating, the mark becomes ✓ and the strip becomes
  * the recording bar: the dot waveform's well grows out of it, with ✕ beside ✓. */
@@ -96,6 +97,8 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
     private val spinner = ProgressBar(context, null, 0, android.R.style.Widget_Material_ProgressBar_Small)
 
     private var idle = true
+    /** Labs › Keyboard › Hex key on the left, as [placeHexKey] last laid the strip out. */
+    private var hexKeyLeft = false
     private var reveal: ValueAnimator? = null
     private val holdHint = context.getString(R.string.keyboard_hint_hold)
     var hint = holdHint
@@ -193,7 +196,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
             setPadding(dp(8), 0, dp(8), 0); isFocusable = true; minimumWidth = dp(40)
         }
         idleRow.addView(menuKey, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, -1))
-        addView(idleRow, LayoutParams(-1, -1).apply { marginStart = side; marginEnd = side + hexWidth })
+        addView(idleRow, LayoutParams(-1, -1))
 
         well.background = shape(color(R.color.sheet), pill / 2f)
         well.clipToOutline = true
@@ -202,10 +205,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         // a pane title would stay behind as the keyboard window's name).
         scope.importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
         scope.accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-        val wellStart = side + px(KeyboardMetrics.GAP / 2)
-        addView(well, LayoutParams(-1, pill, Gravity.CENTER_VERTICAL).apply {
-            marginStart = wellStart; marginEnd = side + hexWidth + cancelWidth - (cancelWidth - pill) / 2 + dp(6)
-        })
+        addView(well, LayoutParams(-1, pill, Gravity.CENTER_VERTICAL))
 
         cancelKey.apply {
             contentDescription = context.getString(R.string.keyboard_cancel_dictation); isFocusable = true
@@ -214,7 +214,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
                 LayoutParams(pill, pill, Gravity.CENTER))
             addView(icon(R.drawable.ic_cancel), LayoutParams(dp(19), dp(19), Gravity.CENTER))
         }
-        addView(cancelKey, LayoutParams(cancelWidth, -1, Gravity.END).apply { marginEnd = side + hexWidth })
+        addView(cancelKey, LayoutParams(cancelWidth, -1))
 
         hexKey.apply {
             isFocusable = true
@@ -230,8 +230,27 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
             setOnClickListener { ime.toggleSpeech() }
             setOnTouchListener { v, e -> hexTouch(v, e) }
         }
-        addView(hexKey, LayoutParams(hexWidth, -1, Gravity.END).apply { marginEnd = side })
+        addView(hexKey, LayoutParams(hexWidth, -1))
+        placeHexKey()
         showIdle(true)
+    }
+
+    /** The Hex key's end of the strip: the right, where Gboard has its mic, or the left with Labs › Keyboard ›
+     * Hex key on the left. ✕ sits beside it and the recording well grows out of it towards the other end; the
+     * idle row (hint, suggestions, menu key) keeps its order in the rest. The keyboard is always laid out
+     * left to right, so start is the left. */
+    fun placeHexKey() {
+        val left = ime.feedback.hexKeyLeft
+        hexKeyLeft = left
+        val edge = if (left) Gravity.START else Gravity.END
+        fun FrameLayout.LayoutParams.ends(hexEnd: Int, otherEnd: Int) = apply {
+            marginStart = if (left) hexEnd else otherEnd; marginEnd = if (left) otherEnd else hexEnd
+        }
+        idleRow.layoutParams = (idleRow.layoutParams as LayoutParams).ends(side + hexWidth, side)
+        well.layoutParams = (well.layoutParams as LayoutParams).ends(
+            side + hexWidth + cancelWidth - (cancelWidth - pill) / 2 + dp(6), side + px(KeyboardMetrics.GAP / 2))
+        cancelKey.layoutParams = (cancelKey.layoutParams as LayoutParams).apply { gravity = edge }.ends(side + hexWidth, 0)
+        hexKey.layoutParams = (hexKey.layoutParams as LayoutParams).apply { gravity = edge }.ends(side, 0)
     }
 
     private fun hexTouch(v: View, e: MotionEvent): Boolean {
@@ -429,7 +448,8 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
     fun prepare(phase: SpeechPhase, hint: String) { this.hint = hint; idle = phase == SpeechPhase.Idle }
     fun setLevel(value: Float) = scope.push(value)
 
-    /** Idle: suggestions and the Hex mark. Dictating: the mark is ✓ and the well grows leftwards out of it. */
+    /** Idle: suggestions and the Hex mark. Dictating: the mark is ✓ and the well grows out of it, leftwards (or
+     * rightwards with the Hex key on the left). */
     private fun showIdle(idle: Boolean) {
         reveal?.cancel(); reveal = null
         idleRow.visibility = if (idle) VISIBLE else GONE
@@ -445,7 +465,8 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
             addUpdateListener {
                 val f = it.animatedValue as Float
                 val w = well.width
-                if (w > 0) well.clipBounds = Rect((w * (1 - f)).roundToInt(), 0, w, well.height)
+                if (w > 0) well.clipBounds = if (hexKeyLeft) Rect(0, 0, (w * f).roundToInt(), well.height)
+                    else Rect((w * (1 - f)).roundToInt(), 0, w, well.height)
                 cancelKey.alpha = f
             }
             start()
