@@ -81,7 +81,9 @@ internal object QuickDictation {
     const val COPIED_MS = 1_200L
 }
 
-/** The tile: a tap opens the sheet, after unlocking when the phone is locked. It holds no state of its own. */
+/** The tile: a tap opens the sheet. It holds no state of its own. On a locked phone Android asks for the unlock
+ * itself before the sheet starts (the sheet never shows over the lock screen): System UI (Android 16 on the emulator)
+ * already unlocks before delivering the click, and a further unlockAndRun there never ran its open. */
 class QuickDictationTile : TileService() {
     override fun onStartListening() {
         super.onStartListening()
@@ -90,7 +92,7 @@ class QuickDictationTile : TileService() {
 
     override fun onClick() {
         super.onClick()
-        if (isLocked) unlockAndRun(::open) else open()
+        open()
     }
 
     private fun open() {
