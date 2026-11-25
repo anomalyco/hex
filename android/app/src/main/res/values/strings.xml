@@ -42,6 +42,9 @@
     <string name="model_no_connection">No connection. Using the smaller built-in model.</string>
     <string name="model_no_space">Not enough storage. Using the smaller built-in model.</string>
     <string name="model_loading">Downloading 190 MB · %1$d%%</string>
+    <!-- On mobile data or a metered Wi-Fi: the download waits for Wi-Fi unless the person taps model_use_mobile_data. -->
+    <string name="model_waiting_wifi">190 MB. Starts by itself on Wi-Fi.</string>
+    <string name="model_use_mobile_data">Use mobile data</string>
     <string name="model_download">Download</string>
     <string name="model_try_again">Try again</string>
 

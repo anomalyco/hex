@@ -370,7 +370,8 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                     Rule()
                                     // The download starts only on this tap, with its size on the row.
                                     when (english) {
-                                        ModelStore.State.Available -> Entry(stringResource(R.string.fast_english_download, size), value = "",
+                                        // Labs' download starts on the tap, on any network: it never waits for Wi-Fi.
+                                        ModelStore.State.Available, ModelStore.State.WaitingForWifi -> Entry(stringResource(R.string.fast_english_download, size), value = "",
                                             action = { ModelStore.english.download(context) })
                                         is ModelStore.State.Loading -> Entry(stringResource(R.string.fast_english_loading, size, english.percent))
                                         is ModelStore.State.Retry -> Entry(stringResource(when (english.problem) {
