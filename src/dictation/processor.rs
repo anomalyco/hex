@@ -2354,11 +2354,64 @@ mod tests {
 
     #[test]
     fn only_model_unavailability_is_retried() {
+        for names_model in [false, true] {
+            assert!(retryable_generation_error(
+                "Model unavailable: example/rewrite-model",
+                names_model
+            ));
+            assert!(!retryable_generation_error(
+                "Provider request failed",
+                names_model
+            ));
+            assert!(!retryable_generation_error(
+                "processor returned empty text",
+                names_model
+            ));
+        }
         assert!(retryable_generation_error(
-            "Model unavailable: example/rewrite-model"
+            "Model not found: example/rewrite-model",
+            true
         ));
-        assert!(!retryable_generation_error("Provider request failed"));
-        assert!(!retryable_generation_error("processor returned empty text"));
+        assert!(!retryable_generation_error(
+            "Model not found: example/rewrite-model",
+            false
+        ));
+    }
+
+    /// A chosen model OpenCode reports missing while its provider still loads
+    /// is asked once more, and answers (#2849).
+    #[test]
+    fn a_chosen_model_not_found_at_startup_is_retried_once() {
+        let chosen = Model {
+            provider: "console-anthropic".into(),
+            id: "claude-fable-5-2".into(),
+            variant: None,
+        };
+        let mut posts = 0;
+        let text = generate_single_model(
+            "Rewrite.",
+            Some(&chosen),
+            Instant::now(),
+            Duration::from_secs(5),
+            &AtomicBool::new(false),
+            |_, _, _| {
+                posts += 1;
+                Ok(if posts == 1 {
+                    Response::Error {
+                        message: "Model not found: console-anthropic/claude-fable-5-2".into(),
+                    }
+                } else {
+                    Response::Success {
+                        data: ResponseData {
+                            text: "rewritten".into(),
+                        },
+                    }
+                })
+            },
+        )
+        .unwrap();
+        assert_eq!(text, "rewritten");
+        assert_eq!(posts, 2);
     }
 
     /// The meeting summary model: a chosen model is the only one
