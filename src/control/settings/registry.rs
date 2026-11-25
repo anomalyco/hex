@@ -1068,7 +1068,7 @@ pub(super) const CAPTURE_KEYS: &[Key] = &[
     optional(
         "capture.folder",
         Kind::Path,
-        "Folder for new captures; none uses Scrawl's captures folder",
+        "Folder for new captures; none uses the annotations folder in Hex's application data",
     ),
     optional(
         "capture.media_days",

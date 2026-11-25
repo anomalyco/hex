@@ -921,8 +921,10 @@ pub fn build_bundle_from_parts(
         windows: extras.activity.windows,
         cursor: extras.activity.cursor,
         autocrop,
+        clean_frames: None,
         destination: None,
         no_screen: extras.no_screen,
+        extra: Default::default(),
     };
     let summary = match extras.agent_context {
         Some(agent_context) => {

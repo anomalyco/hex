@@ -470,3 +470,26 @@ impl SendState {
         )
     }
 }
+
+/// A delivery as a sentence for `hex capture send`.
+pub(super) fn describe(delivery: &RouteDelivery) -> String {
+    match delivery {
+        RouteDelivery::Sending { to } => format!("Sending to {to}"),
+        RouteDelivery::Sent { to } => format!("Sent to {to}"),
+        RouteDelivery::Queued { to, why } => format!("Queued for {to}: {why}"),
+        RouteDelivery::TakenBack => "Taken back".into(),
+        RouteDelivery::TooLate { to } => format!("Already read in {to}"),
+        RouteDelivery::Failed { to, why } => format!("Not sent to {to}: {why}"),
+    }
+}
+
+pub(super) fn delivery_kind(delivery: &RouteDelivery) -> &'static str {
+    match delivery {
+        RouteDelivery::Sending { .. } => "sending",
+        RouteDelivery::Sent { .. } => "sent",
+        RouteDelivery::Queued { .. } => "queued",
+        RouteDelivery::TakenBack => "taken-back",
+        RouteDelivery::TooLate { .. } => "too-late",
+        RouteDelivery::Failed { .. } => "failed",
+    }
+}

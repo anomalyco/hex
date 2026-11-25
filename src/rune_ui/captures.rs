@@ -220,6 +220,7 @@ impl CapturesPane {
             PathBuf::from("/Users/alex/Library/Application Support/Scrawl/captures/1.scrawl");
         let annotation = Annotation {
             id: 4,
+            manifest_id: "1".into(),
             movie: Some(bundle.join("recording.mp4")),
             bundle,
             at_ms: now - 20 * 60_000,

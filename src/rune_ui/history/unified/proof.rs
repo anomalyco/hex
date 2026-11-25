@@ -143,12 +143,18 @@ fn walkthrough(recover: bool) {
         .enumerate()
     {
         let at = now - 180_000 - i as u64;
-        let b = root.join(format!("{at}.scrawl"));
+        let ext = if i == 0 { "hexannotation" } else { "scrawl" };
+        let b = root.join(format!("{at}.{ext}"));
         fs::create_dir(&b).unwrap();
-        let m = serde_json::json!({"version":1,"id":at.to_string(),"createdAtMs":at,"durationMs":3200,"target":{"mode":"display","displayId":1,"frame":{"x":0,"y":0,"width":64,"height":48,"scale":1}},"transcript":{"source":"hex","text":words,"segments":[],"words":[]},"keyframes":[],"strokes":[],"marks":[],"events":[],"contactSheet":"contact-sheet.png"});
-        fs::write(b.join("scrawl.json"), serde_json::to_vec(&m).unwrap()).unwrap();
+        let m: scrawl_capture::model::ScrawlBundle = serde_json::from_value(serde_json::json!({"version":1,"id":at.to_string(),"createdAtMs":at,"durationMs":3200,"target":{"mode":"display","displayId":1,"frame":{"x":0,"y":0,"width":64,"height":48,"scale":1}},"transcript":{"source":"hex","text":words,"segments":[],"words":[]},"keyframes":[],"strokes":[],"marks":[],"events":[],"contactSheet":"contact-sheet.png"})).unwrap();
+        scrawl_capture::bundle::publish(&b, &m).unwrap();
         if i == 0 {
             crate::capture_host::paste_source::mark_ready(&b, now - 1000).unwrap();
+            // A copied package with the same manifest id and receipt must neither duplicate the row nor promote the copy.
+            let copy = root.join(format!("{at}-copy.hexannotation"));
+            fs::create_dir(&copy).unwrap();
+            fs::copy(b.join("annotation.json"), copy.join("annotation.json")).unwrap();
+            fs::copy(b.join(".hex-annotate-v1"), copy.join(".hex-annotate-v1")).unwrap();
         }
     }
     let mut index = saved::CaptureStore::open(root.join("index"));
@@ -181,7 +187,7 @@ fn walkthrough(recover: bool) {
             .unwrap();
     }
     let sources = Sources {
-        root: root.clone(),
+        roots: vec![root.clone()],
         days: Some(7),
         library: true,
         annotate: true,

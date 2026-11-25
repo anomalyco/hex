@@ -155,15 +155,11 @@ fn a_held_shortcut_browses_real_rows_and_clicks_choose_the_original_item() {
             120_000,
         )
         .unwrap();
-    let dir = root.join("125000.scrawl");
+    let dir = root.join("125000.hexannotation");
     fs::create_dir(&dir).unwrap();
-    let manifest = serde_json::json!({"version":1,"id":"125000","createdAtMs":150000,"durationMs":4000,"target":{"mode":"display","displayId":1,"frame":{"x":0,"y":0,"width":240,"height":160,"scale":1}},"transcript":{"source":"hex","text":ANNOTATION,"segments":[],"words":[]},"strokes":[],"marks":[],"events":[],"keyframes":[{"index":1,"t":0,"reason":"initial","file":"frames/frame-01.png","event":"Chart","said":ANNOTATION}],"contactSheet":"contact-sheet.png"});
+    let manifest: scrawl_capture::model::ScrawlBundle = serde_json::from_value(serde_json::json!({"version":1,"id":"125000","createdAtMs":150000,"durationMs":4000,"target":{"mode":"display","displayId":1,"frame":{"x":0,"y":0,"width":240,"height":160,"scale":1}},"transcript":{"source":"hex","text":ANNOTATION,"segments":[],"words":[]},"strokes":[],"marks":[],"events":[],"keyframes":[{"index":1,"t":0,"reason":"initial","file":"frames/frame-01.png","event":"Chart","said":ANNOTATION}],"contactSheet":"contact-sheet.png"})).unwrap();
     rune::render::write_png(&dir.join("contact-sheet.png"), 8, 8, &[200; 256]).unwrap();
-    fs::write(
-        dir.join("scrawl.json"),
-        serde_json::to_vec(&manifest).unwrap(),
-    )
-    .unwrap();
+    scrawl_capture::bundle::publish(&dir, &manifest).unwrap();
     mark_ready(&dir, 150_000).unwrap();
     let out = std::env::var_os("HEX_PASTE_RENDER_DIR").map(PathBuf::from);
     for (theme, dark) in [("dark", true), ("light", false)] {

@@ -140,12 +140,25 @@ fn sound(bundle: &Path) -> Vec<Sound> {
         serde_json::from_slice(&std::fs::read(bundle.join(name)).ok()?).ok()
     };
     let mut sound = Vec::new();
-    if let Some(scrawl) = read("scrawl.json")
-        && let Some(name) = scrawl["audio"].as_str()
+    let mic = scrawl_capture::bundle::read_manifest(bundle)
+        .ok()
+        .and_then(|m| Some((m.audio?, m.video_offset_ms as i64)))
+        .or_else(|| {
+            if bundle.join(scrawl_capture::bundle::MANIFEST).exists() {
+                return None;
+            }
+            let scrawl = read("scrawl.json")?;
+            let name = scrawl["audio"].as_str()?.to_owned();
+            (!name.is_empty()
+                && Path::new(&name)
+                    .components()
+                    .all(|p| matches!(p, std::path::Component::Normal(_))))
+            .then(|| (name, scrawl["videoOffsetMs"].as_i64().unwrap_or(0)))
+        });
+    if let Some((name, offset)) = mic
         && let file = bundle.join(name)
         && heard(&file)
     {
-        let offset = scrawl["videoOffsetMs"].as_i64().unwrap_or(0);
         sound.push(Sound {
             file,
             offset_ms: -offset,
@@ -280,6 +293,23 @@ mod tests {
             }
         );
         assert_eq!(heard.len(), 2);
+        let hex_bundle = bundle.with_extension(scrawl_capture::bundle::EXTENSION);
+        let _ = std::fs::remove_dir_all(&hex_bundle);
+        std::fs::create_dir_all(&hex_bundle).unwrap();
+        let fixture: scrawl_capture::model::ScrawlBundle = serde_json::from_slice(include_bytes!(
+            "../../tests/fixtures/annotations/marked-v1.json"
+        ))
+        .unwrap();
+        scrawl_capture::bundle::publish(&hex_bundle, &fixture).unwrap();
+        wav(&hex_bundle.join("audio.wav"), &[0, 60, -60, 0]);
+        assert_eq!(
+            sound(&hex_bundle),
+            [Sound {
+                file: hex_bundle.join("audio.wav"),
+                offset_ms: -(fixture.video_offset_ms as i64),
+            }]
+        );
+        std::fs::remove_dir_all(&hex_bundle).unwrap();
         std::fs::remove_dir_all(&bundle).unwrap();
     }
 }

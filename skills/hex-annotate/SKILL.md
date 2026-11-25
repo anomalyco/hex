@@ -1,13 +1,13 @@
 ---
 name: hex-annotate
-description: Read Hex Annotate screen captures, where someone recorded their screen while talking, clicking, and drawing red marks on it. Use whenever a message names or attaches a .scrawl bundle, a capture’s summary.md, contact-sheet.png, or frames/, when the user says "look at my capture" or refers to something they just recorded or drew, or when you need `hex annotate` to inspect a capture, list its marks, zoom into a moment, or pull frames. It also applies when a message starts with a `[hex-annotate …]` header, or the older `[scrawl …]` header from earlier versions.
+description: Read Hex Annotate screen captures, where someone recorded their screen while talking, clicking, and drawing red marks on it. Use whenever a message names or attaches a .hexannotation or legacy .scrawl bundle, a capture’s summary.md, contact-sheet.png, or frames/, when the user says "look at my capture" or refers to something they just recorded or drew, or when you need `hex annotate` to inspect a capture, list its marks, zoom into a moment, or pull frames. It also applies when a message starts with a `[hex-annotate …]` header, or the older `[scrawl …]` header from earlier versions.
 license: MIT
 ---
 
 # Hex captures
 
 Hex's Annotate records someone's screen, their voice, clicks, and red ink, and
-packs the result into a `.scrawl` folder (a bundle). They sent it to show you a
+packs the result into a `.hexannotation` package (or an older `.scrawl` bundle). They sent it to show you a
 problem instead of describing it, so the capture is the bug report. Read it
 closely before you answer, and don't ask them to explain again what the capture
 already shows. If something is unclear, look closer with `hex annotate zoom` first.
@@ -43,7 +43,7 @@ into its `zoom/` folder.
 2. `summary.md` names what was recorded, its length, and one line per
    keyframe: `#3 (0:10) [clicked "New tab"] "…"`. `⚑` marks a moment the
    person flagged on purpose, and `⟨Name⟩` a new screen an app reported.
-3. `scrawl.json` is the full manifest: keyframes, `marks` with shape and box,
+3. `annotation.json` (`{"formatVersion":1,"annotation":{…}}`, or `scrawl.json` in older bundles) is the full manifest: keyframes, `marks` with shape and box,
    `events`, `transcript.words` with times, the app `context`, and `autocrop`.
    Speech recognition mishears names and code terms, so trust the screen when
    the two disagree.
@@ -65,14 +65,14 @@ Answer with the moments named the way the summary names them, as in
 ## hex annotate
 
 `inspect`, `zoom`, and `frames` take the bundle as their first argument: a
-bundle name (`1792933491953.scrawl`, extension optional), a path, or `latest`
-(the default) for the newest capture in Hex's captures folder. `skill` takes
+bundle name (`1792933491953-….hexannotation` or `1792933491953.scrawl`, extension optional), a path, or `latest`
+(the default) for the newest capture in Hex's annotations folder. `skill` takes
 no argument.
 
 ```sh
 hex annotate inspect <capture>             # summary.md
 hex annotate inspect <capture> --marks     # one line per mark
-hex annotate inspect <capture> --json      # scrawl.json, pretty
+hex annotate inspect <capture> --json      # annotation.json (or scrawl.json), pretty
 hex annotate zoom <capture> --at 0:21      # a sheet of frames around a moment
 hex annotate zoom <capture> --at "the width changes"   # …or a phrase from it
 hex annotate zoom <capture> --mark 2       # …or one mark, drawn whole
