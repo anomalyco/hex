@@ -23,6 +23,7 @@ extension DictationController {
             controller.warmDuration = .fifteenMinutes
             controller.setWarmSession(.cold)
             if scene.hasPrefix("model-card-") { KeyboardParakeetDownload.shared.applyFixture(scene) }
+            if scene.hasPrefix("settings-dictation-model-") { controller.applySpeechModelFixture(scene) }
 
         case "language-unavailable":
             // Russian picked by hand on an iPhone whose Apple Speech can't install it.
@@ -233,5 +234,37 @@ extension DictationController {
 
     private func applyFixtureWarmSession(remaining: TimeInterval) {
         setWarmSession(.warm(expiresAt: Date().timeIntervalSince1970 + remaining), remaining: remaining)
+    }
+
+    /// `settings-dictation-model-<english|multilingual>-<waiting|downloading|ready>`: Settings ›
+    /// Dictation › Model with that model picked and its download in that state. Waiting is the
+    /// real rule: pass `--simulate-cellular` and the keyboard has measured room for the model,
+    /// so only the connection holds it.
+    private func applySpeechModelFixture(_ scene: String) {
+        let multilingual = scene.contains("-multilingual-")
+        let step = scene.split(separator: "-").last.map(String.init) ?? "waiting"
+        KeyboardParakeetDownload.shared.applyFixture(multilingual ? "model-card-waiting" : "model-card-\(step)")
+        KeyboardParakeetSettings().recordKeyboardLimit(KeyboardParakeetBudget.requiredLimit)
+        MultilingualParakeetSettings().isEnabled = multilingual
+        downloadNetwork.forgetMobileData()
+        guard multilingual else { return }
+        ParakeetUltraModel.remove()
+        switch step {
+        case "downloading":
+            multilingualDownload.applyFixture(share: 0.42)
+        case "ready":
+            // Files of the right sizes (sparse), so it reads as on the iPhone; nothing loads them.
+            for file in ParakeetUltraModel.files {
+                let url = ParakeetUltraModel.directory.appendingPathComponent(file.path)
+                try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                FileManager.default.createFile(atPath: url.path, contents: nil)
+                let handle = try? FileHandle(forWritingTo: url)
+                try? handle?.truncate(atOffset: UInt64(file.size))
+                try? handle?.close()
+            }
+            KeyboardParakeetSettings().setKeyboardState(.ready, multilingual: true)
+        default:
+            startMultilingualDownloadIfWanted()
+        }
     }
 }

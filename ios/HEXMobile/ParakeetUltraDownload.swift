@@ -103,6 +103,11 @@ final class ParakeetUltraDownload {
         state = .waitingForWiFi(ParakeetUltraModel.bytesOnDisk(in: directory, files: files))
     }
 
+    /// `--snap-state settings-dictation-model-multilingual-downloading`: partway, for screenshots.
+    func applyFixture(share: Double) {
+        state = .downloading(Int64(Double(total) * share))
+    }
+
     var isWaitingForWiFi: Bool {
         if case .waitingForWiFi = state { return true }
         return false

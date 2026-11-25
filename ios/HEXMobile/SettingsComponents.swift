@@ -332,6 +332,6 @@ enum SettingsSnapshotFixture {
         VoiceIsolationSettings().isEnabled = on
         AdaptiveTouchSettings().isEnabled = on
         // Settings scenes skip preparing a model, so this only draws the switch.
-        MultilingualParakeetSettings().isEnabled = on
+        MultilingualParakeetSettings().isEnabled = on || scene.contains("-multilingual-")
     }
 }
