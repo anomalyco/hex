@@ -402,11 +402,30 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                     }
                     Page.Privacy -> {
                         // A statement, not rows that look tappable.
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Image(painterResource(R.drawable.ic_lock), null, Modifier.size(15.dp), colorFilter = ColorFilter.tint(colorResource(R.color.ink)))
-                            Spacer(Modifier.width(8.dp)); Label(stringResource(R.string.settings_privacy_line), weight = FontWeight.Medium)
+                        // The promise is never cut short: it wraps, with the lock beside its first line.
+                        Row(verticalAlignment = Alignment.Top) {
+                            Image(painterResource(R.drawable.ic_lock), null, Modifier.padding(top = 3.dp).size(15.dp), colorFilter = ColorFilter.tint(colorResource(R.color.ink)))
+                            Spacer(Modifier.width(8.dp)); Label(stringResource(R.string.settings_privacy_line), weight = FontWeight.Medium, lines = Int.MAX_VALUE)
                         }
                         Label(stringResource(R.string.settings_privacy_detail), muted = true, size = 14, lines = Int.MAX_VALUE)
+                        // What each lab keeps, one row per lab under its own name: rows with no arrow, so they read as a
+                        // list, not as links. The policy, one tap below, keeps the long form.
+                        Label(stringResource(R.string.settings_privacy_labs), muted = true, size = 14, lines = Int.MAX_VALUE)
+                        Card {
+                            listOf(R.string.learn_fixes to R.string.settings_privacy_lab_fixes,
+                                R.string.adaptive_touch to R.string.settings_privacy_lab_touch,
+                                R.string.pick_model to R.string.settings_privacy_lab_model,
+                                R.string.clipboard_history to R.string.settings_privacy_lab_clipboard,
+                                R.string.imported_words to R.string.settings_privacy_lab_words).forEachIndexed { i, (name, keeps) ->
+                                if (i != 0) Rule()
+                                Entry(stringResource(name), stringResource(keeps), titleLines = Int.MAX_VALUE, noteLines = Int.MAX_VALUE)
+                            }
+                        }
+                        Label(stringResource(R.string.settings_privacy_feedback), muted = true, size = 14, lines = Int.MAX_VALUE)
+                        // Hex Preview's update check; Play builds have none.
+                        stringResource(R.string.settings_privacy_updates).takeIf { it.isNotEmpty() }?.let {
+                            Label(it, muted = true, size = 14, lines = Int.MAX_VALUE)
+                        }
                         Card {
                             Entry(stringResource(R.string.settings_privacy_policy), action = { open(Page.Policy) })
                             Rule(); Entry(stringResource(R.string.settings_licences), action = { open(Page.Licences) })
@@ -734,11 +753,11 @@ private fun reflow(lines: List<String>) = buildString {
     }
 }
 @Composable internal fun Entry(title: String, note: String? = null, value: String = "›", action: (() -> Unit)? = null,
-                               titleLines: Int = 1) {
+                               titleLines: Int = 1, noteLines: Int = 2) {
     val click = if (action != null) Modifier.clickable(role = Role.Button, onClick = action) else Modifier
     Row(Modifier.fillMaxWidth().then(click).heightIn(min = 52.dp).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        RowTitle(title, note, titleLines = titleLines)
+        RowTitle(title, note, noteLines, titleLines)
         if (action != null && value.isNotEmpty()) Label(value, muted = true, size = if (value == "›") 22 else 15)
     }
 }
