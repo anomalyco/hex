@@ -607,6 +607,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: a Caps Lock press starts and stops dictation hands-free, and its light shows when Hex records and transcribes; Caps Lock stays off so typing is unchanged (macOS)",
     ),
     key(
+        "labs.middle_mouse_dictation",
+        Kind::Bool,
+        "Labs: holding the middle mouse button for half a second starts a hands-free dictation and the next long press finishes it; clicks still reach the app, and Escape cancels a hands-free dictation and stays out of the app (macOS)",
+    ),
+    key(
         "labs.caps_lock_light",
         Kind::Choice(&["steady", "slow_blink"]),
         "Labs: whether the Caps Lock light stays solid or blinks slowly while recording (macOS)",

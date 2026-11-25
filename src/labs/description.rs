@@ -279,6 +279,9 @@ impl Feature {
             Self::MeetingAudioSource => {
                 "Record one app or one output device in a meeting instead of all computer audio (labs.meeting_audio_source_choice); a chosen source that isn't playing records silence until it returns"
             }
+            Self::MiddleMouseDictation => {
+                "Hold the middle mouse button for half a second to start a hands-free dictation and long-press again to finish; the dictation shortcut can finish it too, and a long press finishes a hands-free dictation the shortcut started. Clicks still reach the app, and Escape cancels a hands-free dictation and stays out of the app (macOS)"
+            }
         }
     }
 }

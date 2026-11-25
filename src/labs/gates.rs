@@ -449,6 +449,14 @@ pub fn caps_lock_dictation() -> bool {
     feature_on(Feature::CapsLockDictation)
 }
 
+/// A half-second middle-button press starts or finishes a hands-free
+/// dictation, and Escape cancels any hands-free dictation (macOS; read by the
+/// event tap at each middle-button edge and by the listener on every pass).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn middle_mouse_dictation() -> bool {
+    feature_on(Feature::MiddleMouseDictation)
+}
+
 /// A spoken trigger phrase inside a dictation turns what follows it into a
 /// one-off instruction for the mode's OpenCode model (read as each
 /// dictation's processing starts). An organization's

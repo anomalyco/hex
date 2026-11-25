@@ -235,6 +235,10 @@ pub struct DictationHotkey {
     /// Cancel works in every trigger mode, not only under Toggle: an extra
     /// dictation shortcut has its own mode and always takes its cancel key.
     cancel_in_any_mode: bool,
+    /// Labs › Middle mouse dictation: Escape cancels this machine's
+    /// hands-free capture in every trigger mode, and the tap keeps it from
+    /// the app in front.
+    escape_cancels_lock: bool,
     /// Labs › Tap or hold, read at each Toggle release: a press held past
     /// the hold threshold finishes on release instead of locking.
     tap_or_hold: fn() -> bool,
@@ -299,6 +303,7 @@ impl DictationHotkey {
             double_tap_only: false,
             toggle: false,
             cancel_in_any_mode: false,
+            escape_cancels_lock: false,
             tap_or_hold: TAP_OR_HOLD,
             double_tap_modifiers: DOUBLE_TAP_MODIFIERS,
             hold_through_keys: HOLD_THROUGH_KEYS,
@@ -340,10 +345,17 @@ impl DictationHotkey {
                 if now.duration_since(started_at) >= MINIMUM_HOLD_DURATION)
     }
 
+    /// Labs › Middle mouse dictation's cancel: Escape while this machine
+    /// records hands-free, whichever input locked it.
+    fn escape_cancels_locked(&self) -> bool {
+        self.escape_cancels_lock && self.is_locked()
+    }
+
     /// Whether the tap keeps Escape from the app in front at `now`: it
-    /// cancels this machine's held capture.
+    /// cancels this machine's held capture, or its hands-free one while
+    /// Labs › Middle mouse dictation is on.
     pub fn takes_escape(&self, now: CaptureInstant) -> bool {
-        self.escape_cancels_hold(now)
+        self.escape_cancels_hold(now) || self.escape_cancels_locked()
     }
 
     /// An Escape a recording machine saw and did nothing with, and why.
@@ -442,6 +454,12 @@ impl DictationHotkey {
     /// as an extra dictation shortcut does.
     pub fn set_cancel_in_any_mode(&mut self, enabled: bool) {
         self.cancel_in_any_mode = enabled;
+    }
+
+    /// Whether Escape cancels a hands-free capture in every trigger mode
+    /// (Labs › Middle mouse dictation).
+    pub fn set_escape_cancels_lock(&mut self, enabled: bool) {
+        self.escape_cancels_lock = enabled;
     }
 
     /// Toggle's or an extra shortcut's cancel shortcut, or `None` for no
@@ -908,6 +926,17 @@ impl DictationHotkey {
                     shortcut = "dictation",
                     after_press_ms = signed_ms(now, started_at),
                     "dictation cancelled by Escape while held"
+                );
+                self.state = State::Dirty;
+                return Some(HotkeyAction::CancelShortcut);
+            }
+            if self.escape_cancels_locked() {
+                if !self.cancel_confirmed() {
+                    return None;
+                }
+                tracing::info!(
+                    shortcut = "dictation",
+                    "hands-free dictation cancelled by Escape"
                 );
                 self.state = State::Dirty;
                 return Some(HotkeyAction::CancelShortcut);

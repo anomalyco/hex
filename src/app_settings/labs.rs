@@ -214,6 +214,10 @@ pub struct LabsSettings {
     /// Whether that light stays solid or blinks slowly while recording
     /// (macOS).
     pub caps_lock_light: CapsLockLight,
+    /// Holding the middle mouse button for half a second starts a hands-free
+    /// dictation and the next long press finishes it; clicks still reach the
+    /// app, and Escape cancels any hands-free dictation (macOS).
+    pub middle_mouse_dictation: bool,
     /// The main window is forced light or dark instead of following the OS
     /// (Labs › Appearance).
     pub appearance: bool,
@@ -556,6 +560,7 @@ impl Default for LabsSettings {
             hide_menu_bar_icon: false,
             caps_lock_dictation: false,
             caps_lock_light: CapsLockLight::Steady,
+            middle_mouse_dictation: false,
             appearance: false,
             appearance_theme: AppearanceTheme::System,
             gnome_clipboard_restore: false,
