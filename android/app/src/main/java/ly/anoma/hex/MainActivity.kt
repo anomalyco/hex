@@ -366,6 +366,8 @@ private fun SetupRow(title: String, note: String, ready: Boolean) {
     val spoken = language.spoken.label
     val others = language.others.map { it.label }
     return when {
+        // Listening, Automatic chooses among these as you speak, as Settings and the Hex menu list them.
+        language.listensAmong.isNotEmpty() -> language.listensAmong.joinToString(stringResource(R.string.language_list_separator)) { it.label }
         !language.automatic -> spoken
         language.unsupported != null -> stringResource(R.string.setup_language_unsupported, spoken, language.unsupported)
         others.size >= 2 -> stringResource(R.string.setup_language_first, spoken, stringResource(R.string.setup_language_or, others[0], others[1]))

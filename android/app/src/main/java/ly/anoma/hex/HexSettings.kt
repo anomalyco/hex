@@ -108,7 +108,12 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
         onDispose { stores.forEach { it.unregisterOnSharedPreferenceChangeListener(changed) } }
     }
     val automatic = remember(revision, LocalConfiguration.current) { speech.spoken }
+    // What Automatic dictates in: one language, or with Labs › Automatic listens for the language those it chooses among.
+    val automaticChoices = remember(revision, LocalConfiguration.current) { speech.automaticCandidates }
+    val listenForLanguage = remember(revision) { speech.listenForLanguage }
     val selectedLanguage = remember(revision) { speech.language }
+    val listening = selectedLanguage == null && automaticChoices.size > 1
+    val languageList = automaticChoices.joinToString(stringResource(R.string.language_list_separator)) { it.label }
     val selectedLayout = remember(revision) { typing.layout }
     val style = remember(revision) { speech.style }
     val translate = remember(revision) { speech.translation }
@@ -283,7 +288,8 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 spokenPunctuation) { speech.spokenPunctuation = it }
                             Rule(); Toggle(stringResource(R.string.dictation_end_with_period), stringResource(R.string.dictation_end_with_period_detail),
                                 endWithPeriod) { speech.endWithPeriod = it }
-                            Rule(); Entry(stringResource(R.string.settings_dictation_language), if (selectedLanguage == null) automatic.label else null,
+                            Rule(); Entry(stringResource(R.string.settings_dictation_language),
+                                if (selectedLanguage == null) languageList else null,
                                 selectedLanguage?.label ?: stringResource(R.string.settings_automatic), { open(Page.Language) })
                         }
                         Card {
@@ -307,7 +313,8 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             val action = modelAction(model)
                             Entry(stringResource(R.string.model_title), modelStatus(model), action?.let { stringResource(it) } ?: "",
                                 if (action != null) download else null)
-                            if (fastEnglish && english == ModelStore.State.Ready) {
+                            // Not while Automatic chooses among several languages: those dictations all use today's model.
+                            if (fastEnglish && english == ModelStore.State.Ready && !listening) {
                                 Rule(); Entry(stringResource(R.string.fast_english_in_use), action = { open(Page.Labs) })
                             }
                         }
@@ -389,6 +396,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                             action = { ModelStore.english.delete(context); speech.fastEnglish = false })
                                     }
                                 }
+                                Rule()
+                                // Labs › Automatic listens for the language: off, Automatic dictates in one language, as before.
+                                Toggle(stringResource(R.string.listen_for_language), stringResource(R.string.listen_for_language_detail),
+                                    listenForLanguage, noteLines = Int.MAX_VALUE) { speech.listenForLanguage = it }
                                 Rule()
                                 // Labs › Learn from my fixes: off, the keyboard tracks nothing, applies nothing and
                                 // offers no hints; on, the learned word pairs are listed with a switch each.
@@ -539,9 +550,11 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                         choices.forEachIndexed { i, (label, chosen, pick) ->
                             if (i != 0) Rule()
                             // Automatic dictates in one language it picks, never the one spoken: its entry says which, now.
+                            // With Labs › Automatic listens for the language, it lists the ones it chooses among.
                             Entry(label ?: stringResource(R.string.settings_automatic),
                                 if (label != null) null else if (layout) stringResource(R.string.settings_layout_automatic_detail)
-                                else automatic.label + " · " + stringResource(R.string.dictation_language_automatic_detail),
+                                else if (automaticChoices.size > 1) languageList
+                                else languageList + " · " + stringResource(R.string.dictation_language_automatic_detail),
                                 if (chosen) "✓" else "", { pick(); open(page.parent) })
                         }
                     }
