@@ -71,7 +71,7 @@ def tally(matches, opportunities):
 def score(lang, mapping, cases, limits, tmp, command):
     with gzip.open(HERE / 'held-out' / (lang + '.tsv.gz'), 'rt', encoding='utf-8') as f:
         rows = [line.rstrip('\n').split('\t') for line in f]
-    if len(rows) != 2000 or len(cases) != 2:
+    if len(rows) != 2000 or len(cases) < 2:
         raise ValueError(f'{lang}: missing held-out sentences or critical cases')
     refs = [text.lower().split() for _, _, text, _, _ in rows]
     model = MODELS / (lang + '.hextm')

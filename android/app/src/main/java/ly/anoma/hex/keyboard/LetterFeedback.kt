@@ -132,6 +132,12 @@ internal class LetterFeedback(private val host: ViewGroup) {
                 "de" -> when (lower) {
                     'a' -> "aàáâæãåā"; 'o' -> "oôòóœøōõ"; 'u' -> "uûùúū"; else -> accents[lower]
                 }
+                // iPhone Hex's Portuguese long presses (KeyboardLanguage.swift), Portugal's and Brazil's
+                // letters first; other letters hold nothing.
+                "pt" -> when (lower) {
+                    'a' -> "aáãàâäåæª"; 'e' -> "eéêèęėēë"; 'i' -> "iíîìïįī"; 'o' -> "oôóõòöœøōº"; 'u' -> "uúüùûū"
+                    'c' -> "cç"; 'n' -> "nñ"; else -> null
+                }
                 else -> accents[lower]
             }
             return raw.orEmpty().map { (if (c.isUpperCase()) (if (it == 'ß') 'ẞ' else it.uppercaseChar()) else it).toString() }
