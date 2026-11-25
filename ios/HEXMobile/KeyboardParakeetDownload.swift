@@ -532,8 +532,17 @@ struct SpeechModelHomeCard: View {
         defaults?.set(true, forKey: dismissedKey)
     }
 
-    static func shows(enabled: Bool, fits: Bool, hold: KeyboardParakeetDownload.Hold?, dismissed: Bool) -> Bool {
-        guard enabled, fits, !dismissed else { return false }
+    /// Not where the model can never run in this keyboard (a limit under 131 MB, or no Neural
+    /// Engine), where the card couldn't be dismissed either; still where trying again can help
+    /// (short of memory, a load that failed, with Try again).
+    static func shows(
+        enabled: Bool,
+        fits: Bool,
+        hold: KeyboardParakeetDownload.Hold?,
+        dismissed: Bool,
+        unavailable: KeyboardParakeetSettings.UnavailableReason? = nil
+    ) -> Bool {
+        guard enabled, fits, !dismissed, unavailable != .noNeuralEngine else { return false }
         switch hold {
         case .otherEngine?, .notEnglish?, .keyboardTooSmall?:
             return false
@@ -545,7 +554,13 @@ struct SpeechModelHomeCard: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 2)) { _ in
             let settings = KeyboardParakeetSettings()
-            if Self.shows(enabled: settings.isEnabled, fits: KeyboardParakeetSettings.fits(), hold: download.hold, dismissed: dismissed) {
+            if Self.shows(
+                enabled: settings.isEnabled,
+                fits: KeyboardParakeetSettings.fits(),
+                hold: download.hold,
+                dismissed: dismissed,
+                unavailable: settings.unavailableReason
+            ) {
                 card(ready: download.isDownloaded && settings.keyboardState?.state == .ready)
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }

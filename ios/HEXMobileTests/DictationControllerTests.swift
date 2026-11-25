@@ -1949,6 +1949,15 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertFalse(shows(hold: .otherEngine))
         XCTAssertFalse(shows(hold: .keyboardTooSmall))
         XCTAssertFalse(shows(dismissed: true))
+        // What the keyboard said: hidden only where the model can never run in it (1.0.5
+        // quality review: the card stayed for good and couldn't be dismissed).
+        func shows(_ reason: KeyboardParakeetSettings.UnavailableReason) -> Bool {
+            SpeechModelHomeCard.shows(enabled: true, fits: true, hold: nil, dismissed: false, unavailable: reason)
+        }
+        XCTAssertFalse(shows(.noNeuralEngine), "never runs in this keyboard")
+        XCTAssertTrue(shows(.shortOfMemory), "it tries again the next time it opens")
+        XCTAssertTrue(shows(.loadFailed), "with Try again")
+        XCTAssertTrue(shows(.notOnNeuralEngine), "with Try again")
         let suite = "speech-model-card-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
