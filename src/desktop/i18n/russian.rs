@@ -557,7 +557,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Microphone", "Микрофон"),
     ("Dictation shortcut", "Сочетание для диктовки"),
     ("Paste last", "Вставить последний элемент"),
-    ("Edit", "Изменить"),
     ("Show all History", "Показать всю историю"),
     ("All types", "Все типы"),
     ("Screen recordings", "Записи экрана"),

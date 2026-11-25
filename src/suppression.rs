@@ -950,11 +950,7 @@ fn list_tap(event_type: u32, event: EventRef) -> ListSwallow {
     if *taken & bit != 0 {
         return ListSwallow::Only;
     }
-    // While the picker's editor has the keys, every key is the editor's.
-    if crate::paste::browse::active()
-        && !crate::paste::browse::editing()
-        && !crate::app_settings::shortcuts_suspended()
-    {
+    if crate::paste::browse::active() && !crate::app_settings::shortcuts_suspended() {
         use crate::paste::browse::{self, Key, KeyUse, Nav};
         // SAFETY: CoreGraphics supplied a valid keyboard event.
         let (flags, repeat) = unsafe {

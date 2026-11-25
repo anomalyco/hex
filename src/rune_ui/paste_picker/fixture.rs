@@ -17,7 +17,7 @@ const MIN: u64 = 60_000;
 /// (2×), a display's 16:10.
 const SHOT: (u32, u32) = ((PICTURE_W * 2.0) as u32, (PICTURE_W * 2.0 / 1.6) as u32);
 
-pub(super) const NEWEST_WORDS: &str = "Let's move the launch review to Thursday. Dana needs one more day on the pricing numbers, and I'd rather walk through the final deck than a draft.\n\nSame room, same time. I'll update the invite after lunch.";
+const NEWEST_WORDS: &str = "Let's move the launch review to Thursday. Dana needs one more day on the pricing numbers, and I'd rather walk through the final deck than a draft.\n\nSame room, same time. I'll update the invite after lunch.";
 
 pub(super) fn rows() -> Vec<Entry> {
     let words = |n, ago: u64, text: &str, app: Option<&str>| Entry {

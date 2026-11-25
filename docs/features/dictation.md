@@ -844,23 +844,17 @@ Hold 200 ms on the Mac event tap → up to eight recent items, without taking fo
 ├── ↑/↓, Tab, or Paste Last's key again (with or without ⌥⇧) → move; its repeats do nothing
 ├── Return or keypad Enter → paste the selected item into the original field
 ├── Copy → a dictation's text, or a capture as Annotate copies it, on the clipboard; closes
-├── Edit, or a click on a dictation's words → the words become a text field in place
-│   ├── A second panel that takes the keys shows the same card; the tap passes every key to it
-│   ├── Return or Paste → paste the edited words into the original field (History is not changed)
-│   ├── Shift-Return → a new line; Escape or Cancel → back to the picker
-│   └── The app must stay in front; the field is rechecked up to 500 ms after the editor closes
 ├── Open in Editor, or a click on a capture's picture → close, and open the capture as
 │   History's Open in Editor does (its movie to trim, else its picture); not a paste
 └── Escape, a click outside the card, another key, or changed focus → close without touching the clipboard
 ```
 
 Check: `a_tap_pastes_and_a_hold_opens_a_picker_that_stays_until_escape` and
-`clicks_select_then_paste_and_edit_pastes_the_edited_words` in
+`a_click_selects_a_second_pastes_and_a_capture_opens_in_its_editor` in
 [paste/browse.rs](../../src/paste/browse.rs). Scenes: `mac-paste-picker` (a
-capture selected), `mac-paste-picker-dictation`, `mac-paste-picker-edit`.
-The scenes draw fixture rows and drawn pictures. Not yet run natively: the
-editor panel taking and returning the keys, and an edited paste landing in the
-original field after it.
+capture selected) and `mac-paste-picker-dictation`, on fixture rows and drawn
+pictures. Not yet run natively: a real capture's picture loading from its
+bundle, Copy, and Open in Editor from the picker.
 
 With it on, the Mac History puts dictations, annotations, screenshots and
 screen recordings in one list. All types is the default. Search works inside the

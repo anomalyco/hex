@@ -93,8 +93,6 @@ pub(crate) fn resolve(
 /// from the caller of a control request. Runs on the ordered output worker.
 pub(crate) struct Request {
     pub id: Option<Id>,
-    /// Words edited in the picker, pasted in place of an item's own.
-    pub edited: Option<String>,
     pub target: Target,
 }
 
@@ -116,26 +114,7 @@ impl Target {
     pub(crate) fn unchanged(&self) -> bool {
         self.in_front() && self.focus.unchanged()
     }
-    /// [`Self::unchanged`] once the picker's editor has given the keys back:
-    /// the field holds focus again a moment after the editor's panel goes,
-    /// so this waits for it, at most [`SETTLE`].
-    fn settled(&self) -> bool {
-        let deadline = std::time::Instant::now() + SETTLE;
-        loop {
-            if self.unchanged() {
-                return true;
-            }
-            if std::time::Instant::now() >= deadline {
-                return false;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-    }
 }
-
-/// The longest an edited paste waits for the original field to hold focus
-/// again after the editor's panel closes.
-const SETTLE: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// Labs › Paste Last picker (macOS): the picker, unified History, and the
 /// words a deliberate cancel keeps. Off, every one of those is exactly as it
@@ -178,13 +157,6 @@ impl Request {
         history: Option<&History>,
     ) -> color_eyre::Result<String> {
         use color_eyre::eyre::eyre;
-        if let Some(text) = self.edited {
-            if !self.target.settled() {
-                return Err(eyre!("paste target changed"));
-            }
-            paster.insert_recent_text(&text, &self.target)?;
-            return Ok(text);
-        }
         let history = history.ok_or_else(|| eyre!("paste history is unavailable"))?;
         let settings = crate::app_settings::capture_settings();
         let root = settings.enabled.then(|| settings.captures_dir());

@@ -27,7 +27,6 @@ struct Doc {
     root: PathBuf,
     store: crate::history::History,
     rows: Vec<Entry>,
-    draft: TextEdit,
     body: String,
     board: objc2::rc::Retained<objc2_app_kit::NSPasteboard>,
 }
@@ -106,12 +105,10 @@ fn view(doc: &Doc, cx: &mut Cx<Doc>) -> El {
                 rows: &doc.rows,
                 cursor: 0,
                 now: NOW,
-                draft: None,
                 trigger: &[],
             },
             p,
             &|_, _| None,
-            |doc: &mut Doc| &mut doc.draft,
             // Row 1 is not the selection, so its click only selects on the
             // picker; here every click chooses, as the picker's Paste does.
             |doc: &mut Doc, act, _| {
@@ -187,7 +184,6 @@ fn a_held_shortcut_browses_real_rows_and_clicks_choose_the_original_item() {
                 NOW,
             )),
             rows: vec![],
-            draft: TextEdit::default(),
             body: String::new(),
         };
         let mut rt = offscreen::runtime(

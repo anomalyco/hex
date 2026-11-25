@@ -201,13 +201,6 @@ pub(super) const SCENES: &[Scene] = &[
         ui.settings.labs.paste_last_picker = true;
         ui.paste_preview = paste_picker::Preview::dictation();
     }),
-    // That dictation's words being edited before a paste.
-    #[cfg(all(target_os = "macos", hex_capture))]
-    ("mac-paste-picker-edit", |ui| {
-        *ui = mac_fixture();
-        ui.settings.labs.paste_last_picker = true;
-        ui.paste_preview = paste_picker::Preview::editing();
-    }),
     #[cfg(all(target_os = "macos", hex_capture))]
     ("mac-history-empty", |ui| {
         unified_history(ui);

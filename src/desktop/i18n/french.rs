@@ -560,7 +560,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Microphone", "Micro"),
     ("Dictation shortcut", "Raccourci de dictée"),
     ("Paste last", "Coller le dernier élément"),
-    ("Edit", "Modifier"),
     ("Show all History", "Afficher tout l’historique"),
     ("All types", "Tous les types"),
     ("Screen recordings", "Enregistrements d’écran"),

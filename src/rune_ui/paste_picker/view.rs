@@ -1,12 +1,12 @@
 //! The picker's card: recent rows down a rail, each led by its picture or a
 //! dictation's mark, and the selected row's preview beside them: a capture's
-//! picture over its words, or a dictation's whole text, with what Paste,
-//! Edit, and Copy do to it. The card states what it draws; its owner decides
-//! what each [`Act`] does.
+//! picture over its words, or a dictation's whole text, with Copy and Paste
+//! (and, for a capture, Open in Editor). The card states what it draws; its
+//! owner decides what each [`Act`] does.
 
 use std::path::Path;
 
-use rune::{Cursor, El, Key, ScrollSpec, SurfaceFit, TextEdit, Tx, col, el, icon, row, text};
+use rune::{Cursor, El, ScrollSpec, SurfaceFit, Tx, col, el, icon, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize};
 
 use crate::desktop::i18n::{event_age_at, tr};
@@ -29,9 +29,6 @@ pub(super) const LEAD: (f32, f32) = (40.0, 28.0);
 pub(super) const PICTURE_W: f32 = CARD_W - RAIL_W - 2.0 * METRICS.row_px;
 /// A taller capture (a window, a phone) is drawn this tall at most.
 const PICTURE_MAX_H: f32 = 244.0;
-/// The words' box hangs this far past the text edge, so its hover and focus
-/// ring have room while the words stay on the edge.
-const WORDS_HANG: f32 = 8.0;
 
 /// A picture's size on the card.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -55,12 +52,10 @@ pub(super) enum Act {
     /// A row was clicked.
     Select(Id),
     Paste(Id),
-    /// A dictation's words become editable; a capture opens in the editor.
-    Edit(Id),
+    /// Opens a capture in the editor.
+    Open(Id),
     /// Copies the row at this index.
     Copy(usize),
-    PasteEdited,
-    StopEditing,
     Dismiss,
     History,
 }
@@ -70,8 +65,6 @@ pub(super) struct Shown<'a> {
     pub rows: &'a [Entry],
     pub cursor: usize,
     pub now: u64,
-    /// The selected dictation's words while they are edited.
-    pub draft: Option<&'a TextEdit>,
     /// Paste Last's keycaps.
     pub trigger: &'a [String],
 }
@@ -82,7 +75,6 @@ pub(super) fn stage<S: 'static>(
     shown: &Shown,
     p: Paint,
     pixels: &dyn Fn(&Path, Size) -> Option<rune::Pixels>,
-    draft: fn(&mut S) -> &mut TextEdit,
     act: impl Fn(&mut S, Act, &mut Tx) + Copy + 'static,
 ) -> El {
     col()
@@ -93,14 +85,13 @@ pub(super) fn stage<S: 'static>(
         .center()
         .hit()
         .on_press_tx(move |s: &mut S, tx| act(s, Act::Dismiss, tx))
-        .child(card(shown, p, pixels, draft, act))
+        .child(card(shown, p, pixels, act))
 }
 
 pub(super) fn card<S: 'static>(
     shown: &Shown,
     p: Paint,
     pixels: &dyn Fn(&Path, Size) -> Option<rune::Pixels>,
-    draft: fn(&mut S) -> &mut TextEdit,
     act: impl Fn(&mut S, Act, &mut Tx) + Copy + 'static,
 ) -> El {
     let c = &p.k.c;
@@ -117,7 +108,7 @@ pub(super) fn card<S: 'static>(
             .h(BODY_H)
             .child(rail(shown, p, pixels, act))
             .child(el().w(p.hair).h_full().fill(c.border_weak))
-            .child(preview(shown, p, pixels, draft, act))
+            .child(preview(shown, p, pixels, act))
     };
     let mut panel = col()
         .key("paste-card")
@@ -143,8 +134,7 @@ pub(super) fn card<S: 'static>(
     panel
 }
 
-/// The recent rows. While a dictation's words are edited the rail steps
-/// back and takes no presses: the keys and the pointer are the editor's.
+/// The recent rows.
 fn rail<S: 'static>(
     shown: &Shown,
     p: Paint,
@@ -152,14 +142,12 @@ fn rail<S: 'static>(
     act: impl Fn(&mut S, Act, &mut Tx) + Copy + 'static,
 ) -> El {
     let c = &p.k.c;
-    let editing = shown.draft.is_some();
     let mut list = col()
         .key("paste-rows")
         .role("list")
         .w(RAIL_W)
         .padding(CAPSULE.row_inset)
-        .gap(CAPSULE.row_gap)
-        .opacity(if editing { 0.5 } else { 1.0 });
+        .gap(CAPSULE.row_gap);
     for (i, entry) in shown.rows.iter().enumerate() {
         let kind = match &entry.row.id {
             Id::Capture(_) => tr("Annotation"),
@@ -216,16 +204,14 @@ fn rail<S: 'static>(
         if i == shown.cursor {
             line = line.fill(c.layer_02);
         }
-        if !editing {
-            let id = entry.row.id.clone();
-            line = line
-                .hover(c.hover)
+        let id = entry.row.id.clone();
+        list = list.child(
+            line.hover(c.hover)
                 .press(c.pressed)
                 .hit()
                 .focusable(false)
-                .on_press_tx(move |s: &mut S, tx| act(s, Act::Select(id.clone()), tx));
-        }
-        list = list.child(line);
+                .on_press_tx(move |s: &mut S, tx| act(s, Act::Select(id.clone()), tx)),
+        );
     }
     list
 }
@@ -276,7 +262,6 @@ fn preview<S: 'static>(
     shown: &Shown,
     p: Paint,
     pixels: &dyn Fn(&Path, Size) -> Option<rune::Pixels>,
-    draft: fn(&mut S) -> &mut TextEdit,
     act: impl Fn(&mut S, Act, &mut Tx) + Copy + 'static,
 ) -> El {
     let pane = col()
@@ -291,7 +276,6 @@ fn preview<S: 'static>(
     let Some(entry) = shown.rows.get(shown.cursor) else {
         return pane;
     };
-    let id = entry.row.id.clone();
     match &entry.row.id {
         Id::Capture(_) => {
             let words = (!entry.detail.text.is_empty()).then(|| {
@@ -307,66 +291,27 @@ fn preview<S: 'static>(
                 .child(el().grow(1.0))
                 .child(actions(shown, p, entry, act))
         }
-        Id::Dictation(_) => {
-            let c = &p.k.c;
-            let words = match shown.draft {
-                Some(edit) => rune::text_input(edit, p.k.ty.body)
-                    .key("paste-draft")
-                    .label(tr("Edit"))
+        // The whole text; one longer than the pane scrolls.
+        Id::Dictation(_) => pane
+            .child(
+                col()
+                    .key("paste-words-scroll")
                     .w_full()
-                    .color(p.text())
-                    .caret(p.text(), p.k.selection())
-                    .on_edit(draft)
-                    .on_submit(move |s: &mut S, tx| act(s, Act::PasteEdited, tx))
-                    .on_input_key(move |s: &mut S, key: &rune::KeyEvent, tx| {
-                        let leave = key.key == Key::Escape;
-                        if leave {
-                            act(s, Act::StopEditing, tx);
-                        }
-                        leave
-                    }),
-                None => text(entry.detail.text.clone())
-                    .key("paste-words")
-                    .font(p.k.ty.body)
-                    .color(p.text())
-                    .wrap(),
-            };
-            // One box for reading and editing, so the words never move
-            // between the two: only its ring and the caret come and go.
-            let words = col()
-                .key("paste-words-box")
-                .grow(1.0)
-                .shrink()
-                .min_h(0.0)
-                .mx(-WORDS_HANG)
-                .mt(-WORDS_HANG)
-                .padding(WORDS_HANG)
-                .radius(p.k.radius.md)
-                .child(
-                    col()
-                        .key("paste-words-scroll")
-                        .w_full()
-                        .grow(1.0)
-                        .shrink()
-                        .min_h(0.0)
-                        .scroll(ScrollSpec {
-                            stick_bottom: false,
-                        })
-                        .child(words),
-                );
-            let words = if shown.draft.is_some() {
-                words.outline(1.0, -1.0, c.border_focus)
-            } else {
-                words
-                    .role("button")
-                    .label(tr("Edit"))
-                    .hover(c.hover)
-                    .cursor(Cursor::Text)
-                    .hit()
-                    .on_press_tx(move |s: &mut S, tx| act(s, Act::Edit(id.clone()), tx))
-            };
-            pane.child(words).child(actions(shown, p, entry, act))
-        }
+                    .grow(1.0)
+                    .shrink()
+                    .min_h(0.0)
+                    .scroll(ScrollSpec {
+                        stick_bottom: false,
+                    })
+                    .child(
+                        text(entry.detail.text.clone())
+                            .key("paste-words")
+                            .font(p.k.ty.body)
+                            .color(p.text())
+                            .wrap(),
+                    ),
+            )
+            .child(actions(shown, p, entry, act)),
     }
 }
 
@@ -413,7 +358,7 @@ fn picture<S: 'static>(
             )
             .cursor(Cursor::Pointer)
             .hit()
-            .on_press_tx(move |s: &mut S, tx| act(s, Act::Edit(id.clone()), tx)),
+            .on_press_tx(move |s: &mut S, tx| act(s, Act::Open(id.clone()), tx)),
     )
 }
 
@@ -440,7 +385,6 @@ fn actions<S: 'static>(
             .key(key)
     };
     let id = entry.row.id.clone();
-    let editing = shown.draft.is_some();
     let paste = Button::new(tr("Paste"))
         .variant(ButtonVariant::Contrast)
         .label_with(|font, ink| {
@@ -452,29 +396,12 @@ fn actions<S: 'static>(
         })
         .on_press_tx({
             let id = id.clone();
-            move |s: &mut S, tx| {
-                let what = if editing {
-                    Act::PasteEdited
-                } else {
-                    Act::Paste(id.clone())
-                };
-                act(s, what, tx)
-            }
+            move |s: &mut S, tx| act(s, Act::Paste(id.clone()), tx)
         })
         .build_push(p.k)
         .key("paste-commit");
-    let others = if editing {
-        vec![push("paste-edit-cancel", tr("Cancel"), Act::StopEditing)]
-    } else {
-        let edit = match &id {
-            Id::Capture(_) => tr("Open in Editor"),
-            Id::Dictation(_) => tr("Edit"),
-        };
-        vec![
-            push("paste-copy", tr("Copy"), Act::Copy(shown.cursor)),
-            push("paste-edit", edit, Act::Edit(id.clone())),
-        ]
-    };
+    let open = matches!(id, Id::Capture(_))
+        .then(|| push("paste-open", tr("Open in Editor"), Act::Open(id.clone())));
     row()
         .key("paste-actions")
         .gap(8.0)
@@ -489,7 +416,8 @@ fn actions<S: 'static>(
                 .min_w(0.0)
                 .truncate(),
         )
-        .children(others)
+        .child(push("paste-copy", tr("Copy"), Act::Copy(shown.cursor)))
+        .children(open)
         .child(paste)
 }
 
@@ -509,14 +437,10 @@ fn footer<S: 'static>(
             .child(text(label.to_owned()).font(p.meta()).color(p.faint()))
     };
     let mut hints = row().key("paste-hints").gap(12.0).center_y().a11y_hidden();
-    if shown.draft.is_some() {
-        hints = hints.child(hint("hint-back", "esc".into(), tr("Back")));
-    } else {
-        if !shown.trigger.is_empty() && shown.rows.len() > 1 {
-            hints = hints.child(hint("hint-next", shown.trigger.concat(), tr("Next")));
-        }
-        hints = hints.child(hint("hint-close", "esc".into(), tr("Close")));
+    if !shown.trigger.is_empty() && shown.rows.len() > 1 {
+        hints = hints.child(hint("hint-next", shown.trigger.concat(), tr("Next")));
     }
+    hints = hints.child(hint("hint-close", "esc".into(), tr("Close")));
     // The button's label ends on the preview's text edge.
     row()
         .key("paste-footer")

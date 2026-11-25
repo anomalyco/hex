@@ -12,7 +12,6 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Move to Trash…", ["Przenieś do kosza…", "移到废纸篓…", "ゴミ箱に入れる…", "In den Papierkorb legen…", "Trasladar a la papelera…", "Перемістити в смітник…"]),
     ("Paste last", ["Wklej ostatni element", "粘贴最近一项", "最新の項目を貼り付け", "Letztes Element einfügen", "Pegar último elemento", "Вставити останній елемент"]),
     ("Annotations", ["Adnotacje", "标注", "注釈", "Annotationen", "Anotaciones", "Анотації"]),
-    ("Edit", ["Edytuj", "编辑", "編集", "Bearbeiten", "Editar", "Редагувати"]),
     ("Show all History", ["Pokaż całą historię", "显示所有历史记录", "すべての履歴を表示", "Gesamten Verlauf anzeigen", "Mostrar todo el historial", "Показати всю історію"]),
     ("All types", ["Wszystkie typy", "所有类型", "すべての種類", "Alle Typen", "Todos los tipos", "Усі типи"]),
     ("Dictations", ["Dyktowania", "听写", "音声入力", "Diktate", "Dictados", "Диктування"]),
