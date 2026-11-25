@@ -117,10 +117,13 @@ struct OnboardingView: View {
         guard let fixture = OnboardingFixture.current else { return nil }
         let english = SpeechModelUnavailable.interfaceName("en-US")
         if fixture == .failed {
-            return OnboardingModel(
+            var model = OnboardingModel(
                 stage: .failed(String(localized: "Hex couldn't download the speech model. Check your connection and try again.")),
                 language: english
             )
+            // `--keyboard-dictates`: only Hex's own model failed, the keyboard has Apple's.
+            model.keyboardDictates = ProcessInfo.processInfo.arguments.contains("--keyboard-dictates")
+            return model
         }
         if let fraction = fixture.modelFraction {
             return OnboardingModel(
