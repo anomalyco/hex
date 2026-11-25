@@ -113,6 +113,7 @@ class HexKeyboard : InputMethodService() {
     }
     private val typingChanged = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == TypingPreferences.SUGGEST_SWEAR_WORDS) engine.swearWordsChanged()
+        if (key == TypingPreferences.KEY_COLORS || key == TypingPreferences.KEY_COLOR) recolor()
         if (key == TypingPreferences.NUMBER_ROW) engine.numberRowChanged()
         if (key == TypingPreferences.LOCAL_CURRENCY) engine.localCurrencyChanged()
         if (key == TypingPreferences.EMOJI_SUGGESTIONS) engine.emojiSuggestionsChanged()
@@ -189,6 +190,17 @@ class HexKeyboard : InputMethodService() {
         currentSubtype = newSubtype
         modeChanged(newSubtype)
     }
+    /** Labs › Keyboard › Key colors changed (tried in Hex's own settings, the keyboard may be showing): the keys are
+     * built again in the new colours, at once unless a dictation is running; then the next showing has them. */
+    private fun recolor() {
+        val old = view ?: return
+        if (old.colored(feedback.drawnKeyColor) || capture.phase != SpeechPhase.Idle) return
+        old.cancelGestures(); old.reset()
+        setInputView(inputView())
+        if (!isInputViewShown) return
+        engine.configureTyping(keepWord = true); view?.status(capture.phase, idleHint())
+        viewing = true; watchClipboard()
+    }
 
     /** The field's type as Hex last started in it: an app can change it in place (restarting the same box). */
     private var fieldType = 0 to 0
@@ -214,8 +226,9 @@ class HexKeyboard : InputMethodService() {
             viewing = true
             return
         }
-        // Settings › Keyboard › Height changed while a dictation ran: the new keys now, before they show.
-        if (view?.sized(feedback.height) == false) setInputView(inputView())
+        // Settings › Keyboard › Height or Labs › Keyboard › Key colors changed while a dictation ran: the new keys
+        // now, before they show.
+        if (view?.sized(feedback.height) == false || view?.colored(feedback.drawnKeyColor) == false) setInputView(inputView())
         view?.cancelGestures()
         // Another type in the same box: back to its keys, as a new field opens (configureTyping draws them).
         if (typeChanged) view?.closeMenu(configure = false)

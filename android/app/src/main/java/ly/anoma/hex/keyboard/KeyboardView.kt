@@ -15,7 +15,9 @@ import ly.anoma.hex.typing.Suggestion
 
 /** The keyboard's root view: the strip, then the keys or the Hex menu in their place. */
 internal class KeyboardView(context: Context, private val ime: HexKeyboard) : LinearLayout(context), KeyboardSurface {
-    private val feedback = LetterFeedback(this)
+    /** Labs › Keyboard › Key colors as these keys were built: another choice builds a new view. */
+    val paints = KeyPaints(context, ime.feedback.drawnKeyColor)
+    private val feedback = LetterFeedback(this, paints)
     /** The rows' height these keys were built at (Settings › Keyboard › Height on this screen). */
     private val size = KeySize.of(resources, ime.feedback.height)
     private val strip = StripView(context, ime, this)
@@ -52,6 +54,7 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
 
     /** Whether these keys are still the size Settings asks for: a new height needs a new view. */
     fun sized(height: KeyboardHeight) = size.height == height
+    fun colored(color: KeyColor) = paints.color == color
 
     override fun showPage(page: KeyboardPage) {
         keys.showPage(page)
