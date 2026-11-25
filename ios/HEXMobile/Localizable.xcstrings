@@ -3631,6 +3631,26 @@
         }
       }
     },
+    "Download failed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载失败"
+          }
+        }
+      }
+    },
+    "Speech recognition isn't ready" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音识别尚未就绪"
+          }
+        }
+      }
+    },
     "Getting the speech model ready." : {
       "localizations" : {
         "zh-Hans" : {

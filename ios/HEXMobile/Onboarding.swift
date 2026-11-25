@@ -603,12 +603,17 @@ struct OnboardingModelWait: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            OnboardingTitle("Almost ready")
-            Text("Getting the speech model ready.")
-                .font(.system(size: 15))
-                .foregroundStyle(HexTheme.textMuted)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
+            // A failed download says so above its message, rather than that it's getting ready.
+            if model.isFailed {
+                OnboardingTitle(model.downloads ? "Download failed" : "Speech recognition isn't ready")
+            } else {
+                OnboardingTitle("Almost ready")
+                Text("Getting the speech model ready.")
+                    .font(.system(size: 15))
+                    .foregroundStyle(HexTheme.textMuted)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if case .failed(let message) = model.stage {
                 OnboardingFailure(message: message, onRetry: onRetry)
