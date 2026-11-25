@@ -1395,6 +1395,21 @@ pub fn runtime_hotkeys() -> RuntimeHotkeys {
     hotkeys
 }
 
+/// Paste Last's keycaps, from the settings last applied; none while it is
+/// unbound.
+#[cfg(all(target_os = "macos", hex_capture))]
+pub fn paste_last_keycaps() -> Vec<String> {
+    HOTKEYS
+        .get_or_init(Default::default)
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .settings
+        .as_ref()
+        .and_then(|settings| settings.paste_last_hotkey.as_ref())
+        .map(HotkeyBinding::keycaps)
+        .unwrap_or_default()
+}
+
 /// Tests install the shortcuts the listener matches, without a settings file.
 #[cfg(test)]
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]

@@ -66,6 +66,10 @@ impl Lab {
     }
 }
 
+/// How long after the picker's editor closes the original field is given
+/// to hold focus again before a changed focus closes the picker.
+const EDITOR_SETTLE: Duration = Duration::from_millis(500);
+
 struct Invocation {
     epoch: u64,
     binding: RuntimeHotkey,
@@ -107,7 +111,11 @@ impl Picker {
             && !crate::suppression::secure_input::enabled()
             && binding.key_code.is_some();
         if !can_hold {
-            return worker.paste_recent(Request { id: None, target });
+            return worker.paste_recent(Request {
+                id: None,
+                edited: None,
+                target,
+            });
         }
         let epoch = browse::begin();
         // Read the rows while the key is held, so the picker opens the
@@ -154,7 +162,16 @@ impl Picker {
             self.cancel();
             return Ok(());
         }
-        if Instant::now() >= inv.check {
+        if browse::editing() {
+            // The editor's panel has the keys, so the field can't be told
+            // apart until it gives them back: the app must still be in
+            // front, and the field is checked again once the editor closes.
+            inv.check = Instant::now() + EDITOR_SETTLE;
+            if !inv.target.in_front() {
+                self.cancel();
+                return Ok(());
+            }
+        } else if Instant::now() >= inv.check {
             inv.check = Instant::now() + Duration::from_millis(120);
             if !inv.target.unchanged() {
                 self.cancel();
@@ -168,8 +185,20 @@ impl Picker {
                 Choice::Cancel => Ok(()),
                 Choice::Item(id) => worker.paste_recent(Request {
                     id: Some(id),
+                    edited: None,
                     target: inv.target,
                 }),
+                Choice::Edited(text) => worker.paste_recent(Request {
+                    id: None,
+                    edited: Some(text),
+                    target: inv.target,
+                }),
+                Choice::Open(id) => {
+                    if let Some(bundle) = recent::capture_bundle(&id) {
+                        crate::rune_ui::paste_picker::open_in_editor(&bundle);
+                    }
+                    Ok(())
+                }
             };
         }
         let effect = self.hold.tick(CaptureInstant::now());
@@ -189,6 +218,7 @@ impl Picker {
                 }
                 worker.paste_recent(Request {
                     id: None,
+                    edited: None,
                     target: inv.target,
                 })
             }

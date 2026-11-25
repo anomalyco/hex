@@ -186,13 +186,27 @@ pub(super) const SCENES: &[Scene] = &[
         ));
     }),
     // The Paste Last picker a held Paste Last opens, centred over the
-    // window as it is over the display: a capture, a cancelled dictation,
-    // and the newest dictation selected.
+    // window as it is over the display: the newest row, a capture, selected
+    // with its picture in the preview.
     #[cfg(all(target_os = "macos", hex_capture))]
     ("mac-paste-picker", |ui| {
         *ui = mac_fixture();
         ui.settings.labs.paste_last_picker = true;
-        ui.paste_preview = true;
+        ui.paste_preview = paste_picker::Preview::capture();
+    }),
+    // A dictation selected: its whole text in the preview.
+    #[cfg(all(target_os = "macos", hex_capture))]
+    ("mac-paste-picker-dictation", |ui| {
+        *ui = mac_fixture();
+        ui.settings.labs.paste_last_picker = true;
+        ui.paste_preview = paste_picker::Preview::dictation();
+    }),
+    // That dictation's words being edited before a paste.
+    #[cfg(all(target_os = "macos", hex_capture))]
+    ("mac-paste-picker-edit", |ui| {
+        *ui = mac_fixture();
+        ui.settings.labs.paste_last_picker = true;
+        ui.paste_preview = paste_picker::Preview::editing();
     }),
     #[cfg(all(target_os = "macos", hex_capture))]
     ("mac-history-empty", |ui| {

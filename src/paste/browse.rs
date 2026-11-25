@@ -2,8 +2,9 @@
 //! and invocation are both frozen: a late click can't act on the next list.
 //! Its rows are read from the press, so the picker opens the moment the hold
 //! passes, and once open it stays open until a choice, Escape, or a click
-//! outside it.
-use super::recent::{Id, Row};
+//! outside it. Editing a dictation's words is the one time the keys are not
+//! the picker's: they go to its editor until it pastes or steps back.
+use super::recent::{Entry, Id};
 use std::sync::{
     Arc, Mutex, OnceLock,
     atomic::{AtomicU8, Ordering},
@@ -13,9 +14,11 @@ use std::sync::{
 pub(crate) struct View {
     pub epoch: u64,
     pub revision: u64,
-    pub rows: Arc<[Row]>,
+    pub rows: Arc<[Entry]>,
     pub cursor: usize,
     pub open: bool,
+    /// The selected dictation's words are being edited before a paste.
+    pub editing: bool,
 }
 #[derive(Default)]
 struct State {
@@ -23,13 +26,17 @@ struct State {
     outcome: Option<Choice>,
     armed: bool,
     /// Rows read before the hold passed, shown once it does.
-    staged: Option<Vec<Row>>,
+    staged: Option<Vec<Entry>>,
     /// The hold passed: rows open as soon as they are read.
     due: bool,
 }
 pub(crate) enum Choice {
     Cancel,
     Item(Id),
+    /// Words edited in the picker, for the field the picker opened over.
+    Edited(String),
+    /// A capture to open in the editor. Nothing is pasted.
+    Open(Id),
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Nav {
@@ -47,13 +54,14 @@ impl State {
         self.staged = None;
         self.due = false;
         self.view.open = false;
+        self.view.editing = false;
         self.view.rows = Arc::default();
         self.view.epoch
     }
     fn current(&self, epoch: u64) -> bool {
         self.armed && self.view.epoch == epoch && self.outcome.is_none()
     }
-    fn show(&mut self, epoch: u64, rows: Vec<Row>) {
+    fn show(&mut self, epoch: u64, rows: Vec<Entry>) {
         if !self.current(epoch) {
             return;
         }
@@ -72,13 +80,13 @@ impl State {
             self.open(rows);
         }
     }
-    fn open(&mut self, rows: Vec<Row>) {
+    fn open(&mut self, rows: Vec<Entry>) {
         self.view.rows = rows.into();
         self.view.cursor = self
             .view
             .rows
             .iter()
-            .position(|r| !r.cancelled)
+            .position(|r| !r.row.cancelled)
             .unwrap_or(self.view.rows.len());
         self.view.open = true;
     }
@@ -88,6 +96,7 @@ impl State {
             self.staged = None;
             self.outcome = Some(choice);
             self.view.open = false;
+            self.view.editing = false;
             self.view.rows = Arc::default();
         }
     }
@@ -107,7 +116,8 @@ impl State {
             self.finish(Choice::Cancel);
             return true;
         }
-        if !self.view.open {
+        // The editor has the keys: nothing moves or commits under it.
+        if !self.view.open || self.view.editing {
             return false;
         }
         let n = self.view.rows.len();
@@ -126,7 +136,7 @@ impl State {
                     .view
                     .rows
                     .get(self.view.cursor)
-                    .map(|r| Choice::Item(r.id.clone()))
+                    .map(|r| Choice::Item(r.row.id.clone()))
                     .unwrap_or(Choice::Cancel);
                 self.finish(choice);
             }
@@ -134,9 +144,53 @@ impl State {
         }
         true
     }
+    fn position(&self, epoch: u64, id: &Id) -> Option<usize> {
+        (self.view.open && self.view.epoch == epoch)
+            .then(|| self.view.rows.iter().position(|r| &r.row.id == id))
+            .flatten()
+    }
     fn pick(&mut self, epoch: u64, id: Id) {
-        if self.view.open && self.view.epoch == epoch && self.view.rows.iter().any(|r| r.id == id) {
+        if self.position(epoch, &id).is_some() {
             self.finish(Choice::Item(id));
+        }
+    }
+    /// A click on a row: it becomes the selection, and a click on the
+    /// selection pastes it, so a double click pastes any row.
+    fn select(&mut self, epoch: u64, id: Id) {
+        match self.position(epoch, &id) {
+            Some(_) if self.view.editing => {}
+            Some(at) if at == self.view.cursor => self.finish(Choice::Item(id)),
+            Some(at) => self.view.cursor = at,
+            None => {}
+        }
+    }
+    /// Edit: a dictation's words become editable in place, and a capture
+    /// leaves for its editor.
+    fn edit(&mut self, epoch: u64, id: Id) {
+        let Some(at) = self.position(epoch, &id) else {
+            return;
+        };
+        match id {
+            Id::Dictation(_) => {
+                self.view.cursor = at;
+                self.view.editing = true;
+            }
+            Id::Capture(_) => self.finish(Choice::Open(id)),
+        }
+    }
+    fn stop_editing(&mut self, epoch: u64) {
+        if self.view.epoch == epoch {
+            self.view.editing = false;
+        }
+    }
+    /// Blank words paste nothing and keep the editor.
+    fn paste_edited(&mut self, epoch: u64, text: String) {
+        if self.view.open
+            && self.view.epoch == epoch
+            && self.view.editing
+            && !text.trim().is_empty()
+        {
+            self.finish(Choice::Edited(text));
         }
     }
 }
@@ -154,7 +208,11 @@ fn update<R>(f: impl FnOnce(&mut State) -> R) -> R {
         let r = f(&mut s);
         s.view.revision += 1;
         PHASE.store(
-            if s.view.open { 2 } else { u8::from(s.armed) },
+            match (s.view.open, s.view.editing) {
+                (true, true) => 3,
+                (true, false) => 2,
+                (false, _) => u8::from(s.armed),
+            },
             Ordering::Release,
         );
         (r, s.view.clone())
@@ -173,7 +231,7 @@ pub(crate) fn available() -> bool {
 pub(crate) fn tap(epoch: u64) -> bool {
     update(|s| s.tap(epoch))
 }
-pub(crate) fn show(epoch: u64, rows: Vec<Row>) {
+pub(crate) fn show(epoch: u64, rows: Vec<Entry>) {
     update(|s| s.show(epoch, rows));
 }
 /// The hold passed: open now if the rows are read, else when they are.
@@ -184,13 +242,30 @@ pub(crate) fn active() -> bool {
     PHASE.load(Ordering::Acquire) != 0
 }
 pub(crate) fn open() -> bool {
-    PHASE.load(Ordering::Acquire) == 2
+    PHASE.load(Ordering::Acquire) >= 2
+}
+/// The picker's editor has the keys; the session tap leaves them alone.
+pub(crate) fn editing() -> bool {
+    PHASE.load(Ordering::Acquire) == 3
 }
 pub(crate) fn nav(key: Nav) -> bool {
     active() && update(|s| s.navigate(key))
 }
+/// Pastes row `id`: the preview's Paste.
 pub(crate) fn click(epoch: u64, id: Id) {
     update(|s| s.pick(epoch, id));
+}
+pub(crate) fn select(epoch: u64, id: Id) {
+    update(|s| s.select(epoch, id));
+}
+pub(crate) fn edit(epoch: u64, id: Id) {
+    update(|s| s.edit(epoch, id));
+}
+pub(crate) fn stop_editing(epoch: u64) {
+    update(|s| s.stop_editing(epoch));
+}
+pub(crate) fn paste_edited(epoch: u64, text: String) {
+    update(|s| s.paste_edited(epoch, text));
 }
 /// Closes the open picker without a paste: a click outside it, or Show all
 /// History, which consumes this invocation before activating the window.
@@ -249,13 +324,71 @@ pub(crate) fn take(epoch: u64) -> Option<Choice> {
 mod tests {
     use super::*;
     use crate::history::paste_source;
-    fn row(id: u64) -> Row {
+    use crate::paste::recent::Row;
+    fn row(id: u64) -> Entry {
         Row {
             cancelled: false,
             id: Id::Dictation(paste_source::Id::Retained(id)),
             preview: format!("note {id}"),
             ready_at: id,
         }
+        .into()
+    }
+    fn capture(at: u64) -> Entry {
+        Row {
+            cancelled: false,
+            id: Id::Capture(crate::capture_host::paste_source::Id::fixture(at)),
+            preview: "over the chart".into(),
+            ready_at: at,
+        }
+        .into()
+    }
+
+    /// A click selects and a second click pastes; Edit hands a dictation's
+    /// keys to its editor, whose words paste in place of the item's own, and
+    /// sends a capture to the editor without pasting.
+    #[test]
+    fn clicks_select_then_paste_and_edit_pastes_the_edited_words() {
+        let mut s = State::default();
+        let epoch = s.begin();
+        s.reveal(epoch);
+        s.show(epoch, vec![row(3), capture(2), row(1)]);
+        s.select(epoch, row(1).row.id);
+        assert_eq!(s.view.cursor, 2);
+        assert!(s.outcome.is_none() && s.view.open);
+
+        s.edit(epoch, row(1).row.id);
+        assert!(s.view.editing);
+        // The editor has the keys: nothing moves, commits, or selects.
+        assert!(!s.navigate(Nav::Next) && !s.navigate(Nav::Commit));
+        s.select(epoch, row(3).row.id);
+        assert_eq!(s.view.cursor, 2);
+        s.paste_edited(epoch, "  ".into());
+        assert!(s.view.editing && s.outcome.is_none());
+        s.stop_editing(epoch);
+        assert!(s.view.open && !s.view.editing);
+        s.edit(epoch, row(1).row.id);
+        s.paste_edited(epoch, "note one".into());
+        assert!(matches!(s.outcome.take(), Some(Choice::Edited(text)) if text == "note one"));
+        assert!(!s.view.open && !s.view.editing);
+
+        let epoch = s.begin();
+        s.reveal(epoch);
+        s.show(epoch, vec![row(3), capture(2)]);
+        s.select(epoch, row(3).row.id);
+        assert!(matches!(s.outcome.take(), Some(Choice::Item(id)) if id == row(3).row.id));
+        let epoch = s.begin();
+        s.reveal(epoch);
+        s.show(epoch, vec![row(3), capture(2)]);
+        s.edit(epoch, capture(2).row.id);
+        assert!(matches!(s.outcome.take(), Some(Choice::Open(id)) if id == capture(2).row.id));
+        // Escape while editing still closes the whole picker.
+        let epoch = s.begin();
+        s.reveal(epoch);
+        s.show(epoch, vec![row(3)]);
+        s.edit(epoch, row(3).row.id);
+        assert!(s.navigate(Nav::Cancel));
+        assert!(matches!(s.outcome.take(), Some(Choice::Cancel)));
     }
     #[test]
     fn tap_and_cancel_claim_the_invocation_only_once() {
@@ -274,13 +407,13 @@ mod tests {
     fn cancelled_needs_an_explicit_selection_even_when_it_is_the_only_row() {
         let mut state = State::default();
         let mut cancelled = row(3);
-        cancelled.cancelled = true;
+        cancelled.row.cancelled = true;
         let epoch = state.begin();
         state.reveal(epoch);
         state.show(epoch, vec![cancelled.clone(), row(2)]);
         assert_eq!(state.view.cursor, 1);
         state.navigate(Nav::Commit);
-        assert!(matches!(state.outcome.take(),Some(Choice::Item(id)) if id==row(2).id));
+        assert!(matches!(state.outcome.take(),Some(Choice::Item(id)) if id==row(2).row.id));
         let epoch = state.begin();
         state.reveal(epoch);
         state.show(epoch, vec![cancelled.clone()]);
@@ -291,7 +424,7 @@ mod tests {
         state.show(epoch, vec![cancelled.clone()]);
         state.navigate(Nav::Next);
         state.navigate(Nav::Commit);
-        assert!(matches!(state.outcome.take(),Some(Choice::Item(id)) if id==cancelled.id));
+        assert!(matches!(state.outcome.take(),Some(Choice::Item(id)) if id==cancelled.row.id));
     }
     #[test]
     fn escape_and_delayed_click_never_commit_to_another_invocation() {
@@ -303,12 +436,12 @@ mod tests {
         let two = s.begin();
         s.reveal(two);
         s.show(two, vec![row(2), row(1)]);
-        s.pick(one, row(1).id);
+        s.pick(one, row(1).row.id);
         assert!(s.outcome.is_none());
         s.navigate(Nav::Next);
         s.navigate(Nav::Commit);
-        assert!(matches!(s.outcome.take(),Some(Choice::Item(id)) if id==row(1).id));
-        s.pick(two, row(2).id);
+        assert!(matches!(s.outcome.take(),Some(Choice::Item(id)) if id==row(1).row.id));
+        s.pick(two, row(2).row.id);
         assert!(s.outcome.is_none());
     }
 

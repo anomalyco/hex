@@ -549,6 +549,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Microphone", "Mikrofon"),
     ("Dictation shortcut", "Diktálás billentyűparancsa"),
     ("Paste last", "Utolsó beillesztése"),
+    ("Edit", "Szerkesztés"),
     ("Show all History", "Összes előzmény megjelenítése"),
     ("All types", "Minden típus"),
     ("Screen recordings", "Képernyőfelvételek"),

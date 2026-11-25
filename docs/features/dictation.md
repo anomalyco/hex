@@ -834,16 +834,33 @@ Tap, Paste Last menu, or hex paste-last → newest ready, noncancelled dictation
 Hold 200 ms on the Mac event tap → up to eight recent items, without taking focus
 ├── Rows are read from the press, so the picker fades in as the hold passes
 ├── Centred on the display under the pointer; stays open once the keys come up
+├── Rows down a rail (a capture's picture or a dictation's mark, first words, kind · age)
+│   beside the selected row's preview: a capture's first keyframe (else its contact
+│   sheet) over its words, or a dictation's whole text; then app · length · model
 ├── Initially select what tap would paste; with only Cancelled rows select nothing
 ├── Show all History → open the searchable archive, not a paste
-├── Click a row → recheck that item and paste it once into the original field
+├── Click a row → select it; click the selected row (so a double click on any row),
+│   or Paste → recheck that item and paste it once into the original field
 ├── ↑/↓, Tab, or Paste Last's key again (with or without ⌥⇧) → move; its repeats do nothing
 ├── Return or keypad Enter → paste the selected item into the original field
+├── Copy → a dictation's text, or a capture as Annotate copies it, on the clipboard; closes
+├── Edit, or a click on a dictation's words → the words become a text field in place
+│   ├── A second panel that takes the keys shows the same card; the tap passes every key to it
+│   ├── Return or Paste → paste the edited words into the original field (History is not changed)
+│   ├── Shift-Return → a new line; Escape or Cancel → back to the picker
+│   └── The app must stay in front; the field is rechecked up to 500 ms after the editor closes
+├── Open in Editor, or a click on a capture's picture → close, and open the capture as
+│   History's Open in Editor does (its movie to trim, else its picture); not a paste
 └── Escape, a click outside the card, another key, or changed focus → close without touching the clipboard
 ```
 
-Check: `a_tap_pastes_and_a_hold_opens_a_picker_that_stays_until_escape` in
-[paste/browse.rs](../../src/paste/browse.rs). Scene: `mac-paste-picker`.
+Check: `a_tap_pastes_and_a_hold_opens_a_picker_that_stays_until_escape` and
+`clicks_select_then_paste_and_edit_pastes_the_edited_words` in
+[paste/browse.rs](../../src/paste/browse.rs). Scenes: `mac-paste-picker` (a
+capture selected), `mac-paste-picker-dictation`, `mac-paste-picker-edit`.
+The scenes draw fixture rows and drawn pictures. Not yet run natively: the
+editor panel taking and returning the keys, and an edited paste landing in the
+original field after it.
 
 With it on, the Mac History puts dictations, annotations, screenshots and
 screen recordings in one list. All types is the default. Search works inside the
