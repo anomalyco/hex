@@ -1,0 +1,13 @@
+{
+  "format": "hex.words",
+  "version": 1,
+  "madeBy": {
+    "app": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "version": "1.0"
+  },
+  "vocabulary": [
+    {
+      "term": "Hex"
+    }
+  ]
+}

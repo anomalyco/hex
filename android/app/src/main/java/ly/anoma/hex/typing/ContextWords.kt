@@ -5,7 +5,10 @@ package ly.anoma.hex.typing
  * apostrophe ("id" or "I'd", "its" or "it's") and words that sound alike ("your", "there", "then");
  * "were" and "we're" aren't here, the pairs can't tell them apart. French and Italian: the same
  * letters with and without an accent, both words ("a" or "à", "ou" or "où", Italian "e" or "è"),
- * which iOS leaves to its dictionary. */
+ * which iOS leaves to its dictionary. Portuguese: the same, "e" or "é", "esta" or "está", and a verb
+ * beside the noun or adjective its accent makes ("ele duvida" or "uma dúvida", "isso magoa" or "mágoa");
+ * the model keeps those verbs although the accented word is far commoner (build-layout-model.py's
+ * PT_CONTEXT_WORDS, which lists these same words). */
 internal object ContextWords {
     private val groups = mapOf(
         "en" to listOf(
@@ -17,6 +20,19 @@ internal object ContextWords {
             listOf("sur", "sûr")),
         "it" to listOf(listOf("e", "è"), listOf("la", "là"), listOf("li", "lì"), listOf("da", "dà"), listOf("ne", "né"),
             listOf("se", "sé")),
+        "pt" to listOf(listOf("e", "é"), listOf("esta", "está"), listOf("estas", "estás"), listOf("nos", "nós"),
+            listOf("a", "à"), listOf("as", "às"), listOf("la", "lá"), listOf("da", "dá"), listOf("de", "dê"), listOf("va", "vá"),
+            listOf("ai", "aí"), listOf("pais", "país"), listOf("por", "pôr"), listOf("pode", "pôde"), listOf("tem", "têm"),
+            listOf("vem", "vêm"), listOf("mas", "más"), listOf("que", "quê"), listOf("sabia", "sábia"),
+            listOf("secretaria", "secretária"),
+            listOf("duvida", "dúvida"), listOf("duvidas", "dúvidas"), listOf("ira", "irá"), listOf("publica", "pública"),
+            listOf("publico", "público"), listOf("pratica", "prática"), listOf("praticas", "práticas"),
+            listOf("pratico", "prático"), listOf("critica", "crítica"), listOf("criticas", "críticas"),
+            listOf("analise", "análise"), listOf("divida", "dívida"), listOf("calculo", "cálculo"), listOf("media", "média"),
+            listOf("formula", "fórmula"), listOf("anuncio", "anúncio"), listOf("noticia", "notícia"),
+            listOf("fabrica", "fábrica"), listOf("valida", "válida"), listOf("numero", "número"), listOf("inicio", "início"),
+            listOf("estimulo", "estímulo"), listOf("peca", "peça"), listOf("copia", "cópia"), listOf("magoa", "mágoa"),
+            listOf("negocio", "negócio")),
     )
     private val groupOf = groups.mapValues { (_, list) -> list.flatMap { group -> group.map { it.lowercase() to group } }.toMap() }
     // The pairs barely spell contractions (the books split "I'd" into "I" and "'d"), so a
@@ -45,6 +61,11 @@ internal object ContextWords {
 
     /** Whether [language] has words its context decides. */
     fun decides(language: String) = language in groups
+
+    /** Whether [typed], a word typed with an accent held for it, stays as typed whatever follows it:
+     * in Portuguese, where "é" and "à" are among the commonest words, a held accent is the typist's
+     * choice. French and Italian still let the next word revise one ("il à faim" -> "il a faim"). */
+    fun keepsTypedAccent(language: String, typed: String) = language == "pt" && fold(typed) != typed
 
     private fun cost(model: TypingModel, word: String, previous: String?, next: String?, startsSentence: Boolean): Double {
         val expanded = if (model.language == "en") expansions[word.lowercase()] else null

@@ -7,7 +7,9 @@ mod keycaps;
 
 pub(super) use keycaps::*;
 
-use rune::{Color, El, LoopSpec, SpringPair, TextStyle, Transition, Tx, col, el, row, text};
+use rune::{
+    Color, Cursor, El, LoopSpec, SpringPair, TextStyle, Transition, Tx, col, el, row, text,
+};
 use rune_kit::{
     Button, ButtonVariant, ControlSize, Kit, Menu, MenuItem, Placement, SegmentedControl, Select,
     SelectAppearance, Switch,
@@ -1240,20 +1242,48 @@ pub(super) fn modal_panel(
 /// The capsule confirmation block: no icon, title and detail on the 16 pt text
 /// rail, equal-width Keep (neutral) and destructive (danger) buttons at inset
 /// 8 so their radius-6 corners are concentric with the radius-14 shell.
-#[allow(dead_code)]
+/// `top` when the header sits above the block so the buttons sit on the free
+/// edge.
 pub(crate) fn capsule_confirm<S: 'static>(
     p: Paint,
     title: &str,
     detail: &str,
+    top: bool,
+    disabled: bool,
     keep: (&str, impl Fn(&mut S, &mut Tx) + 'static),
     act: (&str, impl Fn(&mut S, &mut Tx) + 'static),
 ) -> El {
+    fn choice<S: 'static>(
+        p: Paint,
+        key: &'static str,
+        label: &str,
+        variant: ButtonVariant,
+        disabled: bool,
+        press: impl Fn(&mut S, &mut Tx) + 'static,
+    ) -> El {
+        let button = Button::new(label)
+            .variant(variant)
+            .build_push(p.k)
+            .key(key)
+            .grow(1.0)
+            .shrink()
+            .min_w(0.0);
+        if disabled {
+            button.disabled(true).opacity(0.5)
+        } else {
+            button
+                .cursor(Cursor::Pointer)
+                .no_window_drag()
+                .on_press_tx(press)
+        }
+    }
     let (keep_label, on_keep) = keep;
     let (act_label, on_act) = act;
-    col()
+    let block = col()
         .key("confirm")
-        .w_full()
-        .pt(4.0)
+        .role("alertdialog")
+        .label(title)
+        .w(CAPSULE.panel_w)
         .gap(12.0)
         .child(
             col()
@@ -1265,14 +1295,14 @@ pub(crate) fn capsule_confirm<S: 'static>(
                         .key("title")
                         .font(p.strong())
                         .color(p.text())
-                        .wrap(),
+                        .truncate(),
                 )
                 .child(
                     text(detail)
                         .key("detail")
                         .font(p.description())
                         .color(p.muted())
-                        .wrap(),
+                        .truncate(),
                 ),
         )
         .child(
@@ -1280,29 +1310,31 @@ pub(crate) fn capsule_confirm<S: 'static>(
                 .key("actions")
                 .w_full()
                 .px(CAPSULE.button_inset)
-                .pb(CAPSULE.button_inset)
                 .gap(8.0)
-                .child(
-                    Button::new(keep_label)
-                        .variant(ButtonVariant::Neutral)
-                        .on_press_tx(on_keep)
-                        .build_push(p.k)
-                        .key("keep")
-                        .grow(1.0)
-                        .shrink()
-                        .min_w(0.0),
-                )
-                .child(
-                    Button::new(act_label)
-                        .variant(ButtonVariant::Danger)
-                        .on_press_tx(on_act)
-                        .build_push(p.k)
-                        .key("act")
-                        .grow(1.0)
-                        .shrink()
-                        .min_w(0.0),
-                ),
-        )
+                .child(choice(
+                    p,
+                    "keep",
+                    keep_label,
+                    ButtonVariant::Neutral,
+                    disabled,
+                    on_keep,
+                ))
+                .child(choice(
+                    p,
+                    "act",
+                    act_label,
+                    ButtonVariant::Danger,
+                    disabled,
+                    on_act,
+                )),
+        );
+    // The buttons keep the panel's edge inset; the 4 pt the header leaves
+    // goes between the question and the header.
+    if top {
+        block.pt(4.0).pb(CAPSULE.button_inset)
+    } else {
+        block.pt(CAPSULE.button_inset).pb(4.0)
+    }
 }
 
 /// Wraps `panel` in a modal sheet's overlay elevation, scrim, and centered

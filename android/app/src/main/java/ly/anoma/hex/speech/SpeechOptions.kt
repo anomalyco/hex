@@ -9,7 +9,7 @@ internal enum class Style { Polished, Casual, Notes, Verbatim }
  * [DictationLanguage]; a language can be dictated without a layout of its own. */
 internal enum class Spoken(val code: String, val label: String) {
     English("en", "English"), Spanish("es", "Español"), German("de", "Deutsch"), Norwegian("no", "Norsk"),
-    French("fr", "Français"), Italian("it", "Italiano");
+    French("fr", "Français"), Italian("it", "Italiano"), Portuguese("pt", "Português");
 
     // Whisper calls Bokmål "no"; the keyboard and its model use BCP 47 "nb".
     val layoutCode get() = if (this == Norwegian) "nb" else code
@@ -27,8 +27,9 @@ internal enum class DictationLanguage(val code: String, val label: String, val l
     English("en", "English", Spoken.English), Spanish("es", "Español", Spoken.Spanish),
     German("de", "Deutsch", Spoken.German), Norwegian("no", "Norsk", Spoken.Norwegian),
     French("fr", "Français", Spoken.French), Italian("it", "Italiano", Spoken.Italian), Dutch("nl", "Nederlands", null),
-    // One entry for Brazil and Portugal: Whisper has a single "pt", and Hex has no regional rules.
-    Portuguese("pt", "Português", null),
+    // One entry for Brazil and Portugal: Whisper has a single "pt", and Hex has no regional rules. Its typing
+    // model is Brazil's, with Portugal's spellings among its real words (benchmark/typing/README.md).
+    Portuguese("pt", "Português", Spoken.Portuguese),
     // No layouts of their own yet: Polish's letters are held on the English keys, and Russian has no
     // Cyrillic keys, so a Russian speaker dictates here and types on another keyboard.
     Polish("pl", "Polski", null), Russian("ru", "Русский", null);
@@ -63,7 +64,7 @@ internal fun phoneLanguage(chosen: DictationLanguage?, pinned: Spoken?, system: 
 
 /** The layout whose typing model the keyboard reads: the one pinned in Keyboard › Keyboard layout, else the
  * dictation language's own. Null when the keys are only English's stand-in for a language with no layout
- * (Português, Nederlands, Polski, Русский): English's next words and autocorrections are not that language's. */
+ * (Nederlands, Polski, Русский): English's next words and autocorrections are not that language's. */
 internal fun typingLayout(pinned: Spoken?, spoken: DictationLanguage): Spoken? = pinned ?: spoken.layout
 
 internal data class SpeechOptions(val style: Style, val spoken: DictationLanguage, val clean: Boolean, val translate: Boolean,
@@ -78,7 +79,9 @@ internal data class SpeechOptions(val style: Style, val spoken: DictationLanguag
                                    val learnFixes: Boolean = false,
                                    /** What the recognizers hear: [vocabulary] unless the lab adds learned words.
                                     * Never used as forced spellings. */
-                                   val hints: List<String> = emptyList()) {
+                                   val hints: List<String> = emptyList(),
+                                   /** Custom vocabulary's Word replacements, applied before learned fixes. */
+                                   val replacements: List<WordReplacement> = emptyList()) {
     /** Whisper's prompt and Parakeet's vocabulary. A translated dictation gets only the custom terms, and off
      * the lab's hints are the terms exactly as they always were. */
     val recognitionHints get() = if (!learnFixes || translate) vocabulary else hints
@@ -142,6 +145,10 @@ internal class SpeechPreferences(private val context: Context) {
     var vocabularyTerms: List<String>
         get() = prefs.getString("vocabularyTerms", null)?.split('\n').orEmpty().filter(String::isNotEmpty)
         set(value) { prefs.edit().putString("vocabularyTerms", VocabularySpelling.sanitize(value).joinToString("\n")).apply() }
+    // Custom vocabulary › Word replacements, kept even while the switch is off.
+    var wordReplacements: List<WordReplacement>
+        get() = WordReplacements.decode(prefs.getString("wordReplacements", null).orEmpty())
+        set(value) { prefs.edit().putString("wordReplacements", WordReplacements.encode(WordReplacements.valid(value))).apply() }
     // Labs › Faster English dictation, off by default: English dictations use the downloaded faster model once it is there.
     var fastEnglish: Boolean
         get() = prefs.getBoolean("fastEnglish", false)
@@ -167,6 +174,7 @@ internal class SpeechPreferences(private val context: Context) {
         // as iOS's spellings do; their other words are recognition hints alone.
         val vocabulary = forcedSpellings(terms, learned, learnFixes, translated)
         return SpeechOptions(style, spoken, clean, translated, lowercase, endWithPeriod, formatLists, spokenPunctuation,
-            vocabulary, fastEnglish, learned, learnFixes, recognitionHints(terms, learned, learnFixes, translated))
+            vocabulary, fastEnglish, learned, learnFixes, recognitionHints(terms, learned, learnFixes, translated),
+            if (customVocabulary) wordReplacements else emptyList())
     }
 }

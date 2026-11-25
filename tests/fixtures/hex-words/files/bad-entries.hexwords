@@ -1,0 +1,22 @@
+{
+  "format": "hex.words",
+  "version": 1,
+  "vocabulary": [
+    "Rune",
+    {},
+    {"term": 5},
+    null,
+    {"term": "Kit", "soundsLike": "kitt"},
+    {"term": "Dax", "soundsLike": ["dacks", 7, null, ["nested"]]},
+    {"term": "..."}
+  ],
+  "replacements": [
+    {"heard": "only heard"},
+    {"heard": "null output", "write": null},
+    {"write": "no heard"},
+    {"heard": "gee", "write": "g", "learned": "yes"},
+    {"heard": "!!!", "write": "x"},
+    [],
+    {"heard": "fine", "write": "Fine", "learned": false}
+  ]
+}

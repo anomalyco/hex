@@ -41,11 +41,6 @@ final class FullKeyboardView: UIView {
     let callout = KeyCalloutView()
     let accentCallout = AccentCalloutView()
     let hexKey = HexKeyControl()
-    /// A theme's own opaque panel behind every key and the strip, at the glass panel's own
-    /// frame and top corners (`KeyboardThemePanelView`): this view's own background stays
-    /// clear, since filling its whole rect would draw square corners over the app. Hidden
-    /// under Automatic, which leaves iOS's glass exactly as it was.
-    let themePanel = KeyboardThemePanelView()
     let globeButton = UIButton(type: .custom)
     /// The words' side of the soft edge the recording bar's dots come out of the Hex key behind
     /// (`StripRevealMask`); only while the bar is coming, shown, or going.
@@ -121,7 +116,7 @@ final class FullKeyboardView: UIView {
     /// Settings › Experiments › Emoji shortcodes, cached by `syncEmojiShortcodes`: the strip
     /// offers emoji for a ":name" and the closing ":" completes one while it is on.
     private(set) var emojiShortcodesEnabled = false
-    /// Settings › Experiments › Keyboard themes: Automatic keeps iOS's glass; another theme
+    /// Settings › Experiments › Key colors: Automatic keeps iOS's glass; another theme
     /// paints the keyboard's own colours. Read again by `syncSettings`, which rebuilds the
     /// palette when it changes.
     private var keyboardTheme = FullKeyboardSettings().effectiveKeyboardTheme
@@ -168,9 +163,6 @@ final class FullKeyboardView: UIView {
         super.init(frame: .zero)
         backgroundColor = .clear
 
-        // Under the glass panel's rim, under every key: the keys' pop-ups overflow this
-        // view, which must never clip them, so the panel is a subview, not this view's fill.
-        insertSubview(themePanel, at: 0)
         addSubview(stripView)
         addSubview(plane)
         addSubview(selectionStrip)
@@ -767,8 +759,6 @@ final class FullKeyboardView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        // A theme's panel keeps the glass panel's corners, 1 pt inside its rim.
-        themePanel.place(in: bounds)
         syncPosture()
         let isLandscape = orientation == .landscape
         engine.typingLog?.viewGeometry(size: bounds.size, safeArea: safeAreaInsets)
@@ -843,12 +833,8 @@ final class FullKeyboardView: UIView {
         let isDark = appearanceOverride
             ?? FullKeyboardPalette.isDark(traits: traitCollection)
         let next = FullKeyboardPalette(isDark: isDark, theme: keyboardTheme)
-        // A theme paints its own opaque panel, so the system glass behind the keys never
-        // shows through. The panel, not this view, keeps the glass panel's corners;
-        // Automatic leaves both clear as before.
+        // iOS's glass is the background, with or without a theme: a theme colours the keys.
         backgroundColor = drawsBackdrop ? next.backdrop : .clear
-        themePanel.isHidden = !next.drawsOwnBackground
-        themePanel.backgroundColor = next.drawsOwnBackground ? next.backdrop : .clear
         stripView.inSystemPlatter = !drawsBackdrop
         guard next != palette || !didApplyPalette else { return }
         didApplyPalette = true
@@ -1284,6 +1270,11 @@ final class FullKeyboardView: UIView {
             self?.typingLog?.ui("translate", [TypingLogField("target", .string(target))])
             self?.model.onTranslationTargetSelected?(target)
             self?.dismissStyleMenu()
+        }
+        menu.onOpenHex = { [weak self] in
+            self?.typingLog?.ui("open_hex", [TypingLogField("from", .string("hex_menu"))])
+            self?.dismissStyleMenu()
+            self?.model.onOpenURL?(KeyboardLaunchRequest.home.url)
         }
         menu.onStyle = { [weak self] style in
             self?.typingLog?.ui("style", [

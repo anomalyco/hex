@@ -1,0 +1,12 @@
+{
+  "format": "hex.words",
+  "version": 1,
+  "vocabulary": [
+    {
+      "term": "C [[[[[[[[[[ ]]",
+      "soundsLike": [
+        "see \"{{{{{{{{{{\\"
+      ]
+    }
+  ]
+}

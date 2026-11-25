@@ -166,7 +166,7 @@ private final class GlobeKeycapView: UIView {
         context.fillKeycap(bounds, fill: palette.keyFill, shadow: palette.keyShadow, radius: cornerRadius)
         let config = UIImage.SymbolConfiguration(pointSize: isLandscape ? 16 : 19, weight: .regular)
         guard let image = UIImage(systemName: "globe", withConfiguration: config)?
-            .withTintColor(palette.textBase, renderingMode: .alwaysOriginal) else { return }
+            .withTintColor(palette.keyText, renderingMode: .alwaysOriginal) else { return }
         image.draw(at: CGPoint(x: bounds.midX - image.size.width / 2, y: bounds.midY - image.size.height / 2 + (isLandscape ? 0 : -1)))
     }
 }

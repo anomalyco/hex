@@ -122,13 +122,13 @@ class MainActivity : ComponentActivity() {
                 BackHandler(page == 2) { go(1) }
                 BackHandler(page == 1 && setup.ready) { go(3) }
                 val model = ModelStore.small.state.collectAsState().value
-                if (page == 3) HexSettings(setup, speech, typing, model, ::downloadModel,
+                if (page == 3) HexSettings(setup, speech, typing, model, ::modelRowAction,
                     phase, transcript, notice, ::dictate, capture::cancel, { transcript = "" }, { go(it) },
                     { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) },
                     startPage = startPage)
                 else SetupScreen(page, setup, ::go, ::askForMic,
                     enable = { enabling = true; startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) },
-                    choose = { imm.showInputMethodPicker() }, model = model, download = ::downloadModel,
+                    choose = { imm.showInputMethodPicker() }, model = model, download = ::downloadModel, rowAction = ::modelRowAction,
                     language = remember(LocalConfiguration.current) { speech.phoneLanguage })
             }
         }
@@ -143,8 +143,13 @@ class MainActivity : ComponentActivity() {
             SpeechPhase.Transcribing -> Unit
         }
     }
-    /** The speech model's download, from setup's first tap or Dictation's Download: any network, as before. */
+    /** The speech model's download, from setup's first tap: it waits for Wi-Fi on mobile data (ModelStore). */
     private fun downloadModel() = ModelStore.small.download(this)
+    /** The speech model row's action: Download or Try again, or, while it waits for Wi-Fi, the download on mobile data. */
+    private fun modelRowAction() {
+        if (ModelStore.small.state.value == ModelStore.State.WaitingForWifi) ModelStore.small.useMobileData(this)
+        else ModelStore.small.download(this)
+    }
     private fun go(target: Int) {
         val next = target.coerceIn(1, 3)
         if (page == 3 && next != 3) { capture.cancel(); transcript = "" }
@@ -185,7 +190,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun HexTheme(content: @Composable () -> Unit) {
+internal fun HexTheme(content: @Composable () -> Unit) {
     val ink = colorResource(R.color.ink)
     val page = colorResource(R.color.page)
     val scheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()
@@ -196,7 +201,8 @@ private fun HexTheme(content: @Composable () -> Unit) {
 
 @Composable
 private fun SetupScreen(page: Int, setup: Setup, go: (Int) -> Unit, ask: () -> Unit, enable: () -> Unit, choose: () -> Unit,
-                        model: ModelStore.State, download: () -> Unit, language: PhoneLanguage) {
+                        model: ModelStore.State, download: () -> Unit, rowAction: () -> Unit,
+                        language: PhoneLanguage) {
     val colors = MaterialTheme.colorScheme
     var text by remember(page) { mutableStateOf("") }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -238,7 +244,7 @@ private fun SetupScreen(page: Int, setup: Setup, go: (Int) -> Unit, ask: () -> U
                                 else -> R.string.setup_keyboard_off
                             }), setup.chosen)
                             HorizontalDivider(color = colors.outline)
-                            ModelRow(model, download)
+                            ModelRow(model, rowAction)
                             HorizontalDivider(color = colors.outline)
                             SetupRow(stringResource(R.string.setup_language), languageNote(language), false)
                         }
@@ -314,7 +320,7 @@ private fun Practice(text: String, change: (String) -> Unit, setup: Setup, choos
         }
         builtIn == false -> null
         model is ModelStore.State.Loading -> stringResource(R.string.setup_try_model_loading, model.percent)
-        model is ModelStore.State.Retry -> modelStatus(model)
+        model is ModelStore.State.Retry || model == ModelStore.State.WaitingForWifi -> modelStatus(model)
         else -> null
     }
     if (builtIn != null) {
@@ -378,10 +384,12 @@ private fun SetupRow(title: String, note: String, ready: Boolean) {
         ModelStore.Problem.Server -> R.string.model_stopped
     })
     is ModelStore.State.Loading -> stringResource(R.string.model_loading, state.percent)
+    ModelStore.State.WaitingForWifi -> stringResource(R.string.model_waiting_wifi)
 }
 internal fun modelAction(state: ModelStore.State) = when (state) {
     ModelStore.State.Available -> R.string.model_download
     is ModelStore.State.Retry -> R.string.model_try_again
+    ModelStore.State.WaitingForWifi -> R.string.model_use_mobile_data
     else -> null
 }
 
@@ -393,8 +401,8 @@ internal fun modelAction(state: ModelStore.State) = when (state) {
                 Text(if (state == ModelStore.State.Available) stringResource(R.string.setup_model_size) else modelStatus(state),
                     color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
-            // Setup's first tap starts the download; the row keeps only Try again.
-            if (state is ModelStore.State.Retry) TextButton(onClick = download) { Text(stringResource(R.string.model_try_again)) }
+            // Setup's first tap starts the download; the row keeps Try again and, waiting for Wi-Fi, Use mobile data.
+            if (state != ModelStore.State.Available) modelAction(state)?.let { TextButton(onClick = download) { Text(stringResource(it)) } }
         }
         if (state is ModelStore.State.Loading) LinearProgressIndicator(progress = { state.percent / 100f },
             modifier = Modifier.fillMaxWidth(), trackColor = MaterialTheme.colorScheme.outline)

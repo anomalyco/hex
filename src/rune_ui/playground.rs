@@ -187,6 +187,8 @@ const PATHS: &[(&str, &str)] = &[
     ),
     ("meetings-failed", "Window/Meetings/Failed"),
     ("meetings-empty", "Window/Meetings/Empty"),
+    ("meetings-audio-off", "Window/Meetings/System audio off"),
+    ("meetings-off-sidebar", "Window/Meetings/Off in the sidebar"),
     ("meetings-off", "Window/Meetings/Off"),
     ("meetings-settings", "Window/Meetings/Settings"),
     ("meetings-calls", "Window/Meetings/Calls"),
@@ -240,11 +242,13 @@ const PATHS: &[(&str, &str)] = &[
     #[cfg(all(target_os = "macos", hex_capture))]
     ("mac-paste-picker", "Window/History/Paste Last picker"),
     #[cfg(hex_capture)]
-    ("captures", "Window/Captures/Captures"),
+    ("captures", "Window/Annotate/Captures"),
     #[cfg(hex_capture)]
-    ("captures-empty", "Window/Captures/Empty"),
+    ("captures-empty", "Window/Annotate/Captures empty"),
     #[cfg(hex_capture)]
-    ("mac-scrawl", "Window/Annotate/On"),
+    ("mac-annotate", "Window/Annotate/Annotations"),
+    #[cfg(hex_capture)]
+    ("mac-scrawl", "Window/Annotate/Settings"),
     #[cfg(hex_capture)]
     ("mac-routing-rules", "Window/Annotate/Auto-send rules"),
     #[cfg(hex_capture)]

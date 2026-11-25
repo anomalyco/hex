@@ -202,7 +202,7 @@ struct ExperimentsSettingsPage: View {
             SettingsDivider()
 
             SettingsToggleRow(
-                title: String(localized: "Keyboard themes"),
+                title: String(localized: "Key colors"),
                 isOn: keyboardBinding(\.keyboardThemesEnabled)
             )
 
@@ -343,13 +343,13 @@ struct ExperimentsSettingsPage: View {
     }
 }
 
-/// Experiments › Keyboard themes: the theme the full keyboard draws while it's on.
+/// Experiments › Key colors: the colour the full keyboard's keys take while it's on.
 private struct KeyboardThemeRow: View {
     @Binding var theme: KeyboardTheme
 
     var body: some View {
         HStack(spacing: 12) {
-            SettingsRowLabel(title: String(localized: "Theme"))
+            SettingsRowLabel(title: String(localized: "Color"))
             Spacer(minLength: 8)
             Menu {
                 ForEach(KeyboardTheme.allCases, id: \.self) { option in

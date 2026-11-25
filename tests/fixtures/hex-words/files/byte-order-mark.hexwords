@@ -1,0 +1,41 @@
+﻿{
+  "format": "hex.words",
+  "version": 1,
+  "madeBy": {
+    "app": "Hex for Mac",
+    "version": "3.1.0"
+  },
+  "vocabulary": [
+    {
+      "term": "OpenCode",
+      "soundsLike": [
+        "open code",
+        "open coat"
+      ]
+    },
+    {
+      "term": "Rune"
+    },
+    {
+      "term": "Dax Raad",
+      "soundsLike": [
+        "dax rad"
+      ]
+    }
+  ],
+  "replacements": [
+    {
+      "heard": "jet hub",
+      "write": "GitHub"
+    },
+    {
+      "heard": "cloud code",
+      "write": "Claude Code",
+      "learned": true
+    },
+    {
+      "heard": "dash dash",
+      "write": "--"
+    }
+  ]
+}

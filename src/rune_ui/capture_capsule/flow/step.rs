@@ -271,14 +271,47 @@ impl Flow {
             {
                 Phase::Routed(routed)
             }
-            // The capture shortcut over the suggestions searches every
-            // session; in the search it records anew, which the listener
-            // does itself.
+            // The capture shortcut over a compact finished capsule or open
+            // suggestions opens session search; once search is already open it
+            // records anew, which the listener does itself.
             (Phase::Routed(routed), Input::Record)
-                if routed.open.as_ref().is_some_and(|open| !open.typing) =>
+                if routed.open.as_ref().is_some_and(|open| !open.typing)
+                    || routed.compact_searchable() =>
             {
                 self.phase = Phase::Routed(routed);
                 return self.step(Input::OpenList, now);
+            }
+            (phase @ Phase::Queued { .. }, Input::Record) => {
+                self.phase = phase;
+                return self.step(Input::OpenList, now);
+            }
+            (
+                Phase::Queued {
+                    to, session, back, ..
+                },
+                Input::OpenList,
+            ) => {
+                let route = back.unwrap_or_else(|| Route::Nothing {
+                    recent: vec![
+                        Dest::new(to.clone(), tr("queued")).session(session.unwrap_or(to)),
+                    ],
+                });
+                let mut routed = Routed {
+                    route,
+                    at: now,
+                    open: Some(Open {
+                        typing: true,
+                        ..Open::suggesting()
+                    }),
+                    taken_back: false,
+                    already_with: None,
+                    taken_from: None,
+                    delivered: false,
+                    sending: false,
+                    queued: true,
+                };
+                clamp(&mut routed);
+                Phase::Routed(routed)
             }
             (Phase::Routed(mut routed), Input::OpenList) => {
                 match &mut routed.open {
@@ -390,10 +423,10 @@ impl Flow {
             // Taken back, folding it starts its hold: it leaves like any
             // finished capsule, and Send to… brings it back.
             (Phase::Routed(mut routed), Input::ClickAway) if !self.hovered => {
-                if routed.taken_back {
-                    routed.at = now;
-                }
                 if routed.open.take().is_some() {
+                    if routed.taken_back {
+                        routed.at = now;
+                    }
                     self.fold_hold(now);
                 }
                 Phase::Routed(routed)

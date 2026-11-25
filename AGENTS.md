@@ -1400,12 +1400,12 @@ CoreAudio formats, AppleScript details, or event serialization.
   never overwriting.
 - Meeting data is a liability: until the user chooses a `meetings.retention`,
   meetings recorded since the default began (manifest `retention_applies`)
-  are kept 24 hours and older ones stay; a chosen retention covers every
+  are kept 7 days and older ones stay; a chosen retention covers every
   finished meeting. The meeting controller expires them at launch and hourly,
-  Meetings on or off, measured from when they ended: the recording folder
-  moves to the Trash (never `rm`), and the exported Markdown only while it
-  still matches the SHA-256 of the copy Hex last wrote (`export_sha256`), so
-  an edited copy stays. Recording, transcribing, writing-notes, and
+  Meetings on or off, measured from when they ended: only the recording folder
+  in Application Support moves to the Trash (never `rm`). Expiry never moves
+  the exported Markdown or notes file in the meetings folder; only an explicit
+  Delete trashes those. Recording, transcribing, writing-notes, and
   final.pending meetings wait. Queries, `hex meetings`, `hex mcp`, and the
   pane never return an expired meeting.
 - Visible state remains `Transcribing` until every accepted transcription or

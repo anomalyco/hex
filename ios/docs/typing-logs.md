@@ -246,6 +246,7 @@ Taps that aren't text: `action`:
 - `hex_key` (`dictation`: `warm`, `keyboard`, `open_hex`), `hex_menu`, `style`
   (`style`, `from`: `hex_menu` or `recording_panel`),
   `dictation_language` (`language`: BCP 47 or `automatic`, from the Hex menu),
+  `open_hex` (`from: hex_menu`, the menu's Open Hex row),
   `dictation_stop` (`from: hex_key_release` when lifting a push-to-talk hold
   ends it), `dictation_cancel`;
 - `next_keyboard` (strip chip), `globe`, `undo_dictation` (`applied: false` when

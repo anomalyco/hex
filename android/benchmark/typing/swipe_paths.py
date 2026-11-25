@@ -28,10 +28,11 @@ GOLDEN = 0x9E3779B97F4A7C15
 # Letter rows, as android/app/src/main/java/ly/anoma/hex/keyboard/KeyboardLetters.kt draws them.
 # French's apostrophe key ends row 2: a key, but not a letter.
 ROWS = {"en": ["qwertyuiop", "asdfghjkl", "zxcvbnm"], "it": ["qwertyuiop", "asdfghjkl", "zxcvbnm"],
+        "pt": ["qwertyuiop", "asdfghjkl", "zxcvbnm"],
         "es": ["qwertyuiop", "asdfghjklñ", "zxcvbnm"], "nb": ["qwertyuiopå", "asdfghjkløæ", "zxcvbnm"],
         "de": ["qwertzuiopü", "asdfghjklöä", "yxcvbnm"], "fr": ["azertyuiop", "qsdfghjklm", "wxcvbn'"]}
 # Added to seed * 7919 for the sentence loop (en and es as the Swift bench has them).
-SEED_OFFSET = {"en": 0, "es": 17, "de": 29, "nb": 31, "fr": 37, "it": 41}
+SEED_OFFSET = {"en": 0, "es": 17, "de": 29, "nb": 31, "fr": 37, "it": 41, "pt": 43}
 # Letters with neither a key nor a base letter's key, swiped as these keys.
 SPELLED = {"ß": "s", "œ": "oe", "æ": "ae"}
 

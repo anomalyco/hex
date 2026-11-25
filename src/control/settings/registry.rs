@@ -915,7 +915,7 @@ pub(super) const KEYS: &[Key] = &[
     optional(
         "meetings.retention",
         Kind::Choice(&["day", "week", "month", "forever"]),
-        "How long finished meetings are kept before they move to the Trash; none keeps new meetings 24 hours and older ones until you choose",
+        "How long finished meetings are kept before they move to the Trash; none keeps new meetings 7 days and older ones until you choose",
     ),
     optional(
         "meetings.audio_retention",

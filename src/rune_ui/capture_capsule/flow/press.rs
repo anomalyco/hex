@@ -179,36 +179,6 @@ impl Flow {
                 self.phase = quick_send(routed, now, rule_match, &mut actions);
                 actions
             }
-            (Phase::Queued { .. }, Id::More) => {
-                let Phase::Queued {
-                    to, session, back, ..
-                } = std::mem::replace(&mut self.phase, Phase::Hidden)
-                else {
-                    unreachable!()
-                };
-                let route = back.unwrap_or_else(|| Route::Nothing {
-                    recent: vec![
-                        Dest::new(to.clone(), tr("queued")).session(session.unwrap_or(to)),
-                    ],
-                });
-                let mut routed = Routed {
-                    route,
-                    at: now,
-                    open: Some(Open {
-                        typing: true,
-                        ..Open::suggesting()
-                    }),
-                    taken_back: false,
-                    already_with: None,
-                    taken_from: None,
-                    delivered: false,
-                    sending: false,
-                    queued: true,
-                };
-                clamp(&mut routed);
-                self.phase = Phase::Routed(routed);
-                Vec::new()
-            }
             (Phase::Sent(_), Id::Always) => {
                 let mut closed = false;
                 if let Phase::Sent(sent) = &mut self.phase {

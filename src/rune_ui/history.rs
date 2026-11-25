@@ -1111,7 +1111,7 @@ fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         row()
             .key("delete-confirm")
             .gap(8.0)
-            .pt(14.0)
+            .pt(12.0)
             .child(button(
                 p,
                 "history-confirm-delete",
