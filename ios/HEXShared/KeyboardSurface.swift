@@ -423,7 +423,8 @@ private struct TranslationBadge: View {
 }
 
 enum KeyboardSetupCopy {
-    static let fullAccessPath = String(localized: "Allow Full Access: Settings › Apps › Hex › Keyboards")
+    /// Short enough for the bar on every iPhone; Set up Hex beside it opens the way there.
+    static let fullAccessNeeded = String(localized: "Allow Full Access to dictate")
 }
 
 /// Metal-free stand-in for the resting Dot Scope bar. Mounting it instead of
@@ -793,14 +794,14 @@ struct KeyboardSurfaceView: View {
         return ZStack(alignment: .leading) {
             HStack(spacing: 6) {
                 HexStatusDot(color: HexTheme.warmMic, size: 6)
-                Text(KeyboardSetupCopy.fullAccessPath)
+                Text(KeyboardSetupCopy.fullAccessNeeded)
                     .font(.system(size: 13, weight: .regular))
                     .foregroundStyle(p.textMuted)
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
             }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("Full Access is off. \(KeyboardSetupCopy.fullAccessPath)")
+            .accessibilityLabel("Full Access is off. \(KeyboardSetupCopy.fullAccessNeeded)")
             .hexTrayReveal(slot == .noAccess, reduceMotion: reduceMotion, offsetY: 2)
 
             Text("Starting…")

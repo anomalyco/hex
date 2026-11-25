@@ -4476,7 +4476,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "允许完全访问后即可听写"
+            "value" : "允许完全访问以听写"
           }
         }
       }
@@ -4507,16 +4507,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开 Hex 的设置步骤"
-          }
-        }
-      }
-    },
-    "Allow Full Access: Settings › Apps › Hex › Keyboards" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "允许完全访问：设置 › App › Hex › 键盘"
           }
         }
       }
