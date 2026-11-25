@@ -565,6 +565,12 @@ class InsertionTest {
         // A first language Hex can't dictate is named in itself; Automatic takes the next one it can.
         assertEquals(PhoneLanguage(DictationLanguage.German, "日本語"), phone("ja-JP", "de-DE"))
         assertEquals(PhoneLanguage(DictationLanguage.English, "中文"), phone("zh-CN"))
+        // The phone's own list, whatever Hex's App language: English only, with Hex in 中文, is English, said as such.
+        assertEquals(PhoneLanguage(DictationLanguage.English), phone("en-US"))
+        assertEquals(PhoneLanguage(DictationLanguage.English, "Svenska"), phone("sv-SE", "en-US"))
+        assertEquals(PhoneLanguage(DictationLanguage.Portuguese, others = listOf(DictationLanguage.English)), phone("pt-BR", "en-US"))
+        assertEquals(PhoneLanguage(DictationLanguage.Spanish, others = listOf(DictationLanguage.English, DictationLanguage.Portuguese)),
+            phone("es-ES", "en-US", "pt-BR"))
         // A language chosen in Settings, or a pinned layout, is its own reason.
         assertEquals(PhoneLanguage(DictationLanguage.Spanish, automatic = false), phoneLanguage(DictationLanguage.Spanish, null, listOf(Locale.forLanguageTag("ja-JP"))))
         assertEquals(PhoneLanguage(DictationLanguage.German, automatic = false), phoneLanguage(null, Spoken.German, listOf(Locale.forLanguageTag("pt-BR"), Locale.ENGLISH)))
