@@ -1,7 +1,8 @@
 //! Vocabulary: a sheet from General's Vocabulary row with one row per term
-//! and its "sounds like" spellings, edited in place and saved when typing
-//! pauses, like a mode's corrections. The boost has no control here; it
-//! stays a setting (`hex settings set vocabulary_boost`).
+//! ("Spell as") and its "sounds like" spellings ("Misheard as"), edited in
+//! place and saved when typing pauses, like a mode's corrections. The boost
+//! has no control here; it stays a setting
+//! (`hex settings set vocabulary_boost`).
 
 use std::path::{Path, PathBuf};
 
@@ -27,9 +28,12 @@ const FADES: (f32, f32) = (0.0, 6.0);
 /// end shows no sliver of a row above.
 const ROWS_HEIGHT: f32 = 8.0 * ROW_HEIGHT + FADES.0 + FADES.1;
 /// Room beside the rows inside the list's clip, so the fields' borders
-/// aren't cut at its sides.
+/// aren't cut at its left.
 const SIDE_ROOM: f32 = 2.0;
 const TERM_WIDTH: f32 = 200.0;
+/// From the column labels to the first row; with the row's own padding,
+/// the labels sit `METRICS.label_gap` above the first field.
+const LABEL_GAP: f32 = 4.0;
 
 /// One term row: its term and "sounds like" fields, and an identity that
 /// stays with the row as rows before it are removed, so a callback built
@@ -547,7 +551,8 @@ fn term_row(p: Paint, entry: &TermRow, added: bool) -> El {
         .center_y()
         .child(
             TextInput::new(&entry.term)
-                .placeholder(tr("Term (e.g. cappuccino)"))
+                .label(tr("Spell as"))
+                .placeholder(tr("e.g. cappuccino"))
                 .width(Some(TERM_WIDTH))
                 .on_edit(edit_access(move |ui: &mut Ui| {
                     ui.vocabulary.field(id, false)
@@ -557,7 +562,8 @@ fn term_row(p: Paint, entry: &TermRow, added: bool) -> El {
         )
         .child(
             TextInput::new(&entry.sounds_like)
-                .placeholder(tr("Sounds like (e.g. capuchin, cap a chino)"))
+                .label(tr("Misheard as"))
+                .placeholder(tr("e.g. capuchin, cap a chino"))
                 .width(None)
                 .on_edit(edit_access(move |ui: &mut Ui| {
                     ui.vocabulary.field(id, true)
@@ -579,19 +585,44 @@ fn term_row(p: Paint, entry: &TermRow, added: bool) -> El {
     }
 }
 
+/// The two columns' names, over the fields they name. They stay while rows
+/// are filled in, when no placeholder is left to say which column is which.
+fn column_labels(p: Paint) -> El {
+    let label = |key: &str, copy: &str, color| text(copy).key(key).font(p.label()).color(color);
+    row()
+        .key("columns")
+        .pl(SIDE_ROOM)
+        .mb(LABEL_GAP)
+        .gap(8.0)
+        .child(label("term-label", tr("Spell as"), p.muted()).w(TERM_WIDTH))
+        .child(label("sounds-like-label", tr("Misheard as"), p.muted()))
+        .child(label("optional", tr("optional"), p.faint()))
+}
+
 pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
-    let rows = col().key("terms").px(SIDE_ROOM).children(
-        ui.vocabulary
-            .rows
-            .iter()
-            .map(|entry| term_row(p, entry, ui.vocabulary.added == Some(entry.id))),
-    );
+    let rows = col()
+        .key("terms")
+        .pl(SIDE_ROOM)
+        .pr(METRICS.row_px)
+        .children(
+            ui.vocabulary
+                .rows
+                .iter()
+                .map(|entry| term_row(p, entry, ui.vocabulary.added == Some(entry.id))),
+        );
     let height = ui.vocabulary.rows.len() as f32 * ROW_HEIGHT + FADES.0 + FADES.1;
+    // The list reaches the panel's card edge on the right, so its scroll bar
+    // sits past the remove buttons instead of over them.
     let terms = col()
         .key("term-column")
-        .h(height.min(ROWS_HEIGHT))
-        .px(METRICS.row_px - SIDE_ROOM)
-        .child(super::faded_body(p.k, "term-scroll", rows, FADES));
+        .pl(METRICS.row_px - SIDE_ROOM)
+        .child(column_labels(p))
+        .child(
+            col()
+                .key("term-list")
+                .h(height.min(ROWS_HEIGHT))
+                .child(super::faded_body(p.k, "term-scroll", rows, FADES)),
+        );
     let mut footer = vec![button(
         p,
         "add-term",
@@ -635,19 +666,12 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
         .gap(4.0)
         .child(
             text(tr(
-                "Transcription and rewriting spell them right, and search finds them when misheard",
+                "Names and words Hex should spell right. Phrases match only when said in full.",
             ))
             .key("description")
             .font(p.description())
             .color(p.muted())
             .wrap(),
-        )
-        .child(
-            text(tr("Terms with spaces match only when said in full"))
-                .key("phrases")
-                .font(p.description())
-                .color(p.muted())
-                .wrap(),
         );
     let unused = unused_note(ui).or_else(|| budget_note(ui));
     if let Some(unused) = unused {
@@ -687,16 +711,18 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
     modal_sheet(p, "vocabulary", panel, close)
 }
 
-/// A few terms, one with spellings, with the sheet open.
+/// A few terms, some with spellings, with the sheet open.
 pub(super) fn fixture(ui: &mut Ui, filled: bool) {
     ui.settings.vocabulary = if filled {
         let mut entries = Vec::new();
         for (term, sounds_like) in [
-            ("cappuccino", "capuchin, cap a chino"),
+            ("Claude", "clawed"),
             ("OpenCode", "open code"),
-            ("Rune", "roon"),
+            ("Hex", ""),
+            ("Rune", ""),
+            ("cappuccino", "capuchin, cap a chino"),
+            ("Scrawl", ""),
             ("Parakeet", ""),
-            ("Dax", "Dex, Docs"),
         ] {
             let _ = vocabulary::add(
                 &mut entries,
