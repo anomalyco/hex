@@ -3280,6 +3280,11 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   `:app:assembleDebug` built the arm64 libraries (the native import check included) on 2026-11-24 on
 │   OpenJDK 21 and Android SDK 36 (NDK 27.2.12479018); the repo has no Android CI, and nothing was tried
 │   on a device or emulator.
+├── Labs › Keyboard › Hex key on the left (off, #2800) -> the strip's Hex key, ✕ and recording well
+│   mirror to its left end (`StripView.placeHexKey`, `TypingPreferences.hexKeyLeft`); hold, tap and
+│   slide work as on the right, the well grows rightwards out of ✓, and the idle row keeps its order.
+│   Off, the strip is laid out exactly as before. Checks: none automated; it was not compiled here (no
+│   Android SDK) and nothing was tried on a device or emulator. The repo has no Android CI.
 ├── Symbol pages -> Gboard's ?123 and =< pages (Pixel 8 emulator, API 36), the same on every
 │   layout: ?123 draws 1–0, then @ # $ _ & - + ( ) /, then * " ' : ; ! ? between the page switch
 │   and delete, and =< draws ~ ` | • √ π ÷ × § Δ, then £ ¢ € ¥ ^ ° = { } \, then % © ® ™ ✓ [ ]

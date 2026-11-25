@@ -73,6 +73,11 @@ internal class TypingPreferences(context: Context) {
     var passwordManagerSuggestions: Boolean
         get() = prefs.getBoolean(PASSWORD_MANAGER_SUGGESTIONS, false)
         set(value) { prefs.edit().putBoolean(PASSWORD_MANAGER_SUGGESTIONS, value).apply() }
+    /** Labs › Keyboard › Hex key on the left: the strip's Hex key, ✕ and the recording bar at its left end instead
+     * of its right, for the other hand (#2800). Off by default. */
+    var hexKeyLeft: Boolean
+        get() = prefs.getBoolean(HEX_KEY_LEFT, false)
+        set(value) { prefs.edit().putBoolean(HEX_KEY_LEFT, value).apply() }
     /** Labs › Keyboard › Voice-only mode: a "voice" subtype other keyboards switch to for dictation
      * alone, off by default. */
     var voiceOnly: Boolean
@@ -104,5 +109,6 @@ internal class TypingPreferences(context: Context) {
         const val ADAPTIVE_TOUCH = "adaptiveTouch"
         const val PASSWORD_MANAGER_SUGGESTIONS = "passwordManagerSuggestions"
         const val VOICE_ONLY = "voiceOnly"
+        const val HEX_KEY_LEFT = "hexKeyLeft"
     }
 }

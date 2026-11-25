@@ -159,6 +159,8 @@
     <string name="password_manager_suggestions_detail">在建议栏中显示自动填充服务提供的登录信息、验证码和卡片</string>
     <string name="voice_only_mode">仅语音模式</string>
     <string name="voice_only_detail">让你从其他键盘切换到 Hex 只做听写，说完再切换回去</string>
+    <string name="hex_key_left">Hex 键放在左侧</string>
+    <string name="hex_key_left_detail">把按住说话的 Hex 键移到建议栏的左端</string>
     <!-- Hex 词汇文件与自定词汇的“词语替换”（docs/specs/hex-words.md）。 -->
     <string name="words_open_label">添加到 Hex</string>
     <string name="words_replacements">词语替换</string>
