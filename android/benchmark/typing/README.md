@@ -52,6 +52,34 @@ Outputs also drop the `. , ! ? ; :` and quotes the engine may add, and ’ reads
 
 iOS numbers quoted elsewhere in this file (`ZZDecoderBench`, "iOS today") were made before the nearest-key rule, which moved them by 1–1.6 points of word error rate.
 
+## Adaptive touch
+
+`quality-gate.py --adaptive` also checks Labs › Keyboard › Adaptive touch ([AdaptiveTouch](../../app/src/main/java/ly/anoma/hex/typing/AdaptiveTouch.kt)), which learns where you land on each letter key and lets the decoder read your taps with those centres. [Replay.java](Replay.java) drives it as the keyboard does: each letter typed, each word finished with what autocorrect did to it, a new field per sentence and a new session every 50. The replay never undoes a fix, retypes a letter or picks a suggestion, so only words left as typed teach it: fewer and weaker labels than a person gives. The held-out taps are drawn per tap from a population's offsets, so they have no aim of their own; three typists add one, in keycaps (`Replay.bias`), and the key under the moved tap types:
+
+- **T1** aims low and right (+0.2, +0.2); **T1m** low and left, T1 in a mirror.
+- **T2** reaches inward with both thumbs (left half +0.2, right half −0.2) and low (+0.1).
+- **T3** has an aim of its own for each key, drawn once (normal, 0.12 keycap spread).
+
+Per language, against the same input with Adaptive touch off:
+
+- **A, identical:** on, but before it has learned anything (one session, so never in use), the gate's whole input comes out the same, item for item.
+- **B, fewer errors:** each typist types the 2,000 noisy sentences in order with it learning; word errors in the second thousand. Also reported: the held-out taps as they are, and the same centres deciding alone, without the guard (in brackets).
+- **C, no more correct words changed:** each typist's profile, frozen, never changes more correctly typed words than it off, typed on the key centres or on the typist's own aim, and every critical case passes.
+- **D, a grip change:** learned on T1, typed as T1m: no word it off gets right is broken while T1's centres are still in use; also reported after they fall back, and without the fallback.
+
+2026-11-24, branch `android-adaptive-touch` on `dev` 786451f00, host JVM on the Studio. Word errors in sentences 1,001–2,000, off → on (without the guard):
+
+| Layout | Held-out taps | T1 | T2 | T3 | C: changed on centres / on the aim | D: broken before / after the fallback / without it |
+|---|---:|---:|---:|---:|---|---|
+| German | 383 → 383 | 529 → 524 (439) | 508 → 502 (446) | 457 → 452 (415) | never more / never more | 1 / 14 / 179 |
+| English | 356 → 349 | 511 → 495 (447) | 511 → 493 (472) | 407 → 402 (394) | never more / 100 → 47 (T1), 102 → 47 (T2) | 0 / 7 / 101 |
+| Spanish | 505 → 500 | 605 → 599 (557) | 613 → 605 (577) | 536 → 531 (523) | never more / never more | 0 / 14 / 71 |
+| French | 415 → 422 | 569 → 556 (466) | 557 → 552 (488) | 436 → 442 (426) | never more / never more | 0 / 7 / 154 |
+| Italian | 378 → 378 | 526 → 513 (409) | 521 → 509 (427) | 446 → 444 (408) | never more / never more | 0 / 11 / 153 |
+| Bokmål | 332 → 330 | 436 → 425 (364) | 408 → 390 (356) | 365 → 363 (349) | never more / never more | 0 / 11 / 140 |
+
+A held in all six, and the gate's own numbers are unchanged, field for field. The guard (`TypingWord.guarded`: space corrects a word only when the drawn centres would correct it too, and puts in their reading unless yours also clears their margin) keeps C, and most of the gain with it: without the guard, T1 and T2 make 6–22% fewer errors, but the same frozen centres change more correctly typed words in every layout (1–5 more on the centres, 91 for 76 on T1's aim in Bokmål). Letting your centres alone fix a spelling no list knows recovered 3–10% for T1 and T2, and changed 1–5 more correctly typed words in all six: names and words the lists lack. The fallback needs about 16 labels, so the first two sentences of a new grip can still read the old centres (German's one word).
+
 ## Swipe typing
 
 Keyboard › Swipe typing's decoder ([SwipeDecoder](../../app/src/main/java/ly/anoma/hex/typing/SwipeDecoder.kt)) is scored the way iPhone Hex's was (its experiment `2026-11-20-hex-swipe-typing`): synthetic swipes for every word of the held-out sentences above, with the true word before as context. Words of one key are tapped and words the model lacks are left out. [swipe_paths.py](swipe_paths.py) is a port of the iPhone benchmark's generator: the same random numbers, noise model and minimum-jerk timing, on the key grid both keyboards share. Its paths match the Swift generator's to 5e-6 pitch, word for word. The iPhone replay reads the same files, so the two platforms are scored on the very same paths. [SwipeReplay.java](SwipeReplay.java) decodes them with the keyboard's own `SwipeReader`: the decoder, English's contractions, the never-suggest list, then a rare name ranked lower.
