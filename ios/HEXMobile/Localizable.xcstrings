@@ -6187,16 +6187,6 @@
         }
       }
     },
-    "The keyboard couldn't use it when it last opened, so it used Apple's speech recognition. It tries again the next time it opens." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "键盘上次打开时无法使用它，因此使用了 Apple 的语音识别。下次打开时会再试一次。"
-          }
-        }
-      }
-    },
     "This iPhone's keyboard doesn't have the memory for it, so it uses Apple's speech recognition." : {
       "localizations" : {
         "zh-Hans" : {

@@ -21,6 +21,7 @@ struct HEXMobileApp: App {
         VoiceIsolationSettings().applyLaunchArguments()
         MultilingualParakeetSettings().applyLaunchArguments()
         KeyboardParakeetSettings().applyLaunchArguments()
+        KeyboardParakeetSettings().forgetUnavailableWithoutReason()
         SettingsSnapshotFixture.applyDefaults()
         HexInbox.sweep()
     }
