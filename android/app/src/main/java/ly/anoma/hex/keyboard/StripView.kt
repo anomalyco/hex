@@ -273,7 +273,8 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
                 held = false; tracking = false
             }
             MotionEvent.ACTION_CANCEL -> {
-                removeCallbacks(hold); if (held) ime.cancelSpeech()
+                removeCallbacks(hold)
+                if (held) { if (DictationField.cancelledHoldFinishes(ime.isInputViewShown && isShown)) ime.finishSpeech() else ime.cancelSpeech() }
                 held = false; tracking = false; v.isPressed = false
             }
         }

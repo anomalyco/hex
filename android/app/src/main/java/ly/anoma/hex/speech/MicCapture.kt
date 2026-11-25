@@ -99,9 +99,10 @@ internal class MicCapture(
     private val place: DictationPlace,
     private val update: (SpeechPhase, String?) -> Unit,
     private val meter: (Float) -> Unit,
-    private val insert: (String, String, SpeechOptions) -> Unit,
+    /** The text, what was heard, the options it was written with and the field number [start] was given. */
+    private val insert: (String, String, SpeechOptions, Int) -> Unit,
 ) {
-    private class Ticket(val options: SpeechOptions) {
+    private class Ticket(val options: SpeechOptions, val field: Int) {
         val job = jobs.incrementAndGet()
         @Volatile var finish = false
         @Volatile var cancelled = false
@@ -135,9 +136,10 @@ internal class MicCapture(
     /** Whether a new dictation can start: nothing holds the microphone. */
     val canStart get() = active == null
 
-    fun start(options: SpeechOptions) {
+    /** [field]: the keyboard's number for the field it is spoken in, handed back with the text. */
+    fun start(options: SpeechOptions, field: Int = 0) {
         if (active != null) return
-        val ticket = Ticket(options)
+        val ticket = Ticket(options, field)
         active = ticket
         publish(SpeechPhase.Opening)
         // The model loads while the person speaks, not after they let go.
@@ -157,6 +159,8 @@ internal class MicCapture(
         }
     }
 
+    /** ✓, a hold's release, or the keyboard hiding with its field still there: the microphone stops now and what
+     * was heard is transcribed. */
     fun finish() {
         val ticket = active ?: return
         if (ticket.tickAt == 0L) ticket.tickAt = System.nanoTime()
@@ -175,8 +179,8 @@ internal class MicCapture(
         } else cancel()
     }
 
-    /** Leaving the field: nothing recording or transcribing may reach another editor. A decode in progress
-     * stops too, or the next dictation's load and decode would wait for it. */
+    /** Nothing recording or transcribing goes in: the keyboard's field went away, Next keyboard, Home or the Quick
+     * Settings sheet closing. A decode in progress stops too, or the next dictation's load and decode would wait for it. */
     fun cancel() {
         active?.cancelled = true
         active = null
@@ -210,7 +214,7 @@ internal class MicCapture(
         while (queue.firstOrNull()?.done == true) {
             val next = queue.removeFirst()
             shown = next.note ?: shown
-            next.text?.let { insert(it, next.heard ?: it, next.written ?: next.options) }
+            next.text?.let { insert(it, next.heard ?: it, next.written ?: next.options, next.field) }
             next.spent?.let { lastDictation.value = durations(next, it, if (next.text != null) System.nanoTime() else 0L) }
         }
         publish(current(), shown)
