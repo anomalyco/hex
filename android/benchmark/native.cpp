@@ -132,13 +132,51 @@ int main(int argc, char **argv) {
             p.max_tokens=std::min(220,(int)std::ceil(std::min(count,30*16000)*15.0/16000)+16);
             p.greedy.best_of=1;p.temperature=-0.8f;p.temperature_inc=1.0f;
         }
+        // HEX_LANGS=en,es,... (with HEX_APP): the guard for Labs › Automatic listens for the language. The clip is decoded once
+        // per other language listed, with Automatic choosing between the clip's own (the keyboard's) and that one exactly as
+        // hexspeech.cpp asks whisper-language-choice.patch (Nynorsk counted with Bokmål; a switch at 99% under 4 s of audio,
+        // 95% from 4 s), stopping at the first token, since the language is chosen before it. Instead of the clip's line,
+        // one per pair: id, the clip's language, the other, the language chosen and the other's probability. score.py fails
+        // on any switch (README, Automatic listens for the language).
+        if (const char *langs=getenv("HEX_LANGS"); langs && app) {
+            std::string all=langs; all+=",";
+            for (size_t at=0,comma; (comma=all.find(',',at))!=std::string::npos; at=comma+1) {
+                const std::string other=all.substr(at,comma-at); if (other.empty()||other==lang) continue;
+                std::vector<int> ids,of; int k=0;
+                for (const std::string &c:{lang,other}) { for (const char *a:{c.c_str(),c=="no"?"nn":nullptr}) if (a&&whisper_lang_id(a)>=0) { ids.push_back(whisper_lang_id(a)); of.push_back(k); } ++k; }
+                auto q=p; q.max_tokens=1; q.temperature_inc=0.0f;
+                whisper_state *s=whisper_init_state(ctx);
+                hex_whisper_state_set_languages(s,ids.data(),of.data(),(int)ids.size(),count<4*16000?0.99f:0.95f,-1);
+                if (whisper_full_with_state(ctx,s,q,audio.data(),count)!=0) return 6;
+                float pr[2]={-1,-1}; int64_t us=0; const int chosen=hex_whisper_state_language(s,pr,2,&us);
+                whisper_free_state(s);
+                printf("%s\t%s\t%s\t%s\t%.4f\t%.2f\n",id.c_str(),lang.c_str(),other.c_str(),chosen==1?other.c_str():chosen==0?lang.c_str():"none",pr[1],us/1000.0);fflush(stdout);
+            }
+            continue;
+        }
+        // HEX_CANDIDATES=es,... (with HEX_APP): the app's decode with Labs › Automatic listens for the language choosing among
+        // the clip's own language (the keyboard's) and those listed, at most three, as hexspeech.cpp asks it, the decode
+        // without the prompt below included. The clip's line as usual.
+        std::vector<int> ids,of;
+        if (const char *cands=getenv("HEX_CANDIDATES"); cands && app) {
+            std::string all=lang+","+cands+","; std::vector<std::string> seen;
+            for (size_t at=0,comma; seen.size()<3 && (comma=all.find(',',at))!=std::string::npos; at=comma+1) {
+                const std::string c=all.substr(at,comma-at); if (c.empty()||std::find(seen.begin(),seen.end(),c)!=seen.end()) continue;
+                for (const char *a:{c.c_str(),c=="no"?"nn":nullptr}) if (a&&whisper_lang_id(a)>=0) { ids.push_back(whisper_lang_id(a)); of.push_back((int)seen.size()); }
+                seen.push_back(c);
+            }
+            if (seen.size()<2) ids.clear();
+        }
+        auto listen=[&](whisper_state *s){ if (!ids.empty()) hex_whisper_state_set_languages(s,ids.data(),of.data(),(int)ids.size(),count<4*16000?0.99f:0.95f,-1); };
         whisper_state *state=app?whisper_init_state(ctx):nullptr;
+        if (app) listen(state);
         if (app?whisper_full_with_state(ctx,state,p,audio.data(),count)!=0:whisper_full(ctx,p,audio.data(),count)!=0) return 6;
         // The app decodes a prompted clip up to 30 s that repeated itself, wrote one phrase twice in too little audio, nothing
         // or only the prompt again without the prompt, in a fresh state, and uses that (hexspeech.cpp's againWhy);
         // HEX_NO_GUARD=1 is the decode before, which kept them.
         if (app && p.initial_prompt && p.no_timestamps && !getenv("HEX_NO_GUARD") && again(ctx,state,prompt,p.entropy_thold,count)) {
             whisper_free_state(state); state=whisper_init_state(ctx); p.initial_prompt=nullptr;
+            if (state) listen(state);
             if (!state || whisper_full_with_state(ctx,state,p,audio.data(),count)!=0) return 6;
         }
         if (app) { for(int i=0;i<whisper_full_n_segments_from_state(state);i++) text+=whisper_full_get_segment_text_from_state(state,i); whisper_free_state(state); }

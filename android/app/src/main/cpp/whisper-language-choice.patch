@@ -1,0 +1,128 @@
+--- a/include/whisper.h
++++ b/include/whisper.h
+@@ -391,6 +391,18 @@
+                                int   n_threads,
+                              float * lang_probs);
+ 
++    // Hex: the next whisper_full_with_state on [state] picks its language among candidates from the first window's own
++    // encoder output: one decoder step instead of whisper_lang_auto_detect's second encoder pass. [ids] are [n] language
++    // ids and [of] the candidate each counts toward (0, 1, ...): a candidate's probability is its ids' sum, and it decodes
++    // as its first id. Candidate 0 must be params.language; it is kept unless another reaches [threshold]. With
++    // params.translate and [translate_from] >= 0, only that language is translated; another is transcribed. Fewer than
++    // two candidates change nothing.
++    WHISPER_API void hex_whisper_state_set_languages(struct whisper_state * state, const int * ids, const int * of, int n,
++                                                     float threshold, int translate_from);
++    // Hex: the candidate the last decode on [state] chose (-1: none, as with fewer than two), each candidate's probability
++    // in [p] (up to [n] of them) and the step's time.
++    WHISPER_API int  hex_whisper_state_language(struct whisper_state * state, float * p, int n, int64_t * detect_us);
++
+     WHISPER_API int whisper_n_len           (struct whisper_context * ctx); // mel length
+     WHISPER_API int whisper_n_len_from_state(struct whisper_state * state); // mel length
+     WHISPER_API int whisper_n_vocab         (struct whisper_context * ctx);
+--- a/src/whisper.cpp
++++ b/src/whisper.cpp
+@@ -899,6 +899,15 @@
+ 
+     int lang_id = 0; // english by default
+ 
++    // Hex: hex_whisper_state_set_languages and what it chose
++    std::vector<int> hex_langs;
++    std::vector<int> hex_of;
++    float hex_threshold = 1.0f;
++    int hex_translate_from = -1;
++    std::vector<float> hex_p;
++    int hex_chosen = -1;
++    int64_t hex_detect_us = 0;
++
+     std::string path_model; // populated by whisper_init_from_file_with_params()
+ 
+ #ifdef WHISPER_USE_COREML
+@@ -4262,6 +4271,72 @@
+     return whisper_lang_auto_detect_with_state(ctx, ctx->state, offset_ms, n_threads, lang_probs);
+ }
+ 
++void hex_whisper_state_set_languages(struct whisper_state * state, const int * ids, const int * of, int n,
++                                     float threshold, int translate_from) {
++    state->hex_langs.assign(ids, ids + std::max(0, n));
++    state->hex_of.assign(of, of + std::max(0, n));
++    state->hex_threshold = threshold;
++    state->hex_translate_from = translate_from;
++    state->hex_p.clear();
++    state->hex_chosen = -1;
++    state->hex_detect_us = 0;
++}
++
++int hex_whisper_state_language(struct whisper_state * state, float * p, int n, int64_t * detect_us) {
++    for (int i = 0; i < n && i < (int) state->hex_p.size(); ++i) {
++        p[i] = state->hex_p[i];
++    }
++    *detect_us = state->hex_detect_us;
++    return state->hex_chosen;
++}
++
++// Hex: whisper_lang_auto_detect_internal's step (SOT alone through the decoder) on the window just encoded, a softmax over
++// the candidates only, and the language chosen written into the prompt the decode is about to use.
++static bool hex_choose_language(struct whisper_context * ctx, struct whisper_state * state,
++                                const struct whisper_full_params & params, std::vector<whisper_token> & prompt_init) {
++    const int64_t t_start_us = ggml_time_us();
++    const whisper_token sot = whisper_token_sot(ctx);
++    whisper_batch_prep_legacy(state->batch, &sot, 1, 0, 0);
++    whisper_kv_cache_seq_rm(state->kv_self, 0, 0, -1);
++    if (!whisper_decode_internal(*ctx, *state, state->batch, params.n_threads, false, params.abort_callback, params.abort_callback_user_data)) {
++        return false;
++    }
++    const auto & langs = state->hex_langs;
++    const auto & of = state->hex_of;
++    float max = -INFINITY;
++    for (int id : langs) {
++        max = std::max(max, state->logits[whisper_token_lang(ctx, id)]);
++    }
++    std::vector<double> p(*std::max_element(of.begin(), of.end()) + 1, 0.0);
++    std::vector<int> first(p.size(), -1);
++    double sum = 0.0;
++    for (size_t i = 0; i < langs.size(); ++i) {
++        const double e = exp(state->logits[whisper_token_lang(ctx, langs[i])] - max);
++        p[of[i]] += e;
++        sum += e;
++        if (first[of[i]] < 0) {
++            first[of[i]] = langs[i];
++        }
++    }
++    const size_t best = std::max_element(p.begin(), p.end()) - p.begin();
++    const size_t chosen = best != 0 && p[best] / sum >= state->hex_threshold && first[best] >= 0 ? best : 0;
++    if (first[chosen] < 0) {
++        return true;
++    }
++    state->lang_id = first[chosen];
++    state->hex_chosen = chosen;
++    state->hex_p.resize(p.size());
++    for (size_t i = 0; i < p.size(); ++i) {
++        state->hex_p[i] = p[i] / sum;
++    }
++    prompt_init[1] = whisper_token_lang(ctx, state->lang_id);
++    if (params.translate && state->hex_translate_from >= 0 && state->lang_id != state->hex_translate_from) {
++        prompt_init[2] = whisper_token_transcribe(ctx);
++    }
++    state->hex_detect_us = ggml_time_us() - t_start_us;
++    return true;
++}
++
+ int whisper_model_n_vocab(struct whisper_context * ctx) {
+     return ctx->model.hparams.n_vocab;
+ }
+@@ -7236,6 +7311,15 @@
+             return -6;
+         }
+ 
++        // Hex: the language, once, from the first window's own encoder output; later windows keep it.
++        if (seek == seek_start && !state->hex_of.empty() && *std::max_element(state->hex_of.begin(), state->hex_of.end()) > 0 &&
++            whisper_is_multilingual(ctx)) {
++            if (!hex_choose_language(ctx, state, params, prompt_init)) {
++                WHISPER_LOG_ERROR("%s: failed to choose the language\n", __func__);
++                return -6;
++            }
++        }
++
+         // if there is a very short audio segment left to process, we remove any past prompt since it tends
+         // to confuse the decoder and often make it repeat or hallucinate stuff
+         if (seek > seek_start && seek + 500 >= seek_end) {

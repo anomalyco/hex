@@ -3,6 +3,9 @@ package ly.anoma.hex.speech
 import android.app.Activity
 import android.app.Application
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Bundle
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,14 +19,31 @@ import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import javax.net.ssl.HttpsURLConnection
 
+/** Whether the phone's network costs nothing per byte, as Android judges it: true on most Wi-Fi, false on mobile data or a
+ * metered Wi-Fi (a phone's hotspot), null with no network. Android leaves the network's name and other location details
+ * out of what it returns here; this is all Hex asks about the network (ACCESS_NETWORK_STATE). */
+internal fun unmeteredNetwork(context: Context): Boolean? {
+    val connectivity = context.getSystemService(ConnectivityManager::class.java) ?: return null
+    return connectivity.getNetworkCapabilities(connectivity.activeNetwork ?: return null)?.let(::unmetered)
+}
+private fun unmetered(capabilities: NetworkCapabilities) = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) ||
+    capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_TEMPORARILY_NOT_METERED)
+
+/** A Wi-Fi-first download waits on a network that charges for data, unless the person chose mobile data for it. With
+ * no network at all it goes ahead and fails as before, saying there's no connection. */
+internal fun waitsForWifi(mobileDataChosen: Boolean, unmetered: Boolean?) = !mobileDataChosen && unmetered == false
+
 /** Hex's network operation: an explicit, fixed model GET from Hex's own screens, each file pinned by revision, size and
- * SHA-256 ([small] from setup or Dictation settings, [english] from Labs). The keyboard never calls it. */
+ * SHA-256 ([small] from setup or Dictation settings, [english] from Labs). The keyboard never calls it. A wifiFirst
+ * download waits for an unmetered network ([State.WaitingForWifi]) unless the person chooses mobile data. */
 internal class ModelStore private constructor(private val name: String, private val size: Long, private val hash: String,
-                                              private val url: String, private val extension: String) {
+                                              private val url: String, private val extension: String,
+                                              private val wifiFirst: Boolean = false) {
     companion object {
         /** Whisper small, the default speech model. */
         val small = ModelStore("whisper-small", 190085487L, "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small-q5_1.bin", "bin")
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small-q5_1.bin", "bin",
+            wifiFirst = true)
         /** Labs › Faster English dictation: NVIDIA's Parakeet TDT-CTC 110M, as transcribe.cpp's authors converted it. */
         val english = ModelStore("parakeet-tdt_ctc-110m", 135373280L, "7dd44c74a331d788a4e5f8b16913b3feb29ced22cf5613aad0e0f6cd30516296",
             "https://huggingface.co/handy-computer/parakeet-tdt_ctc-110m-gguf/resolve/1c3f0d5378fdd358905cc410a93ed9e64f52d170/parakeet-tdt_ctc-110m-Q8_0.gguf",
@@ -36,6 +56,8 @@ internal class ModelStore private constructor(private val name: String, private 
         data object Ready : State
         data class Retry(val problem: Problem) : State
         data class Loading(val percent: Int) : State
+        /** On a network that charges for data: it starts by itself on Wi-Fi, or now with [useMobileData]. */
+        data object WaitingForWifi : State
     }
     private class Failure(val problem: Problem) : Exception()
     private class Deleted : Exception()
@@ -80,7 +102,36 @@ internal class ModelStore private constructor(private val name: String, private 
         waiting = false
         checked = null
         path(app).delete(); part(app).delete()
+        forgetMobileData(app)
         progress.value = State.Available
+    }
+
+    /** The person's choice to download on mobile data, kept until this file is installed or deleted, so a download that
+     * resumes later doesn't wait for Wi-Fi again. */
+    private fun choices(app: Context) = app.getSharedPreferences("models", Context.MODE_PRIVATE)
+    private fun mobileDataChosen(app: Context) = choices(app).getBoolean("$name.mobileData", false)
+    private fun forgetMobileData(app: Context) = choices(app).edit().remove("$name.mobileData").apply()
+
+    /** Downloads now on mobile data too (the waiting row's action). */
+    @Synchronized fun useMobileData(context: Context) {
+        val app = context.applicationContext
+        choices(app).edit().putBoolean("$name.mobileData", true).apply()
+        download(app)
+    }
+
+    private var network: ConnectivityManager.NetworkCallback? = null
+    /** While it waits for Wi-Fi, an unmetered network starts it if a Hex screen is in front (Android closes a backgrounded
+     * app's connections; a screen coming to the front checks again). */
+    private fun watchNetwork(app: Context) {
+        if (network != null) return
+        val connectivity = app.getSystemService(ConnectivityManager::class.java) ?: return
+        network = object : ConnectivityManager.NetworkCallback() {
+            override fun onCapabilitiesChanged(changed: Network, capabilities: NetworkCapabilities) {
+                if (unmetered(capabilities)) synchronized(this@ModelStore) {
+                    if (progress.value == State.WaitingForWifi && started > 0) download(app)
+                }
+            }
+        }.also { connectivity.registerDefaultNetworkCallback(it) }
     }
 
     @Synchronized fun refresh(context: Context) {
@@ -110,6 +161,9 @@ internal class ModelStore private constructor(private val name: String, private 
         val app = context.applicationContext
         if (installed(app) != null) { progress.value = State.Ready; return }
         if (running) return
+        if (wifiFirst && waitsForWifi(mobileDataChosen(app), unmeteredNetwork(app))) {
+            waiting = true; progress.value = State.WaitingForWifi; watchNetwork(app); return
+        }
         running = true; waiting = false
         val part = part(app)
         progress.value = State.Loading((part.length().coerceIn(0, size) * 100 / size).toInt().coerceAtMost(99))
@@ -129,7 +183,9 @@ internal class ModelStore private constructor(private val name: String, private 
                 if (result == null || generation != mine) {
                     // Deleted while it ran: whatever the transfer wrote last goes too.
                     part.delete(); path(app).delete(); progress.value = State.Available
-                } else if (result == State.Retry(Problem.Connection) && (started == 0 || stops != since)) {
+                // A Wi-Fi-first download whose Wi-Fi went away waits for it again rather than saying there's no connection.
+                } else if (result == State.Retry(Problem.Connection) && (started == 0 || stops != since ||
+                        wifiFirst && waitsForWifi(mobileDataChosen(app), unmeteredNetwork(app)))) {
                     waiting = true
                     if (started > 0) download(app)
                 } else progress.value = result
@@ -169,6 +225,7 @@ internal class ModelStore private constructor(private val name: String, private 
         synchronized(this) {
             if (generation != mine) throw Deleted()
             Files.move(part.toPath(), path(app).toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            forgetMobileData(app)
         }
         return true
     }

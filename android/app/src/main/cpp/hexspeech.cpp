@@ -254,6 +254,19 @@ Java_ly_anoma_hex_speech_Whisper_library(JNIEnv *env, jobject) {
     return env->NewStringUTF(name ? name + 1 : info.dli_fname);
 }
 
+// What the last decode chose with Labs › Automatic listens for the language: the candidate it wrote in (0, the keyboard's
+// language, 1 or 2; -1 when it had one language, so nothing was chosen), the choice's microseconds, then each candidate's
+// probability among them in millionths (-1 past the last). Written by decode and read by language, both under
+// SpeechModel's lock.
+static jlong chosen[5] = {-1, 0, -1, -1, -1};
+
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_ly_anoma_hex_speech_Whisper_language(JNIEnv *env, jobject) {
+    auto result = env->NewLongArray(5);
+    if (result) env->SetLongArrayRegion(result, 0, 5, chosen);
+    return result;
+}
+
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jlong handle, jboolean small, jshortArray samples,
                                          jint count, jint threads, jstring language, jboolean translate, jstring prompt,
@@ -271,11 +284,20 @@ Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jlong handle, jboo
     auto params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     // Dictation asks for at most 4; Labs › Diagnostics also tries 6.
     params.n_threads = std::clamp<int>(threads, 1, 8);
+    // The dictation language, or the languages Labs › Automatic listens for the language chooses among, comma-separated,
+    // the keyboard's first (at most three of Hex's: "en,es,no").
     const char *code = env->GetStringUTFChars(language, nullptr);
     if (!code) return nullptr;
-    std::string lang(code);
+    std::string codes(code);
     env->ReleaseStringUTFChars(language, code);
-    params.language = lang.c_str();
+    std::vector<std::string> languages;
+    for (size_t at = 0; languages.size() < 3;) {
+        const size_t comma = std::min(codes.find(',', at), codes.size());
+        languages.push_back(codes.substr(at, comma - at));
+        if (comma == codes.size()) break;
+        at = comma + 1;
+    }
+    params.language = languages[0].c_str();
     params.translate = translate;
     // Custom vocabulary as Whisper's initial prompt biases its spelling of those names.
     std::string hint;
@@ -327,6 +349,24 @@ Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jlong handle, jboo
     // still reads, so a short dictation after a long one could come out differently (even in another language).
     std::unique_ptr<whisper_state, decltype(&whisper_free_state)> state(whisper_init_state(ctx), whisper_free_state);
     if (!state) return nullptr;
+    // Labs › Automatic listens for the language: with more than one candidate, whisper-language-choice.patch reads the
+    // language from this decode's own first window (one decoder step, about 3 ms on the host, where whisper.cpp's own
+    // detection encodes a second, full window: about 2 s) and keeps the keyboard's unless another is at least 99% likely
+    // among them, or 95% from 4 s of audio. On 2,466 cuts of 1.5-10 s in 14 languages the most a wrong language reached
+    // was 0.98 below 3 s, 0.90 at 4 s and 0.56 from 5 s (benchmark/README.md). Whisper calls short Bokmål Nynorsk, so
+    // "no" counts both; Danish and Swedish are never candidates. Only Spanish is translated; the others are transcribed.
+    std::vector<int> ids, of;
+    for (size_t i = 0; languages.size() > 1 && i < languages.size(); ++i) {
+        for (const char *alias : {languages[i].c_str(), languages[i] == "no" ? "nn" : nullptr}) {
+            const int id = alias ? whisper_lang_id(alias) : -1;
+            if (id >= 0) { ids.push_back(id); of.push_back(static_cast<int>(i)); }
+        }
+    }
+    const auto listen = [&](whisper_state *s) {
+        if (!ids.empty()) hex_whisper_state_set_languages(s, ids.data(), of.data(), static_cast<int>(ids.size()),
+                                                          count < 4 * 16000 ? 0.99f : 0.95f, translate ? whisper_lang_id("es") : -1);
+    };
+    listen(state.get());
     ggml_threadpool *pool = nullptr;
     jlong mask = 0;
     {
@@ -363,6 +403,8 @@ Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jlong handle, jboo
         again.reset(whisper_init_state(ctx));
         if (again) {
             if (attach) hex_whisper_state_set_threadpool(again.get(), pool);
+            // The same languages: the choice reads only the audio, so it comes out as the first decode's did.
+            listen(again.get());
             params.initial_prompt = nullptr;
             const auto from = std::chrono::steady_clock::now();
             status = whisper_full_with_state(ctx, again.get(), params, pcm.data(), count);
@@ -405,6 +447,15 @@ Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jlong handle, jboo
                         status == 0 ? "complete" : abandoned.load() == job ? "abandoned" : "failed", static_cast<long long>(ms),
                         count, params.n_threads, params.audio_ctx, params.max_tokens, again ? ", again without the prompt" : "");
 #endif
+    {
+        float p[3] = {-1, -1, -1};
+        int64_t us = 0;
+        const int which = languages.size() > 1 ? hex_whisper_state_language(result_state, p, 3, &us) : -1;
+        chosen[0] = which;
+        chosen[1] = us;
+        for (int i = 0; i < 3; ++i)
+            chosen[2 + i] = which >= 0 && i < static_cast<int>(languages.size()) ? std::lround(p[i] * 1e6) : -1;
+    }
     if (status != 0) return nullptr;
     std::string text;
     for (int i = 0; i < whisper_full_n_segments_from_state(result_state); ++i)
