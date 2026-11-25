@@ -218,6 +218,8 @@
     <string name="password_manager_suggestions_detail">在建议栏中显示自动填充服务提供的登录信息、验证码和卡片</string>
     <string name="voice_only_mode">仅语音模式</string>
     <string name="voice_only_detail">让你从其他键盘切换到 Hex 只做听写，说完再切换回去</string>
+    <string name="voice_bar_from_menu">从 Hex 菜单切换到语音栏</string>
+    <string name="voice_bar_from_menu_detail">在 Hex 菜单中加入“仅语音”，在同一个输入框里把按键收起为一个小听写栏</string>
     <string name="hex_key_left">Hex 键放在左侧</string>
     <string name="hex_key_left_detail">把按住说话的 Hex 键移到建议栏的左端</string>
     <string name="volume_in_menu">Hex 菜单中的音量</string>

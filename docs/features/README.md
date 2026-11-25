@@ -3644,6 +3644,24 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
     build-tools 36.0.0, NDK 27.2.12479018); `VoiceOnlyTest` covers the bar-or-keyboard and restart
     decisions, `python3 scripts/code-shape.py --check` and `git diff --check` pass, and the repo has
     no Android CI; nothing was tried on a device or emulator.
+├── Labs > Keyboard > Voice bar from the Hex menu (off, #2869) -> the Hex menu gets a "Voice only"
+    row (never in a password field) that folds the full keyboard into the voice-only mode's compact bar in
+    the same field: no subtype switch, no input restart, so the text, cursor and focus stay. The bar
+    waits idle ("Tap Hex to talk") with the Hex mark where ✓ goes; a tap records, ✓ finishes, and the
+    text goes in at the cursor through the keyboard's own insertion (commitSpeech), after which the bar
+    stays for the next dictation instead of switching keyboards. Its first key is "Show keyboard" (a
+    keyboard icon, not ✕): it finishes a recording as ✓ does, so what was said still goes in, and puts
+    the keys back. A dictation still transcribing carries over either way. The bar stays across fields
+    while the keyboard stays up; a password field shows its keys; the keyboard being dismissed, or the
+    lab turning off, brings the keys back. While collapsed, no inline autofill chips are asked for.
+    A dictation whose field went away (Insert dictation) is not offered in the bar, which has no strip:
+    while one waits for this field the bar's line says "Dictation waiting. Show keyboard to insert it",
+    and Show keyboard puts the strip's offer up. Show keyboard keeps a word half-typed before Voice only
+    (its suggestions come back). Switching to the Voice only subtype clears the collapse, so coming back
+    to Hex's keyboard subtype shows the keys.
+    Off, the menu has no such row and the keyboard is exactly as before. Checks: `VoiceOnlyTest` covers
+    the collapse decision (lab, menu choice, password field). Not compiled or run here (no JDK or
+    Android SDK was available), and nothing was tried on a device or emulator.
 ├── Labs > Keyboard > Test keyboard on Home (off, #2801) -> Keyboard's Test keyboard… field moves to
     Home, below the Dictate bar and its result, so tapping it brings up the Hex keyboard there with
     the current settings; the Keyboard page no longer shows it while the lab is on. Both places share
