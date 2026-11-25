@@ -1,22 +1,23 @@
 {
-  "versionCode": 2448,
-  "versionName": "0.2.2-preview.2448",
+  "versionCode": 2467,
+  "versionName": "0.2.2-preview.2467",
   "version": "0.2.2",
   "minSdk": 31,
   "published": "2026-11-25",
-  "commit": "2278b31afa80146c44eb1c9f951cd366d77da38e",
+  "commit": "9eb099ed670786e14f9b07ebea9a78b301b23b9a",
   "apk": {
-    "url": "https://github.com/anomalyco/hex/releases/download/android-preview-2448/HexPreview-0.2.2-preview.2448.apk",
-    "size": 75048801,
-    "sha256": "749bd4a9c86d1921b312ffd4937a98016eede616ab4bc88e9fafe6bc88fd23a1"
+    "url": "https://github.com/anomalyco/hex/releases/download/android-preview-2467/HexPreview-0.2.2-preview.2467.apk",
+    "size": 75274878,
+    "sha256": "43ab25b8f354f2ac4954b4fbb71adf824002c18f75fc9e83457633ef2beca039"
   },
   "notes": [
-    "Short dictations no longer repeat themselves when you use custom vocabulary or Learn from my fixes.",
-    "Dictation keeps its threads ready between steps, on your phone's fast cores, so it finishes sooner on phones that also have slower cores.",
-    "New in Labs › Dictation: Learn from my fixes, off by default. Fix a word right after dictating and, after the second time, Hex writes it your way. The pairs stay on this phone, and Delete what Hex learned removes them.",
-    "With Autocorrect off, the suggestion strip still offers the nearest words to tap; space never changes your word.",
-    "Labs › Diagnostics now says which cores dictation runs on, and the speed test's rows keep the same names from build to build.",
-    "The low-memory note beside Undo is no longer cut off.",
-    "Português now has its own keyboard: autocorrect, suggestions, next words and swipe typing, with accents on long press (á ã ç é ê ô…). It's tuned for Brazilian Portuguese first; Portugal's own spellings, like \"facto\" or \"telemóvel\", are kept as you type them."
+    "A new first run: one page, one button for the next step, and Hex says which language it will dictate in.",
+    "The 190 MB speech model waits for Wi-Fi, unless you tap Use mobile data.",
+    "Keys sized like Gboard's, a number row that fits, and Settings › Keyboard › Height.",
+    "Faster English dictation writes numbers as digits.",
+    "A swipe in Nederlands, Polski or Русский now says swipe typing isn't available there yet.",
+    "Translate what I say tells you which languages it works between, and when it needs Español.",
+    "Word replacements can be shared as a Hex words file, and you review a file before adding it.",
+    "New in Labs, all off until you turn them on: Automatic listens for the language, Dictate from Quick Settings, Key colors, Hex key on the left and Adaptive touch."
   ]
 }
