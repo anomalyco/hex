@@ -99,7 +99,7 @@
     <string name="settings_haptics_detail">按下 Hex 的按键时会有轻微触感</string>
     <string name="settings_test_keyboard">测试键盘…</string>
     <string name="settings_privacy_line">你的声音和文字都保留在这台手机上</string>
-    <string name="settings_privacy_detail">Hex 在这台手机上将语音转换为文字，绝不上传你的声音或用它的键盘输入的内容，也不保存任何按键记录或转录内容。只有在“发送反馈”中点按“发送”时，反馈才会离开这台手机：你的留言、保留的图片、你填写的邮箱（如有），以及 Hex 和这台手机的相关信息会发送到 Anomaly 的反馈收件箱（Bellhop）。你的听写、录音、词汇和更正都不会包含在内。</string>
+    <string name="settings_privacy_detail">Hex 在这台手机上将语音转换为文字，绝不上传你的声音或用它的键盘输入的内容，也不保存任何按键记录或转录内容。两个实验功能只有在你开启后，才会把学到的内容留在这台手机上：“从我的修改中学习”保存你听写后改正的词对，“自适应触控”保存你点击每个按键的平均位置。在实验室中点按“删除 Hex 学到的内容”即可全部删除。只有在“发送反馈”中点按“发送”时，反馈才会离开这台手机：你的留言、保留的图片、你填写的邮箱（如有），以及 Hex 和这台手机的相关信息会发送到 Anomaly 的反馈收件箱（Bellhop）。你的听写、录音、词汇和更正都不会包含在内。</string>
     <string name="settings_privacy_policy">隐私政策</string>
     <string name="settings_licences">开源许可</string>
     <string name="settings_labs">实验室</string>
