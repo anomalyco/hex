@@ -4,7 +4,8 @@
 //! recording ends ([`crate::dictation::live_text`]); `rune_hud` says where the HUD is,
 //! so the plate sits just past it, on the HUD's screen. Labs › Failure
 //! notices reuses the same plate for one line saying why a dictation failed,
-//! for a few seconds or until the next capture.
+//! for a few seconds or until the next capture, and Labs › Confirm long
+//! cancels for the line asking for a second cancel press.
 //!
 //! The overlay is prewarmed: macOS keeps it drawn while hidden and refreshes
 //! it before a reveal, so it never reappears with the last dictation's
@@ -86,11 +87,11 @@ struct FailureNotice {
 }
 
 impl FailureNotice {
-    /// Replaces any notice with `message` until [`FAILURE_VISIBLE`] from
-    /// `now`; returns the new deadline.
-    fn show(&mut self, message: String, now: Instant) -> Instant {
+    /// Replaces any notice with `message` until `visible` from `now`;
+    /// returns the new deadline.
+    fn show(&mut self, message: String, now: Instant, visible: Duration) -> Instant {
         self.message = Some(message);
-        let deadline = now + FAILURE_VISIBLE;
+        let deadline = now + visible;
         self.expires_at = Some(deadline);
         deadline
     }
@@ -289,11 +290,23 @@ pub(crate) fn show_failure(message: &str) {
     if !notifies(message) {
         return;
     }
+    let message = crate::desktop::activity::failure_explanation(message);
+    show_for(&message, FAILURE_VISIBLE);
+}
+
+/// Labs › Confirm long cancels: shows `message` on the same plate for
+/// `visible`, whatever Labs › Failure notices says, so a first cancel press
+/// says the next one discards the dictation.
+pub(crate) fn show_notice(message: String, visible: Duration) {
+    show_for(&message, visible);
+}
+
+fn show_for(message: &str, visible: Duration) {
     let (Some(overlay), Some(place)) = (LIVE.get(), PLACE.get().copied()) else {
         return;
     };
-    let message = crate::desktop::activity::failure_explanation(message);
-    let deadline = notice().show(message.clone(), Instant::now());
+    let message = message.to_owned();
+    let deadline = notice().show(message.clone(), Instant::now(), visible);
     schedule(deadline);
     let handle = overlay.clone();
     overlay.update(move |plate, tx| {
@@ -523,6 +536,7 @@ mod tests {
         let deadline = notice.show(
             "No microphone is available. Connect a microphone.".into(),
             start,
+            FAILURE_VISIBLE,
         );
         assert_eq!(
             notice.message.as_deref(),
@@ -537,7 +551,7 @@ mod tests {
     fn a_new_capture_dismisses_a_failure_notice_at_once() {
         let start = Instant::now();
         let mut notice = FailureNotice::default();
-        let deadline = notice.show("Could not open microphone".into(), start);
+        let deadline = notice.show("Could not open microphone".into(), start, FAILURE_VISIBLE);
         assert!(notice.capture_started());
         assert_eq!(notice.message, None);
         assert!(!notice.capture_started());
@@ -551,8 +565,12 @@ mod tests {
     fn only_a_notices_own_deadline_dismisses_it() {
         let start = Instant::now();
         let mut notice = FailureNotice::default();
-        let older = notice.show("first".into(), start);
-        let newer = notice.show("second".into(), start + Duration::from_secs(1));
+        let older = notice.show("first".into(), start, FAILURE_VISIBLE);
+        let newer = notice.show(
+            "second".into(),
+            start + Duration::from_secs(1),
+            FAILURE_VISIBLE,
+        );
         assert!(!notice.expire(older, start + FAILURE_VISIBLE));
         assert_eq!(notice.message.as_deref(), Some("second"));
         assert!(notice.expire(newer, start + Duration::from_secs(1) + FAILURE_VISIBLE));

@@ -989,6 +989,19 @@
       ],
       "summary": "Record one app or one output device in meetings instead of all computer audio",
       "title": "Choose meeting audio"
+    },
+    {
+      "added": "2026-11-25",
+      "group": "dictation",
+      "groupTitle": "Dictation",
+      "id": "confirm-long-cancels",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "After 10 seconds, cancelling a dictation takes two presses, so one slip keeps your words",
+      "title": "Confirm long cancels"
     }
   ]
 }

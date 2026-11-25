@@ -56,9 +56,20 @@ impl WindowsHotkeyMonitor {
         let mut guard = CALLBACK_STATE.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(state) = guard.as_mut() {
             match recording {
-                Some(flavour) => state.capture.start_command(flavour),
+                Some(flavour) => {
+                    // Labs › Confirm long cancels counts from a new capture
+                    // only; one already recording keeps its start.
+                    if !matches!(
+                        state.capture.phase,
+                        Capture::Held { .. } | Capture::Locked { .. }
+                    ) {
+                        state.cancel_confirm.started(std::time::Instant::now());
+                    }
+                    state.capture.start_command(flavour);
+                }
                 None => {
                     state.capture.cancel();
+                    state.cancel_confirm.ended();
                 }
             }
         }

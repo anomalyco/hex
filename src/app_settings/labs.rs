@@ -353,6 +353,9 @@ pub struct LabsSettings {
     /// field returns to its default.
     #[serde(deserialize_with = "deserialize_phrase")]
     pub stop_phrase_text: String,
+    /// Once a dictation has recorded for 10 seconds, its cancel shortcut asks
+    /// for a second press before it throws the recording away (#2837).
+    pub confirm_long_cancels: bool,
     /// Every normal dictation is signed with `signature_text` on its own line
     /// at the end (every OS).
     pub signature: bool,
@@ -581,6 +584,7 @@ impl Default for LabsSettings {
             dictation_style_choice: DictationStyle::Polished,
             stop_phrase: false,
             stop_phrase_text: crate::dictation::stop_phrase::DEFAULT_PHRASE.to_owned(),
+            confirm_long_cancels: false,
             signature: false,
             signature_text: crate::dictation::signature::DEFAULT_TEXT.to_owned(),
             clipboard_phrase: false,

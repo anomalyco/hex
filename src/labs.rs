@@ -411,6 +411,7 @@ pub fn log_launch() {
         cursor_context = cursor_context(),
         copy_dictation_audio = copy_dictation_audio(),
         hold_through_keys = hold_through_keys(),
+        confirm_long_cancels = confirm_long_cancels(),
         "labs"
     );
 }

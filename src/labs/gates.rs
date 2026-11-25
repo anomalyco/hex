@@ -465,6 +465,13 @@ pub fn voice_prompt_phrase() -> String {
         .clone()
 }
 
+/// Labs › Confirm long cancels: a dictation's cancel shortcut asks for a
+/// second press once it has recorded for 10 seconds (read at each cancel
+/// press, by each OS's shortcut machine).
+pub fn confirm_long_cancels() -> bool {
+    feature_on(Feature::ConfirmLongCancels)
+}
+
 /// Labs › Stop phrase: a spoken phrase at the end of a hands-free dictation
 /// finishes it as if the shortcut were pressed again (read as each hands-free
 /// capture starts). The partials it matches are produced while this or Live
