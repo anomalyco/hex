@@ -3681,6 +3681,16 @@
         }
       }
     },
+    "The Hex keyboard dictates with Apple's speech recognition until it downloads." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载完成前，Hex 键盘使用 Apple 的语音识别听写。"
+          }
+        }
+      }
+    },
     "Dictation won't work until speech recognition is ready." : {
       "localizations" : {
         "zh-Hans" : {

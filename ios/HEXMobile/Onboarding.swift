@@ -19,6 +19,11 @@ struct OnboardingModel: Equatable {
     /// Whether Hex downloads a model for it: not for Apple's on-device recognizer before iOS 26,
     /// which only needs Speech Recognition allowed.
     var downloads = true
+    /// Whether the keyboard has its own Apple speech model ready, apart from Hex's: where Hex
+    /// dictates with its own model (Parakeet), the keyboard still dictates with Apple's speech
+    /// recognition if only Hex's download failed. Where Hex dictates with Apple's, the
+    /// keyboard follows it (`.followsApp`), and without that model nothing dictates.
+    var keyboardDictates = false
 
     var isReady: Bool { stage == .ready }
 
@@ -59,6 +64,7 @@ struct OnboardingModel: Equatable {
         }
         stage = Self.combine(app, keys)
         downloads = dictation.engineDownloads
+        keyboardDictates = keyboard.state == .ready
         let id: String
         if dictation.isModelReady {
             id = dictation.transcriptionLanguageID
@@ -642,7 +648,9 @@ struct OnboardingModelWait: View {
             if model.isFailed || stalled {
                 VStack(spacing: 6) {
                     OnboardingQuietButton(title: "Continue without a model", action: onWithoutModel)
-                    Text(model.downloads ? "Dictation won't work until the speech model downloads." : "Dictation won't work until speech recognition is ready.")
+                    Text(model.keyboardDictates
+                        ? "The Hex keyboard dictates with Apple's speech recognition until it downloads."
+                        : model.downloads ? "Dictation won't work until the speech model downloads." : "Dictation won't work until speech recognition is ready.")
                         .font(.system(size: 13))
                         .foregroundStyle(HexTheme.textFaint)
                         .multilineTextAlignment(.center)
