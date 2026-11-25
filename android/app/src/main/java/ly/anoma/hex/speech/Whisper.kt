@@ -12,8 +12,9 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
-/** A dictation's text (null when it failed) and the note that goes with it, if any. */
-internal class Heard(val text: String?, val note: String? = null)
+/** A dictation's text (null when it failed), the note that goes with it, if any, and the language Labs › Automatic listens
+ * for the language chose for it among several ([spoken]; null when it chose none). */
+internal class Heard(val text: String?, val note: String? = null, val spoken: DictationLanguage? = null)
 
 internal interface Recognizer {
     /** Loads the model [options] dictate with ahead of a dictation, while it records (on the transcription thread).
@@ -34,7 +35,8 @@ internal class LocalSpeech(private val app: Context) : Recognizer {
     override fun prepare(options: SpeechOptions) = SpeechModel.prepare(app, engineFor(options))
     override fun decode(pcm: ShortArray, count: Int, options: SpeechOptions, job: Long): Heard {
         val decoded = SpeechModel.decode(app, pcm, count, options, job)
-        return Heard(decoded.text, if (decoded.lowMemory && lowMemoryNoteDue()) LOW_MEMORY_NOTE else null)
+        return Heard(decoded.text, if (decoded.lowMemory && lowMemoryNoteDue()) LOW_MEMORY_NOTE else null,
+            decoded.choice?.takeIf { it.probabilities != null }?.language)
     }
     override fun abort(job: Long) = SpeechModel.abort(job)
     override fun spent(job: Long) = SpeechModel.spent(job)
@@ -114,10 +116,10 @@ internal object SpeechModel {
 
     /** A dictation decode's times for Labs › Diagnostics: its start and end (System.nanoTime), the process's processor
      * time over it (-1: unreadable), whisper.cpp's timings when today's model ran, copied before the speed test can
-     * replace them, whether it loaded a model itself, the model that wrote the text and the threads it ran on. Only
-     * [decode] writes it; the speed test's [measure] never does. */
+     * replace them, whether it loaded a model itself, the model that wrote the text, the threads it ran on and the language
+     * Labs › Automatic listens for the language chose. Only [decode] writes it; the speed test's [measure] never does. */
     class Spent(val job: Long, val startedAt: Long, val endedAt: Long, val cpuMs: Long, val timings: LongArray?, val loaded: Boolean,
-                val ran: RanOn = RanOn.Standard, val threads: Int = 0)
+                val ran: RanOn = RanOn.Standard, val threads: Int = 0, val choice: LanguageChoice? = null)
     @Volatile private var spent: Spent? = null
     fun spent(job: Long) = spent?.takeIf { it.job == job }
     private fun cpuMs() = runCatching { android.os.Process.getElapsedCpuTime() }.getOrDefault(-1L)
@@ -136,15 +138,26 @@ internal object SpeechModel {
         decodeAt = 0L; decodeCpu = -1L; whisperRan = false
         val decoded = transcribe(engineFor(options), pcm, count, { abandoned == job },
             english = { audio, n -> openEnglish(app) ?: decodeEnglish(app, audio, n, options.recognitionHints, job) },
-            standard = { audio, n -> decodeStandard(app, audio, n, options.spoken.code, options.translate,
+            standard = { audio, n -> decodeStandard(app, audio, n, options.languages.joinToString(",") { it.code }, options.translate,
                 whisperPrompt(options.recognitionHints), job) })
         val ended = System.nanoTime()
         val started = if (decodeAt != 0L) decodeAt else ended
         val processor = cpuMs().let { if (it < 0 || decodeCpu < 0) -1L else it - decodeCpu }
+        val choice = languageChoice(options.candidates)
         spent = Spent(job, started, ended, processor, if (whisperRan) runCatching { Whisper.timings() }.getOrNull() else null,
-            opened != before, decoded.ran, threads)
+            opened != before, decoded.ran, threads, choice)
         keep()
-        return decoded
+        return decoded.copy(choice = choice)
+    }
+
+    /** What Labs › Automatic listens for the language chose this decode, read from hexspeech.cpp: null with the lab off
+     * (no [candidates]), or when today's model didn't run or chose nothing (it failed first); one candidate is no choice. */
+    private fun languageChoice(candidates: List<DictationLanguage>): LanguageChoice? {
+        if (candidates.size <= 1) return candidates.firstOrNull()?.let { LanguageChoice(candidates, 0, null) }
+        val made = if (whisperRan) runCatching { Whisper.language() }.getOrNull() else null
+        val chosen = made?.takeIf { it.size >= 2 + candidates.size }?.get(0)?.toInt() ?: return null
+        if (chosen !in candidates.indices) return null
+        return LanguageChoice(candidates, chosen, candidates.indices.map { made[2 + it] / 1e6 }, made[1])
     }
 
     private fun decodeEnglish(app: Context, pcm: ShortArray, count: Int, vocabulary: List<String>, job: Long): EnglishResult {
@@ -318,6 +331,8 @@ internal object Whisper {
     external fun abort(job: Long)
     /** The last decode's timings, for Labs › Diagnostics (hexspeech.cpp says what each is). */
     external fun timings(): LongArray?
+    /** What the last decode chose among the languages it was given (hexspeech.cpp says what each value is). */
+    external fun language(): LongArray?
     /** Keeps [threads] worker threads ready with the model [handle] for its decodes, or none (0, ggml's default: new
      * threads for every graph), on the cores [fastCores] has a bit for (0: no restriction, and also what a mask leaves
      * fewer cores than [threads] of). The pool is freed with the model. */

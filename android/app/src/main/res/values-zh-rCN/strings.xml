@@ -67,6 +67,7 @@
     <string name="settings_automatic">自动</string>
     <string name="settings_dictation_language">听写语言</string>
     <string name="dictation_language_automatic_detail">跟随键盘布局，否则跟随手机语言</string>
+    <string name="language_list_separator">、</string>
     <string name="dictation_lowercase">小写</string>
     <string name="dictation_lowercase_detail">全部转为小写</string>
     <string name="dictation_format_lists">整理列表</string>
@@ -117,6 +118,8 @@
     <string name="fast_english_no_connection">没有网络连接</string>
     <string name="fast_english_no_space">存储空间不足</string>
     <string name="fast_english_in_use">英语使用更快的听写（实验室）。</string>
+    <string name="listen_for_language">自动识别你说的语言</string>
+    <string name="listen_for_language_detail">在键盘和手机的语言中，用你说的那种语言听写。</string>
     <string name="learn_fixes">从我的修改中学习</string>
     <string name="learn_fixes_detail">学习你听写后随即改正的词。内容只留在这台手机上，且仅记录词对、次数和每条修正最近一次的时间。</string>
     <string name="learn_fixes_count">已改正 %1$d 次</string>

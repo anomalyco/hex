@@ -22,6 +22,8 @@ add_compile_options(-fvisibility=hidden -ffunction-sections -fdata-sections)
 # a path: the patch keeps ggml_abort's backtrace in process (stock ggml forks gdb or lldb). A bump it no longer fits fails.
 # whisper-state-timings.patch reads a decode's encoder and decoder time from its own state, and whisper-threadpool.patch
 # lets a decode's state run on a thread pool kept with the model, which dictation keeps and Labs › Diagnostics compares.
+# whisper-language-choice.patch lets Labs › Automatic listens for the language pick a decode's language among a few, from
+# the first window the decode encodes anyway.
 find_program(PATCH_EXECUTABLE patch REQUIRED)
 FetchContent_Declare(whisper_cpp
     URL https://codeload.github.com/ggml-org/whisper.cpp/tar.gz/d1be6fde11ac6e0407606b4e42fe72d34add8037
@@ -29,7 +31,8 @@ FetchContent_Declare(whisper_cpp
     TLS_VERIFY ON
     PATCH_COMMAND ${PATCH_EXECUTABLE} -p1 -N -t -F0 -i ${CMAKE_CURRENT_LIST_DIR}/ggml-no-debugger.patch
           COMMAND ${PATCH_EXECUTABLE} -p1 -N -t -F0 -i ${CMAKE_CURRENT_LIST_DIR}/whisper-state-timings.patch
-          COMMAND ${PATCH_EXECUTABLE} -p1 -N -t -F0 -i ${CMAKE_CURRENT_LIST_DIR}/whisper-threadpool.patch)
+          COMMAND ${PATCH_EXECUTABLE} -p1 -N -t -F0 -i ${CMAKE_CURRENT_LIST_DIR}/whisper-threadpool.patch
+          COMMAND ${PATCH_EXECUTABLE} -p1 -N -t -F0 -i ${CMAKE_CURRENT_LIST_DIR}/whisper-language-choice.patch)
 FetchContent_MakeAvailable(whisper_cpp)
 
 add_library(hexspeech SHARED hexspeech.cpp)

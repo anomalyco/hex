@@ -80,11 +80,12 @@ internal fun modelAtTick(tick: Long, prepared: Long, prepareLoaded: Boolean, dec
  * Times are ms after ✓ (after recording stopped when it stopped at 1 minute, [tick] false); [insertedMs] is null
  * when no text went in. [timings] are whisper.cpp's (Whisper.timings; null when today's model didn't run, since the
  * faster model gives no split), [cpuMs] the process's processor time during the decode (-1: unreadable), [ran] the
- * model that wrote the text and [threads] the threads it ran on (0: not known). */
+ * model that wrote the text, [threads] the threads it ran on (0: not known) and [choice] the language Labs › Automatic
+ * listens for the language chose (null with the lab off). */
 internal class DictationTimes(val place: DictationPlace, val recordedMs: Long, val keptMs: Long, val model: ModelAtTick,
                               val modelReadyMs: Long, val tick: Boolean, val stoppedMs: Long, val decodeStartedMs: Long,
                               val decodeEndedMs: Long, val insertedMs: Long?, val cpuMs: Long, val timings: LongArray?,
-                              val ran: RanOn = RanOn.Standard, val threads: Int = 0)
+                              val ran: RanOn = RanOn.Standard, val threads: Int = 0, val choice: LanguageChoice? = null)
 
 /** Held in memory only, so it goes when Hex's process ends; Home and the keyboard share the process. */
 internal val lastDictation = MutableStateFlow<DictationTimes?>(null)
@@ -109,6 +110,8 @@ internal class MicCapture(
         var text: String? = null
         /** What the model heard, before formatting: Labs › Learn from my fixes follows the raw words. */
         var heard: String? = null
+        /** [options] in the language Labs › Automatic listens for the language chose for it, once decoded. */
+        var written: SpeechOptions? = null
         // Labs › Diagnostics' last dictation: System.nanoTime of each step (0: not reached) and sample counts.
         @Volatile var tickAt = 0L
         var preparedAt = 0L
@@ -197,16 +200,17 @@ internal class MicCapture(
     }
 
     /** A dictation ends: recording stopped with nothing to transcribe, or its text is ready. */
-    private fun complete(ticket: Ticket, note: String? = null, text: String? = null, heard: String? = null) = main.post {
+    private fun complete(ticket: Ticket, note: String? = null, text: String? = null, heard: String? = null,
+                         written: SpeechOptions? = null) = main.post {
         if (active === ticket) active = null
         if (ticket.cancelled) { publish(current()); return@post }
-        ticket.done = true; ticket.note = note; ticket.text = text; ticket.heard = heard
+        ticket.done = true; ticket.note = note; ticket.text = text; ticket.heard = heard; ticket.written = written
         if (ticket !in queue) queue.addLast(ticket)
         var shown: String? = null
         while (queue.firstOrNull()?.done == true) {
             val next = queue.removeFirst()
             shown = next.note ?: shown
-            next.text?.let { insert(it, next.heard ?: it, next.options) }
+            next.text?.let { insert(it, next.heard ?: it, next.written ?: next.options) }
             next.spent?.let { lastDictation.value = durations(next, it, if (next.text != null) System.nanoTime() else 0L) }
         }
         publish(current(), shown)
@@ -220,7 +224,7 @@ internal class MicCapture(
             modelAtTick(ticket.tickAt, ticket.preparedAt, ticket.prepareLoaded, spent.loaded),
             if (ticket.preparedAt != 0L) ms(ticket.preparedAt) else 0,
             ticket.tickAt != 0L, ms(ticket.stoppedAt), ms(spent.startedAt), ms(spent.endedAt),
-            if (inserted != 0L) ms(inserted) else null, spent.cpuMs, spent.timings, spent.ran, spent.threads)
+            if (inserted != 0L) ms(inserted) else null, spent.cpuMs, spent.timings, spent.ran, spent.threads, spent.choice)
     }
 
     /** Recording stopped with audio to transcribe: queue it behind earlier dictations. [note] goes with its text. */
@@ -234,14 +238,15 @@ internal class MicCapture(
             decoding = ticket
             try {
                 if (ticket.cancelled) return@execute
-                val options = ticket.options
-                val heard = recognizer.decode(pcm, count, options, ticket.job)
+                val heard = recognizer.decode(pcm, count, ticket.options, ticket.job)
                 ticket.spent = recognizer.spent(ticket.job)
                 if (ticket.cancelled) return@execute
+                // Labs › Automatic listens for the language: formatted and inserted in the language it was written in.
+                val options = heard.spoken?.let(ticket.options::writtenIn) ?: ticket.options
                 when (val text = heard.text?.let { SpokenText.format(it, options) }) {
                     null -> complete(ticket, "Couldn’t transcribe. Try again.")
                     "" -> complete(ticket, "No speech heard")
-                    else -> complete(ticket, dictationNote(note, heard.note), text, heard.text)
+                    else -> complete(ticket, dictationNote(note, heard.note), text, heard.text, options)
                 }
             } catch (_: UnsatisfiedLinkError) {
                 complete(ticket, "Speech model unavailable")
