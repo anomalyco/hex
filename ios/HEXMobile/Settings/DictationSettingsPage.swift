@@ -296,26 +296,32 @@ struct DictationSettingsPage: View {
             SettingsCard {
                 // Hidden where the keyboard dictates by itself and it would say Off.
                 if keepsWarmRow || dictation.showsKeepMicWarm {
-                    HStack(spacing: 12) {
-                        SettingsRowLabel(
-                            title: String(localized: "Keep mic warm"),
-                            // A privacy point too: the microphone stays open for the time picked.
-                            detail: String(localized: "Keeps the mic open after a dictation so the next starts at once")
-                        )
-                        Spacer(minLength: 8)
-                        SettingsSegments(
-                            items: WarmSessionDuration.allCases,
-                            selected: dictation.warmDuration,
-                            label: \.shortLabel,
-                            onSelect: { duration in
-                                keepsWarmRow = true
-                                withAnimation(HexMotion.settleAnimation(reduceMotion: reduceMotion)) {
-                                    dictation.selectWarmDuration(duration)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 12) {
+                            SettingsRowLabel(title: String(localized: "Keep mic warm"))
+                            Spacer(minLength: 8)
+                            SettingsSegments(
+                                items: WarmSessionDuration.allCases,
+                                selected: dictation.warmDuration,
+                                label: \.shortLabel,
+                                onSelect: { duration in
+                                    keepsWarmRow = true
+                                    withAnimation(HexMotion.settleAnimation(reduceMotion: reduceMotion)) {
+                                        dictation.selectWarmDuration(duration)
+                                    }
                                 }
-                            }
-                        )
+                            )
+                        }
+                        // A privacy point too: the microphone stays open for the time picked.
+                        // Under the row, full width: beside the four segments it wrapped to three
+                        // lines.
+                        Text("Keeps the mic open after a dictation so the next starts at once")
+                            .font(.system(size: 12))
+                            .foregroundStyle(HexTheme.textMuted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
                     .frame(minHeight: 50)
 
                     SettingsDivider()
