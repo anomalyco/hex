@@ -81,6 +81,19 @@ Per language, against the same input with Adaptive touch off:
 
 A held in all seven, and the gate's own numbers are `dev`'s, field for field. With the guard, T1 and T2 make 0.9–4.4% fewer errors (Portuguese's T2 10.2%), and T3 0.4–1.2% fewer (Portuguese 4.3%) except in French, 6 more: B fails there, and French's held-out taps also come out 7 errors worse (415 → 422). The guard (`TypingWord.guarded`: space corrects a word only when the drawn centres would correct it too, and puts in their reading unless yours also clears their margin) keeps C, and most of the gain with it: without the guard, T1 and T2 make 6–22% fewer errors, but the same frozen centres change more correctly typed words in every layout (1–5 more on the centres, 91 for 76 on T1's aim in Bokmål). Letting your centres alone fix a spelling no list knows recovered 3–10% for T1 and T2, and changed 1–5 more correctly typed words in all six then measured: names and words the lists lack. D's bar was "no word broken before the fallback" until German broke one: the fallback needs about 16 labels, two sentences, so a new grip's first words still read the old centres, and zero can only be luck. 1 word against 179 without the fallback is what it is there for.
 
+**Time per letter.** The on-device replay (`replay.sh`'s way: the installed APK's classes under `app_process`; each letter asks for the strip, each space for the fix) takes the same options after OUT, so `Replay MODEL SET LANG OUT --adaptive frozen --profile-in PROFILE` reads your centres with a profile in use. On the Studio's API 35 Pixel 8 emulator (4 cores, 2 GB; 2026-11-24, 21:17–21:20, load 5–6 from other work), the held-out English and Portuguese sets, two rounds each, median / p95 in ms:
+
+| | Letter | Space |
+|---|---|---|
+| English, `dev` before #2790 (78258948d) | 0.088 / 0.267, 0.089 / 0.272 | 0.022 / 0.289, 0.022 / 0.275 |
+| English, after it, lab off | 0.088 / 0.269, 0.090 / 0.280 | 0.021 / 0.265, 0.022 / 0.296 |
+| English, after it, a profile in use | 0.110 / 0.459, 0.110 / 0.446 | 0.027 / 0.306, 0.025 / 0.282 |
+| Portuguese, `dev` before #2790 | 0.134 / 0.495, 0.134 / 0.501 | 0.027 / 0.228, 0.026 / 0.234 |
+| Portuguese, after it, lab off | 0.138 / 0.539, 0.136 / 0.510 | 0.029 / 0.240, 0.027 / 0.237 |
+| Portuguese, after it, a profile in use | 0.153 / 0.695, 0.153 / 0.699 | 0.030 / 0.237, 0.029 / 0.236 |
+
+Off, the second list of taps costs nothing measurable: medians within 0.004 ms of before, p95 apart by about as much as two rounds of one build. On, the guard's second decoding adds about 0.02 ms per letter at the median and 0.16–0.19 ms at p95; spaces reuse the decision the strip made. The profiles were learned on the same sentences (the gate's learning run), so the word errors those runs report (English 680 → 667, Portuguese 896 → 852) only show the centres were read, not a gain.
+
 ## Swipe typing
 
 Keyboard › Swipe typing's decoder ([SwipeDecoder](../../app/src/main/java/ly/anoma/hex/typing/SwipeDecoder.kt)) is scored the way iPhone Hex's was (its experiment `2026-11-20-hex-swipe-typing`): synthetic swipes for every word of the held-out sentences above, with the true word before as context. Words of one key are tapped and words the model lacks are left out. [swipe_paths.py](swipe_paths.py) is a port of the iPhone benchmark's generator: the same random numbers, noise model and minimum-jerk timing, on the key grid both keyboards share. Its paths match the Swift generator's to 5e-6 pitch, word for word. The iPhone replay reads the same files, so the two platforms are scored on the very same paths. [SwipeReplay.java](SwipeReplay.java) decodes them with the keyboard's own `SwipeReader`: the decoder, English's contractions, the never-suggest list, then a rare name ranked lower.
