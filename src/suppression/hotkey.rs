@@ -140,6 +140,14 @@ const HOLD_THROUGH_KEYS: fn() -> bool = if cfg!(test) {
     crate::labs::hold_through_keys
 };
 
+/// Labs › Confirm long cancels. Unit tests keep it off; its policy has its
+/// own tests (`dictation::cancel_confirm`).
+const CONFIRM_LONG_CANCELS: fn() -> bool = if cfg!(test) {
+    || false
+} else {
+    crate::labs::confirm_long_cancels
+};
+
 /// Keys and modifier sides currently tracked as held down, with when each went
 /// down. Kept together so every clear resets keys and modifier sides alike.
 #[derive(Default)]
@@ -237,6 +245,12 @@ pub struct DictationHotkey {
     /// modifier-only capture: a second or more in, the key is the app's, not a
     /// chord.
     hold_through_keys: fn() -> bool,
+    /// Labs › Confirm long cancels, read at each cancel press: a long
+    /// capture's first press asks instead of cancelling.
+    confirm_long_cancels: fn() -> bool,
+    /// When this machine's capture started, and a cancel press waiting for
+    /// its second.
+    cancel_confirm: crate::dictation::cancel_confirm::CancelConfirm,
     binding: RuntimeHotkey,
     /// Toggle's cancel shortcut; `None` in Hold mode.
     cancel: Option<RuntimeHotkey>,
@@ -288,6 +302,8 @@ impl DictationHotkey {
             tap_or_hold: TAP_OR_HOLD,
             double_tap_modifiers: DOUBLE_TAP_MODIFIERS,
             hold_through_keys: HOLD_THROUGH_KEYS,
+            confirm_long_cancels: CONFIRM_LONG_CANCELS,
+            cancel_confirm: Default::default(),
             binding,
             cancel: None,
             ignore_before: None,
@@ -377,6 +393,7 @@ impl DictationHotkey {
         self.state = State::IDLE;
         self.stale_keys_neutral_since = None;
         self.chord_break_at = None;
+        self.cancel_confirm.ended();
         Some(HotkeyAction::Finish)
     }
 
@@ -455,6 +472,7 @@ impl DictationHotkey {
         self.held.clear();
         self.stale_keys_neutral_since = None;
         self.chord_break_at = None;
+        self.cancel_confirm.ended();
         was_recording.then_some(HotkeyAction::Cancel)
     }
 
@@ -469,6 +487,7 @@ impl DictationHotkey {
         self.held.clear();
         self.stale_keys_neutral_since = None;
         self.chord_break_at = None;
+        self.cancel_confirm.started(std::time::Instant::now());
         true
     }
 
@@ -704,7 +723,25 @@ impl DictationHotkey {
         let was_locked = matches!(self.state, State::Locked);
         let action = self.process_event(event, now);
         self.track_chord_break(event, now, action, was_locked);
+        match action {
+            Some(HotkeyAction::Start) => self.cancel_confirm.started(std::time::Instant::now()),
+            Some(
+                HotkeyAction::Finish
+                | HotkeyAction::Cancel
+                | HotkeyAction::CancelShortcut
+                | HotkeyAction::Discard(_),
+            ) => self.cancel_confirm.ended(),
+            Some(HotkeyAction::PasteLast | HotkeyAction::ModelSwitch) | None => {}
+        }
         action
+    }
+
+    /// Labs › Confirm long cancels: whether this cancel press discards the
+    /// capture now. A long capture's first press asks instead, shows the
+    /// notice, and leaves the capture recording.
+    fn cancel_confirmed(&mut self) -> bool {
+        self.cancel_confirm
+            .press_with_notice((self.confirm_long_cancels)(), std::time::Instant::now())
     }
 
     /// A bare modifier passes through to other apps, so a hold reads to them
@@ -854,6 +891,9 @@ impl DictationHotkey {
                 .cancel
                 .is_some_and(|cancel| cancel.matches_key_press(code, flags))
         {
+            if !self.cancel_confirmed() {
+                return None;
+            }
             self.state = State::Dirty;
             return Some(HotkeyAction::CancelShortcut);
         }
@@ -861,6 +901,9 @@ impl DictationHotkey {
             if let State::Recording { started_at, .. } = self.state
                 && self.escape_cancels_hold(now)
             {
+                if !self.cancel_confirmed() {
+                    return None;
+                }
                 tracing::info!(
                     shortcut = "dictation",
                     after_press_ms = signed_ms(now, started_at),

@@ -235,6 +235,7 @@ define_features! {
     MeetingMicrophoneMute => labs(meeting_microphone_mute), "meeting-microphone-mute", Meetings, Everyone, MACOS, 20261124;
     MeetingIndicatorDisplay => labs(meeting_indicator_display), "meeting-indicator-display", Meetings, Everyone, MACOS_WINDOWS, 20261124;
     MeetingAudioSource => labs(meeting_audio_source), "meeting-audio-source", Meetings, Everyone, EVERY, 20261124, extra: ["labs.meeting_audio_source_choice"];
+    ConfirmLongCancels => labs(confirm_long_cancels), "confirm-long-cancels", Dictation, Everyone, EVERY, 20261125;
 }
 
 impl Feature {

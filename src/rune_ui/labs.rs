@@ -682,6 +682,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
     rows.push(row(Feature::FasterLiveText, None));
     rows.push(row(Feature::FailureNotices, None));
     rows.push(row(Feature::StopPhrase, None));
+    rows.push(row(Feature::ConfirmLongCancels, None));
     if caps.os == super::platform::Os::Linux && ui.platform.wayland {
         let live_typing = row(Feature::LiveTyping, Some(&KEYBOARD));
         // An organization's lock and its note already say why the switch is
@@ -1116,6 +1117,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::VoicePrompt => "lab-voice-prompt",
         Feature::CursorContext => "lab-cursor-context",
         Feature::StopPhrase => "lab-stop-phrase",
+        Feature::ConfirmLongCancels => "lab-confirm-long-cancels",
         Feature::Signature => "lab-signature",
         Feature::HudHeight => "lab-hud-height",
         Feature::IndicatorFollowsMouse => "lab-indicator-follows-mouse",

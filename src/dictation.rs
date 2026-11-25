@@ -4,6 +4,7 @@ pub(crate) mod apple_cleanup;
 pub(crate) mod audio;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod browser_page;
+pub(crate) mod cancel_confirm;
 pub(crate) mod caret_prompt;
 pub(crate) mod caret_text;
 pub(crate) mod clipboard_phrase;

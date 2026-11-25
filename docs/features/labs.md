@@ -67,6 +67,9 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        saying the phrase at the end of a hands-free dictation finishes it, as if the
 │                                        shortcut were pressed again, and the phrase never reaches the pasted text;
 │                                        needs a speech model that streams on a GPU, as Live text does
+├── Confirm long cancels no labs.confirm_long_cancels        (every OS) once a dictation has recorded 10 s, its cancel shortcut's first press
+│                                        keeps recording and shows "Press again to discard this dictation" beside the HUD
+│                                        for 3 s; a second press inside that window cancels as before (#2837)
 ├── Failure notices no    labs.failure_notices                   when a dictation fails, its explanation sits beside the HUD for about 6 s, or until the next capture starts
 ├── Live typing     no    labs.live_typing                       (Linux Wayland) provisional words as an underlined input-method preedit in the focused field; the final text is committed there instead of pasted; on a compositor that offers no input method (GNOME) its card is disabled with a note and `hex labs` says so
 ├── Appearance      no    labs.appearance + labs.appearance_theme (system/light/dark, default system)  the main window is forced light or dark instead of following the system; the dictation HUD (including its onboarding and Sounds previews) and meeting recording pill remain dark. Other overlays follow the OS. On Windows the title bar follows too, through its background and light/dark mode; Windows 10 has no caption colour, so DWM keeps its own light or dark caption background (builds before 19041 keep the OS caption) while its text and buttons follow
@@ -1177,6 +1180,32 @@ in [control/settings.rs](../../src/control/settings.rs);
 [tests/panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
 dictation with the lab on, and a request against a live model; the Labs page
 goldens were regenerated for the new card.
+
+Confirm long cancels (`confirm-long-cancels`, every OS, #2837): a long
+dictation is no longer lost to one stray press of its cancel shortcut. Each
+OS's shortcut machine (macOS `DictationHotkey`, Windows' hook state, Linux's
+`ShortcutState`) keeps a `dictation::cancel_confirm::CancelConfirm` that learns
+when its capture starts and ends, and asks it before acting on a cancel press.
+
+```ts
+Cancel shortcut while a dictation records       // labs.confirm_long_cancels
+├── Lab off, or under 10 s recorded -> cancels at once, as before
+├── 10 s or more, first press -> keeps recording; the key stays Hex's (the app
+│   in front never sees it); the live-text plate says "Press again to discard
+│   this dictation" for 3 s, even with Failure notices off
+├── Second press within 3 s -> cancels: cancel tone, nothing pasted; the notice goes
+├── A press after the 3 s -> asks again
+└── hex dictation cancel, lost input, a suspended tap -> cancel at once, never ask
+```
+
+It covers Toggle's cancel shortcut on every OS, and on macOS also an extra
+dictation shortcut's cancel, Caps Lock dictation's Escape, and Hold's Escape
+past the hold threshold. Checks: the policy's tests in
+[cancel_confirm.rs](../../src/dictation/cancel_confirm.rs) and
+`a_long_toggled_recording_needs_a_second_cancel`
+([linux/input.rs](../../src/linux/input.rs)). The macOS and Windows wiring was
+not compiled or run from this Linux checkout, and no OS was tried with a real
+keyboard.
 
 Stop phrase (`stop-phrase`, every OS): while a hands-free dictation records,
 saying a configurable phrase at the end of your speech finishes it as if the

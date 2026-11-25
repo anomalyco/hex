@@ -622,6 +622,11 @@ struct ShortcutState {
     /// Dictate without processing, Labs › Terminal paste, or Labs › Second
     /// dictation.
     flavour: DictationFlavour,
+    /// Labs › Confirm long cancels: when the capture started, and a cancel
+    /// press waiting for its second.
+    cancel_confirm: crate::dictation::cancel_confirm::CancelConfirm,
+    /// Its lab, read at each cancel press; tests turn it on.
+    confirm_long_cancels: fn() -> bool,
 }
 
 impl ShortcutState {
@@ -636,6 +641,8 @@ impl ShortcutState {
             last_release: None,
             key_hold: KeyHold::Up,
             flavour: DictationFlavour::Normal,
+            cancel_confirm: Default::default(),
+            confirm_long_cancels: crate::labs::confirm_long_cancels,
         }
     }
 
@@ -721,6 +728,7 @@ impl ShortcutState {
         self.capture = Capture::Idle;
         self.last_release = None;
         self.key_hold = KeyHold::Up;
+        self.cancel_confirm.ended();
         Some(HotkeyEvent::Finish)
     }
 
@@ -734,10 +742,28 @@ impl ShortcutState {
         self.capture = Capture::Idle;
         self.last_release = None;
         self.key_hold = KeyHold::Up;
+        self.cancel_confirm.ended();
         Some(HotkeyEvent::Finish)
     }
 
+    /// One input's transition, keeping Labs › Confirm long cancels' capture
+    /// start in step with the events it produces.
     fn update(&mut self, input: Input, now: Instant) -> Option<HotkeyEvent> {
+        let event = self.transition(input, now);
+        match &event {
+            Some(HotkeyEvent::Start { .. }) => self.cancel_confirm.started(now),
+            Some(
+                HotkeyEvent::Finish
+                | HotkeyEvent::FinishPrinting(_)
+                | HotkeyEvent::FinishPhrase(_)
+                | HotkeyEvent::Cancel,
+            ) => self.cancel_confirm.ended(),
+            _ => {}
+        }
+        event
+    }
+
+    fn transition(&mut self, input: Input, now: Instant) -> Option<HotkeyEvent> {
         match input {
             // Escape while Annotate draws stops drawing, never the recording,
             // and it ends no dictation (#786).
@@ -747,7 +773,13 @@ impl ShortcutState {
                 None
             }
             Input::Lost => self.cancel(),
-            Input::Cancel if self.wants_cancel() => self.cancel(),
+            // Labs › Confirm long cancels: a long capture's first press asks
+            // and keeps recording.
+            Input::Cancel if self.wants_cancel() => self
+                .cancel_confirm
+                .press_with_notice((self.confirm_long_cancels)(), now)
+                .then(|| self.cancel())
+                .flatten(),
             Input::Cancel => None,
             Input::Pressed(
                 shortcut @ (Shortcut::Dictation
@@ -2542,6 +2574,41 @@ mod tests {
         test.tap();
         test.tap();
         assert_eq!(test.events, [START, Cancel, START, Cancel, START, Finish]);
+    }
+
+    /// Labs › Confirm long cancels: past ten seconds, the first cancel press
+    /// keeps recording and a second within the window discards it; a short
+    /// recording still cancels at once, and so does `hex dictation cancel`.
+    #[test]
+    fn a_long_toggled_recording_needs_a_second_cancel() {
+        let mut test = Test::with(toggle_with_cancel());
+        test.state.confirm_long_cancels = || true;
+        test.tap();
+        test.now += Duration::from_secs(2);
+        test.input(Input::Cancel);
+        assert_eq!(test.events, [START, Cancel], "a short one cancels at once");
+
+        test.tap();
+        test.now += Duration::from_secs(30);
+        test.input(Input::Cancel);
+        assert_eq!(test.events, [START, Cancel, START], "the first press asks");
+        assert_eq!(test.state.capture, Capture::Locked);
+        test.now += Duration::from_secs(1);
+        test.input(Input::Cancel);
+        assert_eq!(test.events, [START, Cancel, START, Cancel]);
+
+        test.tap();
+        test.now += Duration::from_secs(30);
+        test.input(Input::Cancel);
+        test.now += Duration::from_secs(5);
+        test.input(Input::Cancel);
+        assert_eq!(
+            test.state.capture,
+            Capture::Locked,
+            "too late: it asks again"
+        );
+        test.command(Command::DictationCancel);
+        assert_eq!(test.events, [START, Cancel, START, Cancel, START, Cancel]);
     }
 
     /// Cancelling mid-hold (for example `hex dictation cancel` while a desktop

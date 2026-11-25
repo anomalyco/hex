@@ -8,7 +8,9 @@ while the shortcut is still held past the hold threshold cancels it; a
 hands-free capture never takes Escape. Every other intentional dictation
 finishes and pastes. The other exception is a Labs › Caps Lock dictation
 capture on macOS: it is hands-free in every shortcut mode, so its own Escape
-binding cancels it even in Hold.
+binding cancels it even in Hold. With Labs › Confirm long cancels on, a dictation
+that has recorded 10 s or more asks for a second cancel press within 3 s
+before it is thrown away (see [labs.md](labs.md), #2837).
 
 This map covers the macOS release path. Linux shares the basic journey, not
 every timing, input, or recovery guarantee; see the

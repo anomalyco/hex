@@ -287,6 +287,9 @@ struct CallbackState {
     cancel_vk: Option<u32>,
     /// The cancel key went down while Hex held it; its release is ours too.
     cancel_down: bool,
+    /// Labs › Confirm long cancels: when the capture started, and a cancel
+    /// press waiting for its second.
+    cancel_confirm: crate::dictation::cancel_confirm::CancelConfirm,
     modifiers: ModifierState,
     /// The same read with AltGr's synthesized Left Ctrl still counted, which
     /// a binding with a key has always seen (`ModifierState::holds`).
@@ -533,6 +536,7 @@ impl WindowsHotkeyMonitor {
             cancel,
             cancel_vk,
             cancel_down: false,
+            cancel_confirm: Default::default(),
             modifiers: ModifierState::default(),
             raw_modifiers: ModifierState::default(),
             side_down: SideDownTimes::default(),
@@ -984,7 +988,13 @@ fn process_button(
             if cancel_event {
                 if is_down && !state.cancel_down {
                     state.cancel_down = true;
-                    if let Some(action) = state.capture.cancel() {
+                    // Labs › Confirm long cancels: a long capture's first
+                    // press asks and keeps recording.
+                    let cancels = state.cancel_confirm.press_with_notice(
+                        crate::labs::confirm_long_cancels(),
+                        std::time::Instant::now(),
+                    );
+                    if let Some(action) = cancels.then(|| state.capture.cancel()).flatten() {
                         watchdog::note_cancelled();
                         send_event(state, action, time);
                     }
@@ -1144,6 +1154,14 @@ fn holds_menu(binding: Option<&WindowsHotkey>) -> bool {
 }
 
 fn send_event(state: &mut CallbackState, action: HotkeyAction, timestamp_ms: u32) {
+    match action {
+        HotkeyAction::Start => state.cancel_confirm.started(std::time::Instant::now()),
+        HotkeyAction::Finish | HotkeyAction::Cancel => state.cancel_confirm.ended(),
+        HotkeyAction::PasteLast
+        | HotkeyAction::ModelSwitch
+        | HotkeyAction::Capture
+        | HotkeyAction::CaptureUp => {}
+    }
     match state.events.try_send(HotkeyEvent {
         action,
         flavour: state.capture.flavour(),
@@ -1466,6 +1484,7 @@ mod tests {
             cancel: None,
             cancel_vk: None,
             cancel_down: false,
+            cancel_confirm: Default::default(),
             modifiers: ModifierState::default(),
             raw_modifiers: ModifierState::default(),
             side_down: SideDownTimes::default(),

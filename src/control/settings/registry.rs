@@ -830,6 +830,12 @@ pub(super) const KEYS: &[Key] = &[
          shortcut were pressed again",
     ),
     key(
+        "labs.confirm_long_cancels",
+        Kind::Bool,
+        "Labs: once a dictation has recorded for 10 seconds, the first cancel press keeps \
+         recording and asks for a second within 3 seconds",
+    ),
+    key(
         "labs.stop_phrase_text",
         Kind::Text,
         "Labs: the phrase that finishes a hands-free dictation, at least two words and six \
