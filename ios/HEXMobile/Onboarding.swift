@@ -933,6 +933,30 @@ private struct OnboardingPracticePage: View {
 
 // MARK: - Hex is ready
 
+/// What's left on page 6, first what matters most.
+enum OnboardingLeft: Equatable {
+    case nothing
+    case model
+    case microphone
+    case keyboard
+    case fullAccess
+
+    static func resolve(modelReady: Bool, microphoneGranted: Bool, keyboardAdded: Bool?, fullAccessOn: Bool) -> Self {
+        if !modelReady { return .model }
+        if !microphoneGranted { return .microphone }
+        if keyboardAdded == false { return .keyboard }
+        if !fullAccessOn { return .fullAccess }
+        return .nothing
+    }
+
+    /// Try again goes back to the practice: worth it once Settings has the microphone or the
+    /// keyboard, or to use the keyboard once for Full Access. Not on "Hex is ready", with
+    /// nothing left, nor while the model gets ready, whose card has its own Try again.
+    var offersTryAgain: Bool {
+        self == .microphone || self == .keyboard || self == .fullAccess
+    }
+}
+
 /// Page 6. "Hex is ready" only once every step is done (the model included); until then it
 /// says what's left. Start using Hex never waits on it (App Review 5.1.1(iv)).
 private struct OnboardingReadyPage: View {
@@ -943,20 +967,13 @@ private struct OnboardingReadyPage: View {
     let onTryAgain: () -> Void
     let onStart: () -> Void
 
-    private enum Left {
-        case nothing
-        case model
-        case microphone
-        case keyboard
-        case fullAccess
-    }
-
-    private var left: Left {
-        if !model.isReady { return .model }
-        if monitor.microphone != .granted { return .microphone }
-        if monitor.keyboardAdded == false { return .keyboard }
-        if !monitor.fullAccessOn { return .fullAccess }
-        return .nothing
+    private var left: OnboardingLeft {
+        OnboardingLeft.resolve(
+            modelReady: model.isReady,
+            microphoneGranted: monitor.microphone == .granted,
+            keyboardAdded: monitor.keyboardAdded,
+            fullAccessOn: monitor.fullAccessOn
+        )
     }
 
     var body: some View {
@@ -988,7 +1005,7 @@ private struct OnboardingReadyPage: View {
             }
             .onboardingStagger(1)
             Spacer(minLength: 24)
-            if left != .model {
+            if left.offersTryAgain {
                 OnboardingQuietButton(title: "Try again", action: onTryAgain)
                     .padding(.bottom, 8)
                     .onboardingStagger(2)
