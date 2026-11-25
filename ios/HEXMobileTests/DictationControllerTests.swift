@@ -3297,14 +3297,22 @@ final class SpeechLanguagePickerTests: XCTestCase {
         XCTAssertEqual(picked?.identifier, "en-US")
     }
 
+    /// Settings names languages as the keyboard does (1.0.5 quality review: "English (United
+    /// Stat…" was cut off, and one language had up to four spellings across screens).
     func testShortNamesDropTheRegionOnlyWhenItIsTheOnlyOne() {
         let english = Locale(identifier: "en-US")
         let names = SpeechLanguagePicker.shortNames(for: ["nb-NO", "en-US", "en-GB", "he-IL"], in: english)
         XCTAssertEqual(names["nb-NO"], "Norwegian Bokmål")
         XCTAssertEqual(names["he-IL"], "Hebrew")
-        XCTAssertEqual(names["en-US"], "English (United States)")
-        XCTAssertEqual(SpeechLanguagePicker.shortName(for: "en-US", in: english), "English (US)")
-        XCTAssertEqual(SpeechLanguagePicker.shortName(for: "es-US", in: english), "Spanish (US)")
+        XCTAssertEqual(names["en-US"], "English (US)")
+        let supported = ["en-US", "en-GB", "es-US", "es-ES", "fr-FR", "fr-CA", "ru-RU"]
+        let short = SpeechLanguagePicker.shortNames(for: ["en-US", "es-US", "fr-FR", "ru-RU"], among: supported, in: english)
+        XCTAssertEqual(short, ["en-US": "English (US)", "es-US": "Spanish (US)", "fr-FR": "French (FR)", "ru-RU": "Russian"])
+        // The keyboard's own names follow the same rule, in each language's own name.
+        let native = DictationLanguageSwitch.nativeNames(for: ["en-US", "es-US", "ru-RU"], supported: supported)
+        XCTAssertEqual(native["en-US"], "English (US)")
+        XCTAssertEqual(native["es-US"], "Español (US)")
+        XCTAssertEqual(native["ru-RU"], "Русский")
     }
 
     func testOnlyEnglishCountsAsEnglish() {
