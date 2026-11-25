@@ -3,6 +3,7 @@ package ly.anoma.hex.typing
 import android.content.Context
 import java.security.MessageDigest
 import ly.anoma.hex.keyboard.KeyboardHeight
+import ly.anoma.hex.keyboard.KeyColor
 import ly.anoma.hex.speech.Spoken
 
 internal class TypingPreferences(context: Context) {
@@ -88,6 +89,16 @@ internal class TypingPreferences(context: Context) {
     var height: KeyboardHeight
         get() = KeyboardHeight.of(prefs.getString(HEIGHT, null))
         set(value) { prefs.edit().putString(HEIGHT, value.key).apply() }
+    /** Labs › Keyboard › Key colors: the keys in [keyColor]'s colours, off by default. */
+    var keyColors: Boolean
+        get() = prefs.getBoolean(KEY_COLORS, false)
+        set(value) { prefs.edit().putBoolean(KEY_COLORS, value).apply() }
+    /** Labs › Keyboard › Key colors › Color: Automatic until a theme is chosen; kept while the lab is off. */
+    var keyColor: KeyColor
+        get() = KeyColor.of(prefs.getString(KEY_COLOR, null))
+        set(value) { prefs.edit().putString(KEY_COLOR, value.key).apply() }
+    /** The colours the keys are drawn in: [keyColor] while the lab is on, else Automatic. */
+    val drawnKeyColor get() = if (keyColors) keyColor else KeyColor.Automatic
 
     // Remember only explicit rejection of this exact pair in this language; never save typed text.
     private fun pair(language: String, original: String, replacement: String): String {
@@ -116,5 +127,7 @@ internal class TypingPreferences(context: Context) {
         const val VOICE_ONLY = "voiceOnly"
         const val HEIGHT = "keyboardHeight"
         const val HEX_KEY_LEFT = "hexKeyLeft"
+        const val KEY_COLORS = "keyColors"
+        const val KEY_COLOR = "keyColor"
     }
 }

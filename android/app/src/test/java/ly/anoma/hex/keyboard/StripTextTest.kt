@@ -282,6 +282,9 @@ class StripTextTest {
         assertTrue(lastDictationLines(DictationTimes(DictationPlace.Home, 2_000, 1_400, ModelAtTick.Loaded, 0, true, 20, 21, 1_321,
             1_330, 3_900, longArrayOf(10_000, 1_000_000, 90_000, 20_000, 0, 320, 4, 0, 610_000, 4))).endsWith(
             "  a phrase written twice, decoded again without your words: 610 ms of the decode\n"))
+        // Labs › Dictate from Quick Settings' sheet names its own place.
+        assertTrue(lastDictationLines(DictationTimes(DictationPlace.QuickSettings, 5_000, 4_800, ModelAtTick.Loaded, 0, true, 20, 25,
+            2_025, 2_030, 7_000, timings)).contains("\n  from Quick Settings, 5.0 s recorded, 4.8 s kept;"))
         // Where a dictation's threads were kept, in the words the report uses: no pool, a pool on any core, a pinned one,
         // and a report from a build before that slot existed.
         assertEquals("started for every graph", poolWords(-1))

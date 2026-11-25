@@ -43,6 +43,7 @@ import ly.anoma.hex.speech.SpeechModel
 import ly.anoma.hex.speech.SpeechPreferences
 import ly.anoma.hex.speech.Spoken
 import ly.anoma.hex.speech.keepAwake
+import ly.anoma.hex.speech.swipeUnreadableIn
 import ly.anoma.hex.speech.typingLayout
 import ly.anoma.hex.typing.AdaptiveTouchStore
 import ly.anoma.hex.typing.PersonalWords
@@ -107,10 +108,12 @@ class HexKeyboard : InputMethodService() {
             readPersonal = { PersonalWords.read(contentResolver, it) }, background = words,
             emoji = EmojiWords(assets, words),
             learned = { if (preferences.learnFixes) fixes.record(it) },
-            adaptiveTouch = { if (feedback.adaptiveTouch) AdaptiveTouchStore.get(this) else null })
+            adaptiveTouch = { if (feedback.adaptiveTouch) AdaptiveTouchStore.get(this) else null },
+            swipeUnavailable = ::swipeUnavailable)
     }
     private val typingChanged = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == TypingPreferences.SUGGEST_SWEAR_WORDS) engine.swearWordsChanged()
+        if (key == TypingPreferences.KEY_COLORS || key == TypingPreferences.KEY_COLOR) recolor()
         if (key == TypingPreferences.NUMBER_ROW) engine.numberRowChanged()
         if (key == TypingPreferences.LOCAL_CURRENCY) engine.localCurrencyChanged()
         if (key == TypingPreferences.EMOJI_SUGGESTIONS) engine.emojiSuggestionsChanged()
@@ -187,6 +190,17 @@ class HexKeyboard : InputMethodService() {
         currentSubtype = newSubtype
         modeChanged(newSubtype)
     }
+    /** Labs › Keyboard › Key colors changed (tried in Hex's own settings, the keyboard may be showing): the keys are
+     * built again in the new colours, at once unless a dictation is running; then the next showing has them. */
+    private fun recolor() {
+        val old = view ?: return
+        if (old.colored(feedback.drawnKeyColor) || capture.phase != SpeechPhase.Idle) return
+        old.cancelGestures(); old.reset()
+        setInputView(inputView())
+        if (!isInputViewShown) return
+        engine.configureTyping(keepWord = true); view?.status(capture.phase, idleHint())
+        viewing = true; watchClipboard()
+    }
 
     /** The field's type as Hex last started in it: an app can change it in place (restarting the same box). */
     private var fieldType = 0 to 0
@@ -212,8 +226,9 @@ class HexKeyboard : InputMethodService() {
             viewing = true
             return
         }
-        // Settings › Keyboard › Height changed while a dictation ran: the new keys now, before they show.
-        if (view?.sized(feedback.height) == false) setInputView(inputView())
+        // Settings › Keyboard › Height or Labs › Keyboard › Key colors changed while a dictation ran: the new keys
+        // now, before they show.
+        if (view?.sized(feedback.height) == false || view?.colored(feedback.drawnKeyColor) == false) setInputView(inputView())
         view?.cancelGestures()
         // Another type in the same box: back to its keys, as a new field opens (configureTyping draws them).
         if (typeChanged) view?.closeMenu(configure = false)
@@ -320,6 +335,13 @@ class HexKeyboard : InputMethodService() {
         checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED -> R.string.keyboard_hint_microphone
         else -> R.string.keyboard_hint_hold
     })
+    /** A swipe in a dictation language without a typing model types nothing: the strip names the language until typing
+     * starts, a tap or its ✕ (in place of Hex Preview's update line, which comes back in the next field). */
+    private fun swipeUnavailable() {
+        val language = swipeUnreadableIn(feedback.layout, preferences.spoken) ?: return
+        view?.notice(StripNotice(getString(R.string.keyboard_note_swipe, language.label), getString(R.string.keyboard_note_dismiss),
+            tap = {}, dismiss = {}))
+    }
     internal fun beginSpeech(): Boolean {
         if (engine.secure || currentInputConnection == null || !capture.canStart ||
             checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {

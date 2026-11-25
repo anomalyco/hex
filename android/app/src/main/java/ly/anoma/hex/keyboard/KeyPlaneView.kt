@@ -50,10 +50,10 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private val density = resources.displayMetrics.density
     private fun dp(value: Int) = (value * density).roundToInt()
     private fun px(value: Float) = (value * density).roundToInt()
-    private val caps = KeyCaps(context, KeyRows.labelBase(resources)) { ime.feedback.haptics }
+    private val caps = KeyCaps(context, host.paints, KeyRows.labelBase(resources)) { ime.feedback.haptics }
     private val ink = caps.ink
     private val modifier = caps.modifier
-    private val quiet = context.getColor(R.color.quiet)
+    private val quiet = caps.paints.quiet
     private val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     // Gboard's rows for this screen ([KeyRows]) at Settings › Keyboard › Height. Each key's touch target is its row's
     // full height (KeyRowLayout), so the targets, and the keycap centres the typing model and swipe read
@@ -420,6 +420,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         enterKey.label?.text = label.orEmpty(); enterKey.requestLayout()
         enterIcon.setImageResource(actionIcon(page.enter.action))
         enterIcon.visibility = if (label == null) View.VISIBLE else View.GONE
+        actionColors(enterKey, page)
         enterKey.contentDescription = label ?: actionLabel(page.enter.action) ?: context.getString(R.string.keyboard_return)
     }
 
@@ -479,7 +480,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                 .also { it.sound = AudioManager.FX_KEYPRESS_SPACEBAR }
             PadAction.Enter -> (page.enter.label?.let { caps.cap(it, it, fill, 17f, ime.engine::enter) }
                 ?: caps.icon(actionIcon(page.enter.action), actionLabel(page.enter.action) ?: context.getString(R.string.keyboard_return),
-                    fill, ime.engine::enter)).also { it.sound = AudioManager.FX_KEYPRESS_RETURN }
+                    fill, ime.engine::enter)).also { it.sound = AudioManager.FX_KEYPRESS_RETURN; actionColors(it, page, fill) }
             else -> caps.cap(label, padDescription(key, label), fill, when { key.word != 0 -> 17f; label.length > 1 -> 21f; else -> 26f }) { act(key.action) }
         }
         // A phone digit's letters beside it, small and quiet, as Gboard's.
@@ -740,7 +741,8 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     /** A finger went down on a letter key: it may become a swipe. */
     private fun strokeBegan(k: KeyCap, e: MotionEvent) {
         if (swipe != null) finishSwipe()
-        if (!ime.engine.swipes || geometry() == null) { forgetStroke(); return }
+        // A stroke that can't be read is followed too, only so the strip can say why once it travels as a swipe would.
+        if (!(ime.engine.swipes || ime.engine.swipeUnreadable) || geometry() == null) { forgetStroke(); return }
         val row = k.parent as View
         stroke = SwipeStroke(e.getPointerId(e.actionIndex)).also { it.add(k.left + e.getX(e.actionIndex).toDouble(), row.top + e.getY(e.actionIndex).toDouble(), e.eventTime / 1000.0) }
         strokeKey = k
@@ -835,6 +837,19 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         for ((c, key) in caseKeys) { val text = cased(c); key.label?.text = text; key.contentDescription = text }
         shiftIcon?.setImageResource(shiftIconFor(page))
         (shiftIcon?.parent?.parent as? View)?.contentDescription = shiftDescription(page)
+    }
+
+    /** Labs › Key colors: in a Send, Go, Search or Done field a theme's enter key takes its action colour under a
+     * white symbol or label, as iPhone Hex's; elsewhere, and always with Automatic, it is a special key. */
+    private fun actionColors(enter: KeyCap, page: KeyboardPage, fill: Int = modifier) {
+        if (caps.paints.color == KeyColor.Automatic) return
+        val action = caps.paints.action(page.enter.action)
+        enter.fill(action ?: fill, if (action != null) caps.paints.actionPressed else caps.paints.pressed)
+        val tint = if (action != null) Color.WHITE else ink
+        for (v in enter.face.children) when (v) {
+            is ImageView -> v.imageTintList = ColorStateList.valueOf(tint)
+            is TextView -> v.setTextColor(tint)
+        }
     }
 
     private fun actionLabel(action: Int) = when (action) {

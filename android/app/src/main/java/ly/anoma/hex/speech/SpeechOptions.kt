@@ -86,6 +86,11 @@ internal fun phoneLanguage(chosen: DictationLanguage?, pinned: Spoken?, system: 
  * (Nederlands, Polski, Русский): English's next words and autocorrections are not that language's. */
 internal fun typingLayout(pinned: Spoken?, spoken: DictationLanguage): Spoken? = pinned ?: spoken.layout
 
+/** The dictation language a swipe can't be read in, named in the strip's note: no layout pinned and none of its own,
+ * so English's word list only stands in for the keys and swipes stay off. Null where swipes read a typing model. */
+internal fun swipeUnreadableIn(pinned: Spoken?, spoken: DictationLanguage): DictationLanguage? =
+    spoken.takeIf { typingLayout(pinned, spoken) == null }
+
 internal data class SpeechOptions(val style: Style, val spoken: DictationLanguage, val clean: Boolean, val translate: Boolean,
                                    val lowercase: Boolean = false, val endWithPeriod: Boolean = true,
                                    val formatLists: Boolean = false, val spokenPunctuation: Boolean = false,

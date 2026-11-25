@@ -56,5 +56,18 @@
             </intent-filter>
             <meta-data android:name="android.view.im" android:resource="@xml/input_method" />
         </service>
+        <!-- Labs › Dictate from Quick Settings. Off in the manifest: the Labs switch enables the tile service, so with the
+             lab off Android offers no Hex tile. The sheet is Hex's own (not exported), in a task of its own so it opens
+             over the app in front rather than bringing Hex forward, and kept out of Recents. -->
+        <service android:name=".QuickDictationTile" android:exported="true" android:enabled="false"
+            android:label="@string/quick_tile" android:icon="@drawable/hex_mark"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <activity android:name=".QuickDictationActivity" android:exported="false" android:theme="@style/HexSheet"
+            android:taskAffinity="" android:launchMode="singleTask" android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode|density|fontScale" />
     </application>
 </manifest>
