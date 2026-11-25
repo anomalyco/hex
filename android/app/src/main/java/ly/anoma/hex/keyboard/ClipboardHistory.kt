@@ -31,6 +31,12 @@ internal object ClipboardRules {
         isText && !sensitive && !own && !secureField && !noLearning &&
             text != null && text.isNotBlank() && text.length <= MAX_LENGTH
 
+    /** A clip's description marks it sensitive: the Android 13 constant and the literal key password managers set below
+     * it are the same key. [extra] reads one boolean of the description's extras. */
+    fun sensitive(extra: (String) -> Boolean) = extra(SENSITIVE)
+    /** A clip is one of Hex's own copies ([hexClip]). */
+    fun own(extra: (String) -> Boolean) = extra(OWN)
+
     /** [text] copied at [at]: a text kept already moves to the top and keeps its pin. */
     fun add(items: List<CopiedText>, text: String, at: Long): List<CopiedText> {
         val pinned = items.any { it.text == text && it.pinned }
@@ -46,6 +52,12 @@ internal object ClipboardRules {
         val (pinned, recent) = items.partition { it.pinned }
         return pinned.sortedByDescending { it.copiedAt }.take(PINNED) + recent.sortedByDescending { it.copiedAt }.take(RECENT)
     }
+
+    fun pin(items: List<CopiedText>, text: String, on: Boolean) =
+        ordered(items.map { if (it.text == text) it.copy(pinned = on) else it })
+    fun delete(items: List<CopiedText>, text: String) = items.filter { it.text != text }
+    /** Clear: every unpinned text goes, pinned ones stay. */
+    fun clear(items: List<CopiedText>) = items.filter { it.pinned }
 
     /** How a kept text reads in the panel: its own lines, each trimmed, without the blank ones. */
     fun preview(text: String) = text.lines().map(String::trim).filter(String::isNotEmpty).joinToString("\n")
@@ -114,8 +126,8 @@ internal object ClipboardHistory {
         seen = at
         val extras = description.extras
         val isText = description.hasMimeType("text/*")
-        val sensitive = extras?.getBoolean(ClipboardRules.SENSITIVE) == true
-        val own = extras?.getBoolean(ClipboardRules.OWN) == true
+        val sensitive = ClipboardRules.sensitive { extras?.getBoolean(it) == true }
+        val own = ClipboardRules.own { extras?.getBoolean(it) == true }
         if (!ClipboardRules.keeps("-", isText, sensitive, own, secureField, noLearning)) { write(context); return }
         // The first item's own text only: coerceToText would open a content: address.
         val text = clip()?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString()
@@ -124,9 +136,9 @@ internal object ClipboardHistory {
     }
 
     @Synchronized fun pin(context: Context, text: String, on: Boolean) =
-        update(context, items(context).map { if (it.text == text) it.copy(pinned = on) else it })
-    @Synchronized fun delete(context: Context, text: String) = update(context, items(context).filter { it.text != text })
-    @Synchronized fun clearUnpinned(context: Context) = update(context, items(context).filter { it.pinned })
+        update(context, ClipboardRules.pin(items(context), text, on))
+    @Synchronized fun delete(context: Context, text: String) = update(context, ClipboardRules.delete(items(context), text))
+    @Synchronized fun clearUnpinned(context: Context) = update(context, ClipboardRules.clear(items(context)))
     /** The lab turned off: every text goes, from memory and from the phone. */
     @Synchronized fun deleteAll(context: Context) {
         loaded = emptyList(); seen = 0L
