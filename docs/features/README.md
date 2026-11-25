@@ -3479,6 +3479,29 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
     than the next reading, and what's left is ordinary text. Held, Delete repeats letter by letter
     from the first; its slide still selects whole words. Off, Delete takes the word back as before
     (`SwipeText.takesBack`).
+├── Labs > Keyboard > Adaptive touch (off) -> iPhone Hex's experiment (#2146) on Android: the keyboard
+    learns where you land on each letter key, on this phone, and the decoder reads your taps with
+    those centres once it has 400 labelled taps over three sessions and they fit your recent taps
+    better than the drawn ones (`typing/AdaptiveTouch.kt`). Keycaps, touch areas, the likelier next
+    letter and swipes never move. A tap teaches only when the words around it show the letter meant:
+    a word left as typed (only letters the key under the finger typed), a pick of the same length, a
+    word kept over an autocorrection by undoing it or tapping it, a letter erased and retyped as a
+    neighbour. Never an autocorrection, a swipe, a slide, a held accent, or a field that takes no
+    corrections or asks not to be learned from, and only with Autocorrect and Spatial autocorrect on
+    and the layout's own model. Space corrects a word only when the drawn centres would correct it too
+    (`TypingWord.guarded`, stricter than iPhone's), and joins read the drawn taps. Each key plane (the
+    keyboard's width in 10 dp steps, orientation, the number row, the letters) learns apart, and a fit
+    check goes back to the drawn centres at once when the grip changes, keeping two grips per plane.
+    It keeps sums per key, no letters, words, times or order of taps: a 23,588-byte table, one Base64
+    value in the private `adaptiveTouch` SharedPreferences (never backed up), saved every 400 labels
+    and when the keyboard hides. The row shows "Learning: n of 400 taps" or "Active", and a confirmed
+    Reset touch learning while anything is stored, lab on or off; Delete what Hex learned clears it
+    too. Off, the keyboard makes no learner and types exactly as before.
+    Checks: `./gradlew --no-daemon :app:testDebugUnitTest -x prepareSpeechModel` passed 310 tests,
+    `AdaptiveTouchTest`'s 11 among them, on 2026-11-24; `android/benchmark/typing/quality-gate.py all
+    --adaptive` (README > Adaptive touch): identical before it learns, 1-4% fewer word errors for
+    typists who aim off the centres, never more correct words changed. Not yet tried on an emulator
+    or a device.
 ├── Labs > Keyboard > Password manager suggestions (off) -> while Android's autofill service —
     Bitwarden, 1Password or Google Password Manager, which must itself support Android 11's inline
     suggestions — offers logins, one-time codes or cards for the focused field, its own chips take

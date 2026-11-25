@@ -63,6 +63,11 @@ internal class TypingPreferences(context: Context) {
     var swipeDeleteLetters: Boolean
         get() = prefs.getBoolean(SWIPE_DELETE_LETTERS, false)
         set(value) { prefs.edit().putBoolean(SWIPE_DELETE_LETTERS, value).apply() }
+    /** Labs › Keyboard › Adaptive touch: the decoder reads taps with your own key centres once it has learned them
+     * ([AdaptiveTouch], kept by [AdaptiveTouchStore]). Off by default. */
+    var adaptiveTouch: Boolean
+        get() = prefs.getBoolean(ADAPTIVE_TOUCH, false)
+        set(value) { prefs.edit().putBoolean(ADAPTIVE_TOUCH, value).apply() }
     /** Labs › Keyboard › Password manager suggestions: Android's inline autofill suggestions in the
      * strip, off by default. Hex shows the service's own chips and never reads them. */
     var passwordManagerSuggestions: Boolean
@@ -96,6 +101,7 @@ internal class TypingPreferences(context: Context) {
         const val KEYBOARD_TOOLS = "keyboardTools"
         const val SMART_QUOTES = "smartQuotes"
         const val SWIPE_DELETE_LETTERS = "swipeDeleteLetters"
+        const val ADAPTIVE_TOUCH = "adaptiveTouch"
         const val PASSWORD_MANAGER_SUGGESTIONS = "passwordManagerSuggestions"
         const val VOICE_ONLY = "voiceOnly"
     }

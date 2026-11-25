@@ -45,6 +45,8 @@ import ly.anoma.hex.feedback.Feedback
 import ly.anoma.hex.feedback.FeedbackForm
 import ly.anoma.hex.keyboard.VoiceOnly
 import ly.anoma.hex.speech.*
+import ly.anoma.hex.typing.AdaptiveTouchModel
+import ly.anoma.hex.typing.AdaptiveTouchStore
 import ly.anoma.hex.typing.TypingPreferences
 import ly.anoma.hex.updates.Updates
 
@@ -95,7 +97,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     // Observe them even while trying the keyboard inside this page.
     var revision by remember { mutableIntStateOf(0) }
     DisposableEffect(context) {
-        val stores = listOf("speech", "typing").map { context.getSharedPreferences(it, Context.MODE_PRIVATE) }
+        val stores = listOf("speech", "typing", AdaptiveTouchStore.FILE).map { context.getSharedPreferences(it, Context.MODE_PRIVATE) }
         val changed = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> revision++ }
         stores.forEach { it.registerOnSharedPreferenceChangeListener(changed) }
         onDispose { stores.forEach { it.unregisterOnSharedPreferenceChangeListener(changed) } }
@@ -127,11 +129,20 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val keyboardTools = remember(revision) { typing.keyboardTools }
     val smartQuotes = remember(revision) { typing.smartQuotes }
     val swipeDeleteLetters = remember(revision) { typing.swipeDeleteLetters }
+    val adaptiveTouch = remember(revision) { typing.adaptiveTouch }
+    // Labs › Keyboard › Adaptive touch: how far it has learned (labelled taps on one key plane, and whether any reads your
+    // own centres), and whether the phone keeps averages, which Reset touch learning removes even with the lab off.
+    val touchStatus = remember(revision, adaptiveTouch) {
+        if (adaptiveTouch) AdaptiveTouchStore.get(context).let { it.taps to it.anyActive } else null
+    }
+    val touchStored = remember(revision) { AdaptiveTouchStore.stored(context) }
+    var resettingTouch by remember { mutableStateOf(false) }
     val passwordManager = remember(revision) { typing.passwordManagerSuggestions }
     val voiceOnly = remember(revision) { typing.voiceOnly }
     // A hidden field or leaving Labs shows the saved line again, never an unsaved draft.
     LaunchedEffect(page, signature) { if (page != Page.Labs || !signature) signatureDraft = speech.signatureText }
     LaunchedEffect(page, learnFixes) { if (page != Page.Labs || !learnFixes) forgetting = false }
+    LaunchedEffect(page) { if (page != Page.Labs) resettingTouch = false }
     val autoCapitalize = remember(revision) { typing.autoCapitalize }
     val autocorrect = remember(revision) { typing.autocorrect }
     val swearWords = remember(revision) { typing.suggestSwearWords }
@@ -393,7 +404,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                                 lines = 2, mod = Modifier.weight(1f))
                                             Action(stringResource(R.string.learn_fixes_cancel)) { forgetting = false }
                                             Action(stringResource(R.string.learn_fixes_delete_action)) {
-                                                fixStore.clear(); forgetting = false
+                                                fixStore.clear(); AdaptiveTouchStore.clear(context); forgetting = false
                                             }
                                         }
                                     } else {
@@ -451,6 +462,32 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 Rule()
                                 Toggle(stringResource(R.string.swipe_delete_letters), stringResource(R.string.swipe_delete_letters_detail),
                                     swipeDeleteLetters) { typing.swipeDeleteLetters = it }
+                                Rule()
+                                // Labs › Keyboard › Adaptive touch: off, the keys read the drawn centres and learn nothing;
+                                // what was learned stays on the phone until Reset touch learning or Delete what Hex learned.
+                                Toggle(stringResource(R.string.adaptive_touch), stringResource(R.string.adaptive_touch_detail),
+                                    adaptiveTouch, noteLines = Int.MAX_VALUE) { typing.adaptiveTouch = it }
+                                touchStatus?.let { (taps, active) ->
+                                    Label(if (active) stringResource(R.string.adaptive_touch_active) else stringResource(
+                                        R.string.adaptive_touch_learning, minOf(taps, AdaptiveTouchModel.ACTIVE_TAPS), AdaptiveTouchModel.ACTIVE_TAPS),
+                                        muted = true, size = 13, mod = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp))
+                                }
+                                if (adaptiveTouch || touchStored) {
+                                    Rule()
+                                    if (resettingTouch) {
+                                        Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(start = 16.dp, end = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically) {
+                                            Label(stringResource(R.string.adaptive_touch_reset_confirm), size = 14, lines = 2,
+                                                mod = Modifier.weight(1f))
+                                            Action(stringResource(R.string.learn_fixes_cancel)) { resettingTouch = false }
+                                            Action(stringResource(R.string.adaptive_touch_reset_action)) {
+                                                AdaptiveTouchStore.clear(context); resettingTouch = false
+                                            }
+                                        }
+                                    } else {
+                                        Entry(stringResource(R.string.adaptive_touch_reset), action = { resettingTouch = true })
+                                    }
+                                }
                                 Rule()
                                 Toggle(stringResource(R.string.password_manager_suggestions),
                                     stringResource(R.string.password_manager_suggestions_detail),

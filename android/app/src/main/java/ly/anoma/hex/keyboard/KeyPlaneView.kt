@@ -31,6 +31,7 @@ import ly.anoma.hex.R
 import ly.anoma.hex.typing.KeyGrid
 import ly.anoma.hex.typing.KeyPoint
 import ly.anoma.hex.typing.KeyRect
+import ly.anoma.hex.typing.TouchPlane
 import ly.anoma.hex.typing.TypingWord
 import ly.anoma.hex.useInter
 import kotlin.math.roundToInt
@@ -248,11 +249,13 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
      * engine for its smart form (Labs › Keyboard › Smart quotes), and every other key types as before.
      * A long press's picked alternate goes through [KeyboardEngine.type] instead, so it inserts exactly
      * the character it shows. */
-    private fun typeFromKey(text: String, g: KeyGrid?, p: KeyPoint?) {
+    private fun typeFromKey(text: String, g: KeyGrid?, p: KeyPoint?, aimed: Boolean = true) {
         if (text.length == 1 && (text[0] == '\'' || text[0] == '"')) ime.engine.quote(text[0])
-        else if (g != null && p != null) ime.engine.letter(text, p.x, p.y, g)
+        else if (g != null && p != null) ime.engine.letter(text, p.x, p.y, g, aimed = aimed)
         else ime.engine.type(text)
     }
+    // A swipe that came back as a tap is typing its letter: where it went down says nothing of your aim.
+    private var slidTap = false
 
     fun showPage(page: KeyboardPage) {
         val shown = current
@@ -319,7 +322,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                     val g = if (symbols) null else geometry()
                     val p = touch ?: g?.centres?.get(c)
                     val text = (downText ?: cased(c)).let { if (symbols || touch == null) it else likelier(c, it, touch!!) }
-                    typeFromKey(text, g, p)
+                    typeFromKey(text, g, p, aimed = touch != null && !slidTap)
                 }
                 row.add(k, at, width); at += width
                 if (!symbols) { letters[c] = k; caseKeys.add(c to k) }
@@ -339,7 +342,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                 }
                 slides[k] = { p ->
                     val g = if (symbols) null else geometry()
-                    typeFromKey(cased(c), g, p)
+                    typeFromKey(cased(c), g, p, aimed = false)
                 }
                 typesOnLift(k, preview = { cased(c) }, holds = { listOf(holds()) }, swipes = !symbols,
                     down = { e ->
@@ -752,7 +755,8 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         val letter = key?.let { slidTap(st, it, grid) }
         if (key != null && letter != null && readings.firstOrNull()?.let { startsAndEnds(it, letter) } != true) {
             // A tap that slid ("a" dragged a little too far and back): its letter goes in as a tap's would.
-            ime.engine.cancelSwipe(); key.performClick()
+            ime.engine.cancelSwipe()
+            slidTap = true; key.performClick(); slidTap = false
             return
         }
         ime.engine.endSwipe(readings)
@@ -851,7 +855,27 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         val first = letters[rows[0][0]] ?: return null; val next = letters[rows[0][1]] ?: return null; val below = letters[rows[1][0]] ?: return null
         if (first.width == 0 || next.left == first.left) return null
         val centres = letters.filterKeys { it.isLetter() }.mapValues { (_, cap) -> capCentre(cap) }
-        return KeyGrid(centres, capCentre(next).x - capCentre(first).x, capCentre(below).y - capCentre(first).y, spaceRect()).also { grid = it }
+        val pitchX = capCentre(next).x - capCentre(first).x; val pitchY = capCentre(below).y - capCentre(first).y
+        return KeyGrid(centres, pitchX, pitchY, spaceRect(), plane(rows, pitchX, pitchY)).also { grid = it }
+    }
+    /** The letter keys as Labs › Keyboard › Adaptive touch learns them: each keycap, its touch cell and its row. A key
+     * plane is the keyboard's width in 10 dp steps, its orientation and the number row, so a phone, an unfolded
+     * foldable, split screen and landscape each learn their own. */
+    private fun plane(lines: List<String>, pitchX: Double, pitchY: Double): TouchPlane {
+        val keys = letters.entries.filter { it.key.isLetter() }
+        val caps = keys.map { (_, cap) ->
+            val top = (cap.parent as View).top
+            KeyRect((cap.left + cap.paddingLeft).toDouble(), (top + cap.top + cap.paddingTop).toDouble(),
+                (cap.right - cap.paddingRight).toDouble(), (top + cap.bottom - cap.paddingBottom).toDouble())
+        }
+        val cells = keys.map { (_, cap) ->
+            val top = (cap.parent as View).top
+            KeyRect(cap.left.toDouble(), (top + cap.top).toDouble(), cap.right.toDouble(), (top + cap.bottom).toDouble())
+        }
+        val signature = "${(width / density / 10).roundToInt()}|${if (landscape) "landscape" else "portrait"}|" +
+            if (current?.digits != null) "digits" else ""
+        return TouchPlane(signature, keys.map { it.key }.toCharArray(), caps.toTypedArray(), cells.toTypedArray(),
+            keys.map { (c, _) -> lines.indexOfFirst { c in it } }.toIntArray(), pitchX, pitchY)
     }
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
         super.onLayout(changed, l, t, r, b)
