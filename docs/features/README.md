@@ -3292,7 +3292,7 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   drawn twice on a page) and `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` passed
 │   175 tests on 2026-11-24 on OpenJDK 21 and Android SDK 36 (offline, `-x prepareSpeechModel`);
 │   the repo has no Android CI, and nothing was tried on a device or emulator.
-├── Português, Nederlands, Polski or Русский with no pinned layout -> English's keys and
+├── Nederlands, Polski or Русский with no pinned layout -> English's keys and
 │   accents (DictationLanguage.layout is null), with English's word list only standing in for
 │   the keys' geometry: the strip keeps what was typed and your own dictionary words as
 │   completions, and text shortcuts, double-space period, capitals and the literal chip stay.
