@@ -1969,12 +1969,12 @@
         }
       }
     },
-    "Remove from keyboard" : {
+    "Remove a quick-switch language" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "从键盘中移除"
+            "value" : "移除快速切换语言"
           }
         }
       }
