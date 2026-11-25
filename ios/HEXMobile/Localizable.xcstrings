@@ -6226,6 +6226,46 @@
           }
         }
       }
+    },
+    "Voice isolation" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音突显"
+          }
+        }
+      }
+    },
+    "Records with Apple's voice chat processing so Control Center's Mic Mode can offer Voice Isolation. Other audio may be lowered while recording, and Bluetooth headphones may switch to the call (hands-free) profile." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用 Apple 的语音聊天处理来录音，让控制中心的麦克风模式可以提供“语音突显”。录音时其他音频可能会被调低，蓝牙耳机可能会切换到通话（免提）模式。"
+          }
+        }
+      }
+    },
+    "Korean keyboard (두벌식)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "韩语键盘（두벌식）"
+          }
+        }
+      }
+    },
+    "Adds 한국어, composing syllables as you type" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加 한국어，输入时自动组合音节"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
