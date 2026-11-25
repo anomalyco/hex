@@ -472,15 +472,17 @@ internal fun modelChoiceLines(on: Boolean, offByHand: Boolean, fastEnglish: Bool
     fun n(value: Double) = String.format(Locale.ROOT, "%.2f", value)
     val threshold = n(ModelChoice.THRESHOLD)
     val median = ModelChoice.median(state.ratios)
+    // The ratios themselves, oldest first, so a report shows whether the median rests on steady numbers or a spread.
+    val ratios = if (state.ratios.isEmpty()) "" else " (${state.ratios.joinToString(", ") { n(it) }})"
     val head = "Model choice: on" + (if (scale != 1.0) " (debug decode scale ×${scale.toString().removeSuffix(".0")})" else "") + "; "
     val first = head + when {
         state.decided -> "chose faster English dictation for this phone on ${java.time.LocalDate.ofEpochDay(state.decidedDay!!)}, " +
             "median ${n(state.decidedMedian ?: 0.0)} s of decoding per second of speech over the last ${state.ratios.size} " +
-            "dictations counted (threshold $threshold)" + if (offByHand) "; faster English dictation since turned off by hand, so it stays off" else ""
+            "dictations counted$ratios (threshold $threshold)" + if (offByHand) "; faster English dictation since turned off by hand, so it stays off" else ""
         offByHand -> "faster English dictation was turned off by hand, so Hex doesn't choose it; nothing is measured"
         fastEnglish -> "faster English dictation is already on, so nothing is measured"
         else -> (if (median == null) "no dictation counted yet" else "median ${n(median)} s of decoding per second of speech over the last " +
-            "${state.ratios.size} of ${ModelChoice.SAMPLES} dictations needed") + " (threshold $threshold); " +
+            "${state.ratios.size} of ${ModelChoice.SAMPLES} dictations needed$ratios") + " (threshold $threshold); " +
             "${state.englishInARow} of ${ModelChoice.WINDOW} English dictations in a row; standard dictation stays for now"
     }
     fun skipped(reason: NotCounted) = state.skipped[reason] ?: 0

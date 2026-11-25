@@ -78,16 +78,23 @@ internal object ModelChoice {
             next.copy(decidedDay = today, decidedMedian = median) else next
     }
 
-    /** What opening a Hex screen does: nothing with the lab off, before a choice, after faster English dictation was turned
-     * off by hand, or off a Hex screen ([onScreen] false: the keyboard, Quick Settings' sheet); else turn faster English
-     * dictation on and download its model, or carry on a download that isn't running ([downloading]) or done. */
-    fun whenOpened(onScreen: Boolean, labOn: Boolean, state: ModelChoiceState, fastEnglish: Boolean, offByHand: Boolean,
+    /** What opening Hex does ([ModelChoiceStore.opened], from MainActivity's onResume only): nothing with the lab off,
+     * before a choice, or after faster English dictation was turned off by hand; else turn faster English dictation on and
+     * download its model, or carry on a download that isn't running ([downloading]) or done. */
+    fun whenOpened(labOn: Boolean, state: ModelChoiceState, fastEnglish: Boolean, offByHand: Boolean,
                    installed: Boolean, downloading: Boolean): OpenAction = when {
-        !onScreen || !labOn || !state.decided || offByHand -> OpenAction.Nothing
+        !labOn || !state.decided || offByHand -> OpenAction.Nothing
         !fastEnglish -> OpenAction.TurnOnAndDownload
         !installed && !downloading -> OpenAction.Download
         else -> OpenAction.Nothing
     }
+
+    /** Faster English dictation's by-hand off after the lab is switched: turning it on is a new request, so an earlier off
+     * (perhaps from before the lab existed) no longer holds it back; turning it off changes nothing. */
+    fun offByHandWhenLabTurned(on: Boolean, offByHand: Boolean) = if (on) false else offByHand
+
+    /** The same after faster English dictation's own switch or Delete download: off is the person's choice, kept for good. */
+    fun offByHandWhenFasterEnglishTurned(on: Boolean, offByHand: Boolean) = if (on) offByHand else true
 
     fun median(values: List<Double>): Double? {
         if (values.isEmpty()) return null
@@ -142,7 +149,7 @@ internal class ModelChoiceStore(context: Context) {
      * is [ModelStore.english]'s, which waits for Wi-Fi on a network that charges for data. */
     fun opened() {
         val store = ModelStore.english
-        val action = ModelChoice.whenOpened(true, speech.pickModel, state, speech.fastEnglish, speech.fastEnglishOffByHand,
+        val action = ModelChoice.whenOpened(speech.pickModel, state, speech.fastEnglish, speech.fastEnglishOffByHand,
             store.installed(app) != null, store.state.value.let { it is ModelStore.State.Loading || it == ModelStore.State.WaitingForWifi })
         if (action == OpenAction.TurnOnAndDownload) speech.fastEnglish = true
         if (action != OpenAction.Nothing) store.download(app)

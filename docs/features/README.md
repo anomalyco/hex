@@ -3690,10 +3690,10 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   Dictation's speech model card says what is true: waiting, downloading with its percentage,
 │   stopped, or "English uses faster dictation, chosen for this phone." Turning faster English
 │   dictation off by hand, or Delete download, sets `fastEnglishOffByHand`, and the rule never turns
-│   it on again. Kept: the private `modelChoice` preferences (last 5 ratios, English dictations in
+│   it on again; turning the lab on, a new request, clears an earlier one. Kept: the private `modelChoice` preferences (last 5 ratios, English dictations in
 │   a row up to 20, counts by reason, the choice's date and median); turning the lab off deletes the
 │   file and leaves a setting or download it made. Diagnostics' "Model choice:" line gives the
-│   median, how many it is over, the threshold, the decision and date, "N of 20 English dictations
+│   median and the ratios it is taken over, the threshold, the decision and date, "N of 20 English dictations
 │   in a row", and the counts not counted by reason. Debug builds only: `setprop
 │   log.tag.HexDecodeScale DEBUG` (×10) or `VERBOSE` (×0.5) scales the measured time; the minified
 │   release and preview dex don't contain the tag. Checks: `ModelChoiceTest` in SignatureTest.kt

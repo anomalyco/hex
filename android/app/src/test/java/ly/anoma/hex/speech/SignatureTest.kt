@@ -630,7 +630,7 @@ class ModelChoiceTest {
     @Test fun withTheLabOffNothingIsMeasuredOrDone() {
         assertFalse(ModelChoice.measures(labOn = false, offByHand = false, state = ModelChoiceState()))
         val decided = run(english(20) + slow(5))
-        assertEquals(OpenAction.Nothing, ModelChoice.whenOpened(true, labOn = false, state = decided, fastEnglish = false,
+        assertEquals(OpenAction.Nothing, ModelChoice.whenOpened(labOn = false, state = decided, fastEnglish = false,
             offByHand = false, installed = false, downloading = false))
         assertEquals(listOf("Model choice: off; nothing measured or kept"), modelChoiceLines(false, false, false, ModelChoiceState()))
     }
@@ -638,39 +638,82 @@ class ModelChoiceTest {
         val decided = run(english(20) + slow(5))
         assertFalse(ModelChoice.measures(labOn = true, offByHand = true, state = ModelChoiceState()))
         // Faster English dictation turned off, or its download deleted, after the rule chose it: quiet for good.
-        for (installed in listOf(true, false)) assertEquals(OpenAction.Nothing, ModelChoice.whenOpened(true, labOn = true, state = decided,
+        for (installed in listOf(true, false)) assertEquals(OpenAction.Nothing, ModelChoice.whenOpened(labOn = true, state = decided,
             fastEnglish = false, offByHand = true, installed = installed, downloading = false))
     }
-    @Test fun onlyAHexScreenStartsTheDownload() {
+    @Test fun turningTheLabOnClearsAnEarlierOffByHand() {
+        // Someone tried faster English dictation before this lab existed and turned it off: turning the lab on is a new
+        // request, so it measures and, once slow dictations decide, acts.
+        val before = ModelChoice.offByHandWhenFasterEnglishTurned(on = false, offByHand = false)
+        assertTrue(before)
+        val offByHand = ModelChoice.offByHandWhenLabTurned(on = true, offByHand = before)
+        assertFalse(offByHand)
+        assertTrue(ModelChoice.measures(labOn = true, offByHand = offByHand, state = ModelChoiceState()))
         val decided = run(english(20) + slow(5))
-        // The keyboard and Quick Settings' sheet only record: off a Hex screen nothing is turned on or downloaded.
-        assertEquals(OpenAction.Nothing, ModelChoice.whenOpened(false, labOn = true, state = decided, fastEnglish = false,
+        assertEquals(OpenAction.TurnOnAndDownload, ModelChoice.whenOpened(labOn = true, state = decided, fastEnglish = false,
+            offByHand = offByHand, installed = false, downloading = false))
+        // Turning the lab off doesn't undo an off by hand.
+        assertTrue(ModelChoice.offByHandWhenLabTurned(on = false, offByHand = true))
+    }
+    @Test fun anOffByHandAfterTheLabIsOnIsKeptForGood() {
+        val labOn = ModelChoice.offByHandWhenLabTurned(on = true, offByHand = false)
+        // The rule chose it; then the person turns faster English dictation off, or deletes its download.
+        val offByHand = ModelChoice.offByHandWhenFasterEnglishTurned(on = false, offByHand = labOn)
+        assertTrue(offByHand)
+        // Turning it on again by hand doesn't clear that choice: only turning the lab on does.
+        assertTrue(ModelChoice.offByHandWhenFasterEnglishTurned(on = true, offByHand = offByHand))
+        val decided = run(english(20) + slow(5))
+        assertEquals(OpenAction.Nothing, ModelChoice.whenOpened(labOn = true, state = decided, fastEnglish = false,
+            offByHand = offByHand, installed = false, downloading = false))
+        assertFalse(ModelChoice.measures(labOn = true, offByHand = offByHand, state = ModelChoiceState()))
+    }
+    @Test fun openingHexTurnsItOnThenCarriesTheDownloadOn() {
+        val decided = run(english(20) + slow(5))
+        assertEquals(OpenAction.TurnOnAndDownload, ModelChoice.whenOpened(labOn = true, state = decided, fastEnglish = false,
             offByHand = false, installed = false, downloading = false))
-        assertEquals(OpenAction.TurnOnAndDownload, ModelChoice.whenOpened(true, labOn = true, state = decided, fastEnglish = false,
+        // Back in Hex after a restart, a stopped download or one still waiting for Wi-Fi: asked again (it still waits).
+        assertEquals(OpenAction.Download, ModelChoice.whenOpened(labOn = true, state = decided, fastEnglish = true,
             offByHand = false, installed = false, downloading = false))
-        assertEquals(OpenAction.Download, ModelChoice.whenOpened(true, labOn = true, state = decided, fastEnglish = true,
-            offByHand = false, installed = false, downloading = false))
-        assertEquals(OpenAction.Nothing, ModelChoice.whenOpened(true, labOn = true, state = decided, fastEnglish = true,
+        assertEquals(OpenAction.Nothing, ModelChoice.whenOpened(labOn = true, state = decided, fastEnglish = true,
             offByHand = false, installed = false, downloading = true))
-        assertEquals(OpenAction.Nothing, ModelChoice.whenOpened(true, labOn = true, state = decided, fastEnglish = true,
+        assertEquals(OpenAction.Nothing, ModelChoice.whenOpened(labOn = true, state = decided, fastEnglish = true,
             offByHand = false, installed = true, downloading = false))
-        assertEquals(OpenAction.Nothing, ModelChoice.whenOpened(true, labOn = true, state = run(slow(5)), fastEnglish = false,
+        assertEquals(OpenAction.Nothing, ModelChoice.whenOpened(labOn = true, state = run(slow(5)), fastEnglish = false,
             offByHand = false, installed = false, downloading = false))
     }
     @Test fun neitherModelDownloadsOnMobileDataByItself() {
-        // Both are Wi-Fi-first, whoever asked: on a network that charges for data they wait unless Use mobile data is tapped.
-        assertTrue(ModelStore.english.wifiFirst)
-        assertTrue(ModelStore.small.wifiFirst)
-        assertTrue(waitsForWifi(mobileDataChosen = false, unmetered = false))
+        // The rule's request and a tap both call ModelStore.download, which starts only when startsNow says so. On a network
+        // that charges for data (unmetered false) neither model starts until Use mobile data is chosen; on Wi-Fi it starts.
+        for (store in listOf(ModelStore.english, ModelStore.small)) {
+            assertFalse(store.startsNow(mobileDataChosen = false, unmetered = false))
+            assertTrue(store.startsNow(mobileDataChosen = true, unmetered = false))
+            assertTrue(store.startsNow(mobileDataChosen = false, unmetered = true))
+            // No network at all: it goes ahead and says there's no connection, as before.
+            assertTrue(store.startsNow(mobileDataChosen = false, unmetered = null))
+        }
     }
-    @Test fun aChoiceNeverMovesADictationAlreadyStarted() {
-        // The route is fixed by the options captured when the dictation started.
-        val started = options(fastEnglish = false)
-        val turnedOn = started.copy(fastEnglish = true)
-        assertEquals(Engine.Standard, engineFor(started))
-        assertEquals(Engine.English, engineFor(turnedOn))
-        assertEquals(Decoded("standard text"), transcribe(engineFor(started), ShortArray(16_000), 16_000, { false },
-            { _, _ -> EnglishResult.Text("never") }, { _, _ -> "standard text" }))
+    /** Real-length dictations at [ratios] (decode wall time ÷ speech kept), the model loaded before ✓, as the keyboard
+     * reports them, each one through [ModelChoice.sample] and [ModelChoice.after] as the phone runs them. */
+    private fun dictations(ratios: List<Double>, kept: List<Long>) = ratios.indices.map { i ->
+        ModelChoice.sample(times(kept[i % kept.size], Math.round(ratios[i] * kept[i % kept.size]),
+            if (i % 2 == 0) ModelAtTick.Loaded else ModelAtTick.LoadedWhileSpeaking), options())!!
+    }
+    private val shortOnes = List(15) { ModelChoice.sample(times(2_400, 1_450), options())!! }
+    @Test fun theOnePlus13sRangeDecides() {
+        // OnePlus 13 in the keyboard: 0.54 to 0.68. Short dictations between them, at 0.6 from fixed costs, don't count.
+        val long = dictations(listOf(0.54, 0.68, 0.61, 0.57, 0.66), listOf(8_200, 12_700, 9_600, 14_100, 6_400))
+        val state = run(shortOnes.take(8) + long.take(2) + shortOnes.drop(8) + long.drop(2))
+        assertTrue(state.decided)
+        assertEquals(0.61, state.decidedMedian!!, 0.0)
+        assertEquals(15, state.skipped[NotCounted.TooShort])
+    }
+    @Test fun theEmulatorsSpeedNeverDecides() {
+        // The emulator: 0.37 at 12.6 s; its short clips are 0.6 from fixed costs and too short to count. Forty dictations.
+        val long = dictations(List(25) { listOf(0.37, 0.35, 0.39, 0.36, 0.41)[it % 5] }, listOf(12_600, 11_300, 9_800, 7_100))
+        val state = run(shortOnes + long)
+        assertFalse(state.decided)
+        assertEquals(0.37, ModelChoice.median(state.ratios)!!, 0.0)
+        assertEquals(20, state.englishInARow)
     }
     @Test fun theRatiosKeptAreNumbersOnly() {
         assertEquals("0.62,0.50", ModelChoice.ratiosText(listOf(0.62, 0.5)))
@@ -681,13 +724,14 @@ class ModelChoiceTest {
     @Test fun diagnosticsExplainsTheDecision() {
         val waiting = run(english(14) + slow(2))
         val lines = modelChoiceLines(true, false, false, waiting)
-        assertTrue(lines[0], lines[0].contains("median 0.62 s of decoding per second of speech over the last 2 of 5 dictations needed"))
+        assertTrue(lines[0], lines[0].contains("median 0.62 s of decoding per second of speech over the last 2 of 5 dictations needed (0.62, 0.62)"))
         assertTrue(lines[0], lines[0].contains("(threshold 0.50)"))
         assertTrue(lines[0], lines[0].contains("16 of 20 English dictations in a row"))
         assertEquals("  dictations counted: 2; not counted: 14 too short (under 6 s kept), 0 another language or translated, " +
             "0 model still loading, 0 decoded again", lines[1])
         val decided = modelChoiceLines(true, false, true, run(english(20) + slow(5)))
         assertTrue(decided[0], decided[0].contains("chose faster English dictation for this phone on 2026-11-25, median 0.62"))
+        assertTrue(decided[0], decided[0].contains("over the last 5 dictations counted (0.62, 0.62, 0.62, 0.62, 0.62) (threshold 0.50)"))
         assertTrue(modelChoiceLines(true, false, false, waiting, 10.0)[0].contains("debug decode scale ×10"))
         for (line in lines + decided) for (engine in listOf("Whisper", "Parakeet", "whisper", "parakeet"))
             assertFalse(line, line.contains(engine))

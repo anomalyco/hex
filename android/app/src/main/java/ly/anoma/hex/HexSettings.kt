@@ -427,7 +427,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                     speech.fastEnglish = it
                                     // Off is the person's choice: Labs › Pick the English model for this phone never turns it
                                     // on again.
-                                    if (!it) speech.fastEnglishOffByHand = true
+                                    speech.fastEnglishOffByHand = ModelChoice.offByHandWhenFasterEnglishTurned(it, speech.fastEnglishOffByHand)
                                     // Off stops a download under way and drops its partial file; a finished one stays
                                     // until Delete download.
                                     if (!it && english != ModelStore.State.Ready) ModelStore.english.delete(context)
@@ -447,14 +447,19 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                             value = stringResource(R.string.model_try_again), action = { ModelStore.english.download(context) })
                                         ModelStore.State.Ready -> Entry(stringResource(R.string.fast_english_ready, size),
                                             value = stringResource(R.string.fast_english_delete),
-                                            action = { ModelStore.english.delete(context); speech.fastEnglish = false; speech.fastEnglishOffByHand = true })
+                                            action = {
+                                                ModelStore.english.delete(context); speech.fastEnglish = false
+                                                speech.fastEnglishOffByHand = ModelChoice.offByHandWhenFasterEnglishTurned(false, speech.fastEnglishOffByHand)
+                                            })
                                     }
                                 }
                                 Rule()
                                 // Labs › Pick the English model for this phone: off, nothing is measured or kept, and turning it
                                 // off deletes its numbers. A setting or download it already made stays, as an ordinary one.
+                                // On is a new request: an earlier by-hand off of faster English dictation no longer holds it.
                                 Toggle(stringResource(R.string.pick_model), stringResource(R.string.pick_model_detail, size),
                                     pickModel, noteLines = Int.MAX_VALUE) {
+                                    speech.fastEnglishOffByHand = ModelChoice.offByHandWhenLabTurned(it, speech.fastEnglishOffByHand)
                                     speech.pickModel = it
                                     if (!it) ModelChoiceStore(context).clear()
                                 }

@@ -166,11 +166,16 @@ internal class ModelStore private constructor(private val name: String, private 
         override fun onActivityDestroyed(activity: Activity) = Unit
     }
 
+    /** Whether a download asked for now starts at once: always for a file that isn't Wi-Fi-first, else unless the network
+     * charges for data ([unmetered] false) and the person didn't choose mobile data. A tap and Labs › Pick the English model
+     * for this phone ask the same way ([download]); only Use mobile data ([useMobileData]) chooses it. */
+    internal fun startsNow(mobileDataChosen: Boolean, unmetered: Boolean?) = !wifiFirst || !waitsForWifi(mobileDataChosen, unmetered)
+
     @Synchronized fun download(context: Context) {
         val app = context.applicationContext
         if (installed(app) != null) { progress.value = State.Ready; return }
         if (running) return
-        if (wifiFirst && waitsForWifi(mobileDataChosen(app), unmeteredNetwork(app))) {
+        if (!startsNow(mobileDataChosen(app), unmeteredNetwork(app))) {
             waiting = true; progress.value = State.WaitingForWifi; watchNetwork(app); return
         }
         running = true; waiting = false
@@ -194,7 +199,7 @@ internal class ModelStore private constructor(private val name: String, private 
                     part.delete(); path(app).delete(); progress.value = State.Available
                 // A Wi-Fi-first download whose Wi-Fi went away waits for it again rather than saying there's no connection.
                 } else if (result == State.Retry(Problem.Connection) && (started == 0 || stops != since ||
-                        wifiFirst && waitsForWifi(mobileDataChosen(app), unmeteredNetwork(app)))) {
+                        !startsNow(mobileDataChosen(app), unmeteredNetwork(app)))) {
                     waiting = true
                     if (started > 0) download(app)
                 } else progress.value = result
