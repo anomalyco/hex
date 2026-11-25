@@ -71,6 +71,7 @@
     <string name="keyboard_menu_feedback">打字反馈</string>
     <string name="keyboard_menu_accents">更多字符</string>
     <string name="keyboard_menu_clipboard">剪贴板</string>
+    <string name="keyboard_menu_volume">音量</string>
     <string name="keyboard_clipboard_empty">你复制的文字会在这里显示一小时</string>
     <string name="keyboard_clipboard_hint">点按即可粘贴，长按可固定或删除</string>
     <plurals name="keyboard_clipboard_clear_confirm">

@@ -3320,6 +3320,12 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   slide work as on the right, the well grows rightwards out of ✓, and the idle row keeps its order.
 │   Off, the strip is laid out exactly as before. Checks: none automated; it was not compiled here (no
 │   Android SDK) and nothing was tried on a device or emulator. The repo has no Android CI.
+├── Labs › Keyboard › Volume in the Hex menu (off, #2868) -> the Hex menu's Home page gets a Volume
+│   row that closes the menu and shows Android's own volume panel over the same field
+│   (`SpeechMenu.showVolumePanel`: `adjustSuggestedStreamVolume(ADJUST_SAME, USE_DEFAULT_STREAM_TYPE,
+│   FLAG_SHOW_UI)`, `TypingPreferences.volumeInMenu`); Android picks the stream as a volume key does,
+│   and the row changes no volume. Off, the menu is unchanged. Checks: none automated; it was not
+│   compiled here (no Android SDK) and nothing was tried on a device or emulator.
 ├── Symbol pages -> Gboard's ?123 and =< pages (Pixel 8 emulator, API 36), the same on every
 │   layout: ?123 draws 1–0, then @ # $ _ & - + ( ) /, then * " ' : ; ! ? between the page switch
 │   and delete, and =< draws ~ ` | • √ π ÷ × § Δ, then £ ¢ € ¥ ^ ° = { } \, then % © ® ™ ✓ [ ]

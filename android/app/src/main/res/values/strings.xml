@@ -248,6 +248,8 @@
     <string name="voice_only_detail">Lets you switch to Hex just to dictate from another keyboard, then switches back</string>
     <string name="hex_key_left">Hex key on the left</string>
     <string name="hex_key_left_detail">Moves the Hex key you hold to talk to the left end of the suggestion strip</string>
+    <string name="volume_in_menu">Volume in the Hex menu</string>
+    <string name="volume_in_menu_detail">Adds Volume to the Hex menu, which opens the phone’s volume controls</string>
     <!-- Labs › Keyboard › Key colors, iPhone Hex's words. -->
     <string name="key_colors">Key colors</string>
     <string name="key_color">Color</string>

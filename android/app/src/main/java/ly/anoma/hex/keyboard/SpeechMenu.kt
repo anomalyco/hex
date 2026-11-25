@@ -1,6 +1,7 @@
 package ly.anoma.hex.keyboard
 
 import android.content.Context
+import android.media.AudioManager
 import android.util.TypedValue
 import android.view.Gravity
 import android.widget.LinearLayout
@@ -75,6 +76,9 @@ internal class SpeechMenu(context: Context, private val ime: HexKeyboard,
                 row(s(R.string.keyboard_menu_translate), onOff(prefs.translation)) {
                     prefs.translation = !prefs.translation; ime.nextEnglish = null; home()
                 }
+                // Labs › Keyboard › Volume in the Hex menu: Android's own volume panel, as a volume key shows it. The
+                // volume stays as it is until the person moves a slider; the keyboard and its field stay open.
+                if (ime.feedback.volumeInMenu) row(s(R.string.keyboard_menu_volume), "") { close(); showVolumePanel() }
                 // The system's own switcher sits in the navigation bar; this reaches the next keyboard without it.
                 row(s(R.string.keyboard_next), "") { close(); ime.nextIme() }
             }
@@ -100,6 +104,13 @@ internal class SpeechMenu(context: Context, private val ime: HexKeyboard,
             Page.Accents -> Unit
             Page.Clipboard -> clipboard.fill()
         }
+    }
+
+    /** Android chooses the stream (media while something plays, else its default), as a volume key would; ADJUST_SAME
+     * changes nothing, so it needs no permission or Do Not Disturb access. */
+    private fun showVolumePanel() {
+        context.getSystemService(AudioManager::class.java)?.adjustSuggestedStreamVolume(
+            AudioManager.ADJUST_SAME, AudioManager.USE_DEFAULT_STREAM_TYPE, AudioManager.FLAG_SHOW_UI)
     }
 
     private fun row(label: String, value: String, click: () -> Unit) {
