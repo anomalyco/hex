@@ -250,7 +250,10 @@ impl BrowserAudio for NativeBrowserAudio {
             // system one could start an app Hex never paused.
             Some(false) if command == MediaCommand::Play => false,
             Some(false) => {
-                tracing::info!(?browsers, "no browser took the pause; sent it to the system");
+                tracing::info!(
+                    ?browsers,
+                    "no browser took the pause; sent it to the system"
+                );
                 send_media_command(command)
             }
             None => send_media_command(command),
@@ -444,7 +447,7 @@ unsafe extern "C" {
     fn CFGetTypeID(value: *const c_void) -> usize;
     fn CFArrayGetTypeID() -> usize;
     fn CFNumberGetTypeID() -> usize;
-    fn CFNumberGetValue(number: *const c_void, number_type: isize, value: *mut c_void) -> bool;
+    fn CFNumberGetValue(number: *const c_void, number_type: isize, value: *mut c_void) -> u8;
 }
 
 const CF_NUMBER_SINT64_TYPE: isize = 4;
@@ -468,7 +471,11 @@ unsafe fn handler_statuses(statuses: *const c_void) -> Vec<i64> {
                     return None;
                 }
                 let mut status = 0_i64;
-                CFNumberGetValue(value, CF_NUMBER_SINT64_TYPE, (&mut status as *mut i64).cast())
+                (CFNumberGetValue(
+                    value,
+                    CF_NUMBER_SINT64_TYPE,
+                    (&mut status as *mut i64).cast(),
+                ) != 0)
                     .then_some(status)
             })
             .collect()
@@ -735,7 +742,10 @@ mod tests {
         audio.browsers = vec!["com.apple.Safari"];
         resume(&mut audio, paused);
         assert_eq!(audio.sent, [MediaCommand::Pause, MediaCommand::Play]);
-        assert_eq!(audio.sent_to, [["com.google.Chrome", "net.imput.helium"]; 2]);
+        assert_eq!(
+            audio.sent_to,
+            [["com.google.Chrome", "net.imput.helium"]; 2]
+        );
     }
 
     #[test]
