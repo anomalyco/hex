@@ -130,7 +130,11 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         }
         idleRow.addView(statusText, LinearLayout.LayoutParams(0, -1, 1f))
         noticeText.apply {
-            useInter(500); setTextColor(ink); setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14f); maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+            // Two lines when it must, shrinking from 14 dp down to 10 only as far as it must, as a dictation's note beside
+            // the ↶ chip does: "Swipe typing isn’t available in Nederlands yet" names its language even at 360 dp.
+            useInter(500); setTextColor(ink); maxLines = 2; ellipsize = TextUtils.TruncateAt.END
+            includeFontPadding = false; setLineSpacing(0f, 0.85f)
+            setAutoSizeTextTypeUniformWithConfiguration(10, 14, 1, TypedValue.COMPLEX_UNIT_DIP)
             gravity = Gravity.CENTER_VERTICAL; setPadding(dp(10), 0, dp(4), 0); isFocusable = true
             setOnClickListener { notice?.let { notice = null; update(); it.tap() } }
         }
