@@ -3596,14 +3596,22 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   or the lab off, nothing is chosen and dictation is unchanged. The Hex menu and Settings then say
 │   "Automatic", and its entry in the list names the candidates ("Automatic · English, Español").
 │   Diagnostics' Last dictation adds the language, kept or switched, each candidate's probability and
-│   the choice's time. Checks: on 2026-11-24, with OpenJDK 21 and NDK 27.2.12479018,
-│   `./gradlew --max-workers=2 :app:testDebugUnitTest :app:assembleDebug` passed 282 tests
-│   (InsertionTest's candidates, SignatureTest's engine and written language, StripTextTest's
-│   Diagnostics line). On the host, the build with the patch decoded the benchmark's 70 clips and 30
-│   long ones byte for byte as one without it. The benchmark's `HEX_LANGS` guard kept the clip's
-│   language in 630 of 630 pairs. The 2,466-cut table, from the built library, had no wrong switch
-│   (android/benchmark/README.md, Automatic listens for the language). All voices are synthetic;
-│   nothing was tried on a device or emulator yet.
+│   the choice's time. When the loop guard decodes a prompted dictation again without its prompt,
+│   that decode chooses the same way (the choice reads only the audio). Checks: on 2026-11-24 on
+│   anomastudio (OpenJDK 21, NDK 27.2.12479018), `./gradlew --no-daemon :app:testDebugUnitTest
+│   :app:assembleDebug` passed 321 tests (InsertionTest's candidates, SignatureTest's engine and
+│   written language, StripTextTest's Diagnostics line). Host builds of the app's whisper.cpp: with
+│   one language the patch's build decoded the benchmark's 70 clips, 30 long ones and 4 prompted
+│   ones byte for byte as one without it; the `HEX_LANGS` guard kept the clip's language in 630 of
+│   630 pairs; with the lab on (English and Español), every prompted clip still came out "Sarah is at
+│   the station." (without the loop guard, all four repeated). The 2,466-cut table, from the built
+│   library, had no wrong switch (android/benchmark/README.md, Automatic listens for the language).
+│   Emulator (API 36, hex-detect-vogel), the lab on with English and Español: Spanish and English
+│   dictations of 2, 5 and 12 s in the keyboard each came out in their own language, Last dictation
+│   naming it ("Español, switched from English; English 0.2%, Español 99.8%"); twenty in a row
+│   alternating, 20 of 20 in their own language, one process, no crash; ✕ while recording and while
+│   transcribing left the field empty; custom vocabulary "stadium" on a 1.6 s clip was decoded again
+│   without it and stayed English. All voices are synthetic.
 └── Labs > Dictation > Learn from my fixes (off) -> an Android-only port of iPhone Hex's dictation
     correction learning, with no typing side. Off, the keyboard tracks nothing, applies nothing and
     adds no hints. On, each keyboard dictation in a non-secure words field that the field lets Hex
