@@ -66,13 +66,8 @@ pub(super) enum Pane {
     /// Recorded calls and their settings, or the opt-in (macOS beta).
     Meetings,
     History,
-    /// The shots and recordings Labs › Screenshots saved (macOS, while
-    /// it's on).
-    #[cfg(hex_capture)]
-    Captures,
-    /// Annotate (Scrawl's captures inside Hex): the switch, shortcuts,
-    /// permission, transcriber, folder, retention, and Scrawl's own app.
-    /// Dev builds, macOS and Linux only.
+    /// Annotate (Scrawl's captures inside Hex): past annotations (or captures
+    /// when Labs › Screenshots is on) and its settings, switched in the header.
     #[cfg(hex_capture)]
     Annotate,
     /// The Hex Microphone's driver, tuning, and try-it demo (macOS, while
@@ -93,8 +88,6 @@ impl Pane {
         Pane::Modes,
         Pane::Meetings,
         Pane::History,
-        #[cfg(hex_capture)]
-        Pane::Captures,
         #[cfg(hex_capture)]
         Pane::Annotate,
         Pane::VoiceFilter,
@@ -120,11 +113,6 @@ impl Pane {
             Pane::VoiceFilter => caps.fun && fun::running(ui),
             #[cfg(hex_capture)]
             Pane::Annotate => ui.platform.scrawl.is_some(),
-            // The Lab turns on only on macOS.
-            #[cfg(all(target_os = "macos", hex_capture))]
-            Pane::Captures if ui.history.unified.enabled => false,
-            #[cfg(hex_capture)]
-            Pane::Captures => ui.settings.labs.screenshots,
             _ => true,
         }
     }
@@ -135,8 +123,6 @@ impl Pane {
             Pane::Output => tr("Output"),
             Pane::Modes => tr("Modes"),
             Pane::History => tr("History"),
-            #[cfg(hex_capture)]
-            Pane::Captures => tr("Captures"),
             Pane::Meetings => tr("Meetings"),
             #[cfg(hex_capture)]
             Pane::Annotate => tr("Annotate"),
@@ -153,8 +139,6 @@ impl Pane {
             Pane::Output => "nav-output",
             Pane::Modes => "nav-modes",
             Pane::History => "nav-history",
-            #[cfg(hex_capture)]
-            Pane::Captures => "nav-captures",
             Pane::Meetings => "nav-meetings",
             #[cfg(hex_capture)]
             Pane::Annotate => "nav-annotate",
@@ -171,8 +155,6 @@ impl Pane {
             Pane::Output => &OUTPUT_ICON,
             Pane::Modes => &MODES_ICON,
             Pane::History => &HISTORY_ICON,
-            #[cfg(hex_capture)]
-            Pane::Captures => &captures::CAPTURES_ICON,
             Pane::Meetings => &MEETINGS_ICON,
             #[cfg(hex_capture)]
             Pane::Annotate => &SCRAWL_ICON,

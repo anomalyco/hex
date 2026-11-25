@@ -135,14 +135,6 @@ impl Pane {
     }
 }
 
-pub(in crate::rune_ui) fn destination(ui: &mut Ui, pane: Destination) -> Destination {
-    if ui.history.unified.enabled && pane == Destination::Captures {
-        filter(ui, Filter::Captures);
-        Destination::History
-    } else {
-        pane
-    }
-}
 pub(in crate::rune_ui) fn poll(ui: &mut Ui) -> bool {
     if !ui.history.unified.enabled
         || ui.pane != Destination::History
