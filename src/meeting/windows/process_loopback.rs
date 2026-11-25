@@ -714,23 +714,32 @@ fn activate(pid: u32) -> std::result::Result<IAudioClient, String> {
         ActivateAudioInterfaceAsync(
             VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
             &IAudioClient::IID,
-            Some(&propvariant),
+            Some(&*propvariant),
             &handler,
         )
     };
     activation.map_err(|error| hresult("ActivateAudioInterfaceAsync", &error))?;
+    // The parameters stay in this frame until activation completes or times
+    // out, though the API has already copied them.
     done.recv_timeout(ACTIVATION_TIMEOUT)
         .map_err(|_| "the app's loopback activation did not complete in time".to_owned())?
 }
 
 /// The VT_BLOB PROPVARIANT naming the activation parameters, which
 /// ActivateAudioInterfaceAsync copies before returning.
-fn activation_propvariant(params: &mut AUDIOCLIENT_ACTIVATION_PARAMS) -> PROPVARIANT {
+///
+/// It is never dropped: PROPVARIANT's Drop runs PropVariantClear, which
+/// frees a VT_BLOB's data with CoTaskMemFree, and this blob points at the
+/// caller's stack. Freeing it corrupted the heap and crashed Hex every time a
+/// meeting recorded one app (#2815). The value owns nothing else to release.
+fn activation_propvariant(
+    params: &mut AUDIOCLIENT_ACTIVATION_PARAMS,
+) -> std::mem::ManuallyDrop<PROPVARIANT> {
     let blob = BLOB {
         cbSize: std::mem::size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>() as u32,
         pBlobData: std::ptr::from_mut(params).cast::<u8>(),
     };
-    PROPVARIANT {
+    std::mem::ManuallyDrop::new(PROPVARIANT {
         Anonymous: PROPVARIANT_0 {
             Anonymous: std::mem::ManuallyDrop::new(PROPVARIANT_0_0 {
                 vt: VT_BLOB,
@@ -740,7 +749,7 @@ fn activation_propvariant(params: &mut AUDIOCLIENT_ACTIVATION_PARAMS) -> PROPVAR
                 Anonymous: PROPVARIANT_0_0_0 { blob },
             }),
         },
-    }
+    })
 }
 
 /// Process loopback's activation completion, which the API calls from its
