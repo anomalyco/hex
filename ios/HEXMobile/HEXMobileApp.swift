@@ -54,6 +54,8 @@ struct HEXMobileApp: App {
                     homeRequests: homeRequests
                 )
                 .onOpenURL { url in
+                    // What's new waits for an open that no link asked for.
+                    WhatsNew.openedByLink = true
                     // A Hex words file from AirDrop, Files or Open in Hex: its review sheet.
                     if HexInbox.open(url) { return }
                     guard let request = KeyboardLaunchRequest(url: url) else { return }
@@ -80,6 +82,8 @@ struct HEXMobileApp: App {
                 }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .background {
+                        // The next open counts as plain again unless a link comes with it.
+                        WhatsNew.openedByLink = false
                         openedFromKeyboard = false
                         dictation.appMovedToBackground()
                     } else if phase == .active {

@@ -11,6 +11,8 @@ import UIKit
 /// Emoji states (`emoji`, `emoji-search`, `emoji-tones`, `emoji-food`, `emoji-strip`) turn
 /// Settings › Keyboard › Emoji on with a seeded history; `emoji-probe` prints the panel's
 /// footprint and latency (`EMOJI_PROBE` lines) for `simctl launch --console`.
+/// Debug builds only, for What's new's pictures: `emoji-word` (a word that names an emoji,
+/// being typed) and `strip-stopped` (a dictation the screen lock cut short, with Paste).
 struct FullKeyboardSnapshotStage: View {
     let scene: String
     /// The `sequence` scene's dictation, once it lands in the field.
@@ -232,6 +234,9 @@ struct FullKeyboardSnapshotStage: View {
         case .english:
             break
         }
+        #if DEBUG
+        if state == "emoji-word" { return "Congrats on the launch! Big smile" }
+        #endif
         if state.hasPrefix("emoji") {
             return state == "emoji-strip" ? "Happy birthday " : "Congrats on the launch, pizza tonight? "
         }
@@ -423,6 +428,12 @@ private struct FullKeyboardFixture: UIViewRepresentable {
                 view.stripView.update(suggestions: [], showsUndo: false, statusText: nil, clipboard: .dictation)
             case "strip-code":
                 view.stripView.update(suggestions: [], showsUndo: false, statusText: nil, clipboard: .code(canPaste: true))
+            #if DEBUG
+            case "strip-stopped":
+                // What's new's picture: a dictation the screen lock cut short, offered with Paste.
+                model.offeredDictation = "should be home by 7:30. Start without me."
+                model.showStoppedNote(44)
+            #endif
             case "strip-selection":
                 view.stripView.isHidden = true
                 view.selectionStrip.update(TrackpadSelectionSession.Presentation(phase: .actions, before: "Running 10 ", selected: "min late", after: ", home by"), canUseClipboard: true)
