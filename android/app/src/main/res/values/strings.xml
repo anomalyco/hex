@@ -176,6 +176,8 @@
     <string name="password_manager_suggestions_detail">Show logins, codes and cards from your autofill service in the suggestion strip</string>
     <string name="voice_only_mode">Voice-only mode</string>
     <string name="voice_only_detail">Lets you switch to Hex just to dictate from another keyboard, then switches back</string>
+    <string name="hex_key_left">Hex key on the left</string>
+    <string name="hex_key_left_detail">Moves the Hex key you hold to talk to the left end of the suggestion strip</string>
     <!-- Hex words files and Custom vocabulary's Word replacements (docs/specs/hex-words.md). -->
     <string name="words_open_label">Add to Hex</string>
     <string name="words_replacements">Word replacements</string>
