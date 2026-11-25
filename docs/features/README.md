@@ -3500,8 +3500,16 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
     Checks: `./gradlew --no-daemon :app:testDebugUnitTest -x prepareSpeechModel` passed 310 tests,
     `AdaptiveTouchTest`'s 11 among them, on 2026-11-24; `android/benchmark/typing/quality-gate.py all
     --adaptive` (README > Adaptive touch): identical before it learns, 1-4% fewer word errors for
-    typists who aim off the centres, never more correct words changed. Not yet tried on an emulator
-    or a device.
+    typists who aim off the centres, never more correct words changed. On the Studio's API 35 Pixel 8
+    emulator (2026-11-24, reading the table back through run-as after each step): words left as typed,
+    a strip pick of the same length, what was typed tapped over the fix, an undone fix and a letter
+    retyped as a neighbour each teach as above; password and no-suggestion fields teach nothing; the
+    table is saved when the keyboard hides and gone after Reset touch learning and after Delete what
+    Hex learned; landscape, the number row and AZERTY each learn their own key plane, and portrait
+    takes its own back; with the switch off nothing learns and the table stays. To reach Active, the
+    table was seeded through run-as as the unit tests seed it. With it on, English, French and
+    Portuguese text typed off the centres came out as with it off. Not tried on a real device; the
+    time per letter is not yet measured.
 ├── Labs > Keyboard > Password manager suggestions (off) -> while Android's autofill service —
     Bitwarden, 1Password or Google Password Manager, which must itself support Android 11's inline
     suggestions — offers logins, one-time codes or cards for the focused field, its own chips take
