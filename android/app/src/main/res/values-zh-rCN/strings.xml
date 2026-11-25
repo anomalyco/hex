@@ -168,6 +168,26 @@
     <string name="smart_quotes_detail">用 ’ ‘ “ ” 代替 \' 和 \"</string>
     <string name="swipe_delete_letters">逐个字母删除滑行输入的单词</string>
     <string name="swipe_delete_letters_detail">滑行输入后按删除键只删除一个字母，而不是整个单词</string>
+    <string name="imported_words">SwiftKey 词语</string>
+    <string name="imported_words_detail">从 SwiftKey 的导出文件中读取它从你这里学到的词语并用于建议。仅保存在这台手机上。</string>
+    <string name="imported_words_import">导入词语…</string>
+    <string name="imported_words_import_detail">SwiftKey 数据门户（查看数据 › 全部导出）中的 ZIP 文件，或纯文本词语列表</string>
+    <string name="imported_words_none">此文件中没有找到词语</string>
+    <string name="imported_words_remove">移除导入的词语</string>
+    <string name="imported_words_remove_confirm">移除导入的词语？</string>
+    <string name="imported_words_remove_action">移除</string>
+    <plurals name="imported_words_added">
+        <item quantity="other">新增 %s 个词语。</item>
+    </plurals>
+    <plurals name="imported_words_already">
+        <item quantity="other">%s 个已存在。</item>
+    </plurals>
+    <plurals name="imported_words_full">
+        <item quantity="other">%s 个未导入：列表已满。</item>
+    </plurals>
+    <plurals name="imported_words_kept">
+        <item quantity="other">已导入 %s 个词语</item>
+    </plurals>
     <string name="adaptive_touch">自适应触控</string>
     <string name="adaptive_touch_detail">学习你点击每个按键的位置。内容只留在这台手机上，只保存平均位置，不保存你输入的内容。</string>
     <string name="adaptive_touch_learning">正在学习：已有 %1$d/%2$d 次轻点</string>

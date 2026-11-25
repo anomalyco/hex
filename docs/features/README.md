@@ -3531,6 +3531,27 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
     table was seeded through run-as as the unit tests seed it. With it on, English, French and
     Portuguese text typed off the centres came out as with it off. Not tried on a real device; the
     time per letter is not yet measured.
+├── Labs > Keyboard > SwiftKey words (off) -> #2802: Import words... (`ACTION_OPEN_DOCUMENT`, `*/*`,
+    read on a background thread, at most 16 MiB) takes SwiftKey's data portal export (View data >
+    Export all: the ZIP, whose `services/sync_words.json` is `{"terms": [...]}`, or that JSON alone)
+    or any plain list of words, whose other columns (counts) drop out. A ZIP's other entries, and a
+    ZIP inside one, give no words. Only
+    single words are kept (letters and apostrophes, 2 to 32 letters, ’ made '), so numbers, links,
+    addresses and phrases are left out. They merge into Hex's own list (`typing/ImportedWords.kt`,
+    `imported-words.txt` in the app's files, at most 50,000): what is there stays, each word is kept
+    once whatever its case (a lowercase spelling preferred among the new ones), the same file twice
+    adds nothing, and the row says how many new words were added, how many were already there and
+    how many a full list left out. With the toggle on the keyboard reads them after Android's
+    personal dictionary (every layout, each keeping only the words in its alphabet, and none the
+    layout's model already has), so they complete, swipe and are read from taps as your own words
+    are; an import or the toggle reads them again at once. Remove imported words (confirmed) shows
+    while any are kept, toggle on or off. Off, the keyboard reads the personal dictionary alone, as
+    before. Checks: `ImportedWordsTest` (android/app/src/test) covers the JSON, ZIP and plain
+    lists, a ZIP inside the export, the merge, a 10,043-word list, the limit and the model's words.
+    The count Settings shows is saved with the list (`importedWordsCount` in the `typing` prefs), so
+    it never reads the list. `./gradlew --no-daemon :app:testDebugUnitTest -x prepareSpeechModel`
+    passed 331 tests, `ImportedWordsTest`'s 9 among them, on 2026-11-25 (Temurin JDK 21, Android SDK
+    36). Not tried on a device or emulator, and not tried with a real SwiftKey export.
 ├── Labs > Keyboard > Password manager suggestions (off) -> while Android's autofill service —
     Bitwarden, 1Password or Google Password Manager, which must itself support Android 11's inline
     suggestions — offers logins, one-time codes or cards for the focused field, its own chips take

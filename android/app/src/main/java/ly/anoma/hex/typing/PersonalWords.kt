@@ -20,6 +20,7 @@ internal interface Lexicon {
 internal class PersonalWords(private val model: TypingModel, words: Collection<String>, shortcuts: Map<String, String>) : Lexicon {
     private val codes: Array<ByteArray>
     private val texts: Array<String>
+    private val lowers: Array<String>
     private val lookup = HashMap<String, Int>()
     // Lowercase shortcut -> phrase as stored.
     private val shortcuts = shortcuts.mapKeys { it.key.lowercase() }
@@ -37,7 +38,8 @@ internal class PersonalWords(private val model: TypingModel, words: Collection<S
         val sorted = byCodes.values.sortedWith { a, b -> compare(a.first, b.first) }
         codes = Array(sorted.size) { sorted[it].first }
         texts = Array(sorted.size) { sorted[it].second }
-        for ((i, t) in texts.withIndex()) lookup[t.lowercase()] = i
+        lowers = Array(texts.size) { texts[it].lowercase() }
+        for ((i, t) in lowers.withIndex()) lookup[t] = i
     }
 
     val isEmpty get() = codes.isEmpty() && shortcuts.isEmpty()
@@ -64,7 +66,9 @@ internal class PersonalWords(private val model: TypingModel, words: Collection<S
     /** Your words that start with `prefix` and are longer, in your spelling. */
     fun completions(prefix: String): List<String> {
         val lower = prefix.lowercase()
-        return texts.filter { it.length > prefix.length && it.lowercase().startsWith(lower) }.sortedBy { it.length }
+        // Imported lists run to tens of thousands of words: compare against the lowercase spellings kept for lookup.
+        return texts.indices.filter { lowers[it].length > lower.length && lowers[it].startsWith(lower) }
+            .map { texts[it] }.sortedBy { it.length }
     }
 
     /** Your phrase for a shortcut typed as [typed], cased as Apple's keyboard writes it (#2153, #2173):
@@ -110,8 +114,10 @@ internal class PersonalWords(private val model: TypingModel, words: Collection<S
 
         /** The personal dictionary's words and shortcuts for the model's language (or every language).
          * Android lets only an enabled input method or spell checker read it, with no permission, and
-         * answers anyone else with nothing; any failure reads as nothing. Read it off the main thread. */
-        fun read(resolver: ContentResolver, model: TypingModel): PersonalWords {
+         * answers anyone else with nothing; any failure reads as nothing. Read it off the main thread.
+         * [imported] (Labs › Keyboard › SwiftKey words) joins after it, less the words the model already
+         * has, which need no help and would only crowd its own completions out. */
+        fun read(resolver: ContentResolver, model: TypingModel, imported: List<String> = emptyList()): PersonalWords {
             val words = ArrayList<String>()
             val shortcuts = HashMap<String, String>()
             try {
@@ -128,9 +134,12 @@ internal class PersonalWords(private val model: TypingModel, words: Collection<S
                     }
                 }
             } catch (_: RuntimeException) {
-                return PersonalWords(model, emptyList(), emptyMap())
+                words.clear(); shortcuts.clear()
             }
-            return PersonalWords(model, words, shortcuts)
+            return PersonalWords(model, words + newTo(model, imported), shortcuts)
         }
+
+        /** The [imported] words the model doesn't already have. */
+        fun newTo(model: TypingModel, imported: List<String>) = imported.filter { model.index(it.lowercase()) < 0 }
     }
 }

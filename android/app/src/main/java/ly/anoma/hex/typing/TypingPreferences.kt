@@ -65,6 +65,11 @@ internal class TypingPreferences(context: Context) {
     var swipeDeleteLetters: Boolean
         get() = prefs.getBoolean(SWIPE_DELETE_LETTERS, false)
         set(value) { prefs.edit().putBoolean(SWIPE_DELETE_LETTERS, value).apply() }
+    /** Labs › Keyboard › SwiftKey words: the words imported from another keyboard's export ([ImportedWords])
+     * join your own words in suggestions. Off by default; the imported list stays on the phone while off. */
+    var importedWords: Boolean
+        get() = prefs.getBoolean(USE_IMPORTED_WORDS, false)
+        set(value) { prefs.edit().putBoolean(USE_IMPORTED_WORDS, value).apply() }
     /** Labs › Keyboard › Adaptive touch: the decoder reads taps with your own key centres once it has learned them
      * ([AdaptiveTouch], kept by [AdaptiveTouchStore]). Off by default. */
     var adaptiveTouch: Boolean
@@ -127,6 +132,11 @@ internal class TypingPreferences(context: Context) {
         const val SMART_QUOTES = "smartQuotes"
         const val SWIPE_DELETE_LETTERS = "swipeDeleteLetters"
         const val ADAPTIVE_TOUCH = "adaptiveTouch"
+        const val USE_IMPORTED_WORDS = "importedWords"
+        /** A counter [ImportedWords] bumps whenever the imported list changes, so the keyboard reads it again. */
+        const val IMPORTED_WORDS = "importedWordsRevision"
+        /** How many imported words are kept, saved with them. */
+        const val IMPORTED_WORDS_COUNT = "importedWordsCount"
         const val PASSWORD_MANAGER_SUGGESTIONS = "passwordManagerSuggestions"
         const val VOICE_ONLY = "voiceOnly"
         const val HEIGHT = "keyboardHeight"
