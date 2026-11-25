@@ -2,7 +2,9 @@ package ly.anoma.hex.speech
 
 import java.io.File
 import java.io.RandomAccessFile
+import java.time.LocalDate
 import kotlin.io.path.createTempDirectory
+import ly.anoma.hex.diagnostics.modelChoiceLines
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -528,4 +530,166 @@ class SpokenNumbersTest {
     private val numbers = ("one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen " +
         "sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand " +
         "million").split(" ")
+}
+
+/** Labs › Pick the English model for this phone: what it measures, when it decides, and what it never does. */
+class ModelChoiceTest {
+    private val day = LocalDate.of(2026, 11, 25).toEpochDay()
+    private fun options(spoken: DictationLanguage = DictationLanguage.English, fastEnglish: Boolean = false,
+                        translate: Boolean = false, candidates: List<DictationLanguage> = emptyList()) =
+        SpeechOptions(Style.Polished, spoken, clean = false, translate = translate, fastEnglish = fastEnglish, candidates = candidates)
+    /** A Last dictation report: [keptMs] of speech decoded in [decodeMs], starting 77 ms after ✓. */
+    private fun times(keptMs: Long, decodeMs: Long, model: ModelAtTick = ModelAtTick.Loaded, ran: RanOn = RanOn.Standard,
+                      retried: Boolean = false, inserted: Boolean = true) =
+        DictationTimes(DictationPlace.Keyboard, keptMs + 800, keptMs, model, 0, true, 40, 77, 77 + decodeMs,
+            if (inserted) 77 + decodeMs + 12 else null, decodeMs * 3,
+            if (ran == RanOn.Standard) LongArray(10).also { it[1] = decodeMs * 910; if (retried) { it[8] = 900_000; it[9] = 1 } } else null,
+            ran, 4)
+    private fun sample(ratio: Double, keptMs: Long = 10_000, routable: Boolean = true, model: ModelAtTick = ModelAtTick.Loaded,
+                       retried: Boolean = false) = ChoiceSample(routable, keptMs, Math.round(ratio * keptMs), model, retried)
+    private fun run(samples: List<ChoiceSample>, from: ModelChoiceState = ModelChoiceState()) =
+        samples.fold(from) { state, s -> ModelChoice.after(state, s, day) }
+    /** English dictations too short to count: they fill the 20 in a row and nothing else. */
+    private fun english(n: Int) = List(n) { sample(0.9, keptMs = 3_000) }
+    private fun slow(n: Int, ratio: Double = 0.62) = List(n) { sample(ratio) }
+
+    @Test fun theOnePlus12sStandardDictationCountsAt062() {
+        // OnePlus 12, build 2448: 12.7 s kept, decode 7,919 ms from 77 ms after ✓, "model loaded while you spoke".
+        val s = ModelChoice.sample(times(12_700, 7_919, ModelAtTick.LoadedWhileSpeaking), options())!!
+        assertNull(ModelChoice.notCounted(s))
+        assertEquals(listOf(0.62), ModelChoice.after(ModelChoiceState(), s, day).ratios)
+    }
+    @Test fun theOnePlus12sFasterDictationIsNotMeasured() {
+        // The same phone with faster English dictation on: 6.2 s kept, decode 411 ms. Nothing to measure.
+        assertNull(ModelChoice.sample(times(6_200, 411, ModelAtTick.LoadedWhileSpeaking, RanOn.Faster), options(fastEnglish = true)))
+        // With faster English dictation on, another language on the standard model isn't measured either.
+        assertNull(ModelChoice.sample(times(12_000, 9_000), options(DictationLanguage.Spanish, fastEnglish = true)))
+        // A fallback to the standard model, and a dictation with no text, aren't measured.
+        assertNull(ModelChoice.sample(times(12_000, 9_000, ran = RanOn.LowMemory), options()))
+        assertNull(ModelChoice.sample(times(12_000, 9_000, inserted = false), options()))
+    }
+    @Test fun aModelThatFinishedLoadingBeforeTheTickCounts() {
+        assertNull(ModelChoice.notCounted(sample(0.7, model = ModelAtTick.Loaded)))
+        assertNull(ModelChoice.notCounted(sample(0.7, model = ModelAtTick.LoadedWhileSpeaking)))
+        for (loading in listOf(ModelAtTick.Loading, ModelAtTick.LoadedAfter, ModelAtTick.Unknown))
+            assertEquals(NotCounted.ModelLoading, ModelChoice.notCounted(sample(0.7, model = loading)))
+    }
+    @Test fun tooShortAndDecodedAgainDontCount() {
+        assertEquals(NotCounted.TooShort, ModelChoice.notCounted(sample(0.9, keptMs = 5_999)))
+        assertNull(ModelChoice.notCounted(sample(0.9, keptMs = 6_000)))
+        val retried = ModelChoice.sample(times(12_000, 9_000, retried = true), options())!!
+        assertEquals(NotCounted.Retried, ModelChoice.notCounted(retried))
+        val state = run(listOf(sample(0.9, keptMs = 3_000), retried))
+        assertEquals(emptyList<Double>(), state.ratios)
+        assertEquals(mapOf(NotCounted.TooShort to 1, NotCounted.Retried to 1), state.skipped)
+        assertEquals(2, state.englishInARow)
+    }
+    @Test fun neverDecidesOnFewerThanFiveDictations() {
+        val four = run(english(20) + slow(4, 3.0))
+        assertFalse(four.decided)
+        val five = run(slow(1, 3.0), four)
+        assertTrue(five.decided)
+        assertEquals(day, five.decidedDay)
+    }
+    @Test fun neverDecidesUnderTheThreshold() {
+        assertFalse(run(english(20) + slow(5, 0.49)).decided)
+        assertTrue(run(english(20) + slow(5, 0.5)).decided)
+    }
+    @Test fun oneSlowDictationDoesNotDecide() {
+        val state = run(english(20) + slow(4, 0.3) + slow(1, 4.0))
+        assertFalse(state.decided)
+        assertEquals(0.3, ModelChoice.median(state.ratios)!!, 0.0)
+    }
+    @Test fun aDictationThatWouldNotGoEnglishNeverCounts() {
+        for (o in listOf(options(DictationLanguage.Spanish), options(translate = true),
+                         options(candidates = listOf(DictationLanguage.English, DictationLanguage.Spanish)))) {
+            val s = ModelChoice.sample(times(12_000, 9_000), o)!!
+            assertEquals(NotCounted.OtherLanguage, ModelChoice.notCounted(s))
+            val state = ModelChoice.after(ModelChoiceState(englishInARow = 19), s, day)
+            assertEquals(emptyList<Double>(), state.ratios)
+            assertEquals(0, state.englishInARow)
+        }
+        // Automatic with one candidate is English as before.
+        assertNull(ModelChoice.notCounted(ModelChoice.sample(times(12_000, 9_000), options(candidates = listOf(DictationLanguage.English)))!!))
+    }
+    @Test fun oneOtherLanguageInTheLastTwentyStopsIt() {
+        val spanish = ModelChoice.sample(times(12_000, 9_000), options(DictationLanguage.Spanish))!!
+        val state = run(english(20) + slow(4) + spanish + slow(1))
+        assertEquals(5, state.ratios.size)
+        assertEquals(1, state.englishInARow)
+        assertFalse(state.decided)
+        assertFalse(run(english(18), state).decided)
+        assertTrue(run(english(19), state).decided)
+    }
+    @Test fun itIsOneWay() {
+        val decided = run(english(20) + slow(5))
+        assertTrue(decided.decided)
+        assertEquals(decided, run(slow(10, 0.1), decided))
+        assertFalse(ModelChoice.measures(labOn = true, offByHand = false, state = decided))
+    }
+    @Test fun withTheLabOffNothingIsMeasuredOrDone() {
+        assertFalse(ModelChoice.measures(labOn = false, offByHand = false, state = ModelChoiceState()))
+        val decided = run(english(20) + slow(5))
+        assertEquals(OpenAction.Nothing, ModelChoice.whenOpened(true, labOn = false, state = decided, fastEnglish = false,
+            offByHand = false, installed = false, downloading = false))
+        assertEquals(listOf("Model choice: off; nothing measured or kept"), modelChoiceLines(false, false, false, ModelChoiceState()))
+    }
+    @Test fun turnedOffByHandItStaysOff() {
+        val decided = run(english(20) + slow(5))
+        assertFalse(ModelChoice.measures(labOn = true, offByHand = true, state = ModelChoiceState()))
+        // Faster English dictation turned off, or its download deleted, after the rule chose it: quiet for good.
+        for (installed in listOf(true, false)) assertEquals(OpenAction.Nothing, ModelChoice.whenOpened(true, labOn = true, state = decided,
+            fastEnglish = false, offByHand = true, installed = installed, downloading = false))
+    }
+    @Test fun onlyAHexScreenStartsTheDownload() {
+        val decided = run(english(20) + slow(5))
+        // The keyboard and Quick Settings' sheet only record: off a Hex screen nothing is turned on or downloaded.
+        assertEquals(OpenAction.Nothing, ModelChoice.whenOpened(false, labOn = true, state = decided, fastEnglish = false,
+            offByHand = false, installed = false, downloading = false))
+        assertEquals(OpenAction.TurnOnAndDownload, ModelChoice.whenOpened(true, labOn = true, state = decided, fastEnglish = false,
+            offByHand = false, installed = false, downloading = false))
+        assertEquals(OpenAction.Download, ModelChoice.whenOpened(true, labOn = true, state = decided, fastEnglish = true,
+            offByHand = false, installed = false, downloading = false))
+        assertEquals(OpenAction.Nothing, ModelChoice.whenOpened(true, labOn = true, state = decided, fastEnglish = true,
+            offByHand = false, installed = false, downloading = true))
+        assertEquals(OpenAction.Nothing, ModelChoice.whenOpened(true, labOn = true, state = decided, fastEnglish = true,
+            offByHand = false, installed = true, downloading = false))
+        assertEquals(OpenAction.Nothing, ModelChoice.whenOpened(true, labOn = true, state = run(slow(5)), fastEnglish = false,
+            offByHand = false, installed = false, downloading = false))
+    }
+    @Test fun neitherModelDownloadsOnMobileDataByItself() {
+        // Both are Wi-Fi-first, whoever asked: on a network that charges for data they wait unless Use mobile data is tapped.
+        assertTrue(ModelStore.english.wifiFirst)
+        assertTrue(ModelStore.small.wifiFirst)
+        assertTrue(waitsForWifi(mobileDataChosen = false, unmetered = false))
+    }
+    @Test fun aChoiceNeverMovesADictationAlreadyStarted() {
+        // The route is fixed by the options captured when the dictation started.
+        val started = options(fastEnglish = false)
+        val turnedOn = started.copy(fastEnglish = true)
+        assertEquals(Engine.Standard, engineFor(started))
+        assertEquals(Engine.English, engineFor(turnedOn))
+        assertEquals(Decoded("standard text"), transcribe(engineFor(started), ShortArray(16_000), 16_000, { false },
+            { _, _ -> EnglishResult.Text("never") }, { _, _ -> "standard text" }))
+    }
+    @Test fun theRatiosKeptAreNumbersOnly() {
+        assertEquals("0.62,0.50", ModelChoice.ratiosText(listOf(0.62, 0.5)))
+        assertEquals(listOf(0.62, 0.5), ModelChoice.parseRatios("0.62,0.50"))
+        assertEquals(emptyList<Double>(), ModelChoice.parseRatios(null))
+        assertEquals(listOf(0.2, 0.3, 0.4, 0.5, 0.6), ModelChoice.parseRatios("0.1,0.2,0.3,0.4,0.5,0.6"))
+    }
+    @Test fun diagnosticsExplainsTheDecision() {
+        val waiting = run(english(14) + slow(2))
+        val lines = modelChoiceLines(true, false, false, waiting)
+        assertTrue(lines[0], lines[0].contains("median 0.62 s of decoding per second of speech over the last 2 of 5 dictations needed"))
+        assertTrue(lines[0], lines[0].contains("(threshold 0.50)"))
+        assertTrue(lines[0], lines[0].contains("16 of 20 English dictations in a row"))
+        assertEquals("  dictations counted: 2; not counted: 14 too short (under 6 s kept), 0 another language or translated, " +
+            "0 model still loading, 0 decoded again", lines[1])
+        val decided = modelChoiceLines(true, false, true, run(english(20) + slow(5)))
+        assertTrue(decided[0], decided[0].contains("chose faster English dictation for this phone on 2026-11-25, median 0.62"))
+        assertTrue(modelChoiceLines(true, false, false, waiting, 10.0)[0].contains("debug decode scale ×10"))
+        for (line in lines + decided) for (engine in listOf("Whisper", "Parakeet", "whisper", "parakeet"))
+            assertFalse(line, line.contains(engine))
+    }
 }

@@ -206,6 +206,15 @@ internal class SpeechPreferences(private val context: Context) {
     var fastEnglish: Boolean
         get() = prefs.getBoolean("fastEnglish", false)
         set(value) { prefs.edit().putBoolean("fastEnglish", value).apply() }
+    // Faster English dictation turned off by hand (its switch or Delete download): Labs › Pick the English model for this
+    // phone never turns it on again. Kept when that lab goes off.
+    var fastEnglishOffByHand: Boolean
+        get() = prefs.getBoolean("fastEnglishOffByHand", false)
+        set(value) { prefs.edit().putBoolean("fastEnglishOffByHand", value).apply() }
+    // Labs › Pick the English model for this phone, off by default (ModelChoice).
+    var pickModel: Boolean
+        get() = prefs.getBoolean("pickModel", false)
+        set(value) { prefs.edit().putBoolean("pickModel", value).apply() }
     // Labs › Learn from my fixes: learn from dictation edits and apply what was learned, off by default.
     var learnFixes: Boolean
         get() = prefs.getBoolean("learnFixes", false)

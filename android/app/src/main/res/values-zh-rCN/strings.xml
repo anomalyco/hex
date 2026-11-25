@@ -123,7 +123,7 @@
     <string name="settings_test_keyboard">测试键盘…</string>
     <string name="settings_privacy_line">你的声音和文字都保留在这台手机上</string>
     <!-- Hex Preview has its own copy, with its update check (src/preview/res/values-zh-rCN): edit both. -->
-    <string name="settings_privacy_detail">Hex 在这台手机上将语音转换为文字，绝不上传你的声音或用它的键盘输入的内容，也不保存任何按键记录或转录内容。两个实验功能只有在你开启后，才会把学到的内容留在这台手机上：“从我的修改中学习”保存你听写后改正的词对，“自适应触控”保存你点击每个按键的平均位置。在实验室中点按“删除 Hex 学到的内容”即可全部删除。只有在“发送反馈”中点按“发送”时，反馈才会离开这台手机：你的留言、保留的图片、你填写的邮箱（如有），以及 Hex 和这台手机的相关信息会发送到 Anomaly 的反馈收件箱（Bellhop）。你的听写、录音、词汇和更正都不会包含在内。</string>
+    <string name="settings_privacy_detail">Hex 在这台手机上将语音转换为文字，绝不上传你的声音或用它的键盘输入的内容，也不保存任何按键记录或转录内容。两个实验功能只有在你开启后，才会把学到的内容留在这台手机上：“从我的修改中学习”保存你听写后改正的词对，“自适应触控”保存你点击每个按键的平均位置。在实验室中点按“删除 Hex 学到的内容”即可全部删除。开启“为这台手机选择英语模型”后，它只保存你最近几次听写的转写用时与说话时长之比以及几项计数，绝不保存文字或音频；关闭后即删除。只有在“发送反馈”中点按“发送”时，反馈才会离开这台手机：你的留言、保留的图片、你填写的邮箱（如有），以及 Hex 和这台手机的相关信息会发送到 Anomaly 的反馈收件箱（Bellhop）。你的听写、录音、词汇和更正都不会包含在内。</string>
     <string name="settings_privacy_policy">隐私政策</string>
     <string name="settings_licences">开源许可</string>
     <string name="settings_labs">实验室</string>
@@ -138,6 +138,13 @@
     <string name="fast_english_no_connection">没有网络连接</string>
     <string name="fast_english_no_space">存储空间不足</string>
     <string name="fast_english_in_use">英语使用更快的听写（实验室）。</string>
+    <string name="fast_english_waiting_wifi">%1$d MB，连上 Wi-Fi 后自动开始下载。</string>
+    <string name="fast_english_chosen">英语使用更快的听写，已为这台手机选定。</string>
+    <string name="fast_english_chosen_waiting">已为这台手机选定更快的英语听写：%1$d MB，连上 Wi-Fi 后自动开始下载。</string>
+    <string name="fast_english_chosen_loading">已为这台手机选定更快的英语听写：正在下载 %1$d MB · %2$d%%</string>
+    <string name="fast_english_chosen_problem">已为这台手机选定更快的英语听写：%1$s</string>
+    <string name="pick_model">为这台手机选择英语模型</string>
+    <string name="pick_model_detail">如果英语听写在这台手机上较慢，Hex 会在连上 Wi-Fi 时下载更快的英语模型（%1$d MB）并使用它。</string>
     <string name="listen_for_language">自动识别你说的语言</string>
     <string name="listen_for_language_detail">在键盘和手机的语言中，用你说的那种语言听写。</string>
     <string name="learn_fixes">从我的修改中学习</string>

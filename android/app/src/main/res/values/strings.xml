@@ -136,7 +136,7 @@
     <string name="settings_test_keyboard">Test keyboard…</string>
     <string name="settings_privacy_line">Your voice and words stay on this phone</string>
     <!-- Hex Preview has its own copy, with its update check (src/preview/res/values): edit both. -->
-    <string name="settings_privacy_detail">Hex turns speech into text on this phone and never uploads your voice or what you type with its keyboard. It keeps no keystrokes or transcripts. Two labs keep what they learn on this phone, and only once you turn them on: Learn from my fixes keeps the word pairs you corrected after dictating, and Adaptive touch keeps an average of where you tap each key. Delete what Hex learned in Labs removes both. Feedback leaves the phone only when you tap Send in Send feedback: then your message, the pictures you keep, your email if you add one and details about Hex and this phone go to Anomaly’s feedback inbox (Bellhop). Your dictations, recordings, vocabulary and corrections are never included.</string>
+    <string name="settings_privacy_detail">Hex turns speech into text on this phone and never uploads your voice or what you type with its keyboard. It keeps no keystrokes or transcripts. Two labs keep what they learn on this phone, and only once you turn them on: Learn from my fixes keeps the word pairs you corrected after dictating, and Adaptive touch keeps an average of where you tap each key. Delete what Hex learned in Labs removes both. Pick the English model for this phone, once you turn it on, keeps only how long your recent dictations took to transcribe against how long you spoke, and a few counts, never words or audio; turning it off deletes them. Feedback leaves the phone only when you tap Send in Send feedback: then your message, the pictures you keep, your email if you add one and details about Hex and this phone go to Anomaly’s feedback inbox (Bellhop). Your dictations, recordings, vocabulary and corrections are never included.</string>
     <string name="settings_privacy_policy">Privacy policy</string>
     <string name="settings_licences">Open-source licences</string>
     <string name="settings_labs">Labs</string>
@@ -154,6 +154,19 @@
     <string name="fast_english_no_space">Not enough storage</string>
     <!-- Dictation › Speech model, while Faster English dictation is on and downloaded. -->
     <string name="fast_english_in_use">English uses faster dictation (Labs).</string>
+    <!-- On mobile data or a metered Wi-Fi, as model_waiting_wifi: the download waits for Wi-Fi unless the person taps
+         model_use_mobile_data, whether a tap or Labs › Pick the English model for this phone asked for it. -->
+    <string name="fast_english_waiting_wifi">%1$d MB. Starts by itself on Wi-Fi.</string>
+    <!-- Dictation › Speech model, when Labs › Pick the English model for this phone chose faster English dictation: what is
+         true now. Proposals for Ryan's wording. -->
+    <string name="fast_english_chosen">English uses faster dictation, chosen for this phone.</string>
+    <string name="fast_english_chosen_waiting">Faster English dictation chosen for this phone: %1$d MB, starts by itself on Wi-Fi.</string>
+    <string name="fast_english_chosen_loading">Faster English dictation chosen for this phone: downloading %1$d MB · %2$d%%</string>
+    <!-- %1$s: fast_english_stopped, fast_english_no_connection or fast_english_no_space. -->
+    <string name="fast_english_chosen_problem">Faster English dictation chosen for this phone: %1$s</string>
+    <!-- Labs › Dictation › Pick the English model for this phone, off by default. %1$d: the download's size in MB. -->
+    <string name="pick_model">Pick the English model for this phone</string>
+    <string name="pick_model_detail">If English dictation is slow here, Hex downloads its faster English model (%1$d MB) on Wi-Fi and uses it.</string>
     <string name="listen_for_language">Automatic listens for the language</string>
     <string name="listen_for_language_detail">Dictates in the language you speak, out of your keyboard’s and phone’s languages.</string>
     <!-- Labs › Dictation › Learn from my fixes: word pairs, counts and when each fix was last made, never

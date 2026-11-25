@@ -171,7 +171,11 @@ class MainActivity : ComponentActivity() {
             permission.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
-    override fun onResume() { super.onResume(); refresh(); Updates.appOpened(this) }
+    override fun onResume() {
+        super.onResume(); refresh(); Updates.appOpened(this)
+        // Labs › Pick the English model for this phone acts here, on a Hex screen, never from the keyboard.
+        ModelChoiceStore(this).opened()
+    }
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (!hasFocus) return

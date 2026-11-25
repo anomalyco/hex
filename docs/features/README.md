@@ -3675,6 +3675,30 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   alternating, 20 of 20 in their own language, one process, no crash; ✕ while recording and while
 │   transcribing left the field empty; custom vocabulary "stadium" on a 1.6 s clip was decoded again
 │   without it and stayed English. All voices are synthetic.
+├── Labs > Dictation > Pick the English model for this phone (off, L135) -> Hex times English
+│   dictations on the standard model and chooses faster English dictation where they are slow.
+│   It measures only while faster English dictation is off, with the dictation's own durations
+│   (`MicCapture` hands them to `Recognizer.timed`): a dictation that went in and would go to the
+│   faster model were it on (English, not translated, Automatic with one candidate), with at least
+│   6 s kept, the model loaded before ✓ (already loaded, or loaded while the person spoke) and no
+│   second decode without the custom words, counts its decode's wall time per second kept. Once the
+│   median of the last 5 is at least 0.5 and the last 20 dictations would all have gone English,
+│   `ModelChoice.after` records the choice and its date, once. The keyboard only records: the next
+│   time Hex opens (`MainActivity.onResume`, `ModelChoice.whenOpened`) it turns faster English
+│   dictation on and starts its 135 MB download, which, like the first model's, waits for Wi-Fi on a
+│   metered network (a hand tap too: "135 MB. Starts by itself on Wi-Fi." with Use mobile data).
+│   Dictation's speech model card says what is true: waiting, downloading with its percentage,
+│   stopped, or "English uses faster dictation, chosen for this phone." Turning faster English
+│   dictation off by hand, or Delete download, sets `fastEnglishOffByHand`, and the rule never turns
+│   it on again. Kept: the private `modelChoice` preferences (last 5 ratios, English dictations in
+│   a row up to 20, counts by reason, the choice's date and median); turning the lab off deletes the
+│   file and leaves a setting or download it made. Diagnostics' "Model choice:" line gives the
+│   median, how many it is over, the threshold, the decision and date, "N of 20 English dictations
+│   in a row", and the counts not counted by reason. Debug builds only: `setprop
+│   log.tag.HexDecodeScale DEBUG` (×10) or `VERBOSE` (×0.5) scales the measured time; the minified
+│   release and preview dex don't contain the tag. Checks: `ModelChoiceTest` in SignatureTest.kt
+│   (17 tests: the OnePlus 12's two reports, each thing it must never do); emulator results are in
+│   the pull request.
 └── Labs > Dictation > Learn from my fixes (off) -> an Android-only port of iPhone Hex's dictation
     correction learning, with no typing side. Off, the keyboard tracks nothing, applies nothing and
     adds no hints. On, each keyboard dictation in a non-secure words field that the field lets Hex

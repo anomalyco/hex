@@ -94,6 +94,13 @@ internal val KeyboardHeight.label get() = when (this) {
     KeyboardHeight.ExtraTall -> R.string.keyboard_height_extra_tall
 }
 
+/** Faster English dictation's download problem, on its Labs row and the Dictation page's line. */
+private fun fastEnglishProblem(problem: ModelStore.Problem) = when (problem) {
+    ModelStore.Problem.Connection -> R.string.fast_english_no_connection
+    ModelStore.Problem.Space -> R.string.fast_english_no_space
+    ModelStore.Problem.Server -> R.string.fast_english_stopped
+}
+
 /** Licence files the credits name, in the order they appear in assets/licenses. */
 private fun licenceFiles(context: Context) =
     context.assets.list("licenses").orEmpty().filter { it != "credits.txt" }.sorted()
@@ -117,7 +124,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     // Observe them even while trying the keyboard inside this page.
     var revision by remember { mutableIntStateOf(0) }
     DisposableEffect(context) {
-        val stores = listOf("speech", "typing", AdaptiveTouchStore.FILE).map { context.getSharedPreferences(it, Context.MODE_PRIVATE) }
+        val stores = listOf("speech", "typing", AdaptiveTouchStore.FILE, ModelChoiceStore.FILE).map { context.getSharedPreferences(it, Context.MODE_PRIVATE) }
         val changed = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> revision++ }
         stores.forEach { it.registerOnSharedPreferenceChangeListener(changed) }
         onDispose { stores.forEach { it.unregisterOnSharedPreferenceChangeListener(changed) } }
@@ -146,6 +153,9 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     var vocabularyDraft by remember(imports) { mutableStateOf(speech.vocabularyTerms.joinToString("\n")) }
     val signature = remember(revision) { speech.signature }
     val fastEnglish = remember(revision) { speech.fastEnglish }
+    val pickModel = remember(revision) { speech.pickModel }
+    // Labs › Pick the English model for this phone chose faster English dictation, and nobody turned it off since.
+    val chosenForPhone = remember(revision) { pickModel && !speech.fastEnglishOffByHand && ModelChoiceStore(context).state.decided }
     val learnFixes = remember(revision) { speech.learnFixes }
     val fixStore = remember(context) { DictationFixStore(context) }
     val learnedFixes = remember(revision, learnFixes) { if (learnFixes) fixStore.learned() else emptyList() }
@@ -353,9 +363,17 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             Entry(stringResource(R.string.model_title), modelStatus(model), action?.let { stringResource(it) } ?: "",
                                 if (action != null) download else null)
                             // Not while Automatic chooses among several languages: those dictations all use today's model.
-                            if (fastEnglish && english == ModelStore.State.Ready && !listening) {
-                                Rule(); Entry(stringResource(R.string.fast_english_in_use), action = { open(Page.Labs) })
-                            }
+                            // Chosen for this phone (Labs › Pick the English model for this phone), the line says what is
+                            // true now: waiting for Wi-Fi, downloading, stopped, or in use.
+                            val size = ModelStore.english.megabytes
+                            val line = if (!fastEnglish || listening) null else if (chosenForPhone) when (english) {
+                                ModelStore.State.Ready -> stringResource(R.string.fast_english_chosen)
+                                ModelStore.State.WaitingForWifi -> stringResource(R.string.fast_english_chosen_waiting, size)
+                                is ModelStore.State.Loading -> stringResource(R.string.fast_english_chosen_loading, size, english.percent)
+                                is ModelStore.State.Retry -> stringResource(R.string.fast_english_chosen_problem, stringResource(fastEnglishProblem(english.problem)))
+                                ModelStore.State.Available -> null
+                            } else if (english == ModelStore.State.Ready) stringResource(R.string.fast_english_in_use) else null
+                            if (line != null) { Rule(); Entry(line, action = { open(Page.Labs) }, titleLines = 3) }
                         }
                     }
                     Page.Keyboard -> {
@@ -407,27 +425,38 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 Toggle(stringResource(R.string.fast_english), stringResource(R.string.fast_english_detail, size),
                                     fastEnglish, noteLines = Int.MAX_VALUE) {
                                     speech.fastEnglish = it
+                                    // Off is the person's choice: Labs › Pick the English model for this phone never turns it
+                                    // on again.
+                                    if (!it) speech.fastEnglishOffByHand = true
                                     // Off stops a download under way and drops its partial file; a finished one stays
                                     // until Delete download.
                                     if (!it && english != ModelStore.State.Ready) ModelStore.english.delete(context)
                                 }
                                 if (fastEnglish) {
                                     Rule()
-                                    // The download starts only on this tap, with its size on the row.
+                                    // The download starts on this tap, with its size on the row, or by itself when Labs › Pick the
+                                    // English model for this phone chose it. Like the first model's, it waits for Wi-Fi on a
+                                    // network that charges for data, unless the person taps Use mobile data.
                                     when (english) {
-                                        // Labs' download starts on the tap, on any network: it never waits for Wi-Fi.
-                                        ModelStore.State.Available, ModelStore.State.WaitingForWifi -> Entry(stringResource(R.string.fast_english_download, size), value = "",
+                                        ModelStore.State.Available -> Entry(stringResource(R.string.fast_english_download, size), value = "",
                                             action = { ModelStore.english.download(context) })
+                                        ModelStore.State.WaitingForWifi -> Entry(stringResource(R.string.fast_english_waiting_wifi, size),
+                                            value = stringResource(R.string.model_use_mobile_data), action = { ModelStore.english.useMobileData(context) }, titleLines = 2)
                                         is ModelStore.State.Loading -> Entry(stringResource(R.string.fast_english_loading, size, english.percent))
-                                        is ModelStore.State.Retry -> Entry(stringResource(when (english.problem) {
-                                            ModelStore.Problem.Connection -> R.string.fast_english_no_connection
-                                            ModelStore.Problem.Space -> R.string.fast_english_no_space
-                                            ModelStore.Problem.Server -> R.string.fast_english_stopped
-                                        }), value = stringResource(R.string.model_try_again), action = { ModelStore.english.download(context) })
+                                        is ModelStore.State.Retry -> Entry(stringResource(fastEnglishProblem(english.problem)),
+                                            value = stringResource(R.string.model_try_again), action = { ModelStore.english.download(context) })
                                         ModelStore.State.Ready -> Entry(stringResource(R.string.fast_english_ready, size),
                                             value = stringResource(R.string.fast_english_delete),
-                                            action = { ModelStore.english.delete(context); speech.fastEnglish = false })
+                                            action = { ModelStore.english.delete(context); speech.fastEnglish = false; speech.fastEnglishOffByHand = true })
                                     }
+                                }
+                                Rule()
+                                // Labs › Pick the English model for this phone: off, nothing is measured or kept, and turning it
+                                // off deletes its numbers. A setting or download it already made stays, as an ordinary one.
+                                Toggle(stringResource(R.string.pick_model), stringResource(R.string.pick_model_detail, size),
+                                    pickModel, noteLines = Int.MAX_VALUE) {
+                                    speech.pickModel = it
+                                    if (!it) ModelChoiceStore(context).clear()
                                 }
                                 Rule()
                                 // Labs › Automatic listens for the language: off, Automatic dictates in one language, as before.
@@ -684,17 +713,18 @@ private fun reflow(lines: List<String>) = buildString {
 @Composable internal fun Rule() {
     Spacer(Modifier.fillMaxWidth().padding(start = 16.dp).height(1.dp).background(colorResource(R.color.rule)))
 }
-@Composable private fun RowScope.RowTitle(title: String, note: String?, noteLines: Int = 2) {
+@Composable private fun RowScope.RowTitle(title: String, note: String?, noteLines: Int = 2, titleLines: Int = 1) {
     Column(Modifier.weight(1f)) {
-        Label(title, weight = FontWeight.Medium)
+        Label(title, weight = FontWeight.Medium, lines = titleLines)
         if (note != null) Label(note, size = 13, muted = true, lines = noteLines)
     }
 }
-@Composable internal fun Entry(title: String, note: String? = null, value: String = "›", action: (() -> Unit)? = null) {
+@Composable internal fun Entry(title: String, note: String? = null, value: String = "›", action: (() -> Unit)? = null,
+                               titleLines: Int = 1) {
     val click = if (action != null) Modifier.clickable(role = Role.Button, onClick = action) else Modifier
     Row(Modifier.fillMaxWidth().then(click).heightIn(min = 52.dp).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        RowTitle(title, note)
+        RowTitle(title, note, titleLines = titleLines)
         if (action != null && value.isNotEmpty()) Label(value, muted = true, size = if (value == "›") 22 else 15)
     }
 }

@@ -38,11 +38,12 @@ internal fun waitsForWifi(mobileDataChosen: Boolean, unmetered: Boolean?) = !mob
 internal interface OfflineScreen
 
 /** Hex's network operation: an explicit, fixed model GET from Hex's own screens, each file pinned by revision, size and
- * SHA-256 ([small] from setup or Dictation settings, [english] from Labs). The keyboard never calls it. A wifiFirst
- * download waits for an unmetered network ([State.WaitingForWifi]) unless the person chooses mobile data. */
+ * SHA-256 ([small] from setup or Dictation settings, [english] from Labs or, with Labs › Pick the English model for this
+ * phone, when Hex is opened). The keyboard never calls it. A wifiFirst download (both models, whoever asked) waits for
+ * an unmetered network ([State.WaitingForWifi]) unless the person chooses mobile data. */
 internal class ModelStore private constructor(private val name: String, private val size: Long, private val hash: String,
                                               private val url: String, private val extension: String,
-                                              private val wifiFirst: Boolean = false) {
+                                              internal val wifiFirst: Boolean = false) {
     companion object {
         /** Whisper small, the default speech model. */
         val small = ModelStore("whisper-small", 190085487L, "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
@@ -51,7 +52,7 @@ internal class ModelStore private constructor(private val name: String, private 
         /** Labs › Faster English dictation: NVIDIA's Parakeet TDT-CTC 110M, as transcribe.cpp's authors converted it. */
         val english = ModelStore("parakeet-tdt_ctc-110m", 135373280L, "7dd44c74a331d788a4e5f8b16913b3feb29ced22cf5613aad0e0f6cd30516296",
             "https://huggingface.co/handy-computer/parakeet-tdt_ctc-110m-gguf/resolve/1c3f0d5378fdd358905cc410a93ed9e64f52d170/parakeet-tdt_ctc-110m-Q8_0.gguf",
-            "gguf")
+            "gguf", wifiFirst = true)
     }
 
     enum class Problem { Connection, Server, Space }
