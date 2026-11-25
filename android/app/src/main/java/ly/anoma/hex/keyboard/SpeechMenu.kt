@@ -79,6 +79,9 @@ internal class SpeechMenu(context: Context, private val ime: HexKeyboard,
                 // Labs › Keyboard › Volume in the Hex menu: Android's own volume panel, as a volume key shows it. The
                 // volume stays as it is until the person moves a slider; the keyboard and its field stay open.
                 if (ime.feedback.volumeInMenu) row(s(R.string.keyboard_menu_volume), "") { close(); showVolumePanel() }
+                // Labs › Keyboard › Voice bar from the Hex menu: the keys collapse into a dictation bar in this field.
+                if (ime.feedback.voiceBarFromMenu && !ime.engine.secure)
+                    row(s(R.string.voice_only), "") { close(); ime.collapseKeys() }
                 // The system's own switcher sits in the navigation bar; this reaches the next keyboard without it.
                 row(s(R.string.keyboard_next), "") { close(); ime.nextIme() }
             }

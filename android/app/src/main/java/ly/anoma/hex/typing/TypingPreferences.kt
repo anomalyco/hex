@@ -105,6 +105,11 @@ internal class TypingPreferences(context: Context) {
     var voiceOnly: Boolean
         get() = prefs.getBoolean(VOICE_ONLY, false)
         set(value) { prefs.edit().putBoolean(VOICE_ONLY, value).apply() }
+    /** Labs › Keyboard › Voice bar from the Hex menu: the Hex menu's Voice only collapses the keys into a dictation
+     * bar in the same field, and its Show keyboard brings them back (#2869). Off by default. */
+    var voiceBarFromMenu: Boolean
+        get() = prefs.getBoolean(VOICE_BAR_FROM_MENU, false)
+        set(value) { prefs.edit().putBoolean(VOICE_BAR_FROM_MENU, value).apply() }
     /** Settings › Keyboard › Height: Normal until another step is chosen. */
     var height: KeyboardHeight
         get() = KeyboardHeight.of(prefs.getString(HEIGHT, null))
@@ -156,6 +161,7 @@ internal class TypingPreferences(context: Context) {
         const val PASSWORD_MANAGER_SUGGESTIONS = "passwordManagerSuggestions"
         const val CLIPBOARD_HISTORY = "clipboardHistory"
         const val VOICE_ONLY = "voiceOnly"
+        const val VOICE_BAR_FROM_MENU = "voiceBarFromMenu"
         const val HEIGHT = "keyboardHeight"
         const val HEX_KEY_LEFT = "hexKeyLeft"
         const val VOLUME_IN_MENU = "volumeInMenu"

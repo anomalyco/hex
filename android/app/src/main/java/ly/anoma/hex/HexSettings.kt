@@ -182,6 +182,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     var resettingTouch by remember { mutableStateOf(false) }
     val passwordManager = remember(revision) { typing.passwordManagerSuggestions }
     val voiceOnly = remember(revision) { typing.voiceOnly }
+    val voiceBarFromMenu = remember(revision) { typing.voiceBarFromMenu }
     val hexKeyLeft = remember(revision) { typing.hexKeyLeft }
     val volumeInMenu = remember(revision) { typing.volumeInMenu }
     // Labs › Dictate from Quick Settings is the tile service's enabled state, not a preference.
@@ -629,6 +630,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 Rule()
                                 Toggle(stringResource(R.string.voice_only_mode), stringResource(R.string.voice_only_detail),
                                     voiceOnly) { typing.voiceOnly = it; VoiceOnly.setEnabledFromSettings(context, it) }
+                                Rule()
+                                // Labs › Keyboard › Voice bar from the Hex menu: off, the Hex menu has no Voice only.
+                                Toggle(stringResource(R.string.voice_bar_from_menu), stringResource(R.string.voice_bar_from_menu_detail),
+                                    voiceBarFromMenu) { typing.voiceBarFromMenu = it }
                                 Rule()
                                 // Labs › Keyboard › Hex key on the left: off, the Hex key stays at the strip's right end.
                                 Toggle(stringResource(R.string.hex_key_left), stringResource(R.string.hex_key_left_detail),

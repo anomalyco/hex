@@ -22,6 +22,10 @@ internal object VoiceOnly {
     /** Whether the bar replaces the keyboard: the lab is on and the current subtype is the voice one. */
     fun shows(lab: Boolean, subtypeMode: String?) = lab && subtypeMode == MODE
 
+    /** Labs › Keyboard › Voice bar from the Hex menu: the keys stay collapsed into the bar while the lab is on and the
+     * menu's Voice only collapsed them, except in a password field, which always gets its keys. */
+    fun collapses(lab: Boolean, collapsed: Boolean, secure: Boolean) = lab && collapsed && !secure
+
     /** Whether showing the bar records: a restart after a leave was asked for keeps it idle instead. */
     fun startsOnShow(restarting: Boolean, left: Boolean) = !restarting || !left
 
