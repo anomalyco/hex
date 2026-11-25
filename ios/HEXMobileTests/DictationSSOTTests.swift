@@ -542,8 +542,12 @@ final class DictationSSOTTests: XCTestCase {
         XCTAssertNil(unpicked(.english, english: (false, false)), "a download that failed leaves the multilingual one")
         XCTAssertNil(unpicked(.english, hex: .parakeetUltra))
 
-        let names = SpeechModelChoice.multilingualLanguages
-        XCTAssertTrue(names.contains("Dutch") && names.contains("Ukrainian") && names.contains("English"), names)
+        // Settings says "25 European languages": the multilingual model's 25, all European.
+        let european: Set<String> = [
+            "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "hr", "hu", "it",
+            "lt", "lv", "mt", "nl", "pl", "pt", "ro", "ru", "sk", "sl", "sv", "uk",
+        ]
+        XCTAssertEqual(MultilingualParakeetSettings.languages, european)
     }
 
     /// Settings › Dictation's speech model line once the keyboard couldn't use the model: it used

@@ -345,10 +345,11 @@ Settings › Dictation's speech model card has **Model: English · Multilingual*
 (`SpeechModelChoice`, `SpeechModelChoiceRow`) under Speech model in keyboard, English
 until Multilingual is picked, on iPhones with 6 GB or more (under that the switch above
 says it needs 6 GB, and the row doesn't show). It moved there from Experiments on
-2026-11-24. Each choice says what it means before anything downloads: English, "For
-English. A 464.4 MB download on Wi-Fi."; Multilingual, its 25 languages by name, "A 632.2 MB
-download on Wi-Fi. Hex dictates them with it too."; both, that other languages
-use Apple's speech recognition and that only the picked model stays on the iPhone. Only the
+2026-11-24. Each choice says what it means before anything downloads: English, "A 464.4 MB
+download on Wi-Fi"; Multilingual, "25 European languages, even mixed in one sentence. A
+632.2 MB download on Wi-Fi." (its languages are no longer named there, since 1.0.5); both,
+"Other languages use Apple's speech recognition. Switching models downloads the new one and
+removes the old." Only the
 picked one is kept, but the other goes only once the picked one is downloaded and has loaded
 once, in Hex or the keyboard (`SpeechModelChoice.unpicked`, checked whenever Hex comes to the
 front and when Hex has loaded the multilingual model; `KeyboardParakeetSettings.hasLoadedOnce`),

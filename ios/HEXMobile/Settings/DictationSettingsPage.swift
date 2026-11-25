@@ -249,7 +249,7 @@ struct DictationSettingsPage: View {
                 SettingsToggleRow(
                     title: String(localized: "Speech model in keyboard"),
                     detail: keyboardParakeetFits
-                        ? String(localized: "The keyboard dictates with the model below. Until it's ready, it uses Apple's speech recognition.")
+                        ? String(localized: "Until it's ready, the keyboard uses Apple's speech recognition")
                         : String(localized: "Needs an iPhone with 6 GB of memory or more"),
                     isOn: $keyboardParakeet
                 )
