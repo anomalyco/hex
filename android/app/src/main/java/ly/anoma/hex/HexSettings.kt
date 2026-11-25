@@ -117,6 +117,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val selectedLayout = remember(revision) { typing.layout }
     val style = remember(revision) { speech.style }
     val translate = remember(revision) { speech.translation }
+    val translatable = remember(revision, LocalConfiguration.current) { speech.translatable }
     val clean = remember(revision) { speech.clean }
     val lowercase = remember(revision) { speech.lowercase }
     val endWithPeriod = remember(revision) { speech.endWithPeriod }
@@ -288,7 +289,13 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 selectedLanguage?.label ?: stringResource(R.string.settings_automatic), { open(Page.Language) })
                         }
                         Card {
-                            Toggle(stringResource(R.string.settings_translate), stringResource(R.string.settings_translate_detail), translate) { speech.translation = it }
+                            // Whisper translates only into English, and Hex offers it only for Spanish: say which pair, and when
+                            // the Dictation language means the switch does nothing.
+                            Toggle(stringResource(R.string.settings_translate), stringResource(when {
+                                !translatable -> R.string.settings_translate_needs_spanish
+                                listening -> R.string.settings_translate_heard
+                                else -> R.string.settings_translate_detail
+                            }), translate, noteLines = 3) { speech.translation = it }
                             Rule(); Toggle(stringResource(R.string.settings_clean), stringResource(R.string.settings_clean_detail), clean) { speech.clean = it }
                             Rule(); Toggle(stringResource(R.string.dictation_vocabulary), stringResource(R.string.dictation_vocabulary_detail),
                                 customVocabulary) { speech.customVocabulary = it }
