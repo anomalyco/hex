@@ -171,7 +171,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun HexTheme(content: @Composable () -> Unit) {
+internal fun HexTheme(content: @Composable () -> Unit) {
     val ink = colorResource(R.color.ink)
     val page = colorResource(R.color.page)
     val scheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()

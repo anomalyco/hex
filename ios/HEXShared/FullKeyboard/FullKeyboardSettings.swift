@@ -47,7 +47,7 @@ struct FullKeyboardSettings {
     static let emojiLaunchArgument = "--experiment-emoji"
     static let emojiLettersLaunchArgument = "--experiment-emoji-letters"
     /// Simulator scenes pass `--experiment-keyboard-themes` for Settings › Experiments ›
-    /// Keyboard themes.
+    /// Key colors.
     static let keyboardThemesLaunchArgument = "--experiment-keyboard-themes"
     /// Simulator scenes pass `--keyboard-theme <automatic|black|white|navy|forest|ember>` for
     /// the full keyboard's theme (with the experiment on).
@@ -96,6 +96,7 @@ struct FullKeyboardSettings {
         static let hideWordSuggestions = "experiments.hideWordSuggestions"
         static let hexKeyOnLeft = "settings.keyboardHexKeyLeft"
         static let numberRow = "settings.keyboardNumberRow"
+        static let keyFlicks = "settings.keyboardKeyFlicks"
         static let dictationBarAutoStart = "settings.dictationBarAutoStart"
         static let joinKeyboardWhenUnfolded = "experiments.joinKeyboardWhenUnfolded"
         static let dvorakPunctuation = "experiments.dvorakPunctuation"
@@ -250,7 +251,7 @@ struct FullKeyboardSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.emojiLettersUnderEmojiKey) }
     }
 
-    /// Settings › Experiments › Keyboard themes: the full keyboard draws its own opaque
+    /// Settings › Experiments › Key colors: the full keyboard draws its own opaque
     /// colours (black, white, navy, forest or ember) instead of translucent keycaps over
     /// iOS's glass. Off by default, so the keyboard keeps the system look; the dictation bar
     /// and iOS's own strip above the keyboard keep it either way. Stored as
@@ -260,7 +261,7 @@ struct FullKeyboardSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.keyboardThemes) }
     }
 
-    /// Settings › Experiments › Keyboard themes: the theme the full keyboard draws with.
+    /// Settings › Experiments › Key colors: the theme the full keyboard draws with.
     /// Automatic when unset, unknown, or without the App Group.
     var keyboardTheme: KeyboardTheme {
         get {
@@ -343,6 +344,14 @@ struct FullKeyboardSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.numberRow) }
     }
 
+    /// Settings › Keyboard › Key flicks (iPad): pulling a docked iPad key down types the
+    /// character over its letter, as Apple's keyboard does (`KeyboardFlicks`). On by default, as
+    /// Apple's Enable Key Flicks is; a keyboard extension can't read that one.
+    var keyFlicks: Bool {
+        get { defaults?.object(forKey: Key.keyFlicks) as? Bool ?? true }
+        nonmutating set { defaults?.set(newValue, forKey: Key.keyFlicks) }
+    }
+
     /// Settings › Experiments › Join the keyboard when unfolded: on the Duo unfolded and held
     /// upright, Hex normally splits its keyboard as Apple's does there, since an extension
     /// can't read Apple's Split Keyboard preference. On, it draws the joined keyboard instead,
@@ -410,7 +419,7 @@ struct FullKeyboardSettings {
     /// to pick the keyboard, `--experiment-emoji` to turn Emoji on, `--experiment-swipe` for
     /// Swipe typing (both on by default; the arguments override a stored off),
     /// `--experiment-emoji-letters` for ABC under the emoji key,
-    /// `--experiment-keyboard-themes` for Keyboard themes and `--keyboard-theme <raw>` for
+    /// `--experiment-keyboard-themes` for Key colors and `--keyboard-theme <raw>` for
     /// the theme it draws,
     /// `--hex-key left|right` for the Hex key's side, `--number-row on|off` for the number row,
     /// `--join-unfolded-keyboard on|off` for the joined keyboard on the Duo unfolded,

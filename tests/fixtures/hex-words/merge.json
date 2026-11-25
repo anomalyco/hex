@@ -1,0 +1,795 @@
+{
+  "description": "Merging a file that was read (incoming, already cleaned) into a device's lists (before). Run merge(receiver, before, incoming, limits = the receiver's limits overridden by limits, parts = both on unless parts says otherwise, choices = keep yours for every clash unless choices says useTheirs for that incoming path) and compare the whole result to expect. On the desktop a vocabulary entry is {term, soundsLike}; on a phone it is the term alone. Undo after any case must give back before exactly.",
+  "cases": [
+    {
+      "name": "Desktop, empty lists: every term with its spellings and every replacement is added; learned is dropped",
+      "receiver": "desktop",
+      "before": {"vocabulary": [], "replacements": []},
+      "incoming": {
+        "vocabulary": [
+          {"term": "OpenCode", "soundsLike": ["open code", "open coat"]},
+          {"term": "Rune", "soundsLike": []},
+          {"term": "Dax Raad", "soundsLike": ["dax rad"]}
+        ],
+        "replacements": [
+          {"heard": "jet hub", "write": "GitHub", "learned": false},
+          {"heard": "cloud code", "write": "Claude Code", "learned": true},
+          {"heard": "dash dash", "write": "--", "learned": false}
+        ]
+      },
+      "expect": {
+        "after": {
+          "vocabulary": [
+            {"term": "OpenCode", "soundsLike": ["open code", "open coat"]},
+            {"term": "Rune", "soundsLike": []},
+            {"term": "Dax Raad", "soundsLike": ["dax rad"]}
+          ],
+          "replacements": [
+            {"heard": "jet hub", "write": "GitHub"},
+            {"heard": "cloud code", "write": "Claude Code"},
+            {"heard": "dash dash", "write": "--"}
+          ]
+        },
+        "summary": {"addedTerms": 3, "updatedTerms": 0, "alreadyHaveTerms": 0, "addedReplacements": 3, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [],
+        "clashes": []
+      }
+    },
+    {
+      "name": "Desktop: the same term in another case gains the new spellings and keeps your casing",
+      "receiver": "desktop",
+      "before": {"vocabulary": [{"term": "OpenCode", "soundsLike": ["open code"]}], "replacements": []},
+      "incoming": {
+        "vocabulary": [{"term": "opencode", "soundsLike": ["open code", "open coat"]}],
+        "replacements": []
+      },
+      "expect": {
+        "after": {
+          "vocabulary": [{"term": "OpenCode", "soundsLike": ["open code", "open coat"]}],
+          "replacements": []
+        },
+        "summary": {"addedTerms": 0, "updatedTerms": 1, "alreadyHaveTerms": 0, "addedReplacements": 0, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [],
+        "clashes": []
+      }
+    },
+    {
+      "name": "Desktop: the same term with nothing new is already there",
+      "receiver": "desktop",
+      "before": {
+        "vocabulary": [{"term": "OpenCode", "soundsLike": ["open code", "open coat"]}],
+        "replacements": []
+      },
+      "incoming": {"vocabulary": [{"term": "OPENCODE", "soundsLike": ["Open Code"]}], "replacements": []},
+      "expect": {
+        "after": {
+          "vocabulary": [{"term": "OpenCode", "soundsLike": ["open code", "open coat"]}],
+          "replacements": []
+        },
+        "summary": {"addedTerms": 0, "updatedTerms": 0, "alreadyHaveTerms": 1, "addedReplacements": 0, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [],
+        "clashes": []
+      }
+    },
+    {
+      "name": "Desktop: a term holds 16 spellings, so one of three new ones fits",
+      "receiver": "desktop",
+      "before": {
+        "vocabulary": [
+          {"term": "Hex", "soundsLike": ["hex 01", "hex 02", "hex 03", "hex 04", "hex 05", "hex 06", "hex 07", "hex 08", "hex 09", "hex 10", "hex 11", "hex 12", "hex 13", "hex 14", "hex 15"]}
+        ],
+        "replacements": []
+      },
+      "incoming": {
+        "vocabulary": [{"term": "Hex", "soundsLike": ["new one", "new two", "new three"]}],
+        "replacements": []
+      },
+      "expect": {
+        "after": {
+          "vocabulary": [
+            {"term": "Hex", "soundsLike": ["hex 01", "hex 02", "hex 03", "hex 04", "hex 05", "hex 06", "hex 07", "hex 08", "hex 09", "hex 10", "hex 11", "hex 12", "hex 13", "hex 14", "hex 15", "new one"]}
+          ],
+          "replacements": []
+        },
+        "summary": {"addedTerms": 0, "updatedTerms": 1, "alreadyHaveTerms": 0, "addedReplacements": 0, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [
+          {"path": "vocabulary[0].soundsLike[1]", "reason": "overDeviceLimit"},
+          {"path": "vocabulary[0].soundsLike[2]", "reason": "overDeviceLimit"}
+        ],
+        "clashes": []
+      }
+    },
+    {
+      "name": "Desktop: with room for one more term (limit set to 3 for this case), the first new term is added and the rest are over the limit",
+      "receiver": "desktop",
+      "limits": {"terms": 3},
+      "before": {
+        "vocabulary": [{"term": "Alpha", "soundsLike": []}, {"term": "Beta", "soundsLike": []}],
+        "replacements": []
+      },
+      "incoming": {
+        "vocabulary": [
+          {"term": "Gamma", "soundsLike": []},
+          {"term": "Delta", "soundsLike": []},
+          {"term": "Epsilon", "soundsLike": []}
+        ],
+        "replacements": []
+      },
+      "expect": {
+        "after": {
+          "vocabulary": [
+            {"term": "Alpha", "soundsLike": []},
+            {"term": "Beta", "soundsLike": []},
+            {"term": "Gamma", "soundsLike": []}
+          ],
+          "replacements": []
+        },
+        "summary": {"addedTerms": 1, "updatedTerms": 0, "alreadyHaveTerms": 0, "addedReplacements": 0, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [
+          {"path": "vocabulary[1]", "reason": "overDeviceLimit"},
+          {"path": "vocabulary[2]", "reason": "overDeviceLimit"}
+        ],
+        "clashes": []
+      }
+    },
+    {
+      "name": "Desktop: \"Next.js\" and \"NextJS\" are different terms here (the phone treats them as one)",
+      "receiver": "desktop",
+      "before": {"vocabulary": [{"term": "Next.js", "soundsLike": []}], "replacements": []},
+      "incoming": {"vocabulary": [{"term": "NextJS", "soundsLike": []}], "replacements": []},
+      "expect": {
+        "after": {
+          "vocabulary": [{"term": "Next.js", "soundsLike": []}, {"term": "NextJS", "soundsLike": []}],
+          "replacements": []
+        },
+        "summary": {"addedTerms": 1, "updatedTerms": 0, "alreadyHaveTerms": 0, "addedReplacements": 0, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [],
+        "clashes": []
+      }
+    },
+    {
+      "name": "Desktop: the same replacement in another case and spacing is already there",
+      "receiver": "desktop",
+      "before": {"vocabulary": [], "replacements": [{"heard": "Jet Hub", "write": "GitHub"}]},
+      "incoming": {
+        "vocabulary": [],
+        "replacements": [{"heard": "jet  hub", "write": "GitHub", "learned": false}]
+      },
+      "expect": {
+        "after": {"vocabulary": [], "replacements": [{"heard": "Jet Hub", "write": "GitHub"}]},
+        "summary": {"addedTerms": 0, "updatedTerms": 0, "alreadyHaveTerms": 0, "addedReplacements": 0, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 1},
+        "notApplied": [],
+        "clashes": []
+      }
+    },
+    {
+      "name": "Desktop: a clash (same heard phrase, another output) keeps yours by default",
+      "receiver": "desktop",
+      "before": {
+        "vocabulary": [],
+        "replacements": [{"heard": "jet hub", "write": "GitHub"}, {"heard": "um", "write": ""}]
+      },
+      "incoming": {
+        "vocabulary": [],
+        "replacements": [
+          {"heard": "jet hub", "write": "Jet Hub", "learned": false},
+          {"heard": "open code", "write": "OpenCode", "learned": false}
+        ]
+      },
+      "expect": {
+        "after": {
+          "vocabulary": [],
+          "replacements": [
+            {"heard": "jet hub", "write": "GitHub"},
+            {"heard": "um", "write": ""},
+            {"heard": "open code", "write": "OpenCode"}
+          ]
+        },
+        "summary": {"addedTerms": 0, "updatedTerms": 0, "alreadyHaveTerms": 0, "addedReplacements": 1, "changedReplacements": 0, "keptYours": 1, "alreadyHaveReplacements": 0},
+        "notApplied": [],
+        "clashes": [{"path": "replacements[0]", "heard": "jet hub", "yours": "GitHub", "theirs": "Jet Hub"}]
+      }
+    },
+    {
+      "name": "Desktop: a clash the person switched to theirs replaces the output in place",
+      "receiver": "desktop",
+      "before": {
+        "vocabulary": [],
+        "replacements": [{"heard": "jet hub", "write": "GitHub"}, {"heard": "um", "write": ""}]
+      },
+      "incoming": {
+        "vocabulary": [],
+        "replacements": [
+          {"heard": "jet hub", "write": "Jet Hub", "learned": false},
+          {"heard": "open code", "write": "OpenCode", "learned": false}
+        ]
+      },
+      "choices": {"replacements[0]": "useTheirs"},
+      "expect": {
+        "after": {
+          "vocabulary": [],
+          "replacements": [
+            {"heard": "jet hub", "write": "Jet Hub"},
+            {"heard": "um", "write": ""},
+            {"heard": "open code", "write": "OpenCode"}
+          ]
+        },
+        "summary": {"addedTerms": 0, "updatedTerms": 0, "alreadyHaveTerms": 0, "addedReplacements": 1, "changedReplacements": 1, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [],
+        "clashes": [{"path": "replacements[0]", "heard": "jet hub", "yours": "GitHub", "theirs": "Jet Hub"}]
+      }
+    },
+    {
+      "name": "Desktop: an empty output (deleting a phrase) is added like any replacement",
+      "receiver": "desktop",
+      "before": {"vocabulary": [], "replacements": []},
+      "incoming": {
+        "vocabulary": [],
+        "replacements": [
+          {"heard": "um", "write": "", "learned": false},
+          {"heard": "you know", "write": "", "learned": false}
+        ]
+      },
+      "expect": {
+        "after": {
+          "vocabulary": [],
+          "replacements": [{"heard": "um", "write": ""}, {"heard": "you know", "write": ""}]
+        },
+        "summary": {"addedTerms": 0, "updatedTerms": 0, "alreadyHaveTerms": 0, "addedReplacements": 2, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [],
+        "clashes": []
+      }
+    },
+    {
+      "name": "Desktop: with the Vocabulary part switched off, only replacements are merged",
+      "receiver": "desktop",
+      "before": {"vocabulary": [], "replacements": []},
+      "incoming": {
+        "vocabulary": [
+          {"term": "OpenCode", "soundsLike": ["open code", "open coat"]},
+          {"term": "Rune", "soundsLike": []},
+          {"term": "Dax Raad", "soundsLike": ["dax rad"]}
+        ],
+        "replacements": [
+          {"heard": "jet hub", "write": "GitHub", "learned": false},
+          {"heard": "cloud code", "write": "Claude Code", "learned": true},
+          {"heard": "dash dash", "write": "--", "learned": false}
+        ]
+      },
+      "parts": {"vocabulary": false},
+      "expect": {
+        "after": {
+          "vocabulary": [],
+          "replacements": [
+            {"heard": "jet hub", "write": "GitHub"},
+            {"heard": "cloud code", "write": "Claude Code"},
+            {"heard": "dash dash", "write": "--"}
+          ]
+        },
+        "summary": {"addedTerms": 0, "updatedTerms": 0, "alreadyHaveTerms": 0, "addedReplacements": 3, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [],
+        "clashes": []
+      }
+    },
+    {
+      "name": "Desktop: with replacements limited to 2 for this case, the third is over the limit",
+      "receiver": "desktop",
+      "limits": {"replacements": 2},
+      "before": {"vocabulary": [], "replacements": [{"heard": "one", "write": "1"}]},
+      "incoming": {
+        "vocabulary": [],
+        "replacements": [
+          {"heard": "two", "write": "2", "learned": false},
+          {"heard": "three", "write": "3", "learned": false}
+        ]
+      },
+      "expect": {
+        "after": {
+          "vocabulary": [],
+          "replacements": [{"heard": "one", "write": "1"}, {"heard": "two", "write": "2"}]
+        },
+        "summary": {"addedTerms": 0, "updatedTerms": 0, "alreadyHaveTerms": 0, "addedReplacements": 1, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [{"path": "replacements[1]", "reason": "overDeviceLimit"}],
+        "clashes": []
+      }
+    },
+    {
+      "name": "Desktop: a file with nothing new changes nothing",
+      "receiver": "desktop",
+      "before": {
+        "vocabulary": [
+          {"term": "OpenCode", "soundsLike": ["open code", "open coat"]},
+          {"term": "Rune", "soundsLike": []},
+          {"term": "Dax Raad", "soundsLike": ["dax rad"]}
+        ],
+        "replacements": [
+          {"heard": "jet hub", "write": "GitHub"},
+          {"heard": "cloud code", "write": "Claude Code"},
+          {"heard": "dash dash", "write": "--"}
+        ]
+      },
+      "incoming": {
+        "vocabulary": [
+          {"term": "OpenCode", "soundsLike": ["open code", "open coat"]},
+          {"term": "Rune", "soundsLike": []},
+          {"term": "Dax Raad", "soundsLike": ["dax rad"]}
+        ],
+        "replacements": [
+          {"heard": "jet hub", "write": "GitHub", "learned": false},
+          {"heard": "cloud code", "write": "Claude Code", "learned": true},
+          {"heard": "dash dash", "write": "--", "learned": false}
+        ]
+      },
+      "expect": {
+        "after": {
+          "vocabulary": [
+            {"term": "OpenCode", "soundsLike": ["open code", "open coat"]},
+            {"term": "Rune", "soundsLike": []},
+            {"term": "Dax Raad", "soundsLike": ["dax rad"]}
+          ],
+          "replacements": [
+            {"heard": "jet hub", "write": "GitHub"},
+            {"heard": "cloud code", "write": "Claude Code"},
+            {"heard": "dash dash", "write": "--"}
+          ]
+        },
+        "summary": {"addedTerms": 0, "updatedTerms": 0, "alreadyHaveTerms": 3, "addedReplacements": 0, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 3},
+        "notApplied": [],
+        "clashes": []
+      }
+    },
+    {
+      "name": "Phone, empty lists: terms are added without spellings; each spelling becomes a replacement to its term, after the file's own replacements",
+      "receiver": "phone",
+      "before": {"vocabulary": [], "replacements": []},
+      "incoming": {
+        "vocabulary": [
+          {"term": "OpenCode", "soundsLike": ["open code", "open coat"]},
+          {"term": "Rune", "soundsLike": []},
+          {"term": "Dax Raad", "soundsLike": ["dax rad"]}
+        ],
+        "replacements": [
+          {"heard": "jet hub", "write": "GitHub", "learned": false},
+          {"heard": "cloud code", "write": "Claude Code", "learned": true},
+          {"heard": "dash dash", "write": "--", "learned": false}
+        ]
+      },
+      "expect": {
+        "after": {
+          "vocabulary": ["OpenCode", "Rune", "Dax Raad"],
+          "replacements": [
+            {"heard": "jet hub", "write": "GitHub"},
+            {"heard": "cloud code", "write": "Claude Code"},
+            {"heard": "dash dash", "write": "--"},
+            {"heard": "open code", "write": "OpenCode"},
+            {"heard": "open coat", "write": "OpenCode"},
+            {"heard": "dax rad", "write": "Dax Raad"}
+          ]
+        },
+        "summary": {"addedTerms": 3, "updatedTerms": 0, "alreadyHaveTerms": 0, "addedReplacements": 6, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [],
+        "clashes": []
+      }
+    },
+    {
+      "name": "Phone: \"NextJS\" is the same term as \"Next.js\" here, because the phone compares letters and digits only",
+      "receiver": "phone",
+      "before": {"vocabulary": ["Next.js"], "replacements": []},
+      "incoming": {"vocabulary": [{"term": "NextJS", "soundsLike": []}], "replacements": []},
+      "expect": {
+        "after": {"vocabulary": ["Next.js"], "replacements": []},
+        "summary": {"addedTerms": 0, "updatedTerms": 0, "alreadyHaveTerms": 1, "addedReplacements": 0, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [],
+        "clashes": []
+      }
+    },
+    {
+      "name": "Phone: a term with fewer than two letters or digits can't be kept, but its spelling still becomes a replacement",
+      "receiver": "phone",
+      "before": {"vocabulary": [], "replacements": []},
+      "incoming": {
+        "vocabulary": [{"term": "C#", "soundsLike": ["see sharp"]}, {"term": "R", "soundsLike": []}],
+        "replacements": []
+      },
+      "expect": {
+        "after": {"vocabulary": [], "replacements": [{"heard": "see sharp", "write": "C#"}]},
+        "summary": {"addedTerms": 0, "updatedTerms": 0, "alreadyHaveTerms": 0, "addedReplacements": 1, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [
+          {"path": "vocabulary[0]", "reason": "tooShortForThisDevice"},
+          {"path": "vocabulary[1]", "reason": "tooShortForThisDevice"}
+        ],
+        "clashes": []
+      }
+    },
+    {
+      "name": "Phone: an empty or blank output (a deletion) isn't supported on the phone yet",
+      "receiver": "phone",
+      "before": {"vocabulary": [], "replacements": []},
+      "incoming": {
+        "vocabulary": [],
+        "replacements": [
+          {"heard": "um", "write": "", "learned": false},
+          {"heard": "space bar", "write": " ", "learned": false},
+          {"heard": "jet hub", "write": "GitHub", "learned": false}
+        ]
+      },
+      "expect": {
+        "after": {"vocabulary": [], "replacements": [{"heard": "jet hub", "write": "GitHub"}]},
+        "summary": {"addedTerms": 0, "updatedTerms": 0, "alreadyHaveTerms": 0, "addedReplacements": 1, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [
+          {"path": "replacements[0]", "reason": "deletionNotSupported"},
+          {"path": "replacements[1]", "reason": "deletionNotSupported"}
+        ],
+        "clashes": []
+      }
+    },
+    {
+      "name": "Phone: the list holds 100 terms, so the first new term fills it and the rest are over the limit",
+      "receiver": "phone",
+      "before": {
+        "vocabulary": [
+          "Term 01",
+          "Term 02",
+          "Term 03",
+          "Term 04",
+          "Term 05",
+          "Term 06",
+          "Term 07",
+          "Term 08",
+          "Term 09",
+          "Term 10",
+          "Term 11",
+          "Term 12",
+          "Term 13",
+          "Term 14",
+          "Term 15",
+          "Term 16",
+          "Term 17",
+          "Term 18",
+          "Term 19",
+          "Term 20",
+          "Term 21",
+          "Term 22",
+          "Term 23",
+          "Term 24",
+          "Term 25",
+          "Term 26",
+          "Term 27",
+          "Term 28",
+          "Term 29",
+          "Term 30",
+          "Term 31",
+          "Term 32",
+          "Term 33",
+          "Term 34",
+          "Term 35",
+          "Term 36",
+          "Term 37",
+          "Term 38",
+          "Term 39",
+          "Term 40",
+          "Term 41",
+          "Term 42",
+          "Term 43",
+          "Term 44",
+          "Term 45",
+          "Term 46",
+          "Term 47",
+          "Term 48",
+          "Term 49",
+          "Term 50",
+          "Term 51",
+          "Term 52",
+          "Term 53",
+          "Term 54",
+          "Term 55",
+          "Term 56",
+          "Term 57",
+          "Term 58",
+          "Term 59",
+          "Term 60",
+          "Term 61",
+          "Term 62",
+          "Term 63",
+          "Term 64",
+          "Term 65",
+          "Term 66",
+          "Term 67",
+          "Term 68",
+          "Term 69",
+          "Term 70",
+          "Term 71",
+          "Term 72",
+          "Term 73",
+          "Term 74",
+          "Term 75",
+          "Term 76",
+          "Term 77",
+          "Term 78",
+          "Term 79",
+          "Term 80",
+          "Term 81",
+          "Term 82",
+          "Term 83",
+          "Term 84",
+          "Term 85",
+          "Term 86",
+          "Term 87",
+          "Term 88",
+          "Term 89",
+          "Term 90",
+          "Term 91",
+          "Term 92",
+          "Term 93",
+          "Term 94",
+          "Term 95",
+          "Term 96",
+          "Term 97",
+          "Term 98",
+          "Term 99"
+        ],
+        "replacements": []
+      },
+      "incoming": {
+        "vocabulary": [
+          {"term": "Alpha", "soundsLike": []},
+          {"term": "Beta", "soundsLike": []},
+          {"term": "Gamma", "soundsLike": []}
+        ],
+        "replacements": []
+      },
+      "expect": {
+        "after": {
+          "vocabulary": [
+            "Term 01",
+            "Term 02",
+            "Term 03",
+            "Term 04",
+            "Term 05",
+            "Term 06",
+            "Term 07",
+            "Term 08",
+            "Term 09",
+            "Term 10",
+            "Term 11",
+            "Term 12",
+            "Term 13",
+            "Term 14",
+            "Term 15",
+            "Term 16",
+            "Term 17",
+            "Term 18",
+            "Term 19",
+            "Term 20",
+            "Term 21",
+            "Term 22",
+            "Term 23",
+            "Term 24",
+            "Term 25",
+            "Term 26",
+            "Term 27",
+            "Term 28",
+            "Term 29",
+            "Term 30",
+            "Term 31",
+            "Term 32",
+            "Term 33",
+            "Term 34",
+            "Term 35",
+            "Term 36",
+            "Term 37",
+            "Term 38",
+            "Term 39",
+            "Term 40",
+            "Term 41",
+            "Term 42",
+            "Term 43",
+            "Term 44",
+            "Term 45",
+            "Term 46",
+            "Term 47",
+            "Term 48",
+            "Term 49",
+            "Term 50",
+            "Term 51",
+            "Term 52",
+            "Term 53",
+            "Term 54",
+            "Term 55",
+            "Term 56",
+            "Term 57",
+            "Term 58",
+            "Term 59",
+            "Term 60",
+            "Term 61",
+            "Term 62",
+            "Term 63",
+            "Term 64",
+            "Term 65",
+            "Term 66",
+            "Term 67",
+            "Term 68",
+            "Term 69",
+            "Term 70",
+            "Term 71",
+            "Term 72",
+            "Term 73",
+            "Term 74",
+            "Term 75",
+            "Term 76",
+            "Term 77",
+            "Term 78",
+            "Term 79",
+            "Term 80",
+            "Term 81",
+            "Term 82",
+            "Term 83",
+            "Term 84",
+            "Term 85",
+            "Term 86",
+            "Term 87",
+            "Term 88",
+            "Term 89",
+            "Term 90",
+            "Term 91",
+            "Term 92",
+            "Term 93",
+            "Term 94",
+            "Term 95",
+            "Term 96",
+            "Term 97",
+            "Term 98",
+            "Term 99",
+            "Alpha"
+          ],
+          "replacements": []
+        },
+        "summary": {"addedTerms": 1, "updatedTerms": 0, "alreadyHaveTerms": 0, "addedReplacements": 0, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [
+          {"path": "vocabulary[1]", "reason": "overDeviceLimit"},
+          {"path": "vocabulary[2]", "reason": "overDeviceLimit"}
+        ],
+        "clashes": []
+      }
+    },
+    {
+      "name": "Phone: a replacement in the file wins over a spelling with the same heard words",
+      "receiver": "phone",
+      "before": {"vocabulary": [], "replacements": []},
+      "incoming": {
+        "vocabulary": [{"term": "GitHub", "soundsLike": ["jet hub"]}],
+        "replacements": [{"heard": "jet hub", "write": "JetHub", "learned": false}]
+      },
+      "expect": {
+        "after": {"vocabulary": ["GitHub"], "replacements": [{"heard": "jet hub", "write": "JetHub"}]},
+        "summary": {"addedTerms": 1, "updatedTerms": 0, "alreadyHaveTerms": 0, "addedReplacements": 1, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [{"path": "vocabulary[0].soundsLike[0]", "reason": "duplicate"}],
+        "clashes": []
+      }
+    },
+    {
+      "name": "Phone: two terms with the same spelling: the first term's spelling-replacement is added, the second is a duplicate",
+      "receiver": "phone",
+      "before": {"vocabulary": [], "replacements": []},
+      "incoming": {
+        "vocabulary": [{"term": "Rune", "soundsLike": ["roon"]}, {"term": "Ruin", "soundsLike": ["roon"]}],
+        "replacements": []
+      },
+      "expect": {
+        "after": {"vocabulary": ["Rune", "Ruin"], "replacements": [{"heard": "roon", "write": "Rune"}]},
+        "summary": {"addedTerms": 2, "updatedTerms": 0, "alreadyHaveTerms": 0, "addedReplacements": 1, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [{"path": "vocabulary[1].soundsLike[0]", "reason": "duplicate"}],
+        "clashes": []
+      }
+    },
+    {
+      "name": "Phone: a spelling that clashes with your replacement keeps yours",
+      "receiver": "phone",
+      "before": {"vocabulary": [], "replacements": [{"heard": "open code", "write": "Open Code"}]},
+      "incoming": {"vocabulary": [{"term": "OpenCode", "soundsLike": ["open code"]}], "replacements": []},
+      "expect": {
+        "after": {"vocabulary": ["OpenCode"], "replacements": [{"heard": "open code", "write": "Open Code"}]},
+        "summary": {"addedTerms": 1, "updatedTerms": 0, "alreadyHaveTerms": 0, "addedReplacements": 0, "changedReplacements": 0, "keptYours": 1, "alreadyHaveReplacements": 0},
+        "notApplied": [],
+        "clashes": [
+          {"path": "vocabulary[0].soundsLike[0]", "heard": "open code", "yours": "Open Code", "theirs": "OpenCode"}
+        ]
+      }
+    },
+    {
+      "name": "Phone: the same clash switched to theirs",
+      "receiver": "phone",
+      "before": {"vocabulary": [], "replacements": [{"heard": "open code", "write": "Open Code"}]},
+      "incoming": {"vocabulary": [{"term": "OpenCode", "soundsLike": ["open code"]}], "replacements": []},
+      "choices": {"vocabulary[0].soundsLike[0]": "useTheirs"},
+      "expect": {
+        "after": {"vocabulary": ["OpenCode"], "replacements": [{"heard": "open code", "write": "OpenCode"}]},
+        "summary": {"addedTerms": 1, "updatedTerms": 0, "alreadyHaveTerms": 0, "addedReplacements": 0, "changedReplacements": 1, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [],
+        "clashes": [
+          {"path": "vocabulary[0].soundsLike[0]", "heard": "open code", "yours": "Open Code", "theirs": "OpenCode"}
+        ]
+      }
+    },
+    {
+      "name": "Phone: with the Vocabulary part off, no terms are added, but the spellings still become replacements: on the phone they belong to the Replacements part",
+      "receiver": "phone",
+      "before": {"vocabulary": [], "replacements": []},
+      "incoming": {
+        "vocabulary": [
+          {"term": "OpenCode", "soundsLike": ["open code", "open coat"]},
+          {"term": "Rune", "soundsLike": []},
+          {"term": "Dax Raad", "soundsLike": ["dax rad"]}
+        ],
+        "replacements": [
+          {"heard": "jet hub", "write": "GitHub", "learned": false},
+          {"heard": "cloud code", "write": "Claude Code", "learned": true},
+          {"heard": "dash dash", "write": "--", "learned": false}
+        ]
+      },
+      "parts": {"vocabulary": false},
+      "expect": {
+        "after": {
+          "vocabulary": [],
+          "replacements": [
+            {"heard": "jet hub", "write": "GitHub"},
+            {"heard": "cloud code", "write": "Claude Code"},
+            {"heard": "dash dash", "write": "--"},
+            {"heard": "open code", "write": "OpenCode"},
+            {"heard": "open coat", "write": "OpenCode"},
+            {"heard": "dax rad", "write": "Dax Raad"}
+          ]
+        },
+        "summary": {"addedTerms": 0, "updatedTerms": 0, "alreadyHaveTerms": 0, "addedReplacements": 6, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [],
+        "clashes": []
+      }
+    },
+    {
+      "name": "Phone: with the Replacements part off, terms are added and nothing becomes a replacement, spellings included",
+      "receiver": "phone",
+      "before": {"vocabulary": [], "replacements": []},
+      "incoming": {
+        "vocabulary": [
+          {"term": "OpenCode", "soundsLike": ["open code", "open coat"]},
+          {"term": "Rune", "soundsLike": []},
+          {"term": "Dax Raad", "soundsLike": ["dax rad"]}
+        ],
+        "replacements": [
+          {"heard": "jet hub", "write": "GitHub", "learned": false},
+          {"heard": "cloud code", "write": "Claude Code", "learned": true},
+          {"heard": "dash dash", "write": "--", "learned": false}
+        ]
+      },
+      "parts": {"replacements": false},
+      "expect": {
+        "after": {"vocabulary": ["OpenCode", "Rune", "Dax Raad"], "replacements": []},
+        "summary": {"addedTerms": 3, "updatedTerms": 0, "alreadyHaveTerms": 0, "addedReplacements": 0, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [],
+        "clashes": []
+      }
+    },
+    {
+      "name": "Phone: with replacements limited to 2 for this case, the rest are over the limit",
+      "receiver": "phone",
+      "limits": {"replacements": 2},
+      "before": {"vocabulary": [], "replacements": [{"heard": "one", "write": "1"}]},
+      "incoming": {
+        "vocabulary": [],
+        "replacements": [
+          {"heard": "two", "write": "2", "learned": false},
+          {"heard": "three", "write": "3", "learned": false}
+        ]
+      },
+      "expect": {
+        "after": {
+          "vocabulary": [],
+          "replacements": [{"heard": "one", "write": "1"}, {"heard": "two", "write": "2"}]
+        },
+        "summary": {"addedTerms": 0, "updatedTerms": 0, "alreadyHaveTerms": 0, "addedReplacements": 1, "changedReplacements": 0, "keptYours": 0, "alreadyHaveReplacements": 0},
+        "notApplied": [{"path": "replacements[1]", "reason": "overDeviceLimit"}],
+        "clashes": []
+      }
+    }
+  ]
+}

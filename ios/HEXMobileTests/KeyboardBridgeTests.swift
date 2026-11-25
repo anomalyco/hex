@@ -415,6 +415,16 @@ final class KeyboardBridgeTests: XCTestCase {
         XCTAssertFalse(request.isHandoffExpired(at: 1_000_000))
     }
 
+    /// The Hex key menu's Open Hex: Hex at Home, no session started.
+    func testHomeLaunchOpensHexAtHomeWithoutAHandoff() {
+        let request = KeyboardLaunchRequest.home
+        XCTAssertEqual(request.url.absoluteString, "hex-dictation://keyboard/home")
+        XCTAssertEqual(KeyboardLaunchRequest(url: request.url), request)
+        XCTAssertTrue(request.opensPage)
+        XCTAssertNil(request.requestedAt)
+        XCTAssertFalse(request.isHandoffExpired(at: 1_000_000))
+    }
+
     func testTranslationSettingsLaunchOpensAPageWithoutAHandoff() {
         let request = KeyboardLaunchRequest.translationSettings
         XCTAssertEqual(request.url.absoluteString, "hex-dictation://keyboard/translation")

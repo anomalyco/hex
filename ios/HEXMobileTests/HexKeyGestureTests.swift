@@ -190,6 +190,31 @@ final class TranslationPasteSwitchTests: XCTestCase {
         XCTAssertFalse(labels(in: menu).contains("Translation language"))
     }
 
+    /// The menu's last row is Open Hex, set apart by a line below the translation rows, with no
+    /// checkmark or chevron; only a tap on it reports, and without a handler it isn't there.
+    func testTheHexKeyMenuEndsWithOpenHex() {
+        let menu = HexStyleMenuView(frame: CGRect(x: 0, y: 0, width: 400, height: 300))
+        menu.languageChoices = ["es-ES", "en-US"]
+        menu.translationTarget = "en"
+        menu.translationTargets = ["en", "ja"]
+        XCTAssertFalse(labels(in: menu).contains("Open Hex"), "no handler, no row")
+
+        var opened = 0
+        menu.onOpenHex = { opened += 1 }
+        XCTAssertEqual(labels(in: menu).last, "Open Hex", "below Translation language")
+        XCTAssertEqual(opened, 0, "showing it opens nothing")
+        let row = controls(in: menu).last
+        XCTAssertEqual(row?.accessibilityTraits, .button)
+        row?.sendActions(for: .touchUpInside)
+        XCTAssertEqual(opened, 1)
+
+        menu.show(page: .languages)
+        XCTAssertFalse(labels(in: menu).contains("Open Hex"), "only on the first page")
+        menu.show(page: .styles)
+        menu.translationTarget = nil
+        XCTAssertEqual(labels(in: menu).suffix(2), ["Language, Automatic", "Open Hex"][...], "after the language row without translation")
+    }
+
     func testTheSwitchIsSettingsSwitch() {
         let settings = DictationTranslationSettings(defaults: defaults)
         XCTAssertFalse(settings.isEnabled, "off by default")

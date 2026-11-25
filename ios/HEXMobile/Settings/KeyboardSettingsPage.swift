@@ -72,6 +72,10 @@ struct KeyboardSettingsPage: View {
 
     private var settings: FullKeyboardSettings { FullKeyboardSettings() }
 
+    /// Hex is an iPhone app, so on an iPad its idiom says phone; the device's model doesn't.
+    /// There the keyboard has Apple's iPad rows: no number row, and key flicks instead.
+    private static let runsOnIPad = UIDevice.current.model.hasPrefix("iPad")
+
     private var fullKeyboard: Bool {
         _ = revision
         return settings.isEnabled
@@ -105,6 +109,12 @@ struct KeyboardSettingsPage: View {
                 revision += 1
             }
         )
+    }
+
+    /// Choosing a Strength plays one key tick at it, as the keyboard's keys will feel.
+    private func previewKeyTick(_ strength: KeyHapticStrength) {
+        UIImpactFeedbackGenerator(style: FullKeyboardView.keyTickStyle(strength))
+            .impactOccurred(intensity: FullKeyboardView.keyTickIntensity(strength))
     }
 
     /// The detail of a row that needs Full Access: none while it's on, and while it isn't, that
@@ -205,11 +215,19 @@ struct KeyboardSettingsPage: View {
 
                     SettingsDivider()
 
-                    SettingsToggleRow(
-                        title: String(localized: "Number row"),
-                        detail: String(localized: "Shows 1 to 0 above the letters"),
-                        isOn: binding(\.numberRow)
-                    )
+                    if Self.runsOnIPad {
+                        SettingsToggleRow(
+                            title: String(localized: "Key flicks"),
+                            detail: String(localized: "Pull a key down to type the character above its letter"),
+                            isOn: binding(\.keyFlicks)
+                        )
+                    } else {
+                        SettingsToggleRow(
+                            title: String(localized: "Number row"),
+                            detail: String(localized: "Shows 1 to 0 above the letters"),
+                            isOn: binding(\.numberRow)
+                        )
+                    }
                 }
             }
 
@@ -295,6 +313,7 @@ struct KeyboardSettingsPage: View {
                             onSelect: { choice in
                                 FullKeyboardSettings().hapticStrength = choice
                                 revision += 1
+                                previewKeyTick(choice)
                             }
                         )
                     }

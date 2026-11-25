@@ -58,6 +58,11 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Queued for {}", ["W kolejce do {}", "已排队发送至 {}", "{} への送信待ち", "In Warteschlange für {}", "En cola para {}", "У черзі до {}"]),
     ("Cancel send", ["Anuluj wysyłanie", "取消发送", "送信をキャンセル", "Senden abbrechen", "Cancelar envío", "Скасувати надсилання"]),
     ("queued", ["w kolejce", "已排队", "送信待ち", "in Warteschlange", "en cola", "у черзі"]),
+    ("No annotations yet.", ["Brak adnotacji.", "暂无标注。", "まだ注釈はありません。", "Noch keine Annotationen.", "Aún no hay anotaciones.", "Анотацій ще немає."]),
+    ("Annotations from the last 30 days show here.", ["Tutaj pojawiają się adnotacje z ostatnich 30 dni.", "最近 30 天的标注会显示在这里。", "過去 30 日間の注釈がここに表示されます。", "Annotationen der letzten 30 Tage werden hier angezeigt.", "Las anotaciones de los últimos 30 días aparecen aquí.", "Тут відображаються анотації за останні 30 днів."]),
+    ("No annotations match.", ["Brak pasujących adnotacji.", "没有匹配的标注。", "一致する注釈はありません。", "Keine passenden Annotationen.", "Ninguna anotación coincide.", "Немає відповідних анотацій."]),
+    ("Search annotations", ["Szukaj adnotacji", "搜索标注", "注釈を検索", "Annotationen durchsuchen", "Buscar anotaciones", "Пошук анотацій"]),
+    ("Stop annotating", ["Zatrzymaj adnotowanie", "停止标注", "注釈を停止", "Annotieren stoppen", "Detener anotación", "Зупинити анотування"]),
 ];
 
 #[rustfmt::skip]
@@ -113,6 +118,11 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("Queued for {}", "En file pour {}"),
     ("Cancel send", "Annuler l’envoi"),
     ("queued", "en file"),
+    ("No annotations yet.", "Aucune annotation pour le moment."),
+    ("Annotations from the last 30 days show here.", "Les annotations des 30 derniers jours apparaissent ici."),
+    ("No annotations match.", "Aucune annotation ne correspond."),
+    ("Search annotations", "Rechercher dans les annotations"),
+    ("Stop annotating", "Arrêter l’annotation"),
 ];
 
 #[rustfmt::skip]
@@ -168,6 +178,11 @@ pub(super) const PORTUGUESE: &[(&str, &str)] = &[
     ("Queued for {}", "Na fila para {}"),
     ("Cancel send", "Cancelar envio"),
     ("queued", "na fila"),
+    ("No annotations yet.", "Nenhuma anotação ainda."),
+    ("Annotations from the last 30 days show here.", "Anotações dos últimos 30 dias aparecem aqui."),
+    ("No annotations match.", "Nenhuma anotação corresponde."),
+    ("Search annotations", "Pesquisar anotações"),
+    ("Stop annotating", "Parar de anotar"),
 ];
 
 #[rustfmt::skip]
@@ -223,6 +238,11 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
     ("Queued for {}", "В очереди в {}"),
     ("Cancel send", "Отменить отправку"),
     ("queued", "в очереди"),
+    ("No annotations yet.", "Аннотаций пока нет."),
+    ("Annotations from the last 30 days show here.", "Здесь отображаются аннотации за последние 30 дней."),
+    ("No annotations match.", "Подходящих аннотаций нет."),
+    ("Search annotations", "Поиск аннотаций"),
+    ("Stop annotating", "Остановить аннотирование"),
 ];
 
 /// Hungarian, for the strings above.
@@ -279,4 +299,9 @@ pub(super) const HUNGARIAN: &[(&str, &str)] = &[
     ("Queued for {}", "Sorban: {}"),
     ("Cancel send", "Küldés megszakítása"),
     ("queued", "sorban"),
+    ("No annotations yet.", "Még nincsenek jegyzetek."),
+    ("Annotations from the last 30 days show here.", "Az elmúlt 30 nap jegyzetei itt jelennek meg."),
+    ("No annotations match.", "Nincs egyező jegyzet."),
+    ("Search annotations", "Keresés a jegyzetek között"),
+    ("Stop annotating", "Annotálás leállítása"),
 ];

@@ -15,7 +15,7 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 ANDROID = HERE.parents[1]
 MODELS = ANDROID / 'app/src/main/assets/typing'
-LANGUAGES = ['en', 'es', 'de', 'nb', 'fr', 'it']
+LANGUAGES = ['en', 'es', 'de', 'nb', 'fr', 'it', 'pt']
 
 
 def paths(lang, noise, out):

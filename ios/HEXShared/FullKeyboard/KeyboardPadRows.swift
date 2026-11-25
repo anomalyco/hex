@@ -155,6 +155,7 @@ extension KeyboardLayout {
                 keys.append(KeyboardKey(kind: item.kind, row: row, frame: item.frame, hitFrame: hit, label: item.label, shifted: item.shifted))
             }
         }
+        KeyboardFlicks.add(to: &keys, layer: layer, language: language)
         return keys
     }
 }

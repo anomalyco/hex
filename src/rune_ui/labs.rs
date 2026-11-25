@@ -49,12 +49,7 @@ pub(super) fn main_panes(ui: &Ui) -> Vec<Pane> {
     }
     panes.push(Pane::History);
     #[cfg(hex_capture)]
-    let optional = [
-        Pane::Captures,
-        Pane::Meetings,
-        Pane::Annotate,
-        Pane::VoiceFilter,
-    ];
+    let optional = [Pane::Meetings, Pane::Annotate, Pane::VoiceFilter];
     #[cfg(not(hex_capture))]
     let optional = [Pane::Meetings, Pane::VoiceFilter];
     panes.extend(optional.into_iter().filter(|pane| pane.shown(ui)));

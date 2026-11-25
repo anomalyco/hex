@@ -1275,10 +1275,9 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   │   and fades its light without squeezing the rows. Checks:
      │   │   `a_pause_gathers_the_light_before_extinguishing_it`,
      │   │   `either_track_can_interrupt_the_release_in_place` (synthetic levels)
-     │   ├── The pill is 151 × 36 pt, its field 78 pt wide (31 columns), with
-     │   │   the rows' 14 pt inset on both sides: the time's right edge is one
-     │   │   line at rest, open and finished (open and finished in a left corner)
-     │   │   (`the_header_keeps_the_rows_inset_at_rest_open_and_finished`)
+     │   ├── The pill is 165 × 36 pt: its field 78 pt wide (31 columns), then
+     │   │   an 8 pt red dot 6 pt before the time, with the rows' 14 pt inset on
+     │   │   both sides (`the_header_keeps_the_rows_inset_at_rest_open_and_finished`)
      │   └── "Microphone is silent" (warning), "Microphone muted" (Labs ›
      │       Mute the microphone while recording, in its place), or, for its
      │       first 10 s, "Started automatically" shows beside the meter
@@ -1286,16 +1285,23 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   Stop nearest the meter, Copy agent prompt, Copy all; pointer
      │   leaving -> eases back to rest (a held press keeps it open). A bottom
      │   corner opens upward, its header nearest the screen edge
+     │   ├── A quiet 28 pt ✕ (Discard recording) on the rows' icon spine, on
+     │   │   the field's free side -> "Discard recording?" / "Deletes its
+     │   │   audio and transcript" over Keep and Discard (Danger), equal
+     │   │   width; the panel hugs it (126 pt) and the ✕ fades and takes no
+     │   │   input while asked. Discard stops capture, skips the final pass,
+     │   │   and moves the recording folder to the Trash; no finished panel.
+     │   │   Leaving the pill answers Keep
+     │   │   (`a_discarded_recording_dismisses_the_pill_and_shows_no_finished_panel`)
      │   ├── The field widens with the wall, from the rows' 14 pt inset to the
-     │   │   time: 179 pt, 69 columns at the same 2.6 pt pitch, three fewer
-     │   │   for each further digit on the time. It is one field: its free end
+     │   │   time, clear of the ✕: 143 pt, 56 columns at the same 2.6 pt
+     │   │   pitch, 8 pt fewer for each further digit on the time. It is one field: its free end
      │   │   is the wall's motion every frame, in whole columns counted from
      │   │   the held end, no dot is drawn outside its place, the dots that
      │   │   stay keep their light, and a column that arrives is lit from the
      │   │   voice's history. In a right corner it is held beside the time,
      │   │   which stays put; in a left corner it is held at the wall and the
-     │   │   time rides the moving wall 14 pt inside it, so the open and
-     │   │   finished headers match the right corner's (✕ before the time). A
+     │   │   time rides the moving wall 14 pt inside it, with the ✕ beyond. A
      │   │   notice in the header keeps its place and its cut while the
      │   │   field's end, or on the left the time, wipes over it, and has gone
      │   │   by the time the field is halfway.
@@ -2308,18 +2314,21 @@ Final publication                                   // meetings.output
 
 Finished meeting panel (15 s, kept open while the pointer is over it; it
     closes when the pointer leaves after that; never shown for a recording
-    with no speech, which is trashed instead) -> title · length, the
+    with no speech, which is trashed instead) -> a title band (title, its
+    length 2 pt under it, ↗ on hover) that opens the meeting in Hex, the
     summary while notes are on (or "Writing a title and summary with Apple
     Intelligence…" when it writes, "…with OpenCode…" otherwise, or
     "Markdown not saved: …"), then the recording's copies
     ├── Dark in either appearance, at the recording pill’s last outer corner
     │   (the saved corner if there was no pill for this meeting)
-    ├── × (Close) -> hide immediately, even under the pointer. Late notes do not
-    │   reopen it; the saved meeting and transcript remain in Meetings
-    ├── Copy agent prompt (first) -> `hex meetings show <id> --md` and search
-    └── Copy all -> Markdown, or speaker turns as a fallback
+    ├── × (Close) inside a ring that drains over the stay; the stay holds
+    │   while the pointer is inside and runs on from there when it leaves.
+    │   × hides at once, even under the pointer. Late notes do not reopen it;
+    │   the saved meeting and transcript remain in Meetings
+    ├── Copy transcript (filled) -> Markdown, or speaker turns as a fallback
+    └── Copy agent prompt -> `hex meetings show <id> --md` and search
     (the_ready_panel_copies_the_finished_meeting,
-    a_ready_panel_whose_time_ran_out_closes_when_the_pointer_leaves)
+    a_ready_panels_stay_holds_under_the_pointer_and_runs_out_after_it_leaves)
 Meetings pane -> Copy icon on a completed row's hover, the card's Copy
     transcript icon, Reveal files (opens the recording folder), and Reveal
     Markdown (selects the exported .md) while the export exists
@@ -2340,9 +2349,10 @@ List (on the title's edge, no divider; grouped Today / Yesterday / date)
     recording or failed); no hover fill; a completed row shows a Copy
     icon in the time's place on hover (pointer only; "Copied" as a check)
 Detail (a raised card beside the list)
-├── Title, status chip (not when Ready), date · time · duration · app
-├── Ghost icons top right: Copy transcript, Rename (finished only), "…" menu
-│   └── Copy summary (stays open to show "Copied"), Reveal Markdown (Finder
+├── 18 pt semibold title, status chip (not when Ready), meta line
+│   date · time · duration · app
+├── Labelled Copy transcript and Copy agent prompt, then "…", above a hairline
+│   └── Rename (finished only), Copy summary (stays open to show "Copied"), Reveal Markdown (Finder
 │       selects the exported .md, when there is one), Reveal files (opens
 │       the recording folder), Summarize / Regenerate summary ("Summarizing…"
 │       disabled while writing or regenerating), separator, Delete…
@@ -2358,8 +2368,14 @@ Detail (a raised card beside the list)
     "Listening…" while recording; "No speech was transcribed." for an older
     empty Complete meeting, or one whose automatic Trash move failed (a lock
     race or a Trash error leaves it listed)
-Empty: "No meetings yet." with a one-line hint; "No meetings match." while
-searching
+Under "Summary" and "Transcript" headings; the list's icons keep one column
+Empty: "No meetings yet" with a one-line hint, Start recording, and a note
+that meetings stay on this Mac and move to the Trash after 7 days; "No
+meetings match." while searching
+System Audio Recording not allowed -> a warning above the list ("Hex can't
+hear the other participants") with Open System Settings
+Meetings off (macOS) -> the sidebar still lists Meetings; its pane is
+"Record your calls" with Turn on Meetings (unless a policy locks it)
 
 Rename -> inline field; Enter or Save          // meetings.rename
   -> manifest title; Markdown heading only while it reads the old title
@@ -2428,28 +2444,26 @@ Checks: `markdown_lists_metadata_and_labeled_turns` and
 
 ### Retention
 
-Meeting data is a liability, so new meetings are kept 24 hours by default.
+Meeting data is a liability, so new meetings are kept 7 days by default.
 
 ```ts
 Meetings › Settings -> Keep meetings: 24 hours / 7 days / 30 days / Forever
 │   `meetings.retention` day|week|month|forever, or none (unchosen)
 ├── Unchosen (default) -> meetings recorded since the default began
-│   (manifest `retention_applies`) are kept 24 hours; older ones stay
+│   (manifest `retention_applies`) are kept 7 days; older ones stay
 │   until the user chooses (the `meeting-retention-default` migration
 │   unsets the `forever` that #604 saved as its default)
 └── Chosen -> applies to every finished meeting, older ones included
-Each finished card -> "Deleted after 24 hours" (or 7 days, 30 days), on its
-own wrapping line under the date line, never truncated
+The empty pane says where meetings are kept and when they move to the Trash;
+a finished meeting's detail no longer repeats it
 Meeting controller, Meetings on or off           // meetings.retention
 ├── At launch, hourly, and soon after the setting changes
 ├── Age from ended_at_ms, else created_at_ms; older than its retention
 │   -> the recording folder (audio, transcripts, notes and summary, live
 │      drafts) to the Trash, never removed outright
-│   -> the exported Markdown to the Trash only while its SHA-256 still
-│      matches the copy Hex last wrote (manifest `export_sha256`; Hex's own
-│      heading and notes rewrites keep it current); an edited copy stays
-│   -> a tracked separate notes file to the Trash only while its SHA-256
-│      matches `notes_export_sha256`; an edited copy stays
+│   -> never the exported Markdown or a tracked notes file in the
+│      meetings folder (`~/Documents/Hex Meetings`): those are the
+│      person's copies, and only an explicit Delete moves them
 ├── Skips recording, transcribing, writing-notes, and final.pending
 │   meetings; a later pass retries them
 └── Nothing expires while Hex is not running

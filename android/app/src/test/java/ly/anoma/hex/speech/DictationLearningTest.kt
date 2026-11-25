@@ -306,6 +306,32 @@ class DictationLearningTest {
         assertEquals(1, DictationFixes.decode("cloud\tClaude\t2\t0\t1").size)
     }
 
+    // Custom vocabulary › Word replacements.
+    @Test fun wordReplacementsRunBeforeLearnedFixesAndWinOverThem() {
+        val options = SpeechOptions(Style.Verbatim, DictationLanguage.English, false, false,
+            fixes = listOf(DictationFix("cloud code", "Cloud Coat", 2, 0), DictationFix("jet", "Jett", 2, 0)),
+            replacements = listOf(WordReplacement("cloud code", "Claude Code")))
+        assertEquals("Claude Code and Jett", SpokenText.format("cloud code and jet", options))
+    }
+
+    @Test fun wordReplacementsMatchUpToEightWholeWordsAndFollowCase() {
+        val list = listOf(WordReplacement("one two three four five six seven eight", "8"), WordReplacement("jet hub", "github"))
+        assertEquals("8 nine", WordReplacements.apply(list, "one two three four five six seven eight nine"))
+        assertEquals("Github and GITHUB, not jet hubs", WordReplacements.apply(list, "Jet hub and JET HUB, not jet hubs"))
+    }
+
+    @Test fun wordReplacementsKeepTheFileLimitsAndRefuseDeletions() {
+        val list = listOf(WordReplacement("jet hub", "GitHub"))
+        assertEquals(WordReplacements.Problem.Blank, WordReplacements.problem(WordReplacements.cleaned("um", " "), list))
+        assertEquals(WordReplacements.Problem.Duplicate, WordReplacements.problem(WordReplacements.cleaned("Jet  Hub", "x"), list))
+        assertEquals(WordReplacements.Problem.TooManyWords, WordReplacements.problem(WordReplacements.cleaned("a b c d e f g h i", "x"), list))
+        assertEquals(WordReplacements.Problem.NoLetters, WordReplacements.problem(WordReplacements.cleaned(":)", "🙂"), list))
+        assertNull(WordReplacements.problem(WordReplacements.cleaned(" sign  off ", "Best,\r\nRyan"), list))
+        val awkward = listOf(WordReplacement("sign off", "Best,\nRyan\t\\o/"), WordReplacement("toda", "תודה"))
+        assertEquals(awkward, WordReplacements.decode(WordReplacements.encode(awkward)))
+        assertEquals(awkward.take(1), WordReplacements.decode(WordReplacements.encode(awkward.take(1)) + "\num\t\nbroken"))
+    }
+
     private fun fields(fix: DictationFix) = listOf(fix.heard, fix.meant, fix.count.toString(), fix.contradictions.toString(),
         fix.lastAt.toString()).joinToString("|")
 }

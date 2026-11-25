@@ -12,7 +12,7 @@ Unmodified InterVariable.ttf from https://github.com/rsms/inter/releases/tag/v4.
 
 Keyboard suggestion filter: List of Dirty, Naughty, Obscene, and Otherwise Bad Words
 (LDNOOBW), © 2012–2020 Shutterstock, Inc., and contributors. English, Spanish, German,
-Norwegian, French and Italian lists. Source: https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/tree/5faf2ba42d7b1c0977169ec3611df25a3c08eb13
+Norwegian, French, Italian and Portuguese lists. Source: https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/tree/5faf2ba42d7b1c0977169ec3611df25a3c08eb13
 Creative Commons Attribution 4.0 International: https://creativecommons.org/licenses/by/4.0/
 Full licence: cc-by-4.0.txt. Hex lowercased and classified the entries, omitted ordinary,
 medical and search-only terms, and added common slurs, inflections and spelling variants.
@@ -52,3 +52,25 @@ Changes: normalized and lowercased word forms, filtered the book counts to attes
 Bokmål spellings, selected informative pairs and quantized probabilities into HXTM v3.
 The Bokmål validity list (nb.valid) is the Norsk ordbank standard full forms outside the model
 that the same book counts use at least 1,000 times, with each word's count quantized to a cost.
+
+Portuguese (Brazil) keyboard language model (pt.hextm), capitalization list (pt.capitals) and
+validity list (pt.valid): word and word-pair counts from the Leipzig Corpora Collection's
+downloadable Portuguese corpora (por-br_newscrawl_2011, por_news_2019 to 2024, por_newscrawl_2011
+to 2020, por-pt_newscrawl_2011 and por-pt_web_2014 and 2015, 1M sentences each), Leipzig University
+and the Saxon Academy of Sciences and Humanities in Leipzig: D. Goldhahn, T. Eckart and
+U. Quasthoff, Building Large Monolingual Dictionaries at the Leipzig Corpora Collection: From 100
+to 200 Languages, LREC 2012. https://wortschatz-leipzig.de/en/download
+And from ParlaIbero-BR: Parliamentary Speeches from Brazil (2003-2025) and ParlaIbero-PT:
+Parliamentary Speeches from Portugal (1976-2025), version 2, by Rodrigo Rodrigues-Silveira,
+University of Salamanca, Harvard Dataverse. https://doi.org/10.7910/DVN/VTXNW3 and
+https://doi.org/10.7910/DVN/VRPUFU
+Both under Creative Commons Attribution 4.0 International: https://creativecommons.org/licenses/by/4.0/
+Full licence: cc-by-4.0.txt.
+Changes: gave each news sentence to Brazil or Portugal by the site it came from, lowercased and
+counted words (Brazil's speeches from 2009, Portugal's from 1995, each news use counted ten times a
+speech's) and word pairs (news only), left out spellings the 1990 spelling agreement retired and
+plain spellings of a much commoner accented word, selected informative pairs and quantized
+probabilities into HXTM v3. The capitalization list is the share of
+each word the Brazilian counts write with a capital first letter. The validity list holds Brazil's
+spellings outside the model and Portugal's own spellings from the Portuguese counts, each word's
+count quantized to a cost. Hex's own chat words (such as vc, pra and tá) were written for Hex.

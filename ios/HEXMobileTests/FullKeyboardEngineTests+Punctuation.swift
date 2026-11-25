@@ -163,7 +163,8 @@ extension FullKeyboardEngineTests {
 
     /// Each of Apple's keyboards types its language's quotes (black box, iOS 27.2): „Hallo“ ‚tag‘
     /// in German, where the apostrophe key types ‘ in a word too; « Bonjour » with no-break
-    /// spaces inside and ‘salut’ in French; „tak” ‚nie’ in Polish; «да» in Russian.
+    /// spaces inside and ‘salut’ in French; „tak” ‚nie’ in Polish; «да» in Russian; ”hej” ’ok’ in
+    /// Swedish, whose keyboard types ” and ’ to open and to close (iOS 26.5 and 27.2).
     func testSmartQuotesFollowTheKeysLanguage() {
         smartField(language: .german)
         keys("\"hallo\" 'tag' geht's")
@@ -180,6 +181,9 @@ extension FullKeyboardEngineTests {
         smartField(language: .russian)
         keys("\"1\" '2'")
         XCTAssertEqual(target.text, "«1» ‘2’")
+        smartField(language: .swedish)
+        keys("\"hej\" 'ok' det's")
+        XCTAssertEqual(target.text, "\u{201D}hej\u{201D} \u{2019}ok\u{2019} det\u{2019}s")
     }
 
     /// Apple's keyboard (black box, iOS 27.2) puts , . ! ? ; : and ) against a picked

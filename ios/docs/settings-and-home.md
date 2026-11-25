@@ -33,8 +33,11 @@ list starts at the top. The pages, one file each in `HEXMobile/Settings/`
   stored in Show what I say's and Type as I speak's two App Group keys (`LiveDictationMode`:
   Into field when Type as I speak's is on, In bar when only Show what I say's is, Off when
   neither; picking one writes both, so the two together, which 1.0.4 allowed, keep working
-  until another is picked); then Clean up what I say and Custom vocabulary (its list below
-  the switch); and last Speech model in keyboard, then **Model**: **English** (the
+  until another is picked); then Clean up what I say and Custom vocabulary (below the
+  switch while it's on: its list, then the **Word replacements** and **Words file** rows,
+  and **Undo last import** while an import can still be undone; see
+  [dictation.md](dictation.md#word-replacements-and-hex-words-files-settings--dictation--custom-vocabulary));
+  and last Speech model in keyboard, then **Model**: **English** (the
   default) or **Multilingual** (`SpeechModelChoice`, from Experiments until 2026-11-24, on
   iPhones with 6 GB or more), with what the picked one means and its status below,
   Keep mic warm and Microphone.
@@ -49,9 +52,9 @@ list starts at the top. The pages, one file each in `HEXMobile/Settings/`
   autocorrect below it while it's on), Swipe typing, Suggest swear words and Vocabulary (Hex's
   custom vocabulary list, how many words it holds); under **Feedback**, Key pop-ups (Full
   only), Haptics (the dictation bar uses it too; Strength below it while it's on: Light, the
-  default until you choose, Medium or Strong), Emoji key, Emoji suggestions (Full only; the
-  strip's emoji, with or without the key) and Clear emoji history while either is on, which
-  asks first; and a field to try the keyboard in.
+  default until you choose, Medium or Strong; choosing one plays a key tick at it), Emoji key,
+  Emoji suggestions (Full only; the strip's emoji, with or without the key) and Clear emoji
+  history while either is on, which asks first; and a field to try the keyboard in.
 - **Privacy:** "Everything stays on this iPhone", Learn how I type (what it
   learned below the switch), and under **Advanced**, Record typing logs (off
   by default) with its Typing logs viewer while it's on; last, under **Feedback**, what
@@ -61,7 +64,7 @@ list starts at the top. The pages, one file each in `HEXMobile/Settings/`
   Korean keyboard (두벌식), Swipe typing in more languages and German spatial autocorrect
   (greyed, its value kept, unless Autocorrect and Spatial autocorrect are on); **Keyboard
   layout**: Comma and period keys, Dvorak punctuation keys, Quick accents, ABC under the
-  emoji key, Keyboard themes (its Theme menu below the switch while it's on) and Join the
+  emoji key, Key colors (its Color menu below the switch while it's on) and Join the
   keyboard when unfolded (only on a foldable iPhone, `FullKeyboardView.isFoldable`);
   **Typing**: Adaptive touch (its status and Reset touch learning below the switch),
   Two-thumb selection, Delete swiped words letter by letter, Hide word suggestions, Emoji
@@ -78,10 +81,12 @@ its page's switches to the App Group: off by default, on with `-on`; switches th
 on by default (Spatial autocorrect, Swipe typing, Emoji key, Emoji suggestions) stay on.
 `-end` starts the page scrolled to the bottom. `settings-privacy-confirm`
 opens Record typing logs' consent dialog. `--experiment-keyboard-themes` turns
-Keyboard themes on, and `--keyboard-theme automatic|black|white|navy|forest|ember`
-picks the theme the full keyboard draws;
-the dictation bar keeps the system look, and iOS draws its own strip above or below
-a third-party keyboard, which a theme can't color.
+Key colors on, and `--keyboard-theme automatic|black|white|navy|forest|ember|burgundy`
+picks the theme. A theme colours the keys only (every keycap, special keys included, their
+pressed and held states, the key pop-ups and the labels), the same in light and dark; the
+background stays iOS's glass, matching the band iOS draws above a third-party keyboard and
+the globe row below it, and the strip, emoji panel, menus and dictation bar keep the system
+look.
 
 ## Send feedback (`HEXMobile/Feedback/`)
 
