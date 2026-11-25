@@ -3402,6 +3402,14 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   Checks: `editorsThatKeepTheirOwnTextTakeKeyEvents` in `FieldTypingTest`
 │   (android/app/src/test) covers the field's classification; the key presses are read from
 │   `KeyboardEngine` and were not tried on a device.
+├── Enter -> the editor's labelled action, else the field's standard one (Search, Go, Send, Done).
+│   With no action, a multi-line field (Android marks each one IME_FLAG_NO_ENTER_ACTION) gets its
+│   line break as text, as before; a field that holds one line, or a TYPE_NULL one, gets a
+│   KEYCODE_ENTER key press instead, so a one-line search box that waits for that key (a
+│   launcher's, #2864) runs its search rather than taking "\n". A key press still ends the word
+│   for adaptive touch and brings next words back, as the typed line break does.
+│   Checks: `EnterPressTest` (android/app/src/test) covers the three outcomes with a fake editor;
+│   not compiled or run here (no JDK), and no launcher's field was inspected or tried on a device.
 ├── Labs > Keyboard > Symbols on letter keys (off) -> hold a letter from any of QWERTY's three
 │   rows for its symbol first, with the letter's accents after it; the marks are
 │   Gboard's own (the ?123 page draws the same ones): a s d f g h j k l for
