@@ -2098,7 +2098,11 @@ final class DictationControllerTests: XCTestCase {
         network.allowMobileData(for: .multilingual)
         download.connectionChanged()
         try await waitUntil { download.state == .loading }
-        XCTAssertEqual(UltraStubProtocol.requested.last ?? nil, "bytes=800-", "resumed from the partial file")
+        XCTAssertEqual(
+            Array(UltraStubProtocol.requested.prefix(2)),
+            [nil, "bytes=800-"],
+            "Use mobile data resumes from the partial file"
+        )
         network.report(unmetered: true)
         network.report(unmetered: false)
         XCTAssertEqual(download.state, .loading, "Use mobile data: carries on until done, Wi-Fi or not")
