@@ -93,6 +93,7 @@ impl Feature {
             Self::Signature => "Signature",
             Self::DictationStyle => "Dictation style",
             Self::HudHeight => "HUD height",
+            Self::IndicatorFollowsMouse => "Indicator follows mouse",
             Self::VoiceIsolation => "Voice isolation",
             Self::DictateWhileAnnotating => "Dictate while annotating",
             Self::StopAnyCallRecording => "Stop every call recording when the call ends",
@@ -346,6 +347,9 @@ impl Feature {
             }
             Self::HudHeight => {
                 "Choose how high the dictation HUD sits above the Dock when it's at the bottom"
+            }
+            Self::IndicatorFollowsMouse => {
+                "Show the dictation indicator next to your mouse pointer instead of at the top or bottom of the screen"
             }
             Self::VoiceIsolation => {
                 "Record dictation through Apple's voice processing so Mic Mode can turn on Voice Isolation and cut background noise."

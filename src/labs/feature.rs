@@ -227,6 +227,7 @@ define_features! {
     Signature => labs(signature), "signature", Output, Everyone, EVERY, 20261121, extra: ["labs.signature_text"];
     DictationStyle => labs(dictation_style), "dictation-style", Output, Everyone, EVERY, 20261122, extra: ["labs.dictation_style_choice"];
     HudHeight => labs(hud_height), "hud-height", Dictation, Everyone, MACOS, 20261122, extra: ["labs.hud_bottom_gap"];
+    IndicatorFollowsMouse => labs(indicator_follows_mouse), "indicator-follows-mouse", Dictation, Everyone, MACOS, 20261125;
     VoiceIsolation => labs(voice_isolation), "voice-isolation", Dictation, Everyone, MACOS, 20261122;
     DictateWhileAnnotating => labs(dictate_while_annotating), "dictate-while-annotating", Annotate, Everyone, EVERY, 20261122;
     StopAnyCallRecording => labs(stop_any_call_recording), "stop-any-call-recording", Meetings, Everyone, EVERY, 20261123;

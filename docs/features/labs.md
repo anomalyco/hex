@@ -278,6 +278,14 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // a_raised_bottom_gap_works_on_a_display_below_the_primary,
 │                                        // a_huge_bottom_gap_keeps_the_plate_inside_the_visible_frame,
 │                                        // a_bottom_gap_never_drops_the_window_below_the_visible_bottom (rune_hud/hud_placement.rs)
+├── Indicator follows mouse no labs.indicator_follows_mouse (macOS) while a dictation records and processes, the HUD's plate sits centred
+│                                        28 pt below the pointer (12 pt above it where the visible frame has no room below),
+│                                        on the pointer's screen, kept inside its visible frame and the window inside its frame;
+│                                        it takes the Top and Bottom positions, the notch indicator, and HUD Lab's placements;
+│                                        live text hangs beside it; Hidden still hides it; off, placement is exactly as before
+│                                        // checks: the_plate_follows_the_pointer_below_it_and_flips_above_near_the_bottom,
+│                                        // the_following_plate_stays_on_the_visible_screen_and_the_window_on_its_display
+│                                        // (rune_hud/hud_placement.rs)
 ├── Import audio    no    labs.meeting_import           (macOS)   Meetings offers Import audio…: a WAV, M4A, MP3, AIFF, or CAF
 │                                        file is decoded locally, transcribed with the selected model, saved as a normal
 │                                        meeting (Speaker turns), exported as Markdown, and given notes as a finished recording
@@ -3211,6 +3219,31 @@ have no row, `hex labs on hud-height` doesn't know it there, and
 `hud_height_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs). Not yet observed: a real dictation at a
 raised gap on a Mac, and the card's controls with every language.
+
+Indicator follows mouse (`indicator-follows-mouse`, macOS only, #2839):
+for people who look where their pointer is rather than at the top or bottom
+of the screen. While on, `Hud::place_on_pointer_screen` in
+[rune_hud/macos.rs](../../src/rune_hud/macos.rs) reads `NSEvent.mouseLocation`
+and places the HUD with `hud_placement::near_pointer`: the plate centred
+under the pointer, its top `POINTER_BELOW` (28 pt) below the hotspot, or its
+bottom `POINTER_ABOVE` (12 pt) above it where the visible frame has no room
+below. The plate is clamped inside the pointer screen's `visibleFrame` (clear
+of the menu bar and the Dock) and the window inside the screen's frame, so its
+shadow padding never crosses onto a neighbouring display; where the window
+can't follow, `Layout.center` moves the plate inside it. The pump places a
+shown HUD every frame while it animates (recording and processing), and an
+unchanged placement is skipped, so the HUD follows the pointer, across
+displays too, and stays click-through and unfocused as before. It takes any
+shown position, the notch indicator, and HUD Lab's placements; live text
+hangs beside the plate (`beside_plate`); Hidden still hides it (the live text
+then sits under the menu bar as before); and turning it off restores the Top
+or Bottom placement from the next frame. Linux and Windows have no row.
+Checks:
+`the_plate_follows_the_pointer_below_it_and_flips_above_near_the_bottom` and
+`the_following_plate_stays_on_the_visible_screen_and_the_window_on_its_display`
+in [rune_hud/hud_placement.rs](../../src/rune_hud/hud_placement.rs). Not yet
+observed: a real dictation with the lab on, on one display or several. The row
+renders only in macOS builds, so no golden changes.
 
 Screenshots (`screenshots`, macOS only, group Annotate): for people who
 miss CleanShot's ⌘⇧4. While on, the shortcut (`screenshots.hotkey`,

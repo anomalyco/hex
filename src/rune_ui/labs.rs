@@ -798,6 +798,8 @@ fn rows(ui: &Ui) -> Vec<Row> {
             rows.push(row(Feature::NotchIndicator, Some(&WAVE)));
             // macOS's HUD reads its bottom gap from the saved setting.
             rows.push(row(Feature::HudHeight, Some(&PANEL)));
+            // macOS's HUD reads the pointer from NSEvent as it places itself.
+            rows.push(row(Feature::IndicatorFollowsMouse, Some(&WAVE)));
             // Hex's session tap takes the shortcut; ScreenCaptureKit shoots.
             #[cfg(hex_capture)]
             rows.push(row(Feature::Screenshots, Some(&CAMERA)));
@@ -1116,6 +1118,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::StopPhrase => "lab-stop-phrase",
         Feature::Signature => "lab-signature",
         Feature::HudHeight => "lab-hud-height",
+        Feature::IndicatorFollowsMouse => "lab-indicator-follows-mouse",
         Feature::VoiceIsolation => "lab-voice-isolation",
         Feature::HoldThroughKeys => "lab-hold-through-keys",
         Feature::ModesEditor => "lab-modes-editor",

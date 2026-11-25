@@ -232,6 +232,11 @@ pub struct LabsSettings {
     /// The gap in points above the Dock while `hud_height` is on; a saved
     /// value above [`HUD_BOTTOM_GAP_MAX`] is clamped at placement.
     pub hud_bottom_gap: u16,
+    /// While a dictation records and processes, the HUD sits just below the
+    /// pointer (above it near the screen's bottom), on the pointer's screen
+    /// and inside its visible frame, instead of at the Top or Bottom position;
+    /// Hidden still hides it (macOS, Labs › Indicator follows mouse).
+    pub indicator_follows_mouse: bool,
     /// Dictation's microphone opens through Apple's voice processing, so
     /// Control Center's Mic Mode can offer Voice Isolation (macOS, Labs ›
     /// Voice isolation).
@@ -555,6 +560,7 @@ impl Default for LabsSettings {
             notch_indicator: false,
             hud_height: false,
             hud_bottom_gap: HUD_BOTTOM_GAP_DEFAULT,
+            indicator_follows_mouse: false,
             voice_isolation: false,
             annotate_replay: false,
             opencode_in_wsl: false,
