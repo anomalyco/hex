@@ -566,7 +566,7 @@ internal fun lastDictationLines(t: DictationTimes?): String = buildString {
     append('\n')
     // hexspeech.cpp decoded it again without the custom vocabulary or learned words (its againWhy).
     if (timings != null && timings.size >= 10 && timings[8] > 0) {
-        append("  ").append(when (timings[9]) { 1L -> "repeated text"; 2L -> "no text"; 3L -> "only your words"; else -> "text unusable" })
+        append("  ").append(when (timings[9]) { 1L -> "repeated text"; 2L -> "no text"; 3L -> "only your words"; 4L -> "a phrase written twice"; else -> "text unusable" })
         append(", decoded again without your words: ${timings[8] / 1000} ms of the decode\n")
     }
 }

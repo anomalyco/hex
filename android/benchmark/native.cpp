@@ -46,11 +46,18 @@ static std::string spoken(const std::string &text) {
     }
     return w;
 }
-static bool again(whisper_context *ctx, whisper_state *state, const std::string &prompt, float thold) {
+static bool again(whisper_context *ctx, whisper_state *state, const std::string &prompt, float thold, int count) {
     if (repeated(ctx,state,thold)) return true;
     std::string text; for (int i=0;i<whisper_full_n_segments_from_state(state);i++) text+=whisper_full_get_segment_text_from_state(state,i);
     const std::string w=spoken(text);
-    return w.empty() || (prompt.find(',')!=std::string::npos && w==spoken(prompt));
+    if (w.empty() || (prompt.find(',')!=std::string::npos && w==spoken(prompt))) return true;
+    std::vector<std::string> ws; std::istringstream in(w); for (std::string x; in>>x;) ws.push_back(x);
+    for (size_t p=3;p*2<=ws.size();p++) {
+        if (ws.size()%p) continue;
+        bool same=true; for (size_t i=p;same&&i<ws.size();i++) same=ws[i]==ws[i-p];
+        if (same) return (long)ws.size()*16000>4L*count;
+    }
+    return false;
 }
 #endif
 int main(int argc, char **argv) {
@@ -127,9 +134,10 @@ int main(int argc, char **argv) {
         }
         whisper_state *state=app?whisper_init_state(ctx):nullptr;
         if (app?whisper_full_with_state(ctx,state,p,audio.data(),count)!=0:whisper_full(ctx,p,audio.data(),count)!=0) return 6;
-        // The app decodes a prompted clip up to 30 s that repeated itself, wrote nothing or only the prompt again without the
-        // prompt, in a fresh state, and uses that (hexspeech.cpp); HEX_NO_GUARD=1 is the decode before, which kept them.
-        if (app && p.initial_prompt && p.no_timestamps && !getenv("HEX_NO_GUARD") && again(ctx,state,prompt,p.entropy_thold)) {
+        // The app decodes a prompted clip up to 30 s that repeated itself, wrote one phrase twice in too little audio, nothing
+        // or only the prompt again without the prompt, in a fresh state, and uses that (hexspeech.cpp's againWhy);
+        // HEX_NO_GUARD=1 is the decode before, which kept them.
+        if (app && p.initial_prompt && p.no_timestamps && !getenv("HEX_NO_GUARD") && again(ctx,state,prompt,p.entropy_thold,count)) {
             whisper_free_state(state); state=whisper_init_state(ctx); p.initial_prompt=nullptr;
             if (!state || whisper_full_with_state(ctx,state,p,audio.data(),count)!=0) return 6;
         }

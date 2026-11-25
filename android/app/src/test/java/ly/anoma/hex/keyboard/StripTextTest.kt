@@ -270,13 +270,16 @@ class StripTextTest {
 
         """.trimIndent(), lastDictationLines(DictationTimes(DictationPlace.Keyboard, 3_000, 2_200, ModelAtTick.Loaded, 0,
             true, 40, 41, 3_421, 3_433, 9_800, longArrayOf(40_000, 2_150_000, 1_100_000, 90_000, 0, 320, 4, 0, 1_180_000, 1))))
-        // Decoded again as the prompted decode wrote nothing, or only the prompt's words.
+        // Decoded again as the prompted decode wrote nothing, only the prompt's words, or one phrase twice in too little audio.
         assertTrue(lastDictationLines(DictationTimes(DictationPlace.Home, 2_000, 1_400, ModelAtTick.Loaded, 0, true, 20, 21, 1_321,
             1_330, 3_900, longArrayOf(10_000, 1_000_000, 90_000, 20_000, 0, 320, 4, 0, 610_000, 2))).endsWith(
             "  no text, decoded again without your words: 610 ms of the decode\n"))
         assertTrue(lastDictationLines(DictationTimes(DictationPlace.Home, 2_000, 1_400, ModelAtTick.Loaded, 0, true, 20, 21, 1_321,
             1_330, 3_900, longArrayOf(10_000, 1_000_000, 90_000, 20_000, 0, 320, 4, 0, 610_000, 3))).endsWith(
             "  only your words, decoded again without your words: 610 ms of the decode\n"))
+        assertTrue(lastDictationLines(DictationTimes(DictationPlace.Home, 2_000, 1_400, ModelAtTick.Loaded, 0, true, 20, 21, 1_321,
+            1_330, 3_900, longArrayOf(10_000, 1_000_000, 90_000, 20_000, 0, 320, 4, 0, 610_000, 4))).endsWith(
+            "  a phrase written twice, decoded again without your words: 610 ms of the decode\n"))
         // Where a dictation's threads were kept, in the words the report uses: no pool, a pool on any core, a pinned one,
         // and a report from a build before that slot existed.
         assertEquals("started for every graph", poolWords(-1))

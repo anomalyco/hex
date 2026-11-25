@@ -4,8 +4,10 @@ from pathlib import Path
 
 # A prompt on a short clip (README): the words the app puts in front of a dictation as Whisper's prompt (custom
 # vocabulary, or Labs › Learn from my fixes' meant words, joined with ", "). Id, language, macOS voice and rate, what is
-# said, then the prompts; generate.py writes the clips, and the check fails if any comes out repeated.
-PROMPTED=[("hint-sarah","en","Samantha","175","Sarah is at the station.",("stadium","Sarah, stadium","Sarah, stadium, Hex, OpenCode"))]
+# said, ms of silence before and after it, then the prompts; generate.py writes the clips, and the check fails if any
+# comes out repeated. hint-sarah2 is cut so that "Sarah, stadium" writes the sentence exactly twice, then stops.
+PROMPTED=[("hint-sarah","en","Samantha","175","Sarah is at the station.",200,400,("stadium","Sarah, stadium","Sarah, stadium, Hex, OpenCode")),
+          ("hint-sarah2","en","Samantha","175","Sarah is at the station.",160,240,("Sarah, stadium",))]
 
 def words(s):
     s=unicodedata.normalize("NFC",s).casefold().replace("’","'")
@@ -44,7 +46,7 @@ def summarize(rows):
     return {k:round(v,2) if v is not None else None for k,v in result.items()}
 if __name__=="__main__":
     if sys.argv[1]=="--prompted-list":
-        for id,lang,_,_,_,prompts in PROMPTED:
+        for id,lang,_,_,_,_,_,prompts in PROMPTED:
             for p in prompts: print(id,lang,p)
         sys.exit(0)
     base=Path(__file__).parent
@@ -93,9 +95,9 @@ if __name__=="__main__":
                 if 2*sum(kept[n] for n in idx)<len(idx): lost.append(f"{id}: utterance {k+1} ({i})")
         print("long clips past 30 s: every utterance kept" if not lost else "long clips past 30 s: utterances lost: "+", ".join(lost),file=sys.stderr)
         failed=failed or bool(worse or lost)
-    # The prompted clips at the app's decode: none may come out repeated, more than twice the words said.
+    # The prompted clips at the app's decode: none may come out repeated, more than 1.5 times the words said.
     if (data/"prompted-app.tsv").exists():
-        cases=[(id,lang,ref,p) for id,lang,_,_,ref,prompts in PROMPTED for p in prompts]
+        cases=[(id,lang,ref,p) for id,lang,_,_,ref,_,_,prompts in PROMPTED for p in prompts]
         lines=(data/"prompted-app.tsv").read_text().splitlines()
         assert len(lines)==len(cases)
         repeated=[]
@@ -103,7 +105,7 @@ if __name__=="__main__":
             rid,wall,cpu,load,hwm,text=x.split("\t",5); assert rid==id
             r=words(ref); h=words(text)
             out.writerow(dict(zip(fields,["prompted-app",id,lang,"clean",len(r),distance(r,h),wall,cpu,load,hwm,"","",text.strip(),"ok" if text.strip() else "empty"])))
-            if len(h)>2*len(r): repeated.append(f'{id} prompted "{p}" ({len(h)} words for {len(r)})')
+            if 2*len(h)>3*len(r): repeated.append(f'{id} prompted "{p}" ({len(h)} words for {len(r)})')
         print("prompted clips: none repeated" if not repeated else "prompted clips: repeated: "+", ".join(repeated),file=sys.stderr)
         failed=failed or bool(repeated)
     if failed: sys.exit(1)

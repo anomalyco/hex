@@ -208,17 +208,40 @@ static std::string spoken(const std::string &text) {
     return words;
 }
 
+// Whether a text's words are one phrase of three or more words written two or more times, and nothing else.
+static bool onePhraseAgain(const std::string &words, int *count) {
+    std::vector<std::string> w;
+    for (size_t at = 0; at < words.size();) {
+        const size_t end = std::min(words.find(' ', at), words.size());
+        w.push_back(words.substr(at, end - at));
+        at = end + 1;
+    }
+    *count = static_cast<int>(w.size());
+    for (size_t p = 3; p * 2 <= w.size(); ++p) {
+        if (w.size() % p) continue;
+        bool same = true;
+        for (size_t i = p; same && i < w.size(); ++i) same = w[i] == w[i - p];
+        if (same) return true;
+    }
+    return false;
+}
+
 // Why a prompted decode up to 30 s (it had speech: MicCapture sends none without) is decoded again without the prompt:
 // 0 it isn't; 1 it repeated itself; 2 it wrote nothing; 3 it wrote only the prompt, two or more terms, which Whisper
 // returns for audio it can't read (the desktop app drops that echo, gguf_session.rs drop_prompt_echo); one term alone is
-// kept, as saying the one listed name must still write it.
-static jlong againWhy(whisper_context *ctx, whisper_state *state, const std::string &prompt, float entropy_thold) {
+// kept, as saying the one listed name must still write it; 4 it wrote one phrase of three or more words two or more times
+// and nothing else, more words than the clip holds (over 4 a second of it), as "Sarah is at the station" twice in 2.2 s.
+// A sentence a person said twice takes the time of both: 40 such clips ran 1.9-2.9 words a second, and the prompt's
+// copies 4.4-5.6, so a real repeat is never decoded again (which, unprompted, could write it once).
+static jlong againWhy(whisper_context *ctx, whisper_state *state, const std::string &prompt, float entropy_thold, int count) {
     if (repeated(ctx, state, entropy_thold)) return 1;
     std::string text;
     for (int i = 0; i < whisper_full_n_segments_from_state(state); ++i) text += whisper_full_get_segment_text_from_state(state, i);
     const std::string words = spoken(text);
     if (words.empty()) return 2;
     if (prompt.find(',') != std::string::npos && words == spoken(prompt)) return 3;
+    int n = 0;
+    if (onePhraseAgain(words, &n) && n * 16000 > 4 * count) return 4;
     return 0;
 }
 
@@ -330,12 +353,12 @@ Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jlong handle, jboo
     int status = whisper_full_with_state(ctx, state.get(), params, pcm.data(), count);
     // A prompt in front of a short clip can make Whisper repeat the clip's sentence to its token limit ("Sarah is at the
     // station" ten times in 2.2 s, prompted "stadium", the word custom vocabulary or Labs › Learn from my fixes adds),
-    // and its retry at 0.2 keeps the prompt and repeats too; or write nothing, or only the prompt. Such a decode runs once
-    // more without the prompt, in a fresh state, and that text is used: the dictation as it would have come out with no
-    // words added. Only those decodes pay for it; past 30 s, with timestamps, none is checked.
+    // and its retry at 0.2 keeps the prompt and repeats too; or write it twice, nothing, or only the prompt. Such a decode
+    // runs once more without the prompt, in a fresh state, and that text is used: the dictation as it would have come out
+    // with no words added. Only those decodes pay for it; past 30 s, with timestamps, none is checked.
     std::unique_ptr<whisper_state, decltype(&whisper_free_state)> again(nullptr, whisper_free_state);
     jlong again_us = 0;
-    const jlong why = status == 0 && params.initial_prompt && params.no_timestamps ? againWhy(ctx, state.get(), hint, params.entropy_thold) : 0;
+    const jlong why = status == 0 && params.initial_prompt && params.no_timestamps ? againWhy(ctx, state.get(), hint, params.entropy_thold, count) : 0;
     if (why != 0) {
         again.reset(whisper_init_state(ctx));
         if (again) {
