@@ -30,14 +30,23 @@ internal class DictationField {
     private var live = false
     private var app: String? = null
     private var view = 0
+    /** The app of each recent field number, for a dictation whose field went away (its text is offered only there). */
+    private val apps = LinkedHashMap<Int, String?>()
 
     /** A field started; true when it is the same one restarting, which keeps its number. */
     fun started(restarting: Boolean, app: String?, view: Int): Boolean {
         val same = live && restarting && app == this.app && view == this.view
-        if (!same) current++
+        if (!same) {
+            current++
+            apps[current] = app
+            if (apps.size > RECENT) apps.remove(apps.keys.first())
+        }
         live = true; this.app = app; this.view = view
         return same
     }
+
+    /** The app field [number] was in, while it is recent. */
+    fun appOf(number: Int) = apps[number]
 
     fun finished() { current++; live = false }
 
@@ -45,6 +54,12 @@ internal class DictationField {
     fun takes(spokenIn: Int, connected: Boolean, secure: Boolean) = live && spokenIn == current && connected && !secure
 
     companion object {
+        private const val RECENT = 8
+
+        /** Whether the strip offers a kept dictation from [keptApp] in a field of [app]: only in the same app, never in
+         * a password field. */
+        fun offersKept(keptApp: String?, app: String?, secure: Boolean) = keptApp != null && keptApp == app && !secure
+
         /** A hold on the Hex key that Android cancelled: the keyboard going away under the finger finishes the dictation,
          * as the hide itself does; a cancel with the keyboard still up discards it. */
         fun cancelledHoldFinishes(keyboardShown: Boolean) = !keyboardShown

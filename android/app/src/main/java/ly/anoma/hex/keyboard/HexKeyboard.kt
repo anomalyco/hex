@@ -217,7 +217,7 @@ class HexKeyboard : InputMethodService() {
         nextEnglish = null
         // A different field, even in the same app, never receives an old result; the same field restarting in place
         // keeps its dictation.
-        if (!field.started(restarting, attribute.packageName, attribute.fieldId)) capture.cancel()
+        if (!field.started(restarting, attribute.packageName, attribute.fieldId)) capture.leave()
         engine.startInput(attribute)
     }
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
@@ -246,6 +246,7 @@ class HexKeyboard : InputMethodService() {
         Diagnostics.keyboardShown(this, info.packageName, engine.secure) { view?.notice(it) }
         viewing = true
         watchClipboard()
+        offerKept()
     }
     override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int,
                                    candidatesStart: Int, candidatesEnd: Int) {
@@ -439,23 +440,62 @@ class HexKeyboard : InputMethodService() {
     /** A dictation's text, for the field it was spoken in ([spokenIn]): typed there even with the keyboard hidden, or
      * dropped when that field is gone. */
     private fun commitSpeech(text: String, heard: String, options: SpeechOptions, spokenIn: Int) {
-        if (!field.takes(spokenIn, currentInputConnection != null, engine.secure)) { leaveVoiceOnly(); return }
+        if (field.takes(spokenIn, currentInputConnection != null, engine.secure)) insertSpoken(text, heard, options)
+        else keep(text, heard, options, field.appOf(spokenIn))
+        leaveVoiceOnly()
+    }
+    private fun insertSpoken(text: String, heard: String, options: SpeechOptions) {
         // Read now, so a toggle or text changed while it transcribed applies to this dictation. Hex's own
         // fields, such as Settings' practice box, never get the signature.
         val own = currentInputEditorInfo?.packageName == packageName
         val signed = if (own) null else Signature.append(text, preferences.signatureText, preferences.signature)
         engine.insertDictation(signed ?: text, if (options.translate) "en" else options.spoken.code, signed != null,
             heard, options.learnFixes && preferences.learnFixes && !options.translate)
-        leaveVoiceOnly()
     }
+
+    /** A dictation whose field went away, held in memory only for [KEPT_MS], never written to disk, the clipboard or a
+     * log. The strip offers it once, in a field of the same app that isn't a password one; it goes when inserted,
+     * dismissed, when that showing ends, or after [KEPT_MS]. Several join in the order they were spoken. */
+    private class Kept(val text: String, val heard: String, val options: SpeechOptions, val app: String) {
+        var offered = false
+    }
+    private var kept: Kept? = null
+    private val main = Handler(Looper.getMainLooper())
+    private val forgetKept = Runnable { dropKept() }
+    private fun keep(text: String, heard: String, options: SpeechOptions, app: String?) {
+        if (app == null) return
+        val earlier = kept?.takeIf { it.app == app && !it.offered }
+        kept = Kept(earlier?.let { it.text + " " + text } ?: text, earlier?.let { it.heard + " " + heard } ?: heard, options, app)
+        main.removeCallbacks(forgetKept)
+        main.postDelayed(forgetKept, KEPT_MS)
+        offerKept()
+    }
+    private fun offerKept() {
+        val waiting = kept ?: return
+        val strip = view ?: return
+        if (waiting.offered || !isInputViewShown || currentInputConnection == null ||
+            !DictationField.offersKept(waiting.app, currentInputEditorInfo?.packageName, engine.secure)) return
+        waiting.offered = true
+        strip.notice(StripNotice(getString(R.string.keyboard_kept), getString(R.string.keyboard_kept_discard),
+            tap = { insertKept(waiting) }, dismiss = { dropKept() }))
+    }
+    private fun insertKept(waiting: Kept) {
+        if (kept !== waiting) return
+        dropKept()
+        if (currentInputConnection != null && DictationField.offersKept(waiting.app, currentInputEditorInfo?.packageName, engine.secure))
+            insertSpoken(waiting.text, waiting.heard, waiting.options)
+    }
+    private fun dropKept() { kept = null; main.removeCallbacks(forgetKept) }
     /** The keyboard goes away. Hidden with its field still there (an app hiding it, Back), a recording stops as with ✓
-     * and its text still goes into that field; with the field gone ([fieldGone]), nothing recording or transcribing goes
-     * in. Either way the microphone closes now. */
+     * and its text still goes into that field; with the field gone ([fieldGone]), it stops the same way and its text is
+     * kept to offer, never typed into another field. Either way the microphone closes now. A kept dictation the strip
+     * already offered goes with this showing. */
     private fun leaveEditor(fieldGone: Boolean) {
         bar?.removeCallbacks(pendingLeave)
         viewing = false; watchClipboard()
         clearInline(); view?.reset(); view?.cancelGestures(); engine.leave(); nextEnglish = null
-        if (fieldGone) capture.cancel() else finishSpeech()
+        if (fieldGone) capture.leave() else finishSpeech()
+        if (kept?.offered == true) { dropKept(); view?.notice(null) }
     }
     override fun onFinishInputView(finishingInput: Boolean) { leaveEditor(finishingInput); super.onFinishInputView(finishingInput) }
     override fun onFinishInput() { field.finished(); leaveEditor(fieldGone = true); super.onFinishInput() }
@@ -467,6 +507,7 @@ class HexKeyboard : InputMethodService() {
         if (level >= TRIM_MEMORY_RUNNING_LOW && level != TRIM_MEMORY_UI_HIDDEN) SpeechModel.releaseSoon()
     }
     override fun onDestroy() {
+        dropKept()
         getSharedPreferences("typing", MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(typingChanged)
         contentResolver.unregisterContentObserver(dictionaryChanged); words.shutdownNow()
         viewing = false; watchClipboard()
@@ -477,5 +518,7 @@ class HexKeyboard : InputMethodService() {
     private companion object {
         /** A failed voice-only dictation's note stays this long before the keyboard comes back. */
         const val VOICE_NOTE_MS = 1_200L
+        /** How long a dictation whose field went away waits, in memory only, to be offered. */
+        const val KEPT_MS = 120_000L
     }
 }

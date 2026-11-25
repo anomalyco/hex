@@ -938,4 +938,19 @@ class InsertionTest {
         // A cancel with the keyboard still up discards the hold's dictation, as before.
         assertFalse(DictationField.cancelledHoldFinishes(keyboardShown = true))
     }
+    @Test fun aDictationWhoseFieldWentIsOfferedOnlyInTheSameApp() {
+        val field = DictationField()
+        field.started(restarting = false, app = "ai.x.grok", view = 7)
+        val spoken = field.current
+        field.finished()
+        field.started(restarting = false, app = "ai.x.grok", view = 9)
+        assertEquals("ai.x.grok", field.appOf(spoken))
+        assertTrue(DictationField.offersKept(field.appOf(spoken), "ai.x.grok", secure = false))
+        // Never in another app, a password field, or for a field Hex no longer remembers.
+        assertFalse(DictationField.offersKept(field.appOf(spoken), "com.bank", secure = false))
+        assertFalse(DictationField.offersKept(field.appOf(spoken), "ai.x.grok", secure = true))
+        repeat(10) { field.started(restarting = false, app = "chat", view = it) }
+        assertNull(field.appOf(spoken))
+        assertFalse(DictationField.offersKept(null, "chat", secure = false))
+    }
 }

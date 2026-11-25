@@ -26,6 +26,10 @@
     <string name="keyboard_cancel_dictation">Cancel dictation</string>
     <string name="keyboard_finish_dictation">Finish dictation</string>
     <string name="keyboard_undo_dictation">Undo dictation</string>
+    <!-- The strip's offer of a dictation whose field went away (the app moved focus or closed it while it was transcribing):
+         a tap types it at the cursor; the words are never shown. Its ✕ for TalkBack. -->
+    <string name="keyboard_kept">Insert dictation</string>
+    <string name="keyboard_kept_discard">Discard dictation</string>
     <string name="keyboard_pane">Hex keyboard, %1$s</string>
     <string name="keyboard_shift_on">Shift enabled</string>
     <string name="keyboard_caps_lock_on">Caps lock enabled</string>
