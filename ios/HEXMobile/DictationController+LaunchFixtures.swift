@@ -239,12 +239,15 @@ extension DictationController {
     /// `settings-dictation-model-<english|multilingual>-<waiting|downloading|ready>`: Settings ›
     /// Dictation › Model with that model picked and its download in that state. Waiting is the
     /// real rule: pass `--simulate-cellular` and the keyboard has measured room for the model,
-    /// so only the connection holds it.
+    /// so only the connection holds it. The other states leave the keyboard unmeasured, so
+    /// nothing really downloads on the simulator's Wi-Fi.
     private func applySpeechModelFixture(_ scene: String) {
         let multilingual = scene.contains("-multilingual-")
         let step = scene.split(separator: "-").last.map(String.init) ?? "waiting"
         KeyboardParakeetDownload.shared.applyFixture(multilingual ? "model-card-waiting" : "model-card-\(step)")
-        KeyboardParakeetSettings().recordKeyboardLimit(KeyboardParakeetBudget.requiredLimit)
+        if step == "waiting" {
+            KeyboardParakeetSettings().recordKeyboardLimit(KeyboardParakeetBudget.requiredLimit)
+        }
         MultilingualParakeetSettings().isEnabled = multilingual
         downloadNetwork.forgetMobileData()
         guard multilingual else { return }
