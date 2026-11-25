@@ -135,9 +135,10 @@ export function renderAndroid(origin: string): string {
 <li>On your phone, tap <strong>Download Hex Preview</strong> above and open the file when it has downloaded.</li>
 <li>Android asks whether your browser or Files app may install apps. Tap <strong>Settings</strong>, turn on <strong>Allow from this source</strong>, then go back and tap <strong>Install</strong>.</li>
 <li>If Google Play Protect says <strong>App scan recommended</strong>, tap <strong>Scan app</strong>, then <strong>Install</strong> when it says the app looks safe.</li>
-<li>Open Hex Preview and tap <strong>Get started</strong>.</li>
-<li>Allow the microphone, then turn on <strong>Hex Preview</strong> in Android's keyboard list and choose it as your keyboard. Hex downloads its speech model (190 MB) once, on Wi-Fi unless you choose mobile data.</li>
-<li>Try it: tap a text field, hold the Hex key, say a few words, then let go.</li>
+<li>Open Hex Preview. Its setup is one page with one button that always names the next step.</li>
+<li>Tap <strong>Allow microphone</strong> and allow it. Hex starts downloading its speech model (190 MB) on Wi-Fi. On mobile data it waits for Wi-Fi, or tap <strong>Use mobile data</strong>.</li>
+<li>Tap <strong>Turn on keyboard</strong>, turn on <strong>Hex Preview</strong> in Android's list, tap <strong>OK</strong> on Android's warnings, then go back. Android then shows its keyboards: under <strong>Hex Preview</strong>, choose <strong>Full keyboard</strong>.</li>
+<li>Hex Preview opens a field to try it in: hold the Hex key, say a few words, then let go.</li>
 </ol>
 </section>
 <section>
