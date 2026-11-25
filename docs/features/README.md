@@ -3697,7 +3697,8 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   in a row", and the counts not counted by reason. Debug builds only: `setprop
 │   log.tag.HexDecodeScale DEBUG` (×10) or `VERBOSE` (×0.5) scales the measured time; the minified
 │   release and preview dex don't contain the tag. Checks: `ModelChoiceTest` in SignatureTest.kt
-│   (17 tests: the OnePlus 12's two reports, each thing it must never do); emulator results are in
+│   (20 tests: the OnePlus 12's two reports, the OnePlus 13's range and the emulator's speed as
+│   dictation sequences, each thing it must never do); emulator results are in
 │   the pull request.
 └── Labs > Dictation > Learn from my fixes (off) -> an Android-only port of iPhone Hex's dictation
     correction learning, with no typing side. Off, the keyboard tracks nothing, applies nothing and
