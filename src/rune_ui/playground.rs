@@ -79,24 +79,8 @@ const PATHS: &[(&str, &str)] = &[
         "Window/General/Vocabulary · after adding a words file",
     ),
     (
-        "vocabulary-files-menu",
-        "Window/General/Vocabulary · words file menu",
-    ),
-    (
         "words-review",
         "Window/General/Vocabulary · words file review",
-    ),
-    (
-        "words-review-long",
-        "Window/General/Vocabulary · long words file review",
-    ),
-    (
-        "words-review-from-iphone",
-        "Window/General/Vocabulary · words file from iPhone",
-    ),
-    (
-        "words-review-from-android",
-        "Window/General/Vocabulary · words file from Android",
     ),
     ("shortcut-row", "Window/General/Shortcut/Left Option"),
     ("shortcut-row-right", "Window/General/Shortcut/Right Option"),

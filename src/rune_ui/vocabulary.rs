@@ -22,9 +22,8 @@ use crate::dictation::vocabulary::{self, VocabularyEntry};
 mod words_file;
 
 pub(super) use words_file::{
-    FROM_ANDROID, FROM_IPHONE, MENU as WORDS_MENU, WordsFiles, fixture as words_fixture,
-    long_fixture as words_long_fixture, modal as review_modal, on_close as review_closed,
-    received_fixture as words_received_fixture,
+    MENU as WORDS_MENU, WordsFiles, fixture as words_fixture, modal as review_modal,
+    on_close as review_closed,
 };
 /// One term row: a regular text field and its padding.
 const ROW_HEIGHT: f32 = 36.0;
@@ -1145,6 +1144,11 @@ mod tests {
         assert_eq!(status(0, 0, 2), "No terms added; skipped 2");
         assert_eq!(status(0, 0, 0), "No new terms in that file");
     }
+
+    /// The cross-check's files exported by Hex for iPhone and Hex for
+    /// Android, byte for byte.
+    const FROM_IPHONE: &[u8] = include_bytes!("vocabulary/from-iphone.hexwords");
+    const FROM_ANDROID: &[u8] = include_bytes!("vocabulary/from-android.hexwords");
 
     /// The sheet open with Labs › Vocabulary and replacement files on, over
     /// a vocabulary of NextJS and a Global replacement of jet hub → Git Hub.

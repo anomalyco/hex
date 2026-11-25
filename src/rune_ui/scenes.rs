@@ -567,28 +567,9 @@ pub(super) const SCENES: &[Scene] = &[
         *ui = mac_fixture();
         vocabulary::words_fixture(ui, false);
     }),
-    ("vocabulary-files-menu", |ui| {
-        *ui = mac_fixture();
-        vocabulary::words_fixture(ui, false);
-        ui.open = Some(vocabulary::WORDS_MENU);
-    }),
     ("words-review", |ui| {
         *ui = mac_fixture();
         vocabulary::words_fixture(ui, true);
-    }),
-    ("words-review-long", |ui| {
-        *ui = mac_fixture();
-        vocabulary::words_long_fixture(ui);
-    }),
-    // The cross-check: the files Hex for iPhone and Hex for Android
-    // exported, reviewed over the receiving lists.
-    ("words-review-from-iphone", |ui| {
-        *ui = mac_fixture();
-        vocabulary::words_received_fixture(ui, vocabulary::FROM_IPHONE);
-    }),
-    ("words-review-from-android", |ui| {
-        *ui = mac_fixture();
-        vocabulary::words_received_fixture(ui, vocabulary::FROM_ANDROID);
     }),
     ("mac-settings-recording", |ui| {
         *ui = mac_fixture();
