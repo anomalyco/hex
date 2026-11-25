@@ -795,7 +795,7 @@ not only when the row
 appears. A long press on a language (a chip, or a row on the Hex key menu's Language
 page) shows **Remove**, which takes it off (`settings.dictationLanguage.removed`, so one
 of the iPhone's own languages stays off too) and puts the one set back on Automatic;
-Settings › Dictation language's **Remove from keyboard** does the same (TestFlight build
+Settings › Dictation language's **Remove a quick-switch language** does the same (TestFlight build
 56: a language couldn't be removed, and one could only be added in Hex). **More
 languages…** lists every other language Apple Speech has, the iPhone's own first, and
 picking one there adds it (in the dictation bar the list takes the keys' place). Removing
