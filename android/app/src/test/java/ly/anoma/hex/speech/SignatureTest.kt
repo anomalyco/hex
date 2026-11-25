@@ -134,6 +134,14 @@ class FastEnglishRoutingTest {
         assertFalse(file.exists())
         assertEquals(ModelStore.State.Available, ModelStore.english.state.value)
     }
+    @Test fun theSpeechModelWaitsForWifiOnlyOnANetworkThatChargesForData() {
+        assertTrue(waitsForWifi(mobileDataChosen = false, unmetered = false))
+        assertFalse(waitsForWifi(mobileDataChosen = false, unmetered = true))
+        // The person chose mobile data: it goes ahead, and a resumed download doesn't ask again.
+        assertFalse(waitsForWifi(mobileDataChosen = true, unmetered = false))
+        // No network: it goes ahead and says there's no connection, as before.
+        assertFalse(waitsForWifi(mobileDataChosen = false, unmetered = null))
+    }
     @Test fun shortOfMemoryTheSameAudioGoesToTodaysModel() {
         val pcm = ShortArray(48_000) { (it % 200).toShort() }
         val before = pcm.copyOf()

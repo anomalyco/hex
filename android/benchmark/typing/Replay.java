@@ -252,11 +252,13 @@ public final class Replay {
         boolean hasIos=false;
         TypingModel model=TypingModel.Companion.file(new File(args[0]),lang);
         // `MODEL SET LANG OUT [GEOMETRY]`: with a measured geometry, any number of sentences.
-        KeyGrid grid=!gate && args.length>4 ? geometry(args[4]) : originalGeometry(lang); TypingWord state=new TypingWord(new SpatialDecoder(model), true);
+        boolean measured=!gate && args.length>4 && !args[4].startsWith("--");
+        KeyGrid grid=measured ? geometry(args[4]) : originalGeometry(lang); TypingWord state=new TypingWord(new SpatialDecoder(model), true);
         // `--gate` options for Labs › Keyboard › Adaptive touch's checks (quality-gate.py --adaptive): a typist who aims
         // off the centres, and Adaptive touch learning as the keyboard does, or reading a profile learned before.
         Map<String,String> options=new HashMap<>();
-        for(int i=4;gate&&i+1<args.length;i+=2) options.put(args[i],args[i+1]);
+        // The same options after OUT (and GEOMETRY) time Adaptive touch per letter on the device (README › Adaptive touch).
+        for(int i=measured?5:4;i+1<args.length;i+=2) options.put(args[i],args[i+1]);
         String typist=options.get("--typist");
         AdaptiveTouch adaptive=adaptive(options);
         int sessionEvery=Integer.parseInt(options.getOrDefault("--sessions","0")), sentence=0, activeFrom=-1;
@@ -379,7 +381,8 @@ public final class Replay {
             }
         }
         if(gate) { if(adaptive!=null) report(adaptive, options, activeFrom, startUse, uses, sentence); return; }
-        if(count!=2000&&args.length<=4) throw new IllegalArgumentException("Incomplete synthetic set: "+count);
+        if(count!=2000&&!measured) throw new IllegalArgumentException("Incomplete synthetic set: "+count);
+        if(adaptive!=null) report(adaptive, options, activeFrom, startUse, uses, sentence);
         if(outputs!=null) outputs.close();
         String[] names={"raw","ios_shared","android_spatial"};
         for(int i=0;i<3;i++) if(i!=1||hasIos)
