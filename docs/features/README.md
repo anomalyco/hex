@@ -3500,6 +3500,16 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
     than the next reading, and what's left is ordinary text. Held, Delete repeats letter by letter
     from the first; its slide still selects whole words. Off, Delete takes the word back as before
     (`SwipeText.takesBack`).
+├── Labs > Keyboard > Punctuation after autocorrect (off, #2813) -> a clause mark (, . ! ? ; : ))
+    typed right after an autocorrection on space, or one of your text replacements on space, takes
+    the space it typed ("keyboadr", space, "." -> "keyboard."), as one already did after a picked
+    suggestion (`KeyboardEngine.fixedAnchor`, `SpaceRules.takesPickedSpace`, read through
+    `TypingPreferences.marksTakeFixSpace`). A space you typed after a word left as it was keeps the
+    mark apart, and any other key, Delete or a cursor move in between cancels it. Off, the anchor is
+    never set, so a mark after an autocorrection goes after its space as before ("keyboard ."). Picks
+    already took their space, and swipes never type one after the word. Checks: none automated (no
+    test drives `KeyboardEngine`'s typing); it was not compiled here (no Android SDK) and nothing was
+    tried on a device or emulator. The repo has no Android CI.
 ├── Labs > Keyboard > Adaptive touch (off) -> iPhone Hex's experiment (#2146) on Android: the keyboard
     learns where you land on each letter key, on this phone, and the decoder reads your taps with
     those centres once it has 400 labelled taps over three sessions and they fit your recent taps

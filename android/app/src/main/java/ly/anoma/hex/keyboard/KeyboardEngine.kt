@@ -135,6 +135,10 @@ internal class KeyboardEngine(
     private var spaceAnchor: String? = null
     private var spaceAt = 0L
     private var pickedAnchor: String? = null
+    // With Labs › Keyboard › Punctuation after autocorrect on, the space an autocorrection or a text replacement typed
+    // with its fix on space: a clause mark takes it as it takes a pick's ("keyboadr", space, "." gives "keyboard.").
+    // A space typed after an unchanged word keeps it. Off, it is never set, so nothing changes.
+    private var fixedAnchor: String? = null
     private var heldAnchor: String? = null
     var secure = true
         private set
@@ -315,7 +319,7 @@ internal class KeyboardEngine(
     private fun resetTyping() {
         cancelChip(); word?.reset(); undo = null; expectedCaret = -1; prefix = ""
     }
-    private fun clearSpaces() { spaceAnchor = null; pickedAnchor = null; heldAnchor = null; swipeAnchor = null }
+    private fun clearSpaces() { spaceAnchor = null; pickedAnchor = null; fixedAnchor = null; heldAnchor = null; swipeAnchor = null }
 
     // Labs › Keyboard › Adaptive touch while it is on: the word reads your own key centres once it has them.
     private var adaptive: AdaptiveTouch? = null
@@ -564,7 +568,7 @@ internal class KeyboardEngine(
             // Your text replacements first, whatever autocorrect is set to; they never offer an undo.
             val swap = w.textReplacement(b)
             if (swap != null && replace(swap.original, smartWord(swap.replacement) + " ")) {
-                teachEnd(b, swap); resetTyping(); afterSpace(now); return
+                teachEnd(b, swap); resetTyping(); afterSpace(now); if (feedback.marksTakeFixSpace) fixedAnchor = spaceAnchor; return
             }
             if (feedback.autocorrect && correctingField && old.isNotEmpty() && endsWith(prefix + old)) {
                 val fix = w.finish(' ', point, grid, ::smartWord)
@@ -573,7 +577,7 @@ internal class KeyboardEngine(
                     cancelChip()
                     undo = Undo(lang, fix.original, fix.replacement)
                     if (expectedCaret >= 0) expectedCaret += fix.replacement.length + 1 - fix.original.length
-                    teachEnd(b, fix); w.reset(); afterSpace(now); return
+                    teachEnd(b, fix); w.reset(); afterSpace(now); if (feedback.marksTakeFixSpace) fixedAnchor = spaceAnchor; return
                 }
             }
         }
@@ -601,9 +605,10 @@ internal class KeyboardEngine(
         if (value == " ") { space(); return }
         val b = before()
         val mark = value.length == 1 && TypingWord.endsWord(value[0])
-        // A clause-ending mark takes the space a picked suggestion typed ("Hello,"); in a URL field, so does any mark
-        // that joins a word ("github." and "github/", never "github /").
-        if (value.length == 1 && SpaceRules.takesPickedSpace(value[0], exactField) && pickedAnchor != null && pickedAnchor == b && b.endsWith(" ")) {
+        // A clause-ending mark takes the space a picked suggestion, an autocorrection or a text replacement typed
+        // ("Hello,"); in a URL field, so does any mark that joins a word ("github." and "github/", never "github /").
+        val typedSpace = (pickedAnchor != null && pickedAnchor == b) || (fixedAnchor != null && fixedAnchor == b)
+        if (value.length == 1 && SpaceRules.takesPickedSpace(value[0], exactField) && typedSpace && b.endsWith(" ")) {
             clearSpaces()
             if (replace(" ", value)) { resetTyping(); showPredictions(before()); inputDone(); return }
         }
