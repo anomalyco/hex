@@ -52,12 +52,12 @@ use self::list_view::*;
 use self::surface::{
     CHIP_H, CHIP_PX, HEADER_H, HINT_GAP, Id, LEAD_TEXT_X, LEVEL_GAP, LEVEL_W, LIST_PAD, LIST_Y,
     PANEL_H, PANEL_W, PROCESSING_TEXT_X, ROW_H, SEG_ICON, SEG_ICON_GAP, Shown, Surface, THUMB_H,
-    THUMB_RADIUS, THUMB_W, THUMB_X, chord, clock_style, clock_width, corner, done_style,
-    done_text_x, ellipsize, measure, medium, processing, small,
+    THUMB_RADIUS, THUMB_W, THUMB_X, chord, clock_width, corner, done_style, done_text_x, ellipsize,
+    measure, medium, processing, small,
 };
 use self::tuning::ListFooter;
 use self::view::*;
-use super::controls::Paint;
+use super::controls::{CAPSULE, Paint};
 use crate::desktop::i18n::{tr, tr_fill};
 
 /// Peak blur (pt) of the picker's badge and the list's rows softening in
@@ -68,8 +68,8 @@ const PRESENCE_BLUR: f32 = 1.5;
 const HIDE_AFTER_S: f64 = 0.5;
 /// The list's corners, and its rows'.
 const LIST_RADIUS: f32 = surface::SHELL_RADIUS;
-const ROW_RADIUS: f32 = 8.0;
-const ROW_PX: f32 = 10.0;
+const ROW_RADIUS: f32 = CAPSULE.inner(CAPSULE.row_inset);
+const ROW_PX: f32 = CAPSULE.row_px;
 /// Under the list header's words.
 const HEADER_PB: f32 = 4.0;
 /// Between one hint and the next.

@@ -28,7 +28,7 @@ internal interface Recognizer {
 }
 
 /** Shown when a shortage of memory sent an English dictation to today's model; at most once a day. */
-internal const val LOW_MEMORY_NOTE = "Phone was low on memory, so this one used standard dictation."
+internal const val LOW_MEMORY_NOTE = "Low on memory: used standard dictation."
 
 internal class LocalSpeech(private val app: Context) : Recognizer {
     override fun prepare(options: SpeechOptions) = SpeechModel.prepare(app, engineFor(options))
@@ -157,6 +157,13 @@ internal object SpeechModel {
                 } catch (e: Exception) {
                     Log.w("HexSpeech", "sentence ends skipped: ${e.javaClass.simpleName}")
                     decoded.substringBefore('\n')
+                }
+            }?.let { text ->
+                try {
+                    SpokenNumbers.digits(text, vocabulary)
+                } catch (e: Exception) {
+                    Log.w("HexSpeech", "numbers as digits skipped: ${e.javaClass.simpleName}")
+                    text
                 }
             }?.trim()
             ?.let(EnglishResult::Text) ?: EnglishResult.Failed

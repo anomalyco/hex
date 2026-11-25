@@ -81,7 +81,7 @@ struct PrivacySettingsPage: View {
             // What Send feedback sends, and when (FeedbackForm; the website's policy says the same).
             if Feedback.isAvailable {
                 SettingsSectionHeader(title: "Feedback")
-                Text("Hex sends nothing unless you tap Send in Send feedback. Then it sends your message and the pictures you kept, your email if you add one, and details about Hex and this iPhone to Anomaly's feedback inbox. Your dictations, what you type, and what Hex learned are never included.")
+                Text("Hex sends nothing unless you tap Send in Send feedback. Then it sends your message and the pictures you kept, your email if you add one, and details about Hex and this iPhone to Anomaly's feedback inbox. With an email, Hex also sends a random install ID so your reports stay together. Your dictations, what you type, and what Hex learned are never included.")
                     .font(.system(size: 12))
                     .foregroundStyle(HexTheme.textMuted)
                     .fixedSize(horizontal: false, vertical: true)

@@ -136,6 +136,45 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(rowOne.text, "power")
     }
 
+    /// TestFlight build 147 (iPad): "flick for symbol is not working". On a docked iPad, pulling
+    /// a key down past half its travel types the character over its letter, as Apple's key
+    /// flicks do; a short pull, a pull taken back, or the switch off types the letter. The pull
+    /// keeps its key (no slide onto the row below), a rollover types the flicked character, and
+    /// a digit goes in as typed, with nothing corrected.
+    func testDockedIPadKeyFlicks() throws {
+        engine.pad = .docked(.mini)
+        defer { KeyboardFlicks.isEnabled = true }
+        let e = try XCTUnwrap(engine.layout.key(.character("e")))
+        XCTAssertEqual(e.flick, "3")
+        let start = CGPoint(x: e.frame.midX, y: e.frame.midY)
+        func pull(_ dy: CGFloat, back: Bool = false, id: Int = 1, lift: Bool = true) {
+            engine.touchBegan(id: id, at: start)
+            for step in stride(from: CGFloat(3), through: dy, by: 3) {
+                engine.touchMoved(id: id, to: CGPoint(x: start.x, y: start.y + step))
+            }
+            if back { engine.touchMoved(id: id, to: start) }
+            if lift { engine.touchEnded(id: id, at: CGPoint(x: start.x, y: start.y + (back ? 0 : dy))) }
+        }
+        pull(30)
+        XCTAssertEqual(target.text, "3")
+        pull(12)
+        XCTAssertEqual(target.text, "3e", "a short pull types the letter")
+        pull(30, back: true)
+        XCTAssertEqual(target.text, "3ee", "taken back, the letter")
+        pull(60)
+        XCTAssertEqual(target.text, "3ee3", "past the row below, still the flick")
+        pull(30, lift: false)
+        XCTAssertEqual(engine.touches[1]?.key.kind, .character("e"))
+        tap(.character("r"))
+        engine.touchEnded(id: 1, at: CGPoint(x: start.x, y: start.y + 30))
+        XCTAssertEqual(target.text, "3ee33r", "rollover types the flicked character")
+        KeyboardFlicks.isEnabled = false
+        pull(30)
+        XCTAssertEqual(target.text, "3ee33re", "Settings › Keyboard › Key flicks off")
+        engine.pad = nil
+        XCTAssertNil(engine.layout.key(.character("e"))?.flick, "an iPhone has none")
+    }
+
     /// Without the switch, or on an iPad, the keys have no number row.
     func testNumberRowNeedsItsSwitchAndAnIPhone() {
         XCTAssertFalse(engine.layout.hasNumberRow, "off by default")

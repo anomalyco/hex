@@ -40,6 +40,9 @@ pub(crate) enum ControllerCommand {
     /// offered again once its app releases and retakes the microphone.
     OfferTimedOut(OfferId),
     Stop,
+    /// Discard from the recording capsule's ✕: stop capture, skip the final
+    /// transcript, and move the recording to the Trash.
+    Discard,
     /// Import a local audio file as a meeting (macOS; Labs › Import audio).
     Import(PathBuf),
     /// Delete selected lines from a saved meeting's transcript
@@ -162,6 +165,9 @@ struct ActiveRecording {
     /// call app present, so the absence one is dropped every pass.
     call_stop: AutoStop,
     stop: Arc<AtomicBool>,
+    /// Set with `stop` by Discard: the worker skips its final pass and the
+    /// controller trashes what it recorded.
+    discard: Arc<AtomicBool>,
     updates: Receiver<meeting::RecordingUpdate>,
     reported_started: bool,
     /// A browser's playback stopped counting while the Mac was locked, and
@@ -519,6 +525,11 @@ fn handle_command(
                 active.end(detector, events);
             }
         }
+        ControllerCommand::Discard => {
+            if let Some(active) = recording.as_ref() {
+                active.throw_away(detector, events);
+            }
+        }
         ControllerCommand::KeepRecording => {
             if let Some(active) = recording.as_mut() {
                 let changed = active.call_switch.changed();
@@ -873,6 +884,8 @@ fn start_recording(
     }
     let stop = Arc::new(AtomicBool::new(false));
     let worker_stop = stop.clone();
+    let discard = Arc::new(AtomicBool::new(false));
+    let worker_discard = discard.clone();
     // Stop can send six updates before the controller next drains them.
     let (update_sender, updates) = mpsc::sync_channel(16);
     // A recording started by hand watches the call app it found on the
@@ -883,8 +896,14 @@ fn start_recording(
     };
     let call_switch = CallSwitch::with_kept(start.call, start.switched_from);
     let meeting_start = start.meeting;
-    let worker =
-        thread::spawn(move || meeting::record(meeting_start, &worker_stop, Some(update_sender)));
+    let worker = thread::spawn(move || {
+        meeting::record(
+            meeting_start,
+            &worker_stop,
+            Some(&worker_discard),
+            Some(update_sender),
+        )
+    });
     let _ = events.send(ControllerEvent::Starting(offer));
     *recording = Some(ActiveRecording {
         title: start.title,
@@ -897,6 +916,7 @@ fn start_recording(
         call_switch,
         call_stop: AutoStop::default(),
         stop,
+        discard,
         updates,
         reported_started: false,
         playback_locked_noted: false,
@@ -956,6 +976,9 @@ fn poll_recording(
             .join()
             .unwrap_or_else(|_| Err(eyre!("meeting recorder panicked")))
         {
+            Ok(manifest) if active.discard.load(Ordering::Relaxed) => {
+                publication::discarded(manifest, events);
+            }
             Ok(manifest) => publication::finished(manifest, events),
             Err(error) => {
                 let _ = events.send(ControllerEvent::Failed {
@@ -1597,6 +1620,7 @@ mod tests {
             call_switch: CallSwitch::new(None),
             call_stop: AutoStop::default(),
             stop: Arc::new(AtomicBool::new(false)),
+            discard: Arc::new(AtomicBool::new(false)),
             updates,
             reported_started: true,
             playback_locked_noted: false,
@@ -1638,6 +1662,7 @@ mod tests {
             call_switch: CallSwitch::new(call.map(str::to_string)),
             call_stop: AutoStop::default(),
             stop: Arc::new(AtomicBool::new(false)),
+            discard: Arc::new(AtomicBool::new(false)),
             updates,
             reported_started: true,
             playback_locked_noted: false,
@@ -2041,6 +2066,7 @@ mod tests {
             call_switch: CallSwitch::new(None),
             call_stop: AutoStop::default(),
             stop: Arc::new(AtomicBool::new(false)),
+            discard: Arc::new(AtomicBool::new(false)),
             updates,
             reported_started: true,
             playback_locked_noted: false,

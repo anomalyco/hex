@@ -363,6 +363,33 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(show(["I", "There", "I’m"]), 1, "appearing again, for another field")
     }
 
+    /// The Hex key's menu ends with Open Hex: opening the menu opens nothing (#2707: only a tap
+    /// that says Open Hex opens Hex), and a tap on the row closes the menu and opens Hex at Home.
+    func testTheHexKeyMenusOpenHexOpensHexAtHomeOnlyWhenTapped() throws {
+        let model = KeyboardViewModel()
+        var opened: [URL] = []
+        model.onOpenURL = { opened.append($0) }
+        let view = FullKeyboardView(model: model, target: target)
+        view.frame = CGRect(x: 0, y: 0, width: 393, height: 254)
+        view.layoutIfNeeded()
+        view.debugShowStyleMenu()
+        view.layoutIfNeeded()
+        let menu = try XCTUnwrap(view.subviews.first { $0 is HexStyleMenuView })
+        menu.layoutIfNeeded()
+        func rows(in view: UIView) -> [UIControl] {
+            view.subviews.flatMap { subview -> [UIControl] in
+                if let control = subview as? UIControl, control.accessibilityLabel != nil { return [control] }
+                return rows(in: subview)
+            }
+        }
+        let all = rows(in: menu)
+        XCTAssertEqual(all.last?.accessibilityLabel, "Open Hex", "the last row")
+        XCTAssertTrue(opened.isEmpty, "opening the menu opens nothing")
+        all.last?.sendActions(for: .touchUpInside)
+        XCTAssertEqual(opened, [KeyboardLaunchRequest.home.url])
+        XCTAssertFalse(view.subviews.contains { $0 is HexStyleMenuView }, "the menu closes")
+    }
+
     /// The Hex key's menu opens toward the screen's middle, and the Full Access hint's Open Hex
     /// sits beside the key, on whichever side it is.
     func testTheMenuAndFullAccessHintFollowTheHexKey() throws {

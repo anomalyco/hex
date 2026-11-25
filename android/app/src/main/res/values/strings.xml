@@ -107,7 +107,7 @@
     <string name="settings_haptics_detail">A light tap as you press Hex’s keys</string>
     <string name="settings_test_keyboard">Test keyboard…</string>
     <string name="settings_privacy_line">Your voice and words stay on this phone</string>
-    <string name="settings_privacy_detail">Hex turns speech into text on this phone and never uploads your voice or what you type with its keyboard. It keeps no keystrokes or transcripts. Feedback leaves the phone only when you tap Send in Send feedback: then your message, the pictures you keep, your email if you add one and details about Hex and this phone go to Anomaly’s feedback inbox (Bellhop). Your dictations, recordings, vocabulary and corrections are never included.</string>
+    <string name="settings_privacy_detail">Hex turns speech into text on this phone and never uploads your voice or what you type with its keyboard. It keeps no keystrokes or transcripts. Two labs keep what they learn on this phone, and only once you turn them on: Learn from my fixes keeps the word pairs you corrected after dictating, and Adaptive touch keeps an average of where you tap each key. Delete what Hex learned in Labs removes both. Feedback leaves the phone only when you tap Send in Send feedback: then your message, the pictures you keep, your email if you add one and details about Hex and this phone go to Anomaly’s feedback inbox (Bellhop). Your dictations, recordings, vocabulary and corrections are never included.</string>
     <string name="settings_privacy_policy">Privacy policy</string>
     <string name="settings_licences">Open-source licences</string>
     <string name="settings_labs">Labs</string>
@@ -115,7 +115,7 @@
     <!-- Labs › Dictation › Faster English dictation. Never name a speech engine or model in these. %1$d: the download's
          size in MB (ModelStore.english). -->
     <string name="fast_english">Faster English dictation</string>
-    <string name="fast_english_detail">Several times faster after a one-time %1$d MB download. Numbers come out as words for now. Other languages are unchanged.</string>
+    <string name="fast_english_detail">Several times faster after a one-time %1$d MB download. Other languages are unchanged.</string>
     <string name="fast_english_download">Download %1$d MB</string>
     <string name="fast_english_loading">Downloading %1$d MB · %2$d%%</string>
     <string name="fast_english_ready">Ready · %1$d MB</string>
@@ -155,10 +155,119 @@
     <string name="smart_quotes_detail">Types ’ ‘ “ ” for \' and \"</string>
     <string name="swipe_delete_letters">Delete swiped words letter by letter</string>
     <string name="swipe_delete_letters_detail">Delete after a swipe removes one letter, not the word</string>
+    <string name="adaptive_touch">Adaptive touch</string>
+    <string name="adaptive_touch_detail">Learns where you tap each key. Stays on this phone and keeps averages, never what you type.</string>
+    <string name="adaptive_touch_learning">Learning: %1$d of %2$d taps</string>
+    <string name="adaptive_touch_active">Active, using your own key centres</string>
+    <string name="adaptive_touch_reset">Reset touch learning</string>
+    <string name="adaptive_touch_reset_confirm">Reset touch learning?</string>
+    <string name="adaptive_touch_reset_action">Reset</string>
     <string name="password_manager_suggestions">Password manager suggestions</string>
     <string name="password_manager_suggestions_detail">Show logins, codes and cards from your autofill service in the suggestion strip</string>
     <string name="voice_only_mode">Voice-only mode</string>
     <string name="voice_only_detail">Lets you switch to Hex just to dictate from another keyboard, then switches back</string>
+    <!-- Hex words files and Custom vocabulary's Word replacements (docs/specs/hex-words.md). -->
+    <string name="words_open_label">Add to Hex</string>
+    <string name="words_replacements">Word replacements</string>
+    <string name="words_replacements_none">Words Hex hears, and what to write instead</string>
+    <string name="words_replacements_intro">Hex writes these instead of the words it hears, matching whole words, up to 8. Yours win over fixes Hex learned.</string>
+    <string name="words_heard_hint">Words Hex hears</string>
+    <string name="words_write_hint">What to write</string>
+    <string name="words_add">Add</string>
+    <string name="words_remove">Remove</string>
+    <string name="words_problem_no_letters">The words Hex hears need a letter or digit.</string>
+    <string name="words_problem_hidden">This has a hidden character in it.</string>
+    <string name="words_problem_too_long">Too long: up to 128 characters heard and 1,000 written.</string>
+    <string name="words_problem_too_many_words">Up to 8 words heard.</string>
+    <string name="words_problem_blank">Write something. Removing words isn’t supported yet.</string>
+    <string name="words_problem_duplicate">You already replace these words.</string>
+    <string name="words_problem_full">The list holds 1,000 replacements.</string>
+    <string name="words_file">Words file</string>
+    <string name="words_file_detail">Open, share or save your words</string>
+    <string name="words_open">Open a words file…</string>
+    <string name="words_open_detail">Check what a .hexwords file adds before anything changes</string>
+    <string name="words_export">Export</string>
+    <string name="words_include_learned">Include fixes Hex learned</string>
+    <string name="words_include_learned_detail">Adds the learned fixes in use, marked as learned</string>
+    <string name="words_share">Share…</string>
+    <string name="words_save">Save to…</string>
+    <string name="words_export_detail">Exports your Custom vocabulary terms and Word replacements as hex-words.hexwords, which Hex on a Mac, a PC, an iPhone or an Android phone can open.</string>
+    <string name="words_exported">Exported %1$s and %2$s.</string>
+    <string name="words_left_out">Left out %1$d: %2$s.</string>
+    <string name="words_export_failed">Hex couldn’t write the file.</string>
+    <string name="words_undo_last">Undo last import</string>
+    <string name="words_sheet_title">Words from a file</string>
+    <string name="words_reading">Reading the file…</string>
+    <string name="words_made_by">Made by %1$s, as the file says</string>
+    <string name="words_newer">Made by a newer Hex. Anything this version doesn’t know is left out.</string>
+    <string name="words_turn_on">Turn on Custom vocabulary</string>
+    <string name="words_turn_on_detail">Off, the words are added but Hex doesn’t use them until you turn it on.</string>
+    <string name="words_part_vocabulary">Vocabulary</string>
+    <string name="words_count_new">%1$d new</string>
+    <string name="words_count_there">%1$d already there</string>
+    <string name="words_count_clash">%1$d different from yours</string>
+    <string name="words_more">and %1$d more</string>
+    <string name="words_yours">Yours: %1$s</string>
+    <string name="words_theirs">This file: %1$s</string>
+    <string name="words_keep_mine">Keep mine</string>
+    <string name="words_use_this">Use this one</string>
+    <string name="words_not_usable">Not usable on this phone</string>
+    <plurals name="words_not_usable_short">
+        <item quantity="one">%1$d term has fewer than 2 letters or digits, too short for this phone: %2$s</item>
+        <item quantity="other">%1$d terms have fewer than 2 letters or digits, too short for this phone: %2$s</item>
+    </plurals>
+    <plurals name="words_not_usable_full">
+        <item quantity="one">%1$d didn’t fit, as this phone keeps up to 100 terms and 1,000 replacements: %2$s</item>
+        <item quantity="other">%1$d didn’t fit, as this phone keeps up to 100 terms and 1,000 replacements: %2$s</item>
+    </plurals>
+    <plurals name="words_not_usable_deletion">
+        <item quantity="one">%1$d replacement writes nothing, or only spaces or line breaks, which this phone can\'t do yet: %2$s</item>
+        <item quantity="other">%1$d replacements write nothing, or only spaces or line breaks, which this phone can\'t do yet: %2$s</item>
+    </plurals>
+    <plurals name="words_not_usable_duplicate">
+        <item quantity="one">%1$d spelling repeats words the file already replaces, so the first one is used: %2$s</item>
+        <item quantity="other">%1$d spellings repeat words the file already replaces, so the first one is used: %2$s</item>
+    </plurals>
+    <string name="words_skipped_title">Skipped in the file</string>
+    <string name="words_skipped">%1$d skipped: %2$s</string>
+    <string name="words_skip_bad_part">a part that isn’t a list</string>
+    <string name="words_skip_bad_entry">entries of the wrong shape</string>
+    <string name="words_skip_bad_field">fields of the wrong shape</string>
+    <string name="words_skip_unknown_field">fields this Hex doesn’t know</string>
+    <string name="words_skip_hidden">hidden characters</string>
+    <string name="words_skip_no_letters">no letters or digits</string>
+    <string name="words_skip_too_long">longer than the limit</string>
+    <string name="words_skip_too_many_words">more than 8 words</string>
+    <string name="words_skip_duplicate">already in the file</string>
+    <string name="words_skip_same_as_term">a spelling the same as its term</string>
+    <string name="words_skip_over_limit">past the file’s limit</string>
+    <string name="words_cancel">Cancel</string>
+    <string name="words_done">Done</string>
+    <string name="words_undo">Undo</string>
+    <string name="words_added_title">Words added</string>
+    <plurals name="words_terms">
+        <item quantity="one">%d term</item>
+        <item quantity="other">%d terms</item>
+    </plurals>
+    <plurals name="words_replacement_count">
+        <item quantity="one">%d replacement</item>
+        <item quantity="other">%d replacements</item>
+    </plurals>
+    <string name="words_added">Added %1$s</string>
+    <string name="words_added_both">Added %1$s and %2$s</string>
+    <string name="words_kept_yours">kept yours for %1$d</string>
+    <string name="words_used_theirs">used the file’s for %1$d</string>
+    <string name="words_nothing_new">No new words in that file</string>
+    <string name="words_undone">Your lists are back as they were.</string>
+    <string name="words_refused_too_large">Hex didn’t open this file: it’s larger than 8 MB.</string>
+    <string name="words_refused_not_utf8">Hex didn’t open this file: it isn’t text Hex can read.</string>
+    <string name="words_refused_empty">Hex didn’t open this file: it’s empty.</string>
+    <string name="words_refused_too_deep">Hex didn’t open this file: it’s nested too deeply to be a words file.</string>
+    <string name="words_refused_duplicate_key">Hex didn’t open this file: it names the same field twice.</string>
+    <string name="words_refused_not_json">Hex didn’t open this file: it’s damaged or isn’t a words file.</string>
+    <string name="words_refused_not_hex_words">Hex didn’t open this file: it isn’t a Hex words file.</string>
+    <string name="words_refused_bad_version">Hex didn’t open this file: its version isn’t one Hex understands.</string>
+    <string name="words_refused_cant_open">Hex couldn’t open that file.</string>
     <!-- Labs › Dictate from Quick Settings: the Labs row, the tile's label and the sheet's lines. -->
     <string name="quick_dictation">Dictate from Quick Settings</string>
     <string name="quick_dictation_detail">Adds a Hex tile to Quick Settings. Tap it in any app, speak, and Hex copies the text for you to paste. For apps where Hex can’t be your keyboard, such as work apps.</string>

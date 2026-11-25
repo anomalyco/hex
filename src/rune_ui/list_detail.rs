@@ -14,7 +14,7 @@ use super::controls::{DESCRIPTION, METRICS, Paint, raised};
 /// text inside them lands on the title's edge.
 pub(super) const HANG: f32 = METRICS.gutter - METRICS.row_px;
 /// The list column's width, its hanging edge included.
-const LIST_W: f32 = 316.0;
+const LIST_W: f32 = METRICS.list_w;
 /// How far a list fades as rows slide under the search field.
 const LIST_FADE: (f32, f32) = (18.0, 28.0);
 /// The pane bar's thumb: 8 pt at rest and 10 under the pointer, inside the
@@ -24,6 +24,8 @@ const PANE_THUMB_HOVER: f32 = 10.0;
 
 pub(super) static COPY_ICON: &Icon = &rune_theme_opencode::icons::OUTLINE_COPY;
 pub(super) static TRASH_ICON: &Icon = &rune_theme_opencode::icons::TRASH;
+// Only macOS History's Edit uses it, now Rename is in the meeting's menu.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(super) static EDIT_ICON: &Icon = &rune_theme_opencode::icons::EDIT;
 pub(super) static HISTORY_ICON: &Icon = &rune_theme_opencode::icons::STATUS;
 pub(super) static SEARCH_ICON: &Icon = &rune_theme_opencode::icons::MAGNIFYING_GLASS;
@@ -37,11 +39,11 @@ pub(super) fn body(p: Paint, key: &str, list: El, detail: El) -> El {
             .grow(1.0)
             .shrink()
             .min_w(0.0)
-            .ml(12.0)
+            .ml(METRICS.split_gap)
             .mr(HANG)
             .mb(HANG)
-            .px(24.0)
-            .pt(20.0)
+            .px(METRICS.detail_pad)
+            .pt(METRICS.detail_pad)
             .clip_soft(0.0)
             .child(detail),
     )
@@ -73,7 +75,8 @@ pub(super) fn notices(children: Vec<El>) -> El {
         .children(children)
 }
 
-/// A group heading inside a list (a task, a day), on the rows' text edge.
+/// A group heading inside a list (a task, a day), on the rows' text rail
+/// over any leading icons, as section labels sit over settings rows.
 pub(super) fn group(p: Paint, key: &str, label: &str, first: bool) -> El {
     text(label)
         .key(key)
@@ -82,7 +85,7 @@ pub(super) fn group(p: Paint, key: &str, label: &str, first: bool) -> El {
         .font(p.k.ty.small_medium)
         .color(p.faint())
         .px(METRICS.row_px)
-        .pt(if first { 0.0 } else { 18.0 })
+        .pt(if first { 0.0 } else { 16.0 })
         .pb(6.0)
 }
 
@@ -115,8 +118,9 @@ pub(super) struct Item {
     pub(super) selected: bool,
 }
 
-/// The size of a row's leading icon, about the meta line's height.
-const LEADING_ICON: f32 = 14.0;
+/// Leading icon size and gap, matching settings rows' `METRICS.icon_lead`.
+const LEADING_ICON: f32 = METRICS.icon;
+const LEADING_GAP: f32 = METRICS.icon_lead - METRICS.icon;
 
 /// One selectable list row with a small faint icon before its title when
 /// `leading` is set; assistive technology hears the title alone.
@@ -159,7 +163,7 @@ pub(super) fn item_body(p: Paint, item: Item, leading: Option<&'static Icon>) ->
     .join(" · ");
     let time = text(item.time)
         .key("time")
-        .font(p.k.ty.small)
+        .font(p.tabular(p.meta()))
         .color(p.faint())
         .align(Align::End)
         .a11y_hidden();
@@ -176,31 +180,19 @@ pub(super) fn item_body(p: Paint, item: Item, leading: Option<&'static Icon>) ->
                 .children(item.hover),
         )
     };
-    let mut row_el = col()
-        .key(item.key)
-        .role("listitem")
-        .label(item.title.clone())
-        .description(described)
-        .px(METRICS.row_px)
-        .py(9.0)
+    let words = col()
+        .key("words")
         .gap(2.0)
-        .radius(p.k.radius.md)
-        .hover(c.hover)
-        .hover_group()
+        .grow(1.0)
+        .shrink()
+        .min_w(0.0)
         .child(
             row()
                 .key("top")
                 .gap(12.0)
                 .center_y()
-                .children(leading.map(|glyph| {
-                    icon(glyph, LEADING_ICON)
-                        .key("leading-icon")
-                        .color(c.icon_faint)
-                        .mr(-6.0)
-                        .a11y_hidden()
-                }))
                 .child(
-                    text(item.title)
+                    text(item.title.clone())
                         .key("title")
                         .font(p.k.ty.ui_medium)
                         .color(p.text())
@@ -227,6 +219,34 @@ pub(super) fn item_body(p: Paint, item: Item, leading: Option<&'static Icon>) ->
                 .truncate()
                 .a11y_hidden()
         }));
+    // The icon in its own column, centred on the title's line,
+    // so the title and the lines under it share one left edge.
+    let mut row_el = row()
+        .key(item.key)
+        .role("listitem")
+        .label(item.title)
+        .description(described)
+        .min_h(METRICS.item_h)
+        .px(METRICS.row_px)
+        .py(8.0)
+        .gap(LEADING_GAP)
+        .items_start()
+        .radius(p.k.radius.md)
+        .hover(c.hover)
+        .hover_group()
+        .children(leading.map(|glyph| {
+            el().key("leading")
+                .w(LEADING_ICON)
+                .h(p.k.ty.ui_medium.line_px())
+                .center()
+                .child(
+                    icon(glyph, LEADING_ICON)
+                        .key("leading-icon")
+                        .color(c.icon_faint),
+                )
+                .a11y_hidden()
+        }))
+        .child(words);
     if item.selected {
         row_el = row_el.fill(c.layer_02);
     }
@@ -245,7 +265,7 @@ pub(super) fn card_header(title: El, meta: Vec<El>, actions: Vec<El>) -> El {
                 .key("title")
                 .grow(1.0)
                 .shrink()
-                .gap(3.0)
+                .gap(4.0)
                 .child(title)
                 .child(row().key("meta").gap(8.0).center_y().children(meta)),
         )
@@ -258,6 +278,31 @@ pub(super) fn card_header(title: El, meta: Vec<El>, actions: Vec<El>) -> El {
                 .center_y()
                 .children(actions),
         )
+}
+
+/// The detail card's heading, a clear step above the 14 pt body.
+pub(super) const CARD_HEADING: rune::TextStyle = super::controls::DISPLAY;
+
+/// [`card_title`] at [`CARD_HEADING`], for the meeting's card.
+pub(super) fn card_heading(p: Paint, title: &str) -> El {
+    text(title)
+        .key("detail-title")
+        .role("heading")
+        .level(2)
+        .font(p.display())
+        .color(p.text())
+        .wrap()
+}
+
+/// The hairline between the card's header and its scrolling
+/// body, across the card's whole width.
+pub(super) fn card_rule(p: Paint) -> El {
+    el().key("detail-rule")
+        .h(p.hair)
+        .mt(16.0)
+        .mx(-METRICS.detail_pad)
+        .fill(p.k.c.border_weak)
+        .a11y_hidden()
 }
 
 pub(super) fn card_title(p: Paint, title: &str) -> El {
@@ -276,17 +321,6 @@ pub(super) fn meta_text(p: Paint, meta: &str) -> El {
         .font(DESCRIPTION)
         .color(p.muted())
         .truncate()
-}
-
-/// A meta line of its own under the card header, wrapping rather than
-/// truncating, for text too long to share the header's meta row.
-pub(super) fn meta_note(p: Paint, key: &str, note: &str) -> El {
-    text(note)
-        .key(key)
-        .font(DESCRIPTION)
-        .color(p.muted())
-        .wrap()
-        .mt(3.0)
 }
 
 /// The card's scrolling content under its header, clear of the scroll bar.
@@ -388,7 +422,7 @@ pub(super) fn empty_state(
                 .color(p.muted())
                 .align(Align::Center)
                 .wrap()
-                .w(300.0)
+                .w(METRICS.copy_w)
         }))
 }
 
@@ -407,14 +441,14 @@ pub(super) fn facts(p: Paint, facts: Vec<(&str, String)>) -> El {
         list = list.child(
             row()
                 .key(format!("fact{index}"))
-                .py(9.0)
+                .py(8.0)
                 .gap(16.0)
                 .child(
                     text(label)
                         .key("label")
                         .font(DESCRIPTION)
                         .color(p.muted())
-                        .w(112.0),
+                        .w(METRICS.fact_label_w),
                 )
                 .child(
                     text(value)

@@ -241,6 +241,8 @@ struct DictationSettingsPage: View {
                         .padding(.top, 2)
                         .padding(.bottom, 14)
                 }
+
+                HexWordsRows(isOn: customVocabularyOn)
             }
 
             SettingsCard {

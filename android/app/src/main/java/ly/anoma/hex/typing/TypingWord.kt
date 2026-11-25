@@ -49,6 +49,10 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
     private var previous = -1
     private var literalOnly = false
     private val taps = ArrayList<SpatialDecoder.Tap>()
+    // The same taps read on the drawn keys. Labs › Keyboard › Adaptive touch reads [taps] on your own centres once it
+    // has them ([personalized]); these decide which of its corrections space may make, and every join.
+    private val drawn = ArrayList<SpatialDecoder.Tap>()
+    private var personalized = false
     private var decision: SpatialDecoder.Decision? = null
     // The text before the word, the word before it (lowercase, null after punctuation) and
     // whether the word starts a sentence.
@@ -70,14 +74,16 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
      * predictions lowercase; your own words and shortcuts keep theirs. */
     var addsCapitals = true
     /** English's word list standing in for a dictation language with no layout or typing model of its own
-     * (Português, Nederlands, Polski, Русский): the keys' geometry and your personal dictionary still work,
+     * (Nederlands, Polski, Русский): the keys' geometry and your personal dictionary still work,
      * but the model's completions, next words, autocorrection, tap correction and emoji keywords are English's
      * and stay off. */
     var standIn = false
+    /** Labs › Keyboard › Adaptive touch while it is on: taps are read on your own key centres once it has them. */
+    var adaptive: AdaptiveTouch? = null
     /** Starts a word after `before`. The word a space just finished stays revisable only when
      * `before` is still the text it left; an empty `before` keeps it for the next call. */
     fun reset(before: String = "") {
-        token = ""; taps.clear(); decision = null; literalOnly = false
+        token = ""; taps.clear(); drawn.clear(); personalized = false; decision = null; literalOnly = false
         this.before = before
         previousText = previousWord(before).takeIf { it.isNotEmpty() }
         previous = model.context(previousText.orEmpty())
@@ -232,17 +238,41 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
     private fun shown(word: String) = matchCase(token, if (token.firstOrNull()?.isUpperCase() == true) word else displayed(word))
     fun letter(text: String, x: Double, y: Double, grid: KeyGrid) {
         token += text; decision = null
-        if (spatial && !literalOnly && taps.size < MAX_LENGTH) taps.add(decoder.score(grid, x, y))
+        if (spatial && !literalOnly && taps.size < MAX_LENGTH) {
+            val tap = decoder.score(grid, x, y)
+            val personal = adaptive?.personal(grid)
+            taps.add(if (personal != null) decoder.score(personal, x, y) else tap)
+            drawn.add(tap)
+            if (personal != null) personalized = true
+        }
     }
     fun explicit(text: String) {
-        token += text; taps.clear(); decision = null; literalOnly = true
+        token += text; taps.clear(); drawn.clear(); decision = null; literalOnly = true
     }
     fun pop() {
         if (token.isEmpty()) return
-        if (taps.size == token.length) taps.removeAt(taps.lastIndex)
+        if (taps.size == token.length) { taps.removeAt(taps.lastIndex); drawn.removeAt(drawn.lastIndex) }
         token = token.dropLast(1); decision = null
     }
-    private fun decision() = decision ?: decoder.decide(lookup(token.lowercase()), taps, previous, suggestSwearWords).also { decision = it }
+    private fun decision() = decision ?: guarded(decoder.decide(lookup(token.lowercase()), taps, previous, suggestSwearWords))
+        .also { decision = it }
+    // Adaptive touch's centres rank the readings, but space corrects a word only when the drawn centres would correct it
+    // too, and puts in their reading unless yours also clears their margin: never a correction the keyboard wouldn't make
+    // without them. Stricter than iPhone's AutocorrectEngine.decoderBaselineKeys, whose margin check alone let a reading
+    // the drawn centres never consider change a word they leave ("sun" to "su", "Mary" to "Matt" in the gate).
+    private fun guarded(personal: SpatialDecoder.Decision): SpatialDecoder.Decision {
+        val replace = personal.replace
+        if (!personalized || replace == null || adaptive?.guards == false) return personal
+        val typed = lookup(token.lowercase())
+        val own = decoder.decide(typed, drawn, previous, suggestSwearWords).replace
+        val kept = when {
+            own == null -> null
+            own.equals(replace, ignoreCase = true) -> replace
+            decoder.replaces(replace, typed, drawn, previous, suggestSwearWords) == true -> replace
+            else -> own
+        }
+        return if (kept == replace) personal else SpatialDecoder.Decision(kept, personal.readings)
+    }
     // Your own words are always yours to offer, as iOS offers UILexicon terms.
     private fun blocked(spelling: String) = model.neverSuggest.blocks(lookup(spelling.lowercase()), suggestSwearWords, previous) &&
         decoder.personal?.owns(spelling) != true
@@ -389,10 +419,11 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         finished = null; pending = null
         if (standIn || token.isEmpty() || (ending == '.' && token.lowercase() in abbreviations)) return null
         var result: Correction? = null
-        if (word?.taps != null && word.space != null && spatial && !literalOnly && taps.size == token.length &&
+        // Joins read the taps on the drawn keys alone: Adaptive touch never joins two words its own way.
+        if (word?.taps != null && word.space != null && spatial && !literalOnly && drawn.size == token.length &&
             listOf(word.typed, token).none { it.lowercase() in shorthand || decoder.personal?.owns(it) == true }) {
             val prev = previousWord(before.dropLast(word.text.length + 1)).takeIf { it.isNotEmpty() }
-            decoder.merge(word.typed.lowercase(), word.taps, word.space, word.reach, token.lowercase(), taps,
+            decoder.merge(word.typed.lowercase(), word.taps, word.space, word.reach, token.lowercase(), drawn,
                 model.context(prev.orEmpty()), knows(word.typed), knows(token), suggestSwearWords)?.let { merged ->
                 result = Correction(word.text + " " + token, matchCase(word.typed, merged))
             }
@@ -401,8 +432,10 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
             val fix = replacement()
             val now = fix ?: token
             // A word typed or corrected with an apostrophe is left as it is, whether that apostrophe
-            // is straight or the smart ’ (Labs › Keyboard › Smart quotes).
-            val revised = if (word != null && '\'' !in lookup(word.typed)) revision(word.text, now) else null
+            // is straight or the smart ’ (Labs › Keyboard › Smart quotes), and so is a Portuguese word
+            // typed with an accent held for it.
+            val revised = if (word != null && '\'' !in lookup(word.typed) &&
+                !ContextWords.keepsTypedAccent(model.language, word.typed)) revision(word.text, now) else null
             if (fix != null || revised != null)
                 result = Correction((if (revised != null) word!!.text + " " else "") + token, (revised?.let { "$it " } ?: "") + now)
         }
@@ -439,7 +472,7 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         val text = after.dropLast(1).takeLastWhile { it.isLetter() || it == '\'' || it == '\u2019' }
         if (text.isEmpty()) return
         val sameLetters = text.count { it != '\'' && it != '\u2019' } == token.length
-        val wordTaps = if (sameLetters && spatial && !literalOnly && taps.size == token.length) ArrayList(taps) else null
+        val wordTaps = if (sameLetters && spatial && !literalOnly && drawn.size == token.length) ArrayList(drawn) else null
         val spaceTap = if (wordTaps != null && space != null && grid != null) decoder.score(grid, space.x, space.y) else null
         val reach = if (spaceTap != null) decoder.rowCost(grid!!, space!!.x, space.y) else Double.POSITIVE_INFINITY
         pending = Finished(text, if (sameLetters) token else text, wordTaps, spaceTap, reach, after)
@@ -466,14 +499,14 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         // the commonest words for next-word slots the model can't fill.
         private val sentenceStarters = mapOf("en" to listOf("I", "the", "I'm"), "es" to listOf("yo", "el", "la"),
             "de" to listOf("ich", "das", "die"), "nb" to listOf("jeg", "det", "vi"), "fr" to listOf("je", "le", "la"),
-            "it" to listOf("io", "il", "la"))
+            "it" to listOf("io", "il", "la"), "pt" to listOf("eu", "o", "a"))
         private val clauseStarters = mapOf("en" to listOf("I", "but", "and"), "es" to listOf("que", "pero", "y"),
             "de" to listOf("und", "aber", "ich"), "nb" to listOf("og", "men", "jeg"), "fr" to listOf("et", "mais", "je"),
-            "it" to listOf("e", "ma", "che"))
+            "it" to listOf("e", "ma", "che"), "pt" to listOf("e", "mas", "que"))
         private val commonWords = mapOf("en" to listOf("the", "to", "and", "a", "I", "of"),
             "es" to listOf("de", "que", "y", "la", "el", "en"), "de" to listOf("und", "die", "der", "ich", "ist", "das"),
             "nb" to listOf("og", "i", "det", "er", "på", "som"), "fr" to listOf("de", "la", "et", "le", "je", "à"),
-            "it" to listOf("di", "e", "che", "la", "il", "a"))
+            "it" to listOf("di", "e", "che", "la", "il", "a"), "pt" to listOf("de", "a", "o", "que", "e", "em"))
         private val midSentenceMarks = ",;:)\"'\u201D\u2019\u2014"
         /** The word right before the cursor, or null inside a handle, path, address or number. */
         fun currentToken(before: CharSequence): String? {

@@ -302,7 +302,15 @@ On Windows                               // capture.windows
     cross-compiling (`cargo xwin clippy`, x86_64 and aarch64); never run on
     a Windows machine
 
-Settings › Annotate                      // capture.pane
+Annotate pane                            // capture.pane
+├── Header switch: `Annotations | Settings` (`Captures | Settings` while Labs ›
+│   Screenshots is on; hidden while both Annotate and Screenshots are off),
+│   matching Meetings' `Recordings | Settings` segmented switch. There is no
+│   separate Captures sidebar item
+│   ├── Annotations / Captures tab -> past annotations (and Screenshots shots /
+│   │   recordings while that Lab is on) from the last 30 days, searchable with
+│   │   Copy, Show in Finder, and two-step Move to Trash (rune_ui::captures)
+│   └── Settings tab ->
 ├── Annotate (capture.enabled, default on) -> off: no host, shortcut,
 │   input, retention, or folder, and the pane shows only the top card. On
 │   (with shortcuts), its second line names the bound shortcut ("Tap ⌥⇧S,
@@ -350,6 +358,10 @@ Settings › Annotate                      // capture.pane
 │   │   windows and a recording capture
 │   └── Replay last 15 s (capture.replay_hotkey, when Labs › Annotate last
 │       15 seconds is on)
+├── macOS menu bar (`macos_rune/status_item.rs`) -> `Annotate` (showing the
+│   saved shortcut, e.g. `⌥⇧S`, or `Stop Annotating` while recording) beside
+│   Paste Last Dictation whenever `capture.enabled` is on and Scrawl.app is not
+│   running; clicking toggles recording just like `hex annotate toggle`
 ├── Scrawl.app running -> "Scrawl is running" card + Use Hex for captures
 │   └── Click -> asks Scrawl to quit (nothing else quits it); Hex takes the
 │       shortcut within 2 s of Scrawl leaving
@@ -614,13 +626,17 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   "Try again" (never offers Paste) and Inspect
 │   ├── Saved with a suggestion (`Route::Guess`, default `list` flow) ->
 │   │   compact bar: `[thumb] Copied  [→ X  ⌄]  ✕` (one unified split-chip fill,
-│   │   no divider; clicking left sends to X at once, `⌄` opens the searchable
-│   │   Send-to list whose footer carries `All rules…` opening Settings › Annotate ›
-│   │   Auto-send rules). Nothing sends until picked; `Shift`-click in the list
-│   │   still saves a rule.
+│   │   no divider; clicking left sends to X at once, `⌄` or pressing the Annotate
+│   │   shortcut again opens the searchable Send-to list whose footer carries
+│   │   `All rules…` opening Settings › Annotate › Auto-send rules). Once search
+│   │   is already open, pressing the shortcut again starts a new recording.
+│   │   Clipboard-only (no sessions) and unreachable capsules never claim the
+│   │   shortcut. Nothing sends until picked; `Shift`-click in the list still
+│   │   saves a rule.
 │   ├── Queued (`RouteDelivery::Queued`) -> `[thumb] Queued  [⏱ X  ⌄]  ✕`
 │   │   naming the target session, with the hover tooltip carrying `why`, and `⌄`
-│   │   opening the Send-to list to redirect or `Cancel send`
+│   │   or pressing the Annotate shortcut again opening the Send-to list to
+│   │   redirect or `Cancel send`
 │   ├── Post-send `Always…` configurator -> on a manual send without an existing
 │   │   rule (`[thumb] Sent to X  [Always…]  [Undo]  ✕`), clicking `Always…`
 │   │   pauses dismiss/countdown and opens an inline popover under the capsule:
