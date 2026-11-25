@@ -171,6 +171,14 @@
     <string name="voice_only_detail">让你从其他键盘切换到 Hex 只做听写，说完再切换回去</string>
     <string name="hex_key_left">Hex 键放在左侧</string>
     <string name="hex_key_left_detail">把按住说话的 Hex 键移到建议栏的左端</string>
+    <string name="key_colors">按键颜色</string>
+    <string name="key_color">颜色</string>
+    <string name="key_color_black">黑色</string>
+    <string name="key_color_white">白色</string>
+    <string name="key_color_navy">海军蓝</string>
+    <string name="key_color_forest">森林绿</string>
+    <string name="key_color_ember">余烬</string>
+    <string name="key_color_burgundy">勃艮第红</string>
     <!-- Hex 词汇文件与自定词汇的“词语替换”（docs/specs/hex-words.md）。 -->
     <string name="words_open_label">添加到 Hex</string>
     <string name="words_replacements">词语替换</string>

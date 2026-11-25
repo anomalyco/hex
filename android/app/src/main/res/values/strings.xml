@@ -186,6 +186,15 @@
     <string name="voice_only_detail">Lets you switch to Hex just to dictate from another keyboard, then switches back</string>
     <string name="hex_key_left">Hex key on the left</string>
     <string name="hex_key_left_detail">Moves the Hex key you hold to talk to the left end of the suggestion strip</string>
+    <!-- Labs › Keyboard › Key colors, iPhone Hex's words. -->
+    <string name="key_colors">Key colors</string>
+    <string name="key_color">Color</string>
+    <string name="key_color_black">Black</string>
+    <string name="key_color_white">White</string>
+    <string name="key_color_navy">Navy</string>
+    <string name="key_color_forest">Forest</string>
+    <string name="key_color_ember">Ember</string>
+    <string name="key_color_burgundy">Burgundy</string>
     <!-- Hex words files and Custom vocabulary's Word replacements (docs/specs/hex-words.md). -->
     <string name="words_open_label">Add to Hex</string>
     <string name="words_replacements">Word replacements</string>

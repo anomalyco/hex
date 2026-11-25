@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import ly.anoma.hex.diagnostics.DiagnosticsPage
 import ly.anoma.hex.feedback.Feedback
 import ly.anoma.hex.feedback.FeedbackForm
+import ly.anoma.hex.keyboard.KeyColor
 import ly.anoma.hex.keyboard.VoiceOnly
 import ly.anoma.hex.keyboard.KeyboardHeight
 import ly.anoma.hex.speech.*
@@ -62,9 +63,9 @@ private enum class Page(val title: Int) {
     Styles(R.string.settings_style),
     Policy(R.string.settings_privacy_policy), Licences(R.string.settings_licences), Licence(R.string.settings_licences),
     Feedback(R.string.feedback_send_feedback), Diagnostics(R.string.diagnostics),
-    Replacements(R.string.words_replacements), WordsFile(R.string.words_file);
+    Replacements(R.string.words_replacements), WordsFile(R.string.words_file), KeyColors(R.string.key_color);
     val parent get() = when (this) {
-        Diagnostics -> Labs
+        Diagnostics, KeyColors -> Labs
         Language, Styles, Replacements, WordsFile -> Dictation
         Layout, Height -> Keyboard
         Policy, Licences -> Privacy
@@ -170,6 +171,8 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val hexKeyLeft = remember(revision) { typing.hexKeyLeft }
     // Labs › Dictate from Quick Settings is the tile service's enabled state, not a preference.
     var quickDictation by remember { mutableStateOf(QuickDictation.enabled(context)) }
+    val keyColors = remember(revision) { typing.keyColors }
+    val keyColor = remember(revision) { typing.keyColor }
     // A hidden field or leaving Labs shows the saved line again, never an unsaved draft.
     LaunchedEffect(page, signature) { if (page != Page.Labs || !signature) signatureDraft = speech.signatureText }
     LaunchedEffect(page, learnFixes) { if (page != Page.Labs || !learnFixes) forgetting = false }
@@ -552,6 +555,15 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 // Labs › Keyboard › Hex key on the left: off, the Hex key stays at the strip's right end.
                                 Toggle(stringResource(R.string.hex_key_left), stringResource(R.string.hex_key_left_detail),
                                     hexKeyLeft) { typing.hexKeyLeft = it }
+                                Rule()
+                                // Labs › Keyboard › Key colors: iPhone Hex's key themes, the keys only. Off, the keys are
+                                // Automatic's whatever Color says; the choice is kept for the next time it is on.
+                                Toggle(stringResource(R.string.key_colors), null, keyColors) { typing.keyColors = it }
+                                if (keyColors) {
+                                    Rule()
+                                    Entry(stringResource(R.string.key_color), value = stringResource(keyColor.label),
+                                        action = { open(Page.KeyColors) })
+                                }
                             }
                             // Hex Preview and debug builds only.
                             if (BuildConfig.DIAGNOSTICS) {
@@ -569,6 +581,12 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                         KeyboardHeight.entries.forEachIndexed { i, it ->
                             if (i != 0) Rule()
                             Entry(stringResource(it.label), value = if (it == height) "✓" else "", action = { typing.height = it; open(Page.Keyboard) })
+                        }
+                    }
+                    Page.KeyColors -> Card {
+                        KeyColor.entries.forEachIndexed { i, it ->
+                            if (i != 0) Rule()
+                            Entry(stringResource(it.label), value = if (it == keyColor) "✓" else "", action = { typing.keyColor = it; open(Page.Labs) })
                         }
                     }
                     Page.Styles -> Card {
@@ -662,7 +680,7 @@ private fun reflow(lines: List<String>) = buildString {
         if (action != null && value.isNotEmpty()) Label(value, muted = true, size = if (value == "›") 22 else 15)
     }
 }
-@Composable internal fun Toggle(title: String, note: String, on: Boolean, enabled: Boolean = true, noteLines: Int = 2,
+@Composable internal fun Toggle(title: String, note: String?, on: Boolean, enabled: Boolean = true, noteLines: Int = 2,
                                 change: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().toggleable(on, enabled = enabled, role = Role.Switch, onValueChange = change)
         .heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 10.dp),
