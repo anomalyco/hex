@@ -5,6 +5,8 @@
 //! for the transcriber, demos, and the replay Lab. Scrawl's own app keeps the
 //! shortcut while it runs until "Use Hex for annotations" asks it to quit.
 
+#[cfg(not(target_os = "macos"))]
+pub(super) mod folder;
 pub(super) mod routing_rules;
 
 use rune::{El, Tx, col, row, text};
@@ -207,6 +209,15 @@ fn how_it_works(ui: &Ui, p: Paint, view: &ScrawlView) -> El {
 
 fn scrawl_request(ui: &mut Ui, request: ScrawlRequest) {
     ui.ask(PlatformRequest::Scrawl(request));
+}
+
+/// macOS's host opens the chooser and saves the pick; elsewhere the window
+/// does.
+fn choose_folder(ui: &mut Ui) {
+    #[cfg(target_os = "macos")]
+    scrawl_request(ui, ScrawlRequest::ChooseFolder);
+    #[cfg(not(target_os = "macos"))]
+    folder::choose(ui);
 }
 
 /// While Scrawl's own app runs it keeps the shortcut; only this card's
@@ -431,7 +442,7 @@ fn after_rows(ui: &Ui, p: Paint, view: &ScrawlView, layer: &mut Vec<El>) -> Vec<
                     "choose-capture-folder",
                     tr("Change…"),
                     ButtonKind::Secondary,
-                    |ui: &mut Ui, _| scrawl_request(ui, ScrawlRequest::ChooseFolder),
+                    |ui: &mut Ui, _| choose_folder(ui),
                 )),
         ),
     ];
@@ -857,7 +868,11 @@ pub(super) fn poll_list(ui: &mut Ui) -> bool {
         && ui.captures.view == View::Annotations
         && has_list(ui)
         && !ui.labs_open;
-    ui.captures.poll(visible)
+    #[cfg(not(target_os = "macos"))]
+    let chosen = folder::poll(ui);
+    #[cfg(target_os = "macos")]
+    let chosen = false;
+    ui.captures.poll(visible) | chosen
 }
 
 /// The header's `Annotations | Settings` switch (or `Captures | Settings`

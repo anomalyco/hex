@@ -703,6 +703,8 @@ pub(crate) struct Ui {
     /// the hex link, read when the pane opens and after an install.
     #[cfg(hex_capture)]
     agents: scrawl::Agents,
+    #[cfg(all(hex_capture, not(target_os = "macos")))]
+    capture_folder: Option<crate::desktop::file_dialog::Pending>,
     modes: modes::ModesPane,
     output: output::OutputPane,
     picker: picker::Picker,
@@ -841,6 +843,8 @@ impl Ui {
             captures: captures::CapturesPane::default(),
             #[cfg(hex_capture)]
             agents: scrawl::Agents::default(),
+            #[cfg(all(hex_capture, not(target_os = "macos")))]
+            capture_folder: None,
             modes,
             output: output::OutputPane::default(),
             picker: picker::Picker::default(),

@@ -53,7 +53,7 @@ pub(crate) enum Target {
         filters: Vec<Filter>,
         file_name: String,
     },
-    /// A folder: the macOS meetings and annotations folders, and Labs ›
+    /// A folder: the meetings and annotations folders, and Labs ›
     /// Screenshots' saves folder.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Folder,
