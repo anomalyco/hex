@@ -1865,7 +1865,8 @@ final class DictationControllerTests: XCTestCase {
             english: Bool = true,
             limit: Int? = 177 * mb,
             unmetered: Bool? = true,
-            free: Int64? = 8_000_000_000
+            free: Int64? = 8_000_000_000,
+            mobileData: Bool = false
         ) -> KeyboardParakeetDownload.Hold? {
             let plan = KeyboardParakeetPlan.resolve(
                 isEnabled: true,
@@ -1877,7 +1878,7 @@ final class DictationControllerTests: XCTestCase {
                 v2Downloaded: false,
                 ultraDownloaded: false
             )
-            return KeyboardParakeetDownload.hold(plan: plan, unmetered: unmetered, freeBytes: free)
+            return KeyboardParakeetDownload.hold(plan: plan, unmetered: unmetered, freeBytes: free, mobileData: mobileData)
         }
         XCTAssertNil(hold(), "an iPhone 17 Pro on Wi-Fi with room")
         XCTAssertEqual(hold(english: false), .notEnglish)
@@ -1889,6 +1890,49 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(hold(unmetered: nil), .notOnWiFi, "before the connection is known")
         XCTAssertEqual(hold(free: 1_500_000_000), .needsSpace)
         XCTAssertNil(hold(free: nil), "space iOS doesn't report doesn't hold it")
+        // Use mobile data, tapped beside "Downloads on Wi-Fi.": any connection, nothing else waived.
+        XCTAssertNil(hold(unmetered: false, mobileData: true), "Use mobile data starts it on cellular")
+        XCTAssertNil(hold(unmetered: nil, mobileData: true))
+        XCTAssertEqual(hold(unmetered: false, free: 1_500_000_000, mobileData: true), .needsSpace)
+        XCTAssertEqual(hold(english: false, unmetered: false, mobileData: true), .notEnglish)
+    }
+
+    /// Settings › Dictation › Model: both models' downloads start by themselves only on Wi-Fi
+    /// (TestFlight build 151: Multilingual started a 632 MB download over mobile data the moment
+    /// it was picked, while English waited for Wi-Fi). Use mobile data is one decision for that
+    /// model's download, kept until it is on the iPhone; picking the other model asks again.
+    func testSpeechModelDownloadsWaitForWiFiUnlessMobileDataIsAllowedForThatModel() {
+        let network = SpeechModelDownloadNetwork(defaults: defaults, isUnmetered: nil, watchesConnection: false)
+        var reports: [Bool] = []
+        network.observe { reports.append($0) }
+        XCTAssertFalse(network.mayDownload(.english), "before the connection is known")
+        XCTAssertFalse(network.mayDownload(.multilingual))
+
+        network.report(unmetered: false)
+        XCTAssertFalse(network.mayDownload(.english), "cellular, a hotspot or Low Data Mode")
+        XCTAssertFalse(network.mayDownload(.multilingual))
+
+        network.allowMobileData(for: .multilingual)
+        XCTAssertTrue(network.mayDownload(.multilingual), "Use mobile data")
+        XCTAssertFalse(network.mayDownload(.english), "only for that model")
+        XCTAssertTrue(
+            SpeechModelDownloadNetwork(defaults: defaults, watchesConnection: false).usesMobileData(for: .multilingual),
+            "kept for a download Hex picks up at the next launch"
+        )
+        network.forgetMobileData(for: .english)
+        XCTAssertTrue(network.usesMobileData(for: .multilingual), "English finishing leaves Multilingual's alone")
+        network.forgetMobileData(for: .multilingual)
+        XCTAssertFalse(network.mayDownload(.multilingual), "on the iPhone: the next download asks again")
+
+        network.allowMobileData(for: .english)
+        network.forgetMobileData()
+        XCTAssertFalse(network.mayDownload(.english), "the other model picked: asks again")
+
+        network.report(unmetered: true)
+        network.report(unmetered: true)
+        XCTAssertTrue(network.mayDownload(.english), "on Wi-Fi both start at once")
+        XCTAssertTrue(network.mayDownload(.multilingual))
+        XCTAssertEqual(reports, [false, true], "each change told once")
     }
 
     func testHomesSpeechModelCardShowsOnlyWhereTheKeyboardWouldUseItAndStaysDismissed() {
@@ -1982,6 +2026,77 @@ final class DictationControllerTests: XCTestCase {
 
         XCTAssertTrue(ParakeetUltraModel.isDownloaded(in: model.folder, files: model.files))
         XCTAssertEqual(UltraStubProtocol.requested.first ?? nil, "bytes=1000-", "resumed with a range")
+    }
+
+    /// Multilingual picked off Wi-Fi: nothing downloads, the line says it waits for Wi-Fi, and
+    /// Use mobile data starts it now. On Wi-Fi it starts at once, as before.
+    func testTheMultilingualDownloadWaitsForWiFiAndUseMobileDataStartsIt() async throws {
+        let model = try UltraStubModel()
+        defer { model.remove() }
+        let network = SpeechModelDownloadNetwork(defaults: defaults, isUnmetered: false, watchesConnection: false)
+        let download = model.download()
+        download.mayDownload = { network.mayDownload(.multilingual) }
+        network.observe { _ in download.connectionChanged() }
+
+        download.start()
+        XCTAssertEqual(download.state, .waitingForWiFi(0))
+        XCTAssertEqual(download.status, "Downloads on Wi-Fi.")
+        XCTAssertNil(download.fraction)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertTrue(UltraStubProtocol.requested.isEmpty, "nothing requested over mobile data")
+
+        network.allowMobileData(for: .multilingual)
+        download.start()
+        try await waitUntil { download.state == .loading }
+        XCTAssertTrue(ParakeetUltraModel.isDownloaded(in: model.folder, files: model.files))
+
+        // On Wi-Fi: at once, with no Use mobile data.
+        let wifi = SpeechModelDownloadNetwork(defaults: defaults, isUnmetered: true, watchesConnection: false)
+        wifi.forgetMobileData()
+        ParakeetUltraModel.remove(from: model.folder)
+        let again = model.download()
+        again.mayDownload = { wifi.mayDownload(.multilingual) }
+        again.start()
+        guard case .downloading = again.state else { return XCTFail("\(again.state)") }
+        try await waitUntil { again.state == .loading }
+    }
+
+    /// A download waiting for Wi-Fi starts by itself when Wi-Fi comes back; one running on Wi-Fi
+    /// that loses it stops where it is (its files resume) and waits, unless Use mobile data was
+    /// tapped for it; and picking the other model mid-wait asks again.
+    func testAMultilingualDownloadFollowsWiFiComingAndGoing() async throws {
+        let model = try UltraStubModel()
+        defer { model.remove() }
+        UltraStubProtocol.script([.hang(800), .serve])
+        let network = SpeechModelDownloadNetwork(defaults: defaults, isUnmetered: false, watchesConnection: false)
+        let download = model.download(stallLimit: .seconds(30))
+        download.mayDownload = { network.mayDownload(.multilingual) }
+        network.observe { _ in download.connectionChanged() }
+
+        download.start()
+        XCTAssertTrue(download.isWaitingForWiFi)
+        network.report(unmetered: true)
+        try await waitUntil { ParakeetUltraModel.bytesOnDisk(in: model.folder, files: model.files) == 800 }
+        XCTAssertTrue(download.isRunning, "Wi-Fi came back: started by itself")
+
+        network.report(unmetered: false)
+        try await waitUntil { download.isWaitingForWiFi }
+        XCTAssertFalse(download.isRunning, "off Wi-Fi: stopped")
+        XCTAssertEqual(download.state, .waitingForWiFi(800), "what's on disk stays for Wi-Fi")
+        XCTAssertNotNil(download.fraction)
+
+        network.allowMobileData(for: .multilingual)
+        download.connectionChanged()
+        try await waitUntil { download.state == .loading }
+        XCTAssertEqual(UltraStubProtocol.requested.last ?? nil, "bytes=800-", "resumed from the partial file")
+        network.report(unmetered: true)
+        network.report(unmetered: false)
+        XCTAssertEqual(download.state, .loading, "Use mobile data: carries on until done, Wi-Fi or not")
+
+        // Picking English mid-wait forgets Use mobile data: English waits for Wi-Fi too.
+        network.forgetMobileData()
+        XCTAssertFalse(network.mayDownload(.english))
+        XCTAssertFalse(network.mayDownload(.multilingual), "and Multilingual, picked again, asks again")
     }
 
     func testAMultilingualDownloadThatDropsOrStallsTriesAgainFromWhereItWas() async throws {

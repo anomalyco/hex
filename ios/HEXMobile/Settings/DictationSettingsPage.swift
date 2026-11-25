@@ -270,7 +270,8 @@ struct DictationSettingsPage: View {
                         MultilingualModelStatus(
                             download: dictation.multilingualDownload,
                             retry: { dictation.retryMultilingualParakeet() },
-                            turnOff: { SpeechModelChoice.english.select(); speechModel = .english }
+                            turnOff: { SpeechModelChoice.english.select(); speechModel = .english },
+                            useMobileData: { dictation.useMobileDataForMultilingualParakeet() }
                         )
                         .padding(.horizontal, 12)
                         .padding(.bottom, 12)
@@ -278,7 +279,11 @@ struct DictationSettingsPage: View {
                 }
 
                 if keyboardParakeet {
-                    KeyboardParakeetStatus(download: KeyboardParakeetDownload.shared, multilingual: speechModel == .multilingual)
+                    KeyboardParakeetStatus(
+                        download: KeyboardParakeetDownload.shared,
+                        multilingual: speechModel == .multilingual,
+                        offersMobileData: true
+                    )
                         .padding(.horizontal, 12)
                         .padding(.bottom, 12)
                 }
