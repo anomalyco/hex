@@ -287,11 +287,15 @@ struct DictationSettingsPage: View {
                         .padding(.horizontal, 12)
                         .padding(.bottom, 12)
                 }
+            }
+            .id(Self.speechModelRow)
 
+            // Keep mic warm and the microphone itself, apart from the speech model.
+            SettingsSectionHeader(title: "Microphone")
+
+            SettingsCard {
                 // Hidden where the keyboard dictates by itself and it would say Off.
                 if keepsWarmRow || dictation.showsKeepMicWarm {
-                    SettingsDivider()
-
                     HStack(spacing: 12) {
                         SettingsRowLabel(title: String(localized: "Keep mic warm"))
                         Spacer(minLength: 8)
@@ -309,9 +313,9 @@ struct DictationSettingsPage: View {
                     }
                     .padding(.horizontal, 16)
                     .frame(minHeight: 50)
-                }
 
-                SettingsDivider()
+                    SettingsDivider()
+                }
 
                 // With a car, headset or headphones connected (`MicrophoneRoute`).
                 HStack(spacing: 12) {
@@ -340,7 +344,6 @@ struct DictationSettingsPage: View {
                 .padding(.vertical, 10)
                 .frame(minHeight: 50)
             }
-            .id(Self.speechModelRow)
         }
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: customVocabularyOn)
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: showsStyleFormatting)
