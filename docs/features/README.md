@@ -3030,7 +3030,20 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   its nine accented vowels held on a e i o u (á é í ó ö ő ú ü ű), the iPhone's `hu`
 │   dictionary behind its autocorrect (a missing accent is the cheapest fix, "koszonom" →
 │   "köszönöm", while a word of its own such as "meg" keeps its spelling), English as its
-│   bilingual partner through the Latin-script rule, and no typing (spatial) model
+│   bilingual partner through the Latin-script rule, and no typing (spatial) model.
+│   Svenska is a normal language too: Apple's "QWERTY-Swedish-Finnish" (å ending row 1, ö ä
+│   row 2), Apple's Swedish holds (Ø on Ö, Æ on Ä, kr on $), ” and ’ opening and closing
+│   quotes, the iPhone's `sv` dictionary behind autocorrect ("kottbullar" → "köttbullar"),
+│   sv-SE dictation through `DictationTranscriber`, and no typing model.
+│   Slovenčina is a normal language too: Czech's keys (Apple's Slovak keyboard uses its
+│   "Czech-Slovak" layouts), its ´ and ˇ accenting the letter before them (ˇ after u types
+│   itself), Apple's Slovak holds (ô ó on O, á ä on A, ľ ĺ on L), the iPhone's `sk`
+│   dictionary behind autocorrect where it has one, else nothing changed or suggested, and
+│   no typing model.
+│   Dutch (Nederlands) is one too: QWERTY on the English letters with Apple's Dutch held
+│   accents (ë ï é ó and the rest, j́ on J, no ĳ), AZERTY and QWERTZ offered, the iPhone's
+│   `nl` dictionary behind its autocorrect, English as its bilingual partner, and no typing
+│   model, so no spatial autocorrect or swipe typing in Dutch
 ├── Korean keyboard (두벌식) (off by default, `experiments.koreanKeyboard`): Settings ›
 │   Experiments adds 한국어 to Settings › Keyboard › Languages, typed on the standard two-set
 │   rows (ㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔ / ㅁㄴㅇㄹㅎㅗㅓㅏㅣ / ㅋㅌㅊㅍㅠㅜㅡ, shift's ㅃㅉㄸㄲㅆ and ㅒㅖ, no
@@ -3479,6 +3492,37 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
     than the next reading, and what's left is ordinary text. Held, Delete repeats letter by letter
     from the first; its slide still selects whole words. Off, Delete takes the word back as before
     (`SwipeText.takesBack`).
+├── Labs > Keyboard > Adaptive touch (off) -> iPhone Hex's experiment (#2146) on Android: the keyboard
+    learns where you land on each letter key, on this phone, and the decoder reads your taps with
+    those centres once it has 400 labelled taps over three sessions and they fit your recent taps
+    better than the drawn ones (`typing/AdaptiveTouch.kt`). Keycaps, touch areas, the likelier next
+    letter and swipes never move. A tap teaches only when the words around it show the letter meant:
+    a word left as typed (only letters the key under the finger typed), a pick of the same length, a
+    word kept over an autocorrection by undoing it or tapping it, a letter erased and retyped as a
+    neighbour. Never an autocorrection, a swipe, a slide, a held accent, or a field that takes no
+    corrections or asks not to be learned from, and only with Autocorrect and Spatial autocorrect on
+    and the layout's own model. Space corrects a word only when the drawn centres would correct it too
+    (`TypingWord.guarded`, stricter than iPhone's), and joins read the drawn taps. Each key plane (the
+    keyboard's width in 10 dp steps, orientation, the number row, the letters) learns apart, and a fit
+    check goes back to the drawn centres at once when the grip changes, keeping two grips per plane.
+    It keeps sums per key, no letters, words, times or order of taps: a 23,588-byte table, one Base64
+    value in the private `adaptiveTouch` SharedPreferences (never backed up), saved every 400 labels
+    and when the keyboard hides. The row shows "Learning: n of 400 taps" or "Active", and a confirmed
+    Reset touch learning while anything is stored, lab on or off; Delete what Hex learned clears it
+    too. Off, the keyboard makes no learner and types exactly as before.
+    Checks: `./gradlew --no-daemon :app:testDebugUnitTest -x prepareSpeechModel` passed 310 tests,
+    `AdaptiveTouchTest`'s 11 among them, on 2026-11-24; `android/benchmark/typing/quality-gate.py all
+    --adaptive` (README > Adaptive touch): identical before it learns, 1-4% fewer word errors for
+    typists who aim off the centres, never more correct words changed. On the Studio's API 35 Pixel 8
+    emulator (2026-11-24, reading the table back through run-as after each step): words left as typed,
+    a strip pick of the same length, what was typed tapped over the fix, an undone fix and a letter
+    retyped as a neighbour each teach as above; password and no-suggestion fields teach nothing; the
+    table is saved when the keyboard hides and gone after Reset touch learning and after Delete what
+    Hex learned; landscape, the number row and AZERTY each learn their own key plane, and portrait
+    takes its own back; with the switch off nothing learns and the table stays. To reach Active, the
+    table was seeded through run-as as the unit tests seed it. With it on, English, French and
+    Portuguese text typed off the centres came out as with it off. Not tried on a real device; the
+    time per letter is not yet measured.
 ├── Labs > Keyboard > Password manager suggestions (off) -> while Android's autofill service —
     Bitwarden, 1Password or Google Password Manager, which must itself support Android 11's inline
     suggestions — offers logins, one-time codes or cards for the focused field, its own chips take
@@ -3521,6 +3565,37 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
     build-tools 36.0.0, NDK 27.2.12479018); `VoiceOnlyTest` covers the bar-or-keyboard and restart
     decisions, `python3 scripts/code-shape.py --check` and `git diff --check` pass, and the repo has
     no Android CI; nothing was tried on a device or emulator.
+├── Dictation > Custom vocabulary (off) > Word replacements and Words file -> the Android side of
+│   Hex words files (`.hexwords`, [docs/specs/hex-words.md](../specs/hex-words.md)). Everything sits
+│   behind the existing Custom vocabulary switch: off, dictation, Settings and the keyboard are as
+│   before, and only a file that arrives from another app reaches the review sheet, which then offers
+│   its own Turn on Custom vocabulary switch (off until tapped). Word replacements are a list the
+│   person edits (heard words -> what to write, at most 1,000, the file's limits, no empty or blank
+│   outputs yet), kept in the `speech` preferences as one escaped line each and applied to
+│   dictations before learned fixes with `DictationFixes`' whole-word, case-following rules and up to
+│   8 heard words; a learned fix for the same heard words is left out, and learned fixes themselves are
+│   never changed. A translated dictation gets neither. `ly.anoma.hex.words` holds a strict JSON
+│   parser of its own (the check pass and parser in one walk), the reader, the phone merge and the
+│   writer. `WordsActivity` (exported, Android's VIEW filter on `content` and its SEND filter, the
+│   spec's three MIME types, no BROWSABLE, no new permission) and Settings > Custom vocabulary > Words
+│   file > Open a words file... (`ACTION_OPEN_DOCUMENT`, `*/*`) read a content address only, through
+│   a private copy in the cache (at most 8 MiB + 1 byte) deleted after Add, Cancel or a refusal, with
+│   no persistable permission. The sheet shows the file's claimed maker, what each part adds and
+│   already has, each clash (Keep mine by default, Use this one), what this phone can't use by reason
+│   and what the file skipped by reason, a switch per part, and a refusal as one sentence; file text
+│   is plain, shortened to 64 characters and direction-isolated. Add saves an Undo copy of both lists
+│   and the switch in the preferences, offered in the confirmation and as Undo last import until either
+│   list is edited or another file is imported. Export (Share... through a `FileProvider` on
+│   `cache/words-out`, and Save to... with `ACTION_CREATE_DOCUMENT`) writes `hex-words.hexwords`:
+│   the terms, the Word replacements and, with Include fixes Hex learned (off; shown only while
+│   Labs > Learn from my fixes has fixes in use), the fixes in use marked `learned`. Checks:
+│   `HexWordsCasesTest` runs the shared cases from `tests/fixtures/hex-words` (a test resource
+│   folder): all 54 read cases, the 11 phone merge cases with an Undo round trip, and the 2 phone
+│   write cases with a schema check; the desktop merge and write cases don't apply to a phone.
+│   `DictationLearningTest` covers Word replacements' order, matching and limits. `./gradlew
+│   --no-daemon --offline :app:testDebugUnitTest -x prepareSpeechModel` passed 299 tests on
+│   2026-11-24 on anomastudio (OpenJDK 21, Android SDK 36). Nothing was tried on a device or emulator
+│   yet; the repo has no Android CI.
 └── Labs > Dictation > Learn from my fixes (off) -> an Android-only port of iPhone Hex's dictation
     correction learning, with no typing side. Off, the keyboard tracks nothing, applies nothing and
     adds no hints. On, each keyboard dictation in a non-secure words field that the field lets Hex

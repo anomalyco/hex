@@ -542,7 +542,7 @@ class InsertionTest {
         assertEquals(DictationLanguage.Portuguese, DictationLanguage.automatic(null, listOf("pt")))
         assertEquals(DictationLanguage.Portuguese, DictationLanguage.automatic(null, listOf("pt", "en")))
         assertEquals(DictationLanguage.Portuguese, DictationLanguage.matching("pt"))
-        assertEquals(null, DictationLanguage.Portuguese.layout)
+        assertEquals(Spoken.Portuguese, DictationLanguage.Portuguese.layout)
         fun format(text: String, style: Style) = SpokenText.format(text, SpeechOptions(style, DictationLanguage.Portuguese,
             clean = true, translate = false, formatLists = true, spokenPunctuation = true))
         // English cleanup would drop "um" (a filler there, "a" here) and read "no" as a correction.
@@ -575,9 +575,10 @@ class InsertionTest {
         assertEquals("Москва большая", SpokenText.continuing("Москва большая", "и", "ru"))
     }
     @Test fun aDictationLanguageWithoutItsOwnLayoutHasNoTypingModel() {
-        // Português keeps English's keys and accents, but its typing model would be English's: until a
+        // Nederlands keeps English's keys and accents, but its typing model would be English's: until a
         // layout is pinned, English's word list only stands in for the keys' geometry and your own words.
-        assertEquals(null, typingLayout(null, DictationLanguage.Portuguese))
+        // Português has a model of its own (Brazil's).
+        assertEquals(Spoken.Portuguese, typingLayout(null, DictationLanguage.Portuguese))
         assertEquals(null, typingLayout(null, DictationLanguage.Dutch))
         assertEquals(null, typingLayout(null, DictationLanguage.Polish))
         assertEquals(null, typingLayout(null, DictationLanguage.Russian))

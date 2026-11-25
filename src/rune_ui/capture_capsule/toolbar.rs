@@ -213,14 +213,14 @@ fn island(p: Paint, s: &Toolbar) -> El {
         .hit()
 }
 
-/// The toolbar draws a step larger than the capsule: its island, buttons,
-/// and icons, in points, with the capsule's proportions.
-const ISLAND_H: f32 = 44.0;
-const ISLAND_INSET: f32 = 6.0;
-const ISLAND_PX: f32 = 5.0;
-const ISLAND_RADIUS: f32 = 16.0;
+/// The toolbar shares the capsule's geometry: 40 pt island, 14 pt shell
+/// radius, 4 pt concentric inset, and 10 pt (`radius.xl`) inner corners.
+const ISLAND_H: f32 = CAPSULE.island_h;
+const ISLAND_INSET: f32 = CAPSULE.chip_inset;
+const ISLAND_PX: f32 = CAPSULE.chip_inset;
+const ISLAND_RADIUS: f32 = CAPSULE.radius;
 const TOOL_H: f32 = ISLAND_H - 2.0 * ISLAND_INSET;
-const TOOL_RADIUS: f32 = 9.0;
+const TOOL_RADIUS: f32 = CAPSULE.inner(CAPSULE.chip_inset);
 const ICON: f32 = 18.0;
 const KIND_ICON: f32 = 16.0;
 const WAVEFORM: f32 = 16.0;
@@ -319,7 +319,7 @@ fn display_chevron(p: Paint, s: &Toolbar) -> El {
     row()
         .key("display")
         .size(16.0, SEGMENT.1)
-        .pr(5.0)
+        .pr(4.0)
         .center()
         .radius(SEGMENT_RADIUS)
         .hover(p.k.c.hover)
@@ -341,7 +341,7 @@ fn menu_button(p: Paint, key: &'static str, name: String) -> El {
     row()
         .key(key)
         .h(TOOL_H)
-        .px(7.0)
+        .px(8.0)
         .gap(4.0)
         .center_y()
         .radius(TOOL_RADIUS)
@@ -443,8 +443,8 @@ fn record(p: Paint) -> El {
         .key("record")
         .h(TOOL_H)
         .pl(12.0)
-        .pr(14.0)
-        .gap(7.0)
+        .pr(12.0)
+        .gap(8.0)
         .center_y()
         .radius(TOOL_RADIUS)
         .fill(c.bg_contrast)

@@ -464,7 +464,10 @@ pub(crate) fn show(ui: &mut Ui, destination: Destination, tx: &mut Tx) {
             ui.meetings.select(id);
         }
         #[cfg(hex_capture)]
-        Destination::RoutingRules => scrawl::routing_rules::open(ui),
+        Destination::RoutingRules => {
+            ui.captures.view = scrawl::View::Settings;
+            scrawl::routing_rules::open(ui);
+        }
         _ => {}
     }
 }
@@ -709,6 +712,8 @@ pub(crate) struct Ui {
     sound_sets: sound_sets::SoundSets,
     /// Meetings › Settings' Calls sheet and the calls Hex has seen.
     calls: calls::Calls,
+    /// Meetings › Computer audio's app and output lists (Labs).
+    meeting_audio: meetings::audio_source::Listing,
     #[cfg(hex_capture)]
     routing: scrawl::routing_rules::Routing,
     tour: Option<onboarding::Tour>,
@@ -843,6 +848,7 @@ impl Ui {
             explainer: explainer::Explainer::default(),
             sound_sets: sound_sets::SoundSets::default(),
             calls: calls::Calls::default(),
+            meeting_audio: meetings::audio_source::Listing::default(),
             #[cfg(hex_capture)]
             routing: scrawl::routing_rules::Routing::default(),
             tour: None,
@@ -1206,8 +1212,6 @@ impl Ui {
     /// Switches panes at once: the new pane replaces the old without a fade,
     /// already at rest (a grant's morph doesn't replay).
     fn select_pane(&mut self, pane: Pane, tx: &mut Tx) {
-        #[cfg(all(target_os = "macos", hex_capture))]
-        let pane = history::unified::destination(self, pane);
         let labs = std::mem::take(&mut self.labs_open);
         if self.pane == pane && !labs {
             return;
@@ -1380,7 +1384,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     );
     changed |= history::poll(ui);
     #[cfg(hex_capture)]
-    let mut changed = ui.captures.poll(ui.pane == Pane::Captures && !ui.labs_open) | changed;
+    let mut changed = scrawl::poll_list(ui) | changed;
     #[cfg(all(target_os = "macos", hex_capture))]
     {
         changed |= history::unified::poll(ui);
@@ -1403,6 +1407,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     changed |= modes::poll_chooser(ui);
     changed |= model_import::poll(ui);
     changed |= meetings::poll_import(ui);
+    changed |= meetings::audio_source::poll(ui, clock);
     changed |= vocabulary::poll(ui);
     // Labs › Screenshots' folder chooser, on macOS.
     #[cfg(all(target_os = "macos", hex_capture))]
@@ -1536,8 +1541,6 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         ),
         Pane::Modes => modes::pane(ui, p, &mut layer),
         Pane::History => history::pane(ui, p, &mut layer),
-        #[cfg(hex_capture)]
-        Pane::Captures => (Vec::new(), captures::pane(ui, p)),
         Pane::Meetings => meetings::pane(ui, p, &mut layer),
         #[cfg(hex_capture)]
         Pane::Annotate => (Vec::new(), scrawl::pane(ui, p, &mut layer)),
@@ -1570,9 +1573,12 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
             if ui.labs_open {
                 Some(labs::search_field(ui, p))
             } else {
-                (ui.pane == Pane::Meetings)
-                    .then(|| meetings::view_switch(ui, p))
-                    .flatten()
+                match ui.pane {
+                    Pane::Meetings => meetings::view_switch(ui, p),
+                    #[cfg(hex_capture)]
+                    Pane::Annotate => scrawl::view_switch(ui, p),
+                    _ => None,
+                }
             },
             actions,
         ))

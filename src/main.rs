@@ -498,6 +498,7 @@ fn main() -> Result<()> {
                 },
                 &SHUTDOWN,
                 None,
+                None,
             )
             .map(|_| ())
         }

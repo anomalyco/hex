@@ -1,0 +1,38 @@
+{
+  "format": "hex.words",
+  "version": 1,
+  "vocabulary": [
+    {
+      "term": "OpenCode",
+      "soundsLike": [
+        "open code",
+        "Open  Code",
+        "OPENCODE",
+        "open coat"
+      ]
+    },
+    {
+      "term": "opencode",
+      "soundsLike": [
+        "something new"
+      ]
+    },
+    {
+      "term": " open  code "
+    }
+  ],
+  "replacements": [
+    {
+      "heard": "jet hub",
+      "write": "GitHub"
+    },
+    {
+      "heard": "Jet  Hub",
+      "write": "Jet Hub"
+    },
+    {
+      "heard": "jet hub",
+      "write": "GitHub"
+    }
+  ]
+}

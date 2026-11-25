@@ -65,7 +65,7 @@ final class DictationSSOTTests: XCTestCase {
         XCTAssertTrue(localRoute.dictatesInPlace)
 
         // Otherwise opensHex carries the reason (or nil when unsupported).
-        for reason: KeyboardSelfDictation.Reason? in [nil, .memory, .speechModel, .multilingual, .openedHex] {
+        for reason: KeyboardSelfDictation.Reason? in [nil, .memory, .speechModel, .languageUnavailable, .openedHex] {
             let route = DictationRoute.resolve(
                 hasFullAccess: true,
                 isModelInstalled: true,
@@ -76,6 +76,69 @@ final class DictationSSOTTests: XCTestCase {
             XCTAssertEqual(route, .opensHex(reason))
             XCTAssertFalse(route.dictatesInPlace)
         }
+    }
+
+    /// From iOS 26 nothing a dictation tap does opens Hex: where the keyboard can't dictate it
+    /// says why, and only Open Hex in that line opens Hex. Before iOS 26 it opens Hex, as always.
+    func testADictationTapThatCantDictateHereSaysWhyFromiOS26AndOpensHexOnlyBefore() {
+        let routes: [(DictationRoute, KeyboardDictationBlock?)] = [
+            (.needsModel, .setUp),
+            (.opensHex(.speechModel), .speechModel(language: "de-DE")),
+            (.opensHex(.memory), .memory),
+            (.opensHex(.languageUnavailable), .languageUnavailable(language: "de-DE")),
+            (.setUp, nil),
+            (.warm, nil),
+            (.inKeyboard, nil),
+        ]
+        for (route, block) in routes {
+            XCTAssertEqual(KeyboardDictationBlock.resolve(route: route, language: "de-DE", osMajorVersion: 26), block, "\(route)")
+            XCTAssertNil(KeyboardDictationBlock.resolve(route: route, language: "de-DE", osMajorVersion: 18), "iOS 18 unchanged: \(route)")
+        }
+        XCTAssertNil(KeyboardDictationBlock.resolve(route: .opensHex(nil), language: nil, osMajorVersion: 18))
+        XCTAssertEqual(KeyboardDictationBlock.resolve(route: .opensHex(.speechModel), language: nil, osMajorVersion: 27), .speechModel(language: "en-US"))
+        XCTAssertEqual(KeyboardDictationBlock.speechModel(language: "en-US").line, "Download English in Hex to dictate")
+        XCTAssertEqual(KeyboardDictationBlock.memory.line, "Not enough memory to dictate here")
+        XCTAssertEqual(KeyboardDictationBlock.setUp.line, "Finish setting up Hex to dictate")
+        // Apple has no model for it here: downloading in Hex can't help, so no Open Hex.
+        XCTAssertEqual(KeyboardDictationBlock.languageUnavailable(language: "mt-MT").line, "Maltese isn't available on this iPhone yet")
+        XCTAssertFalse(KeyboardDictationBlock.languageUnavailable(language: "mt-MT").opensHex)
+        XCTAssertTrue(KeyboardDictationBlock.speechModel(language: "en-US").opensHex)
+    }
+
+    @MainActor
+    func testTheDictationBlockOpensHexOnlyFromItsOpenHexAndPutsItselfAway() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.operatingSystemVersion.majorVersion < KeyboardSelfDictation.firstVersion)
+        let model = KeyboardViewModel()
+        var opened: [URL] = []
+        model.onOpenURL = { opened.append($0) }
+        model.configureFixture(snapshot: .offline, now: 50_000)
+        model.automaticLanguage = "en-US"
+        model.opensHexReason = .memory
+        XCTAssertEqual(model.route, .opensHex(.memory))
+        XCTAssertFalse(model.dictationTapOpensHex)
+
+        model.dictateWhereUnavailable()
+        XCTAssertEqual(model.dictationBlock, .memory)
+        XCTAssertEqual(model.statusSlot, .dictationBlock(.memory), "the bar's line")
+        XCTAssertTrue(opened.isEmpty, "a dictation tap opens nothing")
+        model.dismissDictationBlock()
+        XCTAssertNil(model.dictationBlock, "its ✕")
+        XCTAssertTrue(opened.isEmpty)
+
+        model.dictateWhereUnavailable()
+        model.openHexForDictationBlock()
+        XCTAssertEqual(opened, [model.coldStartURL], "Open Hex records in Hex")
+        XCTAssertNil(model.dictationBlock)
+
+        // The second failure to get the speech model says so as a tap would; dictating here again puts it away.
+        model.opensHexReason = .speechModel
+        model.localDictationChanged(available: false, was: true, reason: .speechModel)
+        XCTAssertEqual(model.dictationBlock, .speechModel(language: "en-US"))
+        model.localDictationChanged(available: true, was: false, reason: nil)
+        XCTAssertNil(model.dictationBlock)
+        model.localDictationChanged(available: false, was: nil, reason: .speechModel)
+        XCTAssertNil(model.dictationBlock, "a keyboard that opens without the model says nothing until a tap")
+        XCTAssertEqual(opened.count, 1)
     }
 
     @MainActor
@@ -293,8 +356,10 @@ final class DictationSSOTTests: XCTestCase {
         XCTAssertFalse(DictationEngine.undecided.keyboardSpeechFollowsApp(keyboardNeedsHex: true))
         XCTAssertFalse(DictationEngine.parakeetV2.keyboardSpeechFollowsApp(keyboardNeedsHex: false))
         XCTAssertFalse(DictationEngine.parakeetV2.keyboardSpeechFollowsApp(keyboardNeedsHex: true))
-        XCTAssertTrue(DictationEngine.parakeetUltra.keyboardSpeechFollowsApp(keyboardNeedsHex: false))
-        XCTAssertTrue(DictationEngine.parakeetUltra.keyboardSpeechFollowsApp(keyboardNeedsHex: true))
+        // The keyboard dictates the multilingual model's languages itself, with Apple's model
+        // until it has the multilingual one loaded: Hex gets that model ready for it.
+        XCTAssertFalse(DictationEngine.parakeetUltra.keyboardSpeechFollowsApp(keyboardNeedsHex: false))
+        XCTAssertFalse(DictationEngine.parakeetUltra.keyboardSpeechFollowsApp(keyboardNeedsHex: true))
         XCTAssertTrue(DictationEngine.appleSpeech.keyboardSpeechFollowsApp(keyboardNeedsHex: false))
         XCTAssertFalse(DictationEngine.appleSpeech.keyboardSpeechFollowsApp(keyboardNeedsHex: true))
         XCTAssertTrue(DictationEngine.onDeviceRecognizer.keyboardSpeechFollowsApp(keyboardNeedsHex: false))
@@ -352,6 +417,22 @@ final class DictationSSOTTests: XCTestCase {
         let ultraMissing = plan(multilingual: "nl-NL", limit: largeLimit, ultraDownloaded: false)
         XCTAssertNil(ultraMissing.modelChoice)
 
+        // Settings › Dictation › Model switched: the model picked before keeps dictating English
+        // until the new one is here (it goes only once the new one has loaded once).
+        let multilingualPickedEnglishStill = plan(multilingual: "en-US", v2Downloaded: true, ultraDownloaded: false)
+        XCTAssertEqual(multilingualPickedEnglishStill, .readyV2(language: "en-US"))
+        XCTAssertEqual(multilingualPickedEnglishStill.modelChoice?.model, .parakeetV2)
+        XCTAssertEqual(plan(multilingual: "en-US", v2Downloaded: true, ultraDownloaded: true).modelChoice?.model, .parakeetUltra)
+        XCTAssertNil(plan(multilingual: "nl-NL", v2Downloaded: true, ultraDownloaded: false).modelChoice, "English's model only takes English")
+        let englishPickedUltraStill = plan(v2Downloaded: false, ultraDownloaded: true)
+        XCTAssertEqual(englishPickedUltraStill, .awaitingV2DownloadUsingUltra(language: "en-US"))
+        XCTAssertEqual(englishPickedUltraStill.modelChoice?.model, .parakeetUltra)
+        XCTAssertNil(
+            KeyboardParakeetDownload.hold(plan: englishPickedUltraStill, unmetered: true, freeBytes: 8_000_000_000),
+            "English's model still downloads by itself"
+        )
+        XCTAssertEqual(plan(v2Downloaded: true, ultraDownloaded: true).modelChoice?.model, .parakeetV2)
+
         // Non-English and nil wanted language.
         XCTAssertEqual(plan(wanted: "es-ES"), .notEnglish)
         XCTAssertEqual(plan(wanted: nil), .notEnglish)
@@ -402,6 +483,61 @@ final class DictationSSOTTests: XCTestCase {
             KeyboardParakeetStatus.line(state: .idle, isDownloaded: false, hold: .notEnglish, keyboardState: nil, now: now),
             "Only for English dictation."
         )
+
+        // Model: Multilingual. Its download speaks for itself; once on the iPhone, what the
+        // keyboard does with it, or why it doesn't.
+        func multilingual(
+            downloaded: Bool = true,
+            takes: Bool = true,
+            fits: Bool = true,
+            _ state: KeyboardParakeetSettings.KeyboardState?
+        ) -> String? {
+            KeyboardParakeetStatus.multilingualLine(
+                isDownloaded: downloaded,
+                takesLanguage: takes,
+                fitsKeyboard: fits,
+                keyboardState: state.map { ($0, now) },
+                now: now
+            )
+        }
+        XCTAssertNil(multilingual(downloaded: false, .ready))
+        XCTAssertEqual(multilingual(.ready), "Ready in the keyboard")
+        XCTAssertEqual(multilingual(.preparing), "Getting ready in the keyboard")
+        XCTAssertEqual(multilingual(nil), "Downloaded. The keyboard gets it ready the next time it opens.")
+        XCTAssertEqual(multilingual(fits: false, nil), "The keyboard can't use it right now, so it uses Apple's speech recognition.")
+        XCTAssertEqual(
+            multilingual(takes: false, .ready),
+            "Not for this dictation language, so the keyboard uses Apple's speech recognition."
+        )
+        // Only the picked model stays, and the other goes only once the picked one is downloaded
+        // and has loaded once, and never while Hex dictates with it.
+        func unpicked(
+            _ picked: SpeechModelChoice,
+            english: (Bool, Bool) = (true, true),
+            multilingual: (Bool, Bool) = (true, true),
+            hex: KeyboardParakeetPlan.Model? = nil
+        ) -> KeyboardParakeetPlan.Model? {
+            SpeechModelChoice.unpicked(
+                picked: picked,
+                englishDownloaded: english.0,
+                englishLoaded: english.1,
+                multilingualDownloaded: multilingual.0,
+                multilingualLoaded: multilingual.1,
+                hexDictatesWith: hex
+            )
+        }
+        XCTAssertEqual(unpicked(.multilingual), .parakeetV2)
+        XCTAssertNil(unpicked(.multilingual, multilingual: (false, false)), "still downloading: English's stays and dictates")
+        XCTAssertNil(unpicked(.multilingual, multilingual: (true, false)), "downloaded, not loaded yet")
+        XCTAssertNil(unpicked(.multilingual, english: (false, false)), "nothing to remove")
+        XCTAssertNil(unpicked(.multilingual, hex: .parakeetV2), "Hex dictates with English's")
+        XCTAssertEqual(unpicked(.english), .parakeetUltra)
+        XCTAssertNil(unpicked(.english, english: (true, false)))
+        XCTAssertNil(unpicked(.english, english: (false, false)), "a download that failed leaves the multilingual one")
+        XCTAssertNil(unpicked(.english, hex: .parakeetUltra))
+
+        let names = SpeechModelChoice.multilingualLanguages
+        XCTAssertTrue(names.contains("Dutch") && names.contains("Ukrainian") && names.contains("English"), names)
     }
 
     func testWantedDictationLanguagePrecedenceAndSelfDictationHandoffReason() throws {
@@ -418,17 +554,24 @@ final class DictationSSOTTests: XCTestCase {
 
         let selfDict = KeyboardSelfDictation(defaults: defaults)
         XCTAssertEqual(selfDict.handoffReason(osMajorVersion: 18), .openedHex)
-        XCTAssertNil(selfDict.handoffReason(osMajorVersion: 26, hasMultilingualModelInKeyboard: false, hasMemoryToStart: true, includeRecentHandoff: false))
-        XCTAssertEqual(selfDict.handoffReason(osMajorVersion: 26, hasMultilingualModelInKeyboard: false, hasMemoryToStart: false, includeRecentHandoff: false), .memory)
+        XCTAssertNil(selfDict.handoffReason(osMajorVersion: 26, hasMemoryToStart: true, includeRecentHandoff: false))
+        XCTAssertEqual(selfDict.handoffReason(osMajorVersion: 26, hasMemoryToStart: false, includeRecentHandoff: false), .memory)
 
         languages.markKeyboardNeedsHex()
-        XCTAssertEqual(selfDict.handoffReason(osMajorVersion: 26, hasMultilingualModelInKeyboard: false, hasMemoryToStart: true, includeRecentHandoff: false), .speechModel)
+        XCTAssertEqual(selfDict.handoffReason(osMajorVersion: 26, hasMemoryToStart: true, includeRecentHandoff: false), .speechModel)
         XCTAssertFalse(selfDict.dictatesItself(osMajorVersion: 26))
+        languages.markKeyboardNeedsHex(unavailable: true)
+        XCTAssertEqual(
+            selfDict.handoffReason(osMajorVersion: 26, hasMemoryToStart: true, includeRecentHandoff: false),
+            .languageUnavailable,
+            "Hex found Apple has no model for the language here"
+        )
         languages.clearKeyboardNeedsHex()
+        XCTAssertFalse(languages.keyboardLanguageUnavailable)
 
         selfDict.recordHandedToHex(.memory)
         XCTAssertEqual(selfDict.handoffReason(osMajorVersion: 26, includeRecentHandoff: true), .memory)
-        XCTAssertNil(selfDict.handoffReason(osMajorVersion: 26, hasMultilingualModelInKeyboard: false, hasMemoryToStart: true, includeRecentHandoff: false))
+        XCTAssertNil(selfDict.handoffReason(osMajorVersion: 26, hasMemoryToStart: true, includeRecentHandoff: false))
     }
 
     // MARK: - DictationPipeline.Preferences

@@ -55,6 +55,8 @@ struct DictationSettingsPage: View {
     @State private var revision = 0
     @State private var keyboardParakeet = KeyboardParakeetSettings().isOn
     private let keyboardParakeetFits = KeyboardParakeetSettings.fits()
+    /// English or Multilingual (`SpeechModelChoice`), on iPhones with the memory for either.
+    @State private var speechModel = SpeechModelChoice.current
     /// Keep mic warm stays on the page once picked, even Off where it would hide.
     @State private var keepsWarmRow = false
 
@@ -123,9 +125,13 @@ struct DictationSettingsPage: View {
             SettingsSectionHeader(title: "Formatting")
 
             SettingsCard {
-                // After the style, on every path (`DictationPipeline`).
+                // After the style, on every path (`DictationPipeline`). Casual lowercases sentence
+                // starts by itself, which read as this switch not working (TestFlight build 149).
                 SettingsToggleRow(
                     title: String(localized: "Lowercase"),
+                    detail: dictation.style == .casual
+                        ? String(localized: "Casual starts sentences lowercase anyway. Pick Polished for capitals.")
+                        : nil,
                     isOn: toggleBinding(
                         { DictationLowercaseSettings().isEnabled },
                         { DictationLowercaseSettings().isEnabled = $0 }
@@ -235,20 +241,44 @@ struct DictationSettingsPage: View {
                         .padding(.top, 2)
                         .padding(.bottom, 14)
                 }
+
+                HexWordsRows(isOn: customVocabularyOn)
             }
 
             SettingsCard {
                 SettingsToggleRow(
                     title: String(localized: "Speech model in keyboard"),
                     detail: keyboardParakeetFits
-                        ? String(localized: "For English. Uses about \(KeyboardParakeetDownload.size), downloaded on Wi-Fi. Until then, the keyboard uses Apple's speech recognition.")
+                        ? String(localized: "The keyboard dictates with the model below. Until it's ready, it uses Apple's speech recognition.")
                         : String(localized: "Needs an iPhone with 6 GB of memory or more"),
                     isOn: $keyboardParakeet
                 )
                 .disabled(!keyboardParakeetFits)
 
+                // Where the iPhone has the memory for either model (the switch above says why not).
+                if keyboardParakeetFits {
+                    SettingsDivider()
+
+                    SpeechModelChoiceRow(choice: speechModel) { choice in
+                        choice.select()
+                        withAnimation(HexMotion.settleAnimation(reduceMotion: reduceMotion)) {
+                            speechModel = SpeechModelChoice.current
+                        }
+                    }
+
+                    if speechModel == .multilingual {
+                        MultilingualModelStatus(
+                            download: dictation.multilingualDownload,
+                            retry: { dictation.retryMultilingualParakeet() },
+                            turnOff: { SpeechModelChoice.english.select(); speechModel = .english }
+                        )
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 12)
+                    }
+                }
+
                 if keyboardParakeet {
-                    KeyboardParakeetStatus(download: KeyboardParakeetDownload.shared)
+                    KeyboardParakeetStatus(download: KeyboardParakeetDownload.shared, multilingual: speechModel == .multilingual)
                         .padding(.horizontal, 12)
                         .padding(.bottom, 12)
                 }
@@ -316,6 +346,7 @@ struct DictationSettingsPage: View {
         }
         .onAppear {
             keyboardParakeet = KeyboardParakeetSettings().isOn
+            speechModel = SpeechModelChoice.current
             revision += 1
         }
     }

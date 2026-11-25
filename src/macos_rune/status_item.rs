@@ -53,6 +53,8 @@ pub enum StatusItemAction {
     /// Pause Hex, or Resume Hex while shortcuts are suspended (Labs › Pause
     /// from menu bar).
     TogglePause,
+    /// Start or stop an annotation (Annotate on and Scrawl.app not owning it).
+    ToggleAnnotate,
     /// Copy chapter `n` of the recording meeting (Labs).
     CopyChapter(usize),
     /// The recording row: the Meetings pane.
@@ -155,6 +157,7 @@ objc2::define_class!(
             refresh_restore_capture();
             refresh_upcoming();
             update_pause();
+            refresh_annotate();
         }
 
         /// Restore Last Capture is dimmed while no closed card can come
@@ -253,6 +256,11 @@ objc2::define_class!(
             let _ = self.ivars().actions.try_send(StatusItemAction::TogglePause);
         }
 
+        #[unsafe(method(toggleAnnotate:))]
+        fn toggle_annotate(&self, _sender: &AnyObject) {
+            let _ = self.ivars().actions.try_send(StatusItemAction::ToggleAnnotate);
+        }
+
         #[unsafe(method(copyChapter:))]
         fn copy_chapter(&self, sender: &NSMenuItem) {
             if let Ok(index) = usize::try_from(sender.tag()) {
@@ -308,6 +316,9 @@ enum Row {
     MeetingSeparator,
     /// Labs › Pause from menu bar: hidden until the menu opens with it on.
     PauseHex,
+    /// Annotate (or Stop Annotating while recording), shown while Annotate is
+    /// on and Scrawl.app is not owning it.
+    Annotate,
     PasteLast,
     /// Labs › Copy dictation audio: hidden until the menu opens with it on.
     CopyLastDictationAudio,
@@ -331,7 +342,7 @@ enum Row {
 /// How many upcoming meetings the menu lists at most.
 const UPCOMING_ROWS: usize = crate::calendar_menu::MAX_ROWS;
 
-const ROWS: [Row; 26] = [
+const ROWS: [Row; 27] = [
     Row::UpcomingHeader,
     Row::UpcomingSlot,
     Row::UpcomingSlot,
@@ -347,6 +358,7 @@ const ROWS: [Row; 26] = [
     Row::RecordMeeting,
     Row::MeetingSeparator,
     Row::PauseHex,
+    Row::Annotate,
     Row::PasteLast,
     Row::CopyLastDictationAudio,
     Row::CopyRecentDictation,
@@ -376,6 +388,7 @@ impl Row {
             Row::CopySection => label("Copy Section", tr("Copy section")),
             Row::RecordMeeting => label("Record Meeting", tr("Record meeting")),
             Row::PauseHex => pause_title(false),
+            Row::Annotate => annotate_title(false),
             #[cfg(hex_capture)]
             Row::PasteLast if crate::paste::recent::enabled() => {
                 label("Paste Last", tr("Paste last"))
@@ -404,7 +417,12 @@ impl Row {
     fn titled_by_state(self) -> bool {
         matches!(
             self,
-            Row::UpcomingSlot | Row::MeetingStatus | Row::MuteMeeting | Row::PauseHex | Row::Update
+            Row::UpcomingSlot
+                | Row::MeetingStatus
+                | Row::MuteMeeting
+                | Row::PauseHex
+                | Row::Annotate
+                | Row::Update
         )
     }
 
@@ -416,6 +434,7 @@ impl Row {
             Row::MuteMeeting => sel!(muteMeeting:),
             Row::RecordMeeting => sel!(startMeeting:),
             Row::PauseHex => sel!(togglePause:),
+            Row::Annotate => sel!(toggleAnnotate:),
             Row::PasteLast => sel!(pasteLast:),
             Row::CopyLastDictationAudio => sel!(copyLastDictationAudio:),
             Row::CopyLastMeetingTranscript => sel!(copyLastMeetingTranscript:),
@@ -460,6 +479,7 @@ impl Row {
                 | Row::RecordMeeting
                 | Row::MeetingSeparator
                 | Row::PauseHex
+                | Row::Annotate
                 | Row::CopyLastDictationAudio
                 | Row::CopyRecentDictation
                 | Row::CopyLastMeetingTranscript
@@ -554,6 +574,8 @@ struct StatusItemController {
     meeting_section_labels: RefCell<Vec<String>>,
     meeting_separator: Retained<NSMenuItem>,
     meeting_button: RefCell<(String, bool)>,
+    annotate: Retained<NSMenuItem>,
+    annotate_state: RefCell<(String, Option<KeyEquivalent>)>,
     paste_last: Retained<NSMenuItem>,
     paste_last_key: RefCell<Option<KeyEquivalent>>,
     copy_last_dictation_audio: Retained<NSMenuItem>,
@@ -739,6 +761,8 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
             meeting_section_labels: RefCell::new(Vec::new()),
             meeting_separator: row(Row::MeetingSeparator),
             meeting_button: RefCell::new((String::new(), false)),
+            annotate: row(Row::Annotate),
+            annotate_state: RefCell::new((annotate_title(false), None)),
             paste_last: row(Row::PasteLast),
             paste_last_key: RefCell::new(None),
             copy_last_dictation_audio: row(Row::CopyLastDictationAudio),
@@ -1003,6 +1027,39 @@ fn pause_title(suspended: bool) -> String {
         tr("Resume Hex").into()
     } else {
         tr("Pause Hex").into()
+    }
+}
+
+fn annotate_title(recording: bool) -> String {
+    if recording {
+        label("Stop Annotating", tr("Stop annotating"))
+    } else {
+        label("Annotate", tr("Annotate"))
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct AnnotateMenu {
+    shown: bool,
+    title: String,
+    key: Option<KeyEquivalent>,
+}
+
+fn annotate_menu(settings: &AppSettings, scrawl_running: bool, recording: bool) -> AnnotateMenu {
+    #[cfg(hex_capture)]
+    let shown = !crate::policy::Policy::current().locks(crate::policy::Lock::Annotate)
+        && (recording || (settings.capture.enabled && !scrawl_running));
+    #[cfg(not(hex_capture))]
+    let shown = {
+        let _ = (settings, scrawl_running, recording);
+        false
+    };
+    AnnotateMenu {
+        shown,
+        title: annotate_title(recording),
+        key: shown
+            .then(|| paste_last_key(Some(&settings.capture.hotkey)))
+            .flatten(),
     }
 }
 
@@ -1295,29 +1352,58 @@ fn update_enabled(recording: bool, status: &crate::desktop::host::DesktopUpdateS
     crate::updater::offer_hold(status, recording).is_none()
 }
 
+fn apply_key_equivalent(item: &NSMenuItem, key: Option<&KeyEquivalent>) {
+    let (equivalent, modifiers) = key
+        .map(|key| (key.key.as_str(), key.modifiers))
+        .unwrap_or(("", NSEventModifierFlags::empty()));
+    item.setKeyEquivalent(&NSString::from_str(equivalent));
+    item.setKeyEquivalentModifierMask(modifiers);
+}
+
+/// Shows Annotate (or Stop Annotating while recording) with its shortcut
+/// while Annotate is on and Scrawl.app is not owning it.
+pub fn update_annotate(settings: &AppSettings) {
+    #[cfg(hex_capture)]
+    let (scrawl_running, recording) = (
+        crate::capture_host::scrawl_running(),
+        crate::capture_host::snapshot().recording.is_some(),
+    );
+    #[cfg(not(hex_capture))]
+    let (scrawl_running, recording) = (false, false);
+    let menu = annotate_menu(settings, scrawl_running, recording);
+    STATUS_ITEM.with(|c| {
+        let c = c.borrow();
+        let Some(c) = c.as_ref() else { return };
+        c.annotate.setHidden(!menu.shown);
+        let mut state = c.annotate_state.borrow_mut();
+        if state.0 != menu.title {
+            c.annotate.setTitle(&NSString::from_str(&menu.title));
+            state.0 = menu.title;
+        }
+        if state.1 != menu.key {
+            apply_key_equivalent(&c.annotate, menu.key.as_ref());
+            state.1 = menu.key;
+        }
+    });
+}
+
+fn refresh_annotate() {
+    if let Some(published) = crate::macos_rune::runtime().and_then(|r| r.published()) {
+        update_annotate(&published.settings);
+    }
+}
+
 /// Shows the saved Paste Last binding beside Paste Last Dictation, or
 /// nothing when it is unbound.
 pub fn update_paste_last(settings: &AppSettings) {
     let key = paste_last_key(settings.paste_last_hotkey.as_ref());
-    STATUS_ITEM.with(|controller| {
-        let controller = controller.borrow();
-        let Some(controller) = controller.as_ref() else {
-            return;
-        };
-        if *controller.paste_last_key.borrow() == key {
-            return;
+    STATUS_ITEM.with(|c| {
+        let c = c.borrow();
+        let Some(c) = c.as_ref() else { return };
+        if *c.paste_last_key.borrow() != key {
+            apply_key_equivalent(&c.paste_last, key.as_ref());
+            c.paste_last_key.replace(key);
         }
-        let (equivalent, modifiers) = key
-            .as_ref()
-            .map(|key| (key.key.as_str(), key.modifiers))
-            .unwrap_or(("", NSEventModifierFlags::empty()));
-        controller
-            .paste_last
-            .setKeyEquivalent(&NSString::from_str(equivalent));
-        controller
-            .paste_last
-            .setKeyEquivalentModifierMask(modifiers);
-        controller.paste_last_key.replace(key);
     });
 }
 
@@ -1520,6 +1606,7 @@ mod tests {
                 "Record Meeting".into(),
                 "—".into(),
                 "Pause Hex".into(),
+                "Annotate".into(),
                 "Paste Last Dictation".into(),
                 "Copy Last Dictation Audio".into(),
                 "Copy Recent Dictation".into(),
@@ -1570,6 +1657,30 @@ mod tests {
         assert_eq!(menu_key(","), Some(",".into()));
         assert_eq!(menu_key("Mouse 4"), None);
         assert_eq!(menu_key("F99"), None);
+    }
+
+    #[cfg(hex_capture)]
+    #[test]
+    fn annotate_menu_shows_shortcut_when_enabled_and_hides_for_scrawl() {
+        let mut settings = AppSettings::default();
+        settings.capture.enabled = true;
+        let idle = annotate_menu(&settings, false, false);
+        assert!(idle.shown);
+        assert_eq!(idle.title, "Annotate");
+        let key = idle.key.expect("default ⌥⇧S key equivalent");
+        assert_eq!(key.key, "s");
+        assert_eq!(
+            key.modifiers,
+            NSEventModifierFlags::Option | NSEventModifierFlags::Shift
+        );
+
+        let recording = annotate_menu(&settings, false, true);
+        assert!(recording.shown);
+        assert_eq!(recording.title, "Stop Annotating");
+
+        assert!(!annotate_menu(&settings, true, false).shown);
+        settings.capture.enabled = false;
+        assert!(!annotate_menu(&settings, false, false).shown);
     }
 
     #[test]

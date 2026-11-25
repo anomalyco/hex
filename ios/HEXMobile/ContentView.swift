@@ -41,6 +41,9 @@ struct ContentView: View {
     @Binding var showSetup: Bool
     /// A settings page the keyboard asked for (`KeyboardLaunchRequest.translationSettings`).
     var openPage: Binding<SettingsPage?> = .constant(nil)
+    /// Goes up by one at each Open Hex from the keyboard's Hex key menu
+    /// (`KeyboardLaunchRequest.home`): Settings closes back to Home.
+    var homeRequests = 0
     @State private var setupMonitor = KeyboardSetupMonitor()
     @State private var keyboardSpeech = KeyboardSpeechPreparation()
     @State private var onboardingPage = OnboardingProgress.launchPage
@@ -179,6 +182,9 @@ struct ContentView: View {
             settingsPath = [page]
             openPage.wrappedValue = nil
         }
+        .onChange(of: homeRequests) { _, _ in
+            settingsPath = []
+        }
         .tint(HexTheme.textBase)
         .sheet(isPresented: $showSetup) {
             SetupSheet(dictation: dictation, monitor: setupMonitor, keyboardSpeech: keyboardSpeech)
@@ -232,7 +238,7 @@ struct ContentView: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }
 
-                // Experiments › Multilingual model: its download or load, beside dictation.
+                // Settings › Dictation › Model: Multilingual: its download or load, beside dictation.
                 MultilingualModelStatus(
                     download: dictation.multilingualDownload,
                     retry: { dictation.retryMultilingualParakeet() },

@@ -35,6 +35,9 @@ override shipped behavior.
   QuickJS instead of Bun, with size and latency measurements.
 - [`specs/local-transcription-service.md`](specs/local-transcription-service.md):
   implemented macOS local-service protocol and lifecycle guarantees.
+- [`specs/hex-words.md`](specs/hex-words.md): the Hex words file (`.hexwords`)
+  that carries vocabulary and word replacements between the desktop, iPhone and
+  Android apps, with shared cases in `tests/fixtures/hex-words`.
 
 ## Architecture Decisions And Active Plans
 

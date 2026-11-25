@@ -8,18 +8,18 @@ use rune::{El, Icon, SpringPair, Transition, col, el, row, text};
 use rune_theme_opencode::icons as oc;
 
 use super::flow::AlwaysConfig;
-use super::surface::{Id, LIST_Y, PANEL_W, SHELL_RADIUS, ellipsize, measure, medium, small};
+use super::surface::{Id, LIST_Y, PANEL_W, ellipsize, measure, medium, small};
 use super::view::{BUTTON_H, ICON_BUTTON_RADIUS, press, rim};
 use super::{CapsuleState, LIST_DROP, PRESENCE_BLUR, Part, tuning};
 use crate::capture_host::RuleMatch;
 use crate::desktop::i18n::tr;
-use crate::rune_ui::controls::Paint;
+use crate::rune_ui::controls::{CAPSULE, Paint};
 use crate::rune_ui::icons;
 
 pub(crate) const POP_W: f32 = 320.0;
-const POP_PAD: f32 = 6.0;
-const POP_RADIUS: f32 = SHELL_RADIUS;
-const OPTION_H: f32 = 44.0;
+const POP_PAD: f32 = CAPSULE.row_inset;
+const POP_RADIUS: f32 = CAPSULE.radius;
+const OPTION_H: f32 = CAPSULE.row_h;
 const HEADER_H: f32 = 26.0;
 const FOOTER_H: f32 = 44.0;
 
@@ -48,7 +48,7 @@ fn header(p: Paint, key: &str, copy: &str) -> El {
     row()
         .key(key.to_owned())
         .h(HEADER_H)
-        .px(10.0)
+        .px(CAPSULE.row_px)
         .center_y()
         .child(text(copy).font(small()).color(p.muted()))
 }
@@ -63,7 +63,8 @@ fn option(
     on: bool,
 ) -> El {
     let c = &p.k.c;
-    let max_w = POP_W - 2.0 * POP_PAD - 20.0 - 16.0 - 10.0 - 24.0;
+    let max_w =
+        POP_W - 2.0 * POP_PAD - 2.0 * CAPSULE.row_px - CAPSULE.icon - CAPSULE.icon_gap - 24.0;
     let name_fit = ellipsize(name, medium(), max_w.max(60.0));
     let detail_fit = ellipsize(detail, small(), max_w.max(60.0));
     let base = row().key(key.to_owned());
@@ -73,10 +74,10 @@ fn option(
         base.hover(c.hover)
     };
     base.h(OPTION_H)
-        .px(10.0)
-        .gap(10.0)
+        .px(CAPSULE.row_px)
+        .gap(CAPSULE.icon_gap)
         .center_y()
-        .radius(POP_RADIUS - POP_PAD)
+        .radius(CAPSULE.inner(CAPSULE.row_inset))
         .press(c.pressed)
         .role("button")
         .label(format!("{name} · {detail}"))

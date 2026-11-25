@@ -3,18 +3,20 @@
 //! rules are pure window-class data, tested on every OS, and the Windows
 //! paster reads the window they judge.
 
-/// Window classes only the shell's desktop and taskbars have.
-const SHELL_CLASSES: [&str; 4] = [
+/// Window classes only the shell's desktop, taskbars, and the taskbar's
+/// hidden-icons overflow flyout have.
+const SHELL_CLASSES: [&str; 5] = [
     "Progman",
     "WorkerW",
     "Shell_TrayWnd",
     "Shell_SecondaryTrayWnd",
+    "TopLevelWindowForOverflowXamlIsland",
 ];
 
 /// Whether a paste to this window would be lost in the Windows shell: no
-/// window at all, or the desktop or a taskbar Explorer owns. A rename box on
-/// the desktop still takes a paste, and an Explorer window that is not one of
-/// those classes (`CabinetWClass`) always does.
+/// window at all, or the desktop, a taskbar, or a taskbar flyout Explorer
+/// owns. A rename box on the desktop still takes a paste, and an Explorer
+/// window that is not one of those classes (`CabinetWClass`) always does.
 pub(crate) fn is_shell_target(
     class: Option<&str>,
     application: Option<&str>,
@@ -28,7 +30,8 @@ pub(crate) fn is_shell_target(
         && !focus_class.is_some_and(is_edit_class)
 }
 
-/// Whether `class` is one of the shell's desktop or taskbar classes.
+/// Whether `class` is one of the shell's desktop, taskbar, or taskbar flyout
+/// classes.
 pub(crate) fn is_shell_class(class: &str) -> bool {
     SHELL_CLASSES
         .iter()
@@ -72,7 +75,24 @@ mod tests {
     }
 
     #[test]
+    fn the_taskbar_overflow_flyout_takes_no_paste() {
+        // The hidden-icons flyout is a top-level XAML island of Explorer's
+        // whose focused child is an input site, not an edit control.
+        assert!(is_shell_target(
+            Some("TopLevelWindowForOverflowXamlIsland"),
+            Some("explorer"),
+            Some("Windows.UI.Input.InputSite.WindowClass")
+        ));
+        assert!(!is_shell_target(
+            Some("TopLevelWindowForOverflowXamlIsland"),
+            Some("chrome"),
+            None
+        ));
+    }
+
+    #[test]
     fn explorer_windows_that_are_not_the_shell_still_take_a_paste() {
+        assert!(!is_shell_class("CabinetWClass"));
         assert!(!is_shell_target(
             Some("CabinetWClass"),
             Some("explorer"),

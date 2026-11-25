@@ -14,15 +14,16 @@ nonisolated enum DictationCorrections {
     /// Replaces each heard word or phrase (matched ignoring case, whole words only, never
     /// inside a longer word or a hyphenated, dotted, or slashed token) with what you meant.
     /// The meant spelling is kept when it has capitals; otherwise it follows the original's
-    /// capitalization, so a fix at a sentence start still starts the sentence.
-    static func apply(_ corrections: [DictationCorrection], to text: String) -> String {
+    /// capitalization, so a fix at a sentence start still starts the sentence. `maxWords` is
+    /// the longest heard phrase that matches: Word replacements allow 8.
+    static func apply(_ corrections: [DictationCorrection], to text: String, maxWords: Int = maxPhraseWords) -> String {
         guard !corrections.isEmpty, !text.isEmpty else { return text }
         var table: [[String]: String] = [:]
         var longest = 1
         for correction in corrections {
             let keys = DictationText.words(in: correction.heard).map { DictationText.key($0.text) }
             let meant = correction.meant.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !keys.isEmpty, keys.count <= maxPhraseWords, !meant.isEmpty, table[keys] == nil else { continue }
+            guard !keys.isEmpty, keys.count <= maxWords, !meant.isEmpty, table[keys] == nil else { continue }
             table[keys] = meant
             longest = max(longest, keys.count)
         }

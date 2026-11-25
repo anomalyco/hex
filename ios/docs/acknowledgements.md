@@ -33,7 +33,7 @@ The app shows these under Settings › Acknowledgements (`HEXMobile/Acknowledgem
   downloaded as FluidInference's
   [Core ML conversion](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml)
   (CC BY 4.0, encoder weights at reduced precision), used unchanged.
-- **Parakeet Ultra:** Experiments › Multilingual model downloads
+- **Parakeet Ultra:** Settings › Dictation › Model: Multilingual downloads
   [Parakeet Ultra](https://huggingface.co/moondream/parakeet-ultra) by Moondream, a
   post-training of NVIDIA's
   [Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3), both licensed

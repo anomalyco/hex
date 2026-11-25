@@ -44,6 +44,7 @@ import ly.anoma.hex.speech.SpeechPreferences
 import ly.anoma.hex.speech.Spoken
 import ly.anoma.hex.speech.keepAwake
 import ly.anoma.hex.speech.typingLayout
+import ly.anoma.hex.typing.AdaptiveTouchStore
 import ly.anoma.hex.typing.PersonalWords
 import ly.anoma.hex.typing.SpatialDecoder
 import ly.anoma.hex.typing.TypingModel
@@ -105,7 +106,8 @@ class HexKeyboard : InputMethodService() {
             { SpatialDecoder(TypingModel.asset(assets, it)) },
             readPersonal = { PersonalWords.read(contentResolver, it) }, background = words,
             emoji = EmojiWords(assets, words),
-            learned = { if (preferences.learnFixes) fixes.record(it) })
+            learned = { if (preferences.learnFixes) fixes.record(it) },
+            adaptiveTouch = { if (feedback.adaptiveTouch) AdaptiveTouchStore.get(this) else null })
     }
     private val typingChanged = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == TypingPreferences.SUGGEST_SWEAR_WORDS) engine.swearWordsChanged()
@@ -116,6 +118,7 @@ class HexKeyboard : InputMethodService() {
         if (key == TypingPreferences.VOICE_ONLY) modeChanged()
         if (key == TypingPreferences.PASSWORD_MANAGER_SUGGESTIONS) clearInline()
         if (key == TypingPreferences.HEIGHT) resize()
+        if (key == TypingPreferences.ADAPTIVE_TOUCH) engine.adaptiveTouchChanged()
     }
     // The strip's Paste tool comes and goes with the clipboard (Labs › Keyboard › Keyboard tools): the
     // listener exists only while the lab is on and the input view is shown.

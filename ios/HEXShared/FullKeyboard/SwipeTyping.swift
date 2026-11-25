@@ -123,7 +123,7 @@ final class SwipeTyping {
         pending[id] = stroke
         guard let first = stroke.points.first, hypot(point.x - first.x, point.y - first.y) > threshold,
               let touch = engine.touches[id], !touch.committed, engine.activeAccentMenu == nil,
-              engine.allowsSwipes else { return false }
+              touch.flick == nil, engine.allowsSwipes else { return false }
         pending[id] = nil
         syncWords()
         engine.beginSwipe(touchID: id)
@@ -325,7 +325,8 @@ final class SwipeTrailView: UIView {
     required init?(coder: NSCoder) { fatalError() }
 
     static func color(_ palette: FullKeyboardPalette) -> UIColor {
-        palette.isDark ? UIColor(white: 1, alpha: 0.5) : palette.actionFill.withAlphaComponent(0.42)
+        // The trail is drawn over the keys, so it follows them, not the glass.
+        palette.keysAreDark ? UIColor(white: 1, alpha: 0.5) : palette.actionFill.withAlphaComponent(0.42)
     }
 
     override func layoutSubviews() {

@@ -41,7 +41,7 @@ struct AcknowledgementsView: View {
 
     /// Spatial autocorrect's word lists (`scripts/build-typing-model.py`), the keyboard's
     /// never-suggest list (`OffensiveWords`), and the speech models Hex downloads (Parakeet V2,
-    /// and Parakeet Ultra for Experiments › Multilingual model); keep in step with ios/README.md.
+    /// and Parakeet Ultra for Settings › Dictation › Model: Multilingual); keep in step with ios/README.md.
     static let entries: [Entry] = [
         Entry(
             title: "Google Books Ngram data",
@@ -109,7 +109,7 @@ struct AcknowledgementsView: View {
         Entry(
             title: "Parakeet Ultra",
             body: """
-            Experiments › Multilingual model downloads Parakeet Ultra by Moondream \
+            Settings › Dictation › Model: Multilingual downloads Parakeet Ultra by Moondream \
             (huggingface.co/moondream/parakeet-ultra), a post-training of NVIDIA's Parakeet \
             TDT 0.6B v3 (huggingface.co/nvidia/parakeet-tdt-0.6b-v3), both licensed under \
             Creative Commons Attribution 4.0 International \

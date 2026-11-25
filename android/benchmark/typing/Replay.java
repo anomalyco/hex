@@ -13,6 +13,7 @@ public final class Replay {
         // AZERTY, its bottom row's apostrophe key (never typed) left out of the letters.
         boolean wide = language.equals("de") || language.equals("nb");
         double pitch = wide ? 36 : 39.5; Map<Character,KeyPoint> points = new LinkedHashMap<>();
+        List<KeyRect> caps = new ArrayList<>(), cells = new ArrayList<>(); StringBuilder keys = new StringBuilder(); List<Integer> keyRows = new ArrayList<>();
         String[] rows = language.equals("de") ? new String[]{"qwertzuiopü", "asdfghjklöä", "yxcvbnm"}
             : language.equals("nb") ? new String[]{"qwertyuiopå", "asdfghjkløæ", "zxcvbnm"}
             : language.equals("fr") ? new String[]{"azertyuiop", "qsdfghjklm", "wxcvbn'"}
@@ -20,10 +21,19 @@ public final class Replay {
         for (int row=0; row<rows.length; row++) {
             String letters=rows[row];
             for (int i=0; i<letters.length(); i++)
-                if (letters.charAt(i) != '\'')
-                    points.put(letters.charAt(i),new KeyPoint(201 + (i-(letters.length()-1)/2.0)*pitch,66.5+56*row));
+                if (letters.charAt(i) != '\'') {
+                    double x=201 + (i-(letters.length()-1)/2.0)*pitch, y=66.5+56*row;
+                    points.put(letters.charAt(i),new KeyPoint(x,y));
+                    // Adaptive touch's plane: keycaps 6 pt narrower than the pitch and 45 pt tall, touch cells tiling the rows.
+                    keys.append(letters.charAt(i)); keyRows.add(row);
+                    caps.add(new KeyRect(x-(pitch-6)/2, y-22.5, x+(pitch-6)/2, y+22.5));
+                    cells.add(new KeyRect(x-pitch/2, y-28, x+pitch/2, y+28));
+                }
         }
-        return new KeyGrid(points, pitch, 56, new KeyRect(64.76, 212, 303.1, 257));
+        int[] rowOf=new int[keyRows.size()]; for(int i=0;i<rowOf.length;i++) rowOf[i]=keyRows.get(i);
+        TouchPlane plane=new TouchPlane("replay|"+language, keys.toString().toCharArray(), caps.toArray(new KeyRect[0]),
+            cells.toArray(new KeyRect[0]), rowOf, pitch, 56);
+        return new KeyGrid(points, pitch, 56, new KeyRect(64.76, 212, 303.1, 257), plane);
     }
     // A keyboard's own geometry, as the end-to-end check measures it on the emulator: key centres,
     // pitches and the space bar, in the key plane's pixels.
@@ -140,6 +150,80 @@ public final class Replay {
             return (Character) m.invoke(state, before, hit, near(grid, hit, x, y), grid.getCentres().keySet());
         } catch (NoSuchMethodException old) { return hit; }
     }
+    // Labs › Keyboard › Adaptive touch for `--adaptive learn|monitor|frozen`, from `--profile-in` or nothing learned,
+    // its guard off with `--unguarded 1`; null without it.
+    static AdaptiveTouch adaptive(Map<String,String> o) throws IOException {
+        String mode=o.get("--adaptive"); if(mode==null) return null;
+        String in=o.get("--profile-in");
+        AdaptiveTouchModel learned=in==null ? new AdaptiveTouchModel()
+            : AdaptiveTouchModel.Companion.from(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(in)));
+        if(learned==null) throw new IllegalArgumentException("Unreadable profile "+in);
+        AdaptiveTouch a=new AdaptiveTouch(learned);
+        a.setMode(AdaptiveTouch.Mode.valueOf(Character.toUpperCase(mode.charAt(0))+mode.substring(1)));
+        a.setGuards(!o.containsKey("--unguarded"));
+        return a;
+    }
+    // Where a typist aims off a key's centre, in points: T1 low and right; T1m low and left (T1 in a mirror, another
+    // grip); T2 thumbs reaching inward, low; T3 a fixed aim of its own for every key, drawn once.
+    static double[] bias(String typist, char letter, KeyGrid grid) {
+        double w=grid.getPitchX()-6, h=45;
+        KeyPoint c=grid.getCentres().get(letter);
+        switch(typist) {
+            case "T1": return new double[]{.2*w,.2*h};
+            case "T1m": return new double[]{-.2*w,.2*h};
+            case "T2": return new double[]{(c.getX()<201 ? .2 : -.2)*w,.1*h};
+            case "T3": {
+                // One generator for all the keys, in letter order: generators seeded one apart start alike.
+                if(aims==null) {
+                    aims=new HashMap<>(); Random r=new Random(20261124L);
+                    for(char k:new TreeSet<>(grid.getCentres().keySet())) aims.put(k,new double[]{r.nextGaussian()*.12*w,r.nextGaussian()*.12*h});
+                }
+                return aims.get(letter);
+            }
+            default: throw new IllegalArgumentException("Unknown typist "+typist);
+        }
+    }
+    static Map<Character,double[]> aims;
+    // The letter whose touch cell holds (x, y), the nearest row's and key's: a tap aimed at a letter stays on the letters.
+    static char letterAt(KeyGrid grid, double x, double y) {
+        double row=Double.NaN, best=Double.POSITIVE_INFINITY;
+        for(KeyPoint p:grid.getCentres().values()) if(Math.abs(p.getY()-y)<best) { best=Math.abs(p.getY()-y); row=p.getY(); }
+        char out=0; best=Double.POSITIVE_INFINITY;
+        for(Map.Entry<Character,KeyPoint> e:grid.getCentres().entrySet())
+            if(e.getValue().getY()==row && Math.abs(e.getValue().getX()-x)<best) { best=Math.abs(e.getValue().getX()-x); out=e.getKey(); }
+        return out;
+    }
+    // What a space tells Adaptive touch, as the keyboard does: the word as typed, whether autocorrect replaced it or
+    // revised the word before, and nothing at all from two words joined.
+    static void finishWord(AdaptiveTouch adaptive, String token, String before, Correction fix) {
+        String typed=token.isEmpty() ? null : token;
+        if(fix==null) { adaptive.finish(typed, before, null, false); return; }
+        String original=fix.getOriginal(), replacement=fix.getReplacement();
+        if(original.contains(" ") && !replacement.contains(" ")) { adaptive.forget(); return; }
+        boolean kept=replacement.equals(token) || replacement.endsWith(" "+token);
+        adaptive.finish(typed, before, kept ? null : replacement, original.contains(" "));
+    }
+    // On stderr, so the gate's lines stay one per sentence: when the personal centres came into use, and each context.
+    static int inUse(AdaptiveTouch adaptive) {
+        AdaptiveTouchModel.Context[] contexts=adaptive.getModel().getContexts();
+        for(int c=0;c<contexts.length;c++) if(contexts[c].getInUse()) return c;
+        return -1;
+    }
+    static void report(AdaptiveTouch adaptive, Map<String,String> o, int activeFrom, int startUse, CharSequence uses, int sentences) throws IOException {
+        String out=o.get("--profile-out");
+        if(out!=null) java.nio.file.Files.write(java.nio.file.Paths.get(out), adaptive.getModel().serialized());
+        System.err.printf(Locale.ROOT,"adaptive\tactive_from\t%d\tactive_end\t%b\tsentences\t%d%n",activeFrom,adaptive.isActive(),sentences);
+        System.err.println("uses\t"+startUse+"\t"+uses);
+        AdaptiveTouchModel m=adaptive.getModel();
+        for(int c=0;c<AdaptiveTouchModel.CONTEXTS;c++) {
+            AdaptiveTouchModel.Context x=m.getContexts()[c];
+            if(x.getGeometry()==0) continue;
+            double mx=0, my=0; int n=adaptive.getPlane()==null ? 0 : adaptive.getPlane().getLetters().length;
+            for(int s=0;s<n;s++) { mx+=m.offsetX(c,s); my+=m.offsetY(c,s); }
+            System.err.printf(Locale.ROOT,"context\t%d\tregime\t%d\taccepted\t%d\tweak\t%d\tpicked\t%d\tstrong\t%d\tsessions\t%d\tpromotions\t%d\tin_use\t%b\tlearning\t%b\tmean_offset\t%.3f\t%.3f%n",
+                c,x.getRegime(),x.getAccepted(),x.getWeak(),x.getPicked(),x.getStrong(),x.getSessions(),x.getPromotions(),x.getInUse(),x.getLearning(),n>0?mx/n:0,n>0?my/n:0);
+        }
+    }
     // `memory MODEL SET LANG ...`: every language's replay in one process, each kept loaded, then the
     // process's resident memory with all of them, against before the first.
     static final List<Object> kept=new ArrayList<>();
@@ -163,12 +247,23 @@ public final class Replay {
     }
     static void replay(String[] args) throws Exception {
         String lang=args[2], group=lang.equals("en") ? "test-" : lang+"-test-";
-        boolean gate=args.length==4 && args[3].equals("--gate");
+        boolean gate=args.length>=4 && args[3].equals("--gate");
         PrintWriter outputs=!gate && args.length>3 ? new PrintWriter(new FileWriter(args[3])) : null;
         boolean hasIos=false;
         TypingModel model=TypingModel.Companion.file(new File(args[0]),lang);
         // `MODEL SET LANG OUT [GEOMETRY]`: with a measured geometry, any number of sentences.
-        KeyGrid grid=args.length>4 ? geometry(args[4]) : originalGeometry(lang); TypingWord state=new TypingWord(new SpatialDecoder(model), true);
+        KeyGrid grid=!gate && args.length>4 ? geometry(args[4]) : originalGeometry(lang); TypingWord state=new TypingWord(new SpatialDecoder(model), true);
+        // `--gate` options for Labs › Keyboard › Adaptive touch's checks (quality-gate.py --adaptive): a typist who aims
+        // off the centres, and Adaptive touch learning as the keyboard does, or reading a profile learned before.
+        Map<String,String> options=new HashMap<>();
+        for(int i=4;gate&&i+1<args.length;i+=2) options.put(args[i],args[i+1]);
+        String typist=options.get("--typist");
+        AdaptiveTouch adaptive=adaptive(options);
+        int sessionEvery=Integer.parseInt(options.getOrDefault("--sessions","0")), sentence=0, activeFrom=-1;
+        StringBuilder uses=new StringBuilder();
+        double[] now={0};
+        if(adaptive!=null) { state.setAdaptive(adaptive); adaptive.setClock(() -> now[0]); adaptive.beginSession(); }
+        int startUse=adaptive==null ? -1 : inUse(adaptive);
         apostropheKey=lang.equals("fr")&&cells==null ? new KeyPoint(201+3*39.5,66.5+56*2) : null;
         boolean apostropheOnLetters=lang.equals("fr");
         kept.add(state);
@@ -190,6 +285,11 @@ public final class Replay {
                 String[] points=gate && fields.length==2 ? fields[1].split(" ") : null;
                 if((!gate && typed.length()!=taps.length()) || (points!=null && typed.length()!=points.length)) throw new IllegalArgumentException("Unaligned taps");
                 StringBuilder out=new StringBuilder(); state.reset("");
+                if(adaptive!=null) {
+                    // Each sentence is a field of its own, typed a few seconds after the last.
+                    now[0]+=5; adaptive.forget();
+                    if(sessionEvery>0 && sentence>0 && sentence%sessionEvery==0) adaptive.beginSession();
+                }
                 String[] planned=gate ? null : r.getString("intended").toLowerCase(Locale.ROOT).split(" ");
                 Map<Integer,Integer> ends=new HashMap<>(), early=new HashMap<>();
                 String want=gate ? "" : r.optString("want","");
@@ -217,26 +317,43 @@ public final class Replay {
                         explicit=p==null && Character.isLetter(key); // IME long-press choice: w.explicit, no spatial evidence
                         x=p==null ? 0 : p.getX(); y=p==null ? 0 : p.getY();
                     }
+                    if(typist!=null && !explicit && Character.isLetter(key) && grid.getCentres().containsKey(Character.toLowerCase(key))) {
+                        // The typist's own aim moves the tap, and the key under it types.
+                        double[] b=bias(typist, Character.toLowerCase(key), grid);
+                        x+=b[0]; y+=b[1];
+                        char under=letterAt(grid, x, y);
+                        key=Character.isUpperCase(key) ? Character.toUpperCase(under) : under;
+                    }
+                    now[0]+=.25;
                     long start=System.nanoTime();
                     // As the keyboard: a touch on a letter key, or on French's apostrophe key among them, types
                     // the likelier neighbour when it is near enough (the engine leaves a word it isn't reading alone).
                     if(!explicit && (Character.isLetter(key)||(key=='\''&&apostropheOnLetters))) key=likelierKey(state,out.toString(),key,x,y,grid);
                     if(key!=' '&&!Character.isLetter(key)) {
+                        if(adaptive!=null) adaptive.finish(state.getToken().isEmpty() ? null : state.getToken(), out.toString(), null, false);
                         out.append(key); state.reset(out.toString()); tracked=false; shown=Collections.emptyList();
                     } else if(key==' '&&!tracked) {
+                        if(adaptive!=null) adaptive.forget();
                         out.append(' '); String before=out.toString(); state.reset(before); if(!gate) shown=predictions(state,before); tracked=true;
                     } else if(key!=' '&&state.getToken().isEmpty()&&!startsWord(state,out.toString())&&!(tracked&&out.length()==0)) {
+                        if(adaptive!=null) adaptive.forget();
                         out.append(key); tracked=false; shown=Collections.emptyList();
                     } else if(key==' ') {
+                        String token=state.getToken(), before=out.toString();
                         Correction fix=state.finish(' ',new KeyPoint(x,y),grid,word->word); // Labs › Smart quotes off, as by default
                         if(fix!=null) {
                             if(!out.toString().endsWith(fix.getOriginal())) throw new IllegalStateException("Correction off the text");
                             out.replace(out.length()-fix.getOriginal().length(),out.length(),fix.getReplacement());
                         }
-                        out.append(' '); String before=out.toString(); state.reset(before); if(!gate) shown=predictions(state,before);
+                        if(adaptive!=null) finishWord(adaptive, token, before, fix);
+                        out.append(' '); before=out.toString(); state.reset(before); if(!gate) shown=predictions(state,before);
                     } else {
                         tracked=true;
-                        if(explicit) state.explicit(String.valueOf(key)); else state.letter(String.valueOf(key),x,y,grid);
+                        if(explicit) { state.explicit(String.valueOf(key)); if(adaptive!=null) adaptive.untapped(); }
+                        else {
+                            state.letter(String.valueOf(key),x,y,grid);
+                            if(adaptive!=null) adaptive.typed(key,x,y,grid,true);
+                        }
                         out.append(key); if(!gate) shown=strip(state);
                     }
                     if(gate) continue;
@@ -248,6 +365,10 @@ public final class Replay {
                         hits[2]+=hit(shown,planned[j+1])?1:0; hits[3]++;
                     }
                 }
+                if(adaptive!=null && activeFrom<0 && adaptive.isActive()) activeFrom=sentence;
+                // Which context's centres were in use after each sentence (-1: the drawn ones).
+                if(adaptive!=null) uses.append(sentence>0 ? "," : "").append(inUse(adaptive));
+                sentence++;
                 if(gate) { System.out.println(out.toString().trim()); continue; }
                 String[] ref=words(r.getString("intended")); total+=ref.length; count++;
                 String ios=r.getString("ios_shared"); hasIos|=!ios.isEmpty();
@@ -257,7 +378,7 @@ public final class Replay {
                 for(int i=0;i<3;i++) { int err=edits(ref,words(results[i])); errors[i]+=err; if(err==0) exact[i]++; }
             }
         }
-        if(gate) return;
+        if(gate) { if(adaptive!=null) report(adaptive, options, activeFrom, startUse, uses, sentence); return; }
         if(count!=2000&&args.length<=4) throw new IllegalArgumentException("Incomplete synthetic set: "+count);
         if(outputs!=null) outputs.close();
         String[] names={"raw","ios_shared","android_spatial"};

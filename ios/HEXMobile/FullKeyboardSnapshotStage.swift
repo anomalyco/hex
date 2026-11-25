@@ -5,9 +5,9 @@ import UIKit
 /// `--snap-state full-keyboard-<state>[-dark|-dark-field]` is passed on Simulator.
 /// `-dark` is a dark app; `-dark-field` is a light app whose field asks for a dark keyboard.
 /// The layout follows `--dictation-language` (Automatic, English, without it), or
-/// `--keyboard-layout nb|es|de|it|fr|fr-CA|fr-CH|pt|pl|cs|hu|ro|ru|uk|el|sr-Latn|ko|en` pins it; drafts are in the layout's language.
+/// `--keyboard-layout nb|sv|es|de|it|fr|fr-CA|fr-CH|pt|pl|cs|sk|hu|nl|ro|ru|uk|el|sr-Latn|ko|en` pins it; drafts are in the layout's language.
 /// `--keyboard-letters qwerty|qwertz|azerty|dvorak|own` arranges its letters (its own without it).
-/// `--accent-key ø` (or Cyrillic `е`, `ь`, `ʼ`, Greek `α`, `σ`, `t` on Romanian, or `o` on Hungarian) picks the key the `accents` state holds; `--emoji-query kiss` what `emoji-search` types.
+/// `--accent-key ø` (or Cyrillic `е`, `ь`, `ʼ`, Greek `α`, `σ`, `t` on Romanian, `o` on Hungarian, or `j` on Dutch) picks the key the `accents` state holds; `--emoji-query kiss` what `emoji-search` types.
 /// Emoji states (`emoji`, `emoji-search`, `emoji-tones`, `emoji-food`, `emoji-strip`) turn
 /// Settings › Keyboard › Emoji on with a seeded history; `emoji-probe` prints the panel's
 /// footprint and latency (`EMOJI_PROBE` lines) for `simctl launch --console`.
@@ -67,6 +67,15 @@ struct FullKeyboardSnapshotStage: View {
 
     private var draft: String {
         switch Self.layout {
+        case .swedish:
+            return switch state {
+            case "inserted": "Kommer tio min sent, är hemma 19.30. Börja utan mig."
+            case "numbers": "Kommer tio min sent, hemma 19.3"
+            case "shift": "Kommer tio min sent. "
+            case "typing": "Kommer tio min se"
+            case "accents": Self.accentKey == "e" ? "Kaf" : "Bl"
+            default: "Kommer tio min sent, "
+            }
         case .norwegian:
             return switch state {
             case "inserted": "Kommer ti min for sent, er hjemme 19.30. Begynn uten meg."
@@ -139,6 +148,15 @@ struct FullKeyboardSnapshotStage: View {
             case "accents": Self.accentKey == "r" ? "P" : "Ka"
             default: "Přijdu o deset minut později, "
             }
+        case .slovak:
+            return switch state {
+            case "inserted": "Prídem o desať minút neskôr, doma budem o 19:30. Začnite bezo mňa."
+            case "numbers": "Prídem o desať minút neskôr, doma budem o 19:3"
+            case "shift": "Prídem o desať minút neskôr. "
+            case "typing": "Prídem o desať minút nesk"
+            case "accents": Self.accentKey == "o" ? "K" : "Ďakuj"
+            default: "Prídem o desať minút neskôr, "
+            }
         case .hungarian:
             return switch state {
             case "inserted": "Köszönöm szépen, találkozunk holnap!"
@@ -147,6 +165,15 @@ struct FullKeyboardSnapshotStage: View {
             case "typing": "Köszönöm szépen, találkozunk holn"
             case "accents": Self.accentKey == "e" ? "Káv" : "Köszön"
             default: "Köszönöm szépen, találkozunk "
+            }
+        case .dutch:
+            return switch state {
+            case "inserted": "Ik ben tien minuten later, om 19:30 thuis. Begin maar zonder mij."
+            case "numbers": "Ik ben tien minuten later, om 19:3"
+            case "shift": "Ik ben tien minuten later. "
+            case "typing": "Ik ben tien minuten la"
+            case "accents": Self.accentKey == "j" ? "Ví" : "Idee"
+            default: "Ik ben tien minuten later, "
             }
         case .romanian:
             return switch state {
@@ -346,10 +373,13 @@ private struct FullKeyboardFixture: UIViewRepresentable {
                 let key = FullKeyboardSnapshotStage.accentKey
                 let serbian = FullKeyboardSnapshotStage.layout == .serbianLatin
                 let ownLetters: [String: String] = switch FullKeyboardSnapshotStage.layout {
+                case .swedish: ["e": "é", "ö": "ø", "ä": "æ"]
                 case .polish: ["e": "ę", "a": "ą", "c": "ć", "l": "ł", "n": "ń", "o": "ó", "s": "ś", "z": "ż"]
                 case .romanian: ["a": "ă", "i": "î", "s": "ș", "t": "ț"]
                 case .czech: ["e": "ě", "r": "ř", "u": "ů", "a": "á", "c": "č", "s": "š", "z": "ž", "y": "ý", "n": "ň"]
+                case .slovak: ["o": "ô", "a": "ä", "l": "ľ", "e": "é", "c": "č", "s": "š", "z": "ž", "y": "ý", "n": "ň"]
                 case .hungarian: ["a": "á", "e": "é", "i": "í", "o": "ő", "u": "ű"]
+                case .dutch: ["e": "ë", "i": "ï", "j": "j\u{0301}"]
                 case .greek: ["ε": "έ", "α": "ά", "ο": "ό", "η": "ή", "ι": "ί", "υ": "ύ", "ω": "ώ", "σ": "ς", "κ": "ϗ"]
                 default: [:]
                 }

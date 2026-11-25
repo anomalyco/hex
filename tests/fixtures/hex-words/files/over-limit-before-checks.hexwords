@@ -1,0 +1,1511 @@
+{
+  "format": "hex.words",
+  "version": 1,
+  "vocabulary": [
+    {
+      "term": "Term 001"
+    },
+    {
+      "term": "Term 002"
+    },
+    {
+      "term": "Term 003"
+    },
+    {
+      "term": "Term 004"
+    },
+    {
+      "term": "Term 005"
+    },
+    {
+      "term": "Term 006"
+    },
+    {
+      "term": "Term 007"
+    },
+    {
+      "term": "Term 008"
+    },
+    {
+      "term": "Term 009"
+    },
+    {
+      "term": "Term 010"
+    },
+    {
+      "term": "Term 011"
+    },
+    {
+      "term": "Term 012"
+    },
+    {
+      "term": "Term 013"
+    },
+    {
+      "term": "Term 014"
+    },
+    {
+      "term": "Term 015"
+    },
+    {
+      "term": "Term 016"
+    },
+    {
+      "term": "Term 017"
+    },
+    {
+      "term": "Term 018"
+    },
+    {
+      "term": "Term 019"
+    },
+    {
+      "term": "Term 020"
+    },
+    {
+      "term": "Term 021"
+    },
+    {
+      "term": "Term 022"
+    },
+    {
+      "term": "Term 023"
+    },
+    {
+      "term": "Term 024"
+    },
+    {
+      "term": "Term 025"
+    },
+    {
+      "term": "Term 026"
+    },
+    {
+      "term": "Term 027"
+    },
+    {
+      "term": "Term 028"
+    },
+    {
+      "term": "Term 029"
+    },
+    {
+      "term": "Term 030"
+    },
+    {
+      "term": "Term 031"
+    },
+    {
+      "term": "Term 032"
+    },
+    {
+      "term": "Term 033"
+    },
+    {
+      "term": "Term 034"
+    },
+    {
+      "term": "Term 035"
+    },
+    {
+      "term": "Term 036"
+    },
+    {
+      "term": "Term 037"
+    },
+    {
+      "term": "Term 038"
+    },
+    {
+      "term": "Term 039"
+    },
+    {
+      "term": "Term 040"
+    },
+    {
+      "term": "Term 041"
+    },
+    {
+      "term": "Term 042"
+    },
+    {
+      "term": "Term 043"
+    },
+    {
+      "term": "Term 044"
+    },
+    {
+      "term": "Term 045"
+    },
+    {
+      "term": "Term 046"
+    },
+    {
+      "term": "Term 047"
+    },
+    {
+      "term": "Term 048"
+    },
+    {
+      "term": "Term 049"
+    },
+    {
+      "term": "Term 050"
+    },
+    {
+      "term": "Term 051"
+    },
+    {
+      "term": "Term 052"
+    },
+    {
+      "term": "Term 053"
+    },
+    {
+      "term": "Term 054"
+    },
+    {
+      "term": "Term 055"
+    },
+    {
+      "term": "Term 056"
+    },
+    {
+      "term": "Term 057"
+    },
+    {
+      "term": "Term 058"
+    },
+    {
+      "term": "Term 059"
+    },
+    {
+      "term": "Term 060"
+    },
+    {
+      "term": "Term 061"
+    },
+    {
+      "term": "Term 062"
+    },
+    {
+      "term": "Term 063"
+    },
+    {
+      "term": "Term 064"
+    },
+    {
+      "term": "Term 065"
+    },
+    {
+      "term": "Term 066"
+    },
+    {
+      "term": "Term 067"
+    },
+    {
+      "term": "Term 068"
+    },
+    {
+      "term": "Term 069"
+    },
+    {
+      "term": "Term 070"
+    },
+    {
+      "term": "Term 071"
+    },
+    {
+      "term": "Term 072"
+    },
+    {
+      "term": "Term 073"
+    },
+    {
+      "term": "Term 074"
+    },
+    {
+      "term": "Term 075"
+    },
+    {
+      "term": "Term 076"
+    },
+    {
+      "term": "Term 077"
+    },
+    {
+      "term": "Term 078"
+    },
+    {
+      "term": "Term 079"
+    },
+    {
+      "term": "Term 080"
+    },
+    {
+      "term": "Term 081"
+    },
+    {
+      "term": "Term 082"
+    },
+    {
+      "term": "Term 083"
+    },
+    {
+      "term": "Term 084"
+    },
+    {
+      "term": "Term 085"
+    },
+    {
+      "term": "Term 086"
+    },
+    {
+      "term": "Term 087"
+    },
+    {
+      "term": "Term 088"
+    },
+    {
+      "term": "Term 089"
+    },
+    {
+      "term": "Term 090"
+    },
+    {
+      "term": "Term 091"
+    },
+    {
+      "term": "Term 092"
+    },
+    {
+      "term": "Term 093"
+    },
+    {
+      "term": "Term 094"
+    },
+    {
+      "term": "Term 095"
+    },
+    {
+      "term": "Term 096"
+    },
+    {
+      "term": "Term 097"
+    },
+    {
+      "term": "Term 098"
+    },
+    {
+      "term": "Term 099"
+    },
+    {
+      "term": "Term 100"
+    },
+    {
+      "term": "Term 101"
+    },
+    {
+      "term": "Term 102"
+    },
+    {
+      "term": "Term 103"
+    },
+    {
+      "term": "Term 104"
+    },
+    {
+      "term": "Term 105"
+    },
+    {
+      "term": "Term 106"
+    },
+    {
+      "term": "Term 107"
+    },
+    {
+      "term": "Term 108"
+    },
+    {
+      "term": "Term 109"
+    },
+    {
+      "term": "Term 110"
+    },
+    {
+      "term": "Term 111"
+    },
+    {
+      "term": "Term 112"
+    },
+    {
+      "term": "Term 113"
+    },
+    {
+      "term": "Term 114"
+    },
+    {
+      "term": "Term 115"
+    },
+    {
+      "term": "Term 116"
+    },
+    {
+      "term": "Term 117"
+    },
+    {
+      "term": "Term 118"
+    },
+    {
+      "term": "Term 119"
+    },
+    {
+      "term": "Term 120"
+    },
+    {
+      "term": "Term 121"
+    },
+    {
+      "term": "Term 122"
+    },
+    {
+      "term": "Term 123"
+    },
+    {
+      "term": "Term 124"
+    },
+    {
+      "term": "Term 125"
+    },
+    {
+      "term": "Term 126"
+    },
+    {
+      "term": "Term 127"
+    },
+    {
+      "term": "Term 128"
+    },
+    {
+      "term": "Term 129"
+    },
+    {
+      "term": "Term 130"
+    },
+    {
+      "term": "Term 131"
+    },
+    {
+      "term": "Term 132"
+    },
+    {
+      "term": "Term 133"
+    },
+    {
+      "term": "Term 134"
+    },
+    {
+      "term": "Term 135"
+    },
+    {
+      "term": "Term 136"
+    },
+    {
+      "term": "Term 137"
+    },
+    {
+      "term": "Term 138"
+    },
+    {
+      "term": "Term 139"
+    },
+    {
+      "term": "Term 140"
+    },
+    {
+      "term": "Term 141"
+    },
+    {
+      "term": "Term 142"
+    },
+    {
+      "term": "Term 143"
+    },
+    {
+      "term": "Term 144"
+    },
+    {
+      "term": "Term 145"
+    },
+    {
+      "term": "Term 146"
+    },
+    {
+      "term": "Term 147"
+    },
+    {
+      "term": "Term 148"
+    },
+    {
+      "term": "Term 149"
+    },
+    {
+      "term": "Term 150"
+    },
+    {
+      "term": "Term 151"
+    },
+    {
+      "term": "Term 152"
+    },
+    {
+      "term": "Term 153"
+    },
+    {
+      "term": "Term 154"
+    },
+    {
+      "term": "Term 155"
+    },
+    {
+      "term": "Term 156"
+    },
+    {
+      "term": "Term 157"
+    },
+    {
+      "term": "Term 158"
+    },
+    {
+      "term": "Term 159"
+    },
+    {
+      "term": "Term 160"
+    },
+    {
+      "term": "Term 161"
+    },
+    {
+      "term": "Term 162"
+    },
+    {
+      "term": "Term 163"
+    },
+    {
+      "term": "Term 164"
+    },
+    {
+      "term": "Term 165"
+    },
+    {
+      "term": "Term 166"
+    },
+    {
+      "term": "Term 167"
+    },
+    {
+      "term": "Term 168"
+    },
+    {
+      "term": "Term 169"
+    },
+    {
+      "term": "Term 170"
+    },
+    {
+      "term": "Term 171"
+    },
+    {
+      "term": "Term 172"
+    },
+    {
+      "term": "Term 173"
+    },
+    {
+      "term": "Term 174"
+    },
+    {
+      "term": "Term 175"
+    },
+    {
+      "term": "Term 176"
+    },
+    {
+      "term": "Term 177"
+    },
+    {
+      "term": "Term 178"
+    },
+    {
+      "term": "Term 179"
+    },
+    {
+      "term": "Term 180"
+    },
+    {
+      "term": "Term 181"
+    },
+    {
+      "term": "Term 182"
+    },
+    {
+      "term": "Term 183"
+    },
+    {
+      "term": "Term 184"
+    },
+    {
+      "term": "Term 185"
+    },
+    {
+      "term": "Term 186"
+    },
+    {
+      "term": "Term 187"
+    },
+    {
+      "term": "Term 188"
+    },
+    {
+      "term": "Term 189"
+    },
+    {
+      "term": "Term 190"
+    },
+    {
+      "term": "Term 191"
+    },
+    {
+      "term": "Term 192"
+    },
+    {
+      "term": "Term 193"
+    },
+    {
+      "term": "Term 194"
+    },
+    {
+      "term": "Term 195"
+    },
+    {
+      "term": "Term 196"
+    },
+    {
+      "term": "Term 197"
+    },
+    {
+      "term": "Term 198"
+    },
+    {
+      "term": "Term 199"
+    },
+    {
+      "term": "Term 200"
+    },
+    {
+      "term": "Term 201"
+    },
+    {
+      "term": "Term 202"
+    },
+    {
+      "term": "Term 203"
+    },
+    {
+      "term": "Term 204"
+    },
+    {
+      "term": "Term 205"
+    },
+    {
+      "term": "Term 206"
+    },
+    {
+      "term": "Term 207"
+    },
+    {
+      "term": "Term 208"
+    },
+    {
+      "term": "Term 209"
+    },
+    {
+      "term": "Term 210"
+    },
+    {
+      "term": "Term 211"
+    },
+    {
+      "term": "Term 212"
+    },
+    {
+      "term": "Term 213"
+    },
+    {
+      "term": "Term 214"
+    },
+    {
+      "term": "Term 215"
+    },
+    {
+      "term": "Term 216"
+    },
+    {
+      "term": "Term 217"
+    },
+    {
+      "term": "Term 218"
+    },
+    {
+      "term": "Term 219"
+    },
+    {
+      "term": "Term 220"
+    },
+    {
+      "term": "Term 221"
+    },
+    {
+      "term": "Term 222"
+    },
+    {
+      "term": "Term 223"
+    },
+    {
+      "term": "Term 224"
+    },
+    {
+      "term": "Term 225"
+    },
+    {
+      "term": "Term 226"
+    },
+    {
+      "term": "Term 227"
+    },
+    {
+      "term": "Term 228"
+    },
+    {
+      "term": "Term 229"
+    },
+    {
+      "term": "Term 230"
+    },
+    {
+      "term": "Term 231"
+    },
+    {
+      "term": "Term 232"
+    },
+    {
+      "term": "Term 233"
+    },
+    {
+      "term": "Term 234"
+    },
+    {
+      "term": "Term 235"
+    },
+    {
+      "term": "Term 236"
+    },
+    {
+      "term": "Term 237"
+    },
+    {
+      "term": "Term 238"
+    },
+    {
+      "term": "Term 239"
+    },
+    {
+      "term": "Term 240"
+    },
+    {
+      "term": "Term 241"
+    },
+    {
+      "term": "Term 242"
+    },
+    {
+      "term": "Term 243"
+    },
+    {
+      "term": "Term 244"
+    },
+    {
+      "term": "Term 245"
+    },
+    {
+      "term": "Term 246"
+    },
+    {
+      "term": "Term 247"
+    },
+    {
+      "term": "Term 248"
+    },
+    {
+      "term": "Term 249"
+    },
+    {
+      "term": "Term 250"
+    },
+    {
+      "term": "Term 251"
+    },
+    {
+      "term": "Term 252"
+    },
+    {
+      "term": "Term 253"
+    },
+    {
+      "term": "Term 254"
+    },
+    {
+      "term": "Term 255"
+    },
+    {
+      "term": "Term 256"
+    },
+    {
+      "term": "Term 257"
+    },
+    {
+      "term": "Term 258"
+    },
+    {
+      "term": "Term 259"
+    },
+    {
+      "term": "Term 260"
+    },
+    {
+      "term": "Term 261"
+    },
+    {
+      "term": "Term 262"
+    },
+    {
+      "term": "Term 263"
+    },
+    {
+      "term": "Term 264"
+    },
+    {
+      "term": "Term 265"
+    },
+    {
+      "term": "Term 266"
+    },
+    {
+      "term": "Term 267"
+    },
+    {
+      "term": "Term 268"
+    },
+    {
+      "term": "Term 269"
+    },
+    {
+      "term": "Term 270"
+    },
+    {
+      "term": "Term 271"
+    },
+    {
+      "term": "Term 272"
+    },
+    {
+      "term": "Term 273"
+    },
+    {
+      "term": "Term 274"
+    },
+    {
+      "term": "Term 275"
+    },
+    {
+      "term": "Term 276"
+    },
+    {
+      "term": "Term 277"
+    },
+    {
+      "term": "Term 278"
+    },
+    {
+      "term": "Term 279"
+    },
+    {
+      "term": "Term 280"
+    },
+    {
+      "term": "Term 281"
+    },
+    {
+      "term": "Term 282"
+    },
+    {
+      "term": "Term 283"
+    },
+    {
+      "term": "Term 284"
+    },
+    {
+      "term": "Term 285"
+    },
+    {
+      "term": "Term 286"
+    },
+    {
+      "term": "Term 287"
+    },
+    {
+      "term": "Term 288"
+    },
+    {
+      "term": "Term 289"
+    },
+    {
+      "term": "Term 290"
+    },
+    {
+      "term": "Term 291"
+    },
+    {
+      "term": "Term 292"
+    },
+    {
+      "term": "Term 293"
+    },
+    {
+      "term": "Term 294"
+    },
+    {
+      "term": "Term 295"
+    },
+    {
+      "term": "Term 296"
+    },
+    {
+      "term": "Term 297"
+    },
+    {
+      "term": "Term 298"
+    },
+    {
+      "term": "Term 299"
+    },
+    {
+      "term": "Term 300"
+    },
+    {
+      "term": "Term 301"
+    },
+    {
+      "term": "Term 302"
+    },
+    {
+      "term": "Term 303"
+    },
+    {
+      "term": "Term 304"
+    },
+    {
+      "term": "Term 305"
+    },
+    {
+      "term": "Term 306"
+    },
+    {
+      "term": "Term 307"
+    },
+    {
+      "term": "Term 308"
+    },
+    {
+      "term": "Term 309"
+    },
+    {
+      "term": "Term 310"
+    },
+    {
+      "term": "Term 311"
+    },
+    {
+      "term": "Term 312"
+    },
+    {
+      "term": "Term 313"
+    },
+    {
+      "term": "Term 314"
+    },
+    {
+      "term": "Term 315"
+    },
+    {
+      "term": "Term 316"
+    },
+    {
+      "term": "Term 317"
+    },
+    {
+      "term": "Term 318"
+    },
+    {
+      "term": "Term 319"
+    },
+    {
+      "term": "Term 320"
+    },
+    {
+      "term": "Term 321"
+    },
+    {
+      "term": "Term 322"
+    },
+    {
+      "term": "Term 323"
+    },
+    {
+      "term": "Term 324"
+    },
+    {
+      "term": "Term 325"
+    },
+    {
+      "term": "Term 326"
+    },
+    {
+      "term": "Term 327"
+    },
+    {
+      "term": "Term 328"
+    },
+    {
+      "term": "Term 329"
+    },
+    {
+      "term": "Term 330"
+    },
+    {
+      "term": "Term 331"
+    },
+    {
+      "term": "Term 332"
+    },
+    {
+      "term": "Term 333"
+    },
+    {
+      "term": "Term 334"
+    },
+    {
+      "term": "Term 335"
+    },
+    {
+      "term": "Term 336"
+    },
+    {
+      "term": "Term 337"
+    },
+    {
+      "term": "Term 338"
+    },
+    {
+      "term": "Term 339"
+    },
+    {
+      "term": "Term 340"
+    },
+    {
+      "term": "Term 341"
+    },
+    {
+      "term": "Term 342"
+    },
+    {
+      "term": "Term 343"
+    },
+    {
+      "term": "Term 344"
+    },
+    {
+      "term": "Term 345"
+    },
+    {
+      "term": "Term 346"
+    },
+    {
+      "term": "Term 347"
+    },
+    {
+      "term": "Term 348"
+    },
+    {
+      "term": "Term 349"
+    },
+    {
+      "term": "Term 350"
+    },
+    {
+      "term": "Term 351"
+    },
+    {
+      "term": "Term 352"
+    },
+    {
+      "term": "Term 353"
+    },
+    {
+      "term": "Term 354"
+    },
+    {
+      "term": "Term 355"
+    },
+    {
+      "term": "Term 356"
+    },
+    {
+      "term": "Term 357"
+    },
+    {
+      "term": "Term 358"
+    },
+    {
+      "term": "Term 359"
+    },
+    {
+      "term": "Term 360"
+    },
+    {
+      "term": "Term 361"
+    },
+    {
+      "term": "Term 362"
+    },
+    {
+      "term": "Term 363"
+    },
+    {
+      "term": "Term 364"
+    },
+    {
+      "term": "Term 365"
+    },
+    {
+      "term": "Term 366"
+    },
+    {
+      "term": "Term 367"
+    },
+    {
+      "term": "Term 368"
+    },
+    {
+      "term": "Term 369"
+    },
+    {
+      "term": "Term 370"
+    },
+    {
+      "term": "Term 371"
+    },
+    {
+      "term": "Term 372"
+    },
+    {
+      "term": "Term 373"
+    },
+    {
+      "term": "Term 374"
+    },
+    {
+      "term": "Term 375"
+    },
+    {
+      "term": "Term 376"
+    },
+    {
+      "term": "Term 377"
+    },
+    {
+      "term": "Term 378"
+    },
+    {
+      "term": "Term 379"
+    },
+    {
+      "term": "Term 380"
+    },
+    {
+      "term": "Term 381"
+    },
+    {
+      "term": "Term 382"
+    },
+    {
+      "term": "Term 383"
+    },
+    {
+      "term": "Term 384"
+    },
+    {
+      "term": "Term 385"
+    },
+    {
+      "term": "Term 386"
+    },
+    {
+      "term": "Term 387"
+    },
+    {
+      "term": "Term 388"
+    },
+    {
+      "term": "Term 389"
+    },
+    {
+      "term": "Term 390"
+    },
+    {
+      "term": "Term 391"
+    },
+    {
+      "term": "Term 392"
+    },
+    {
+      "term": "Term 393"
+    },
+    {
+      "term": "Term 394"
+    },
+    {
+      "term": "Term 395"
+    },
+    {
+      "term": "Term 396"
+    },
+    {
+      "term": "Term 397"
+    },
+    {
+      "term": "Term 398"
+    },
+    {
+      "term": "Term 399"
+    },
+    {
+      "term": "Term 400"
+    },
+    {
+      "term": "Term 401"
+    },
+    {
+      "term": "Term 402"
+    },
+    {
+      "term": "Term 403"
+    },
+    {
+      "term": "Term 404"
+    },
+    {
+      "term": "Term 405"
+    },
+    {
+      "term": "Term 406"
+    },
+    {
+      "term": "Term 407"
+    },
+    {
+      "term": "Term 408"
+    },
+    {
+      "term": "Term 409"
+    },
+    {
+      "term": "Term 410"
+    },
+    {
+      "term": "Term 411"
+    },
+    {
+      "term": "Term 412"
+    },
+    {
+      "term": "Term 413"
+    },
+    {
+      "term": "Term 414"
+    },
+    {
+      "term": "Term 415"
+    },
+    {
+      "term": "Term 416"
+    },
+    {
+      "term": "Term 417"
+    },
+    {
+      "term": "Term 418"
+    },
+    {
+      "term": "Term 419"
+    },
+    {
+      "term": "Term 420"
+    },
+    {
+      "term": "Term 421"
+    },
+    {
+      "term": "Term 422"
+    },
+    {
+      "term": "Term 423"
+    },
+    {
+      "term": "Term 424"
+    },
+    {
+      "term": "Term 425"
+    },
+    {
+      "term": "Term 426"
+    },
+    {
+      "term": "Term 427"
+    },
+    {
+      "term": "Term 428"
+    },
+    {
+      "term": "Term 429"
+    },
+    {
+      "term": "Term 430"
+    },
+    {
+      "term": "Term 431"
+    },
+    {
+      "term": "Term 432"
+    },
+    {
+      "term": "Term 433"
+    },
+    {
+      "term": "Term 434"
+    },
+    {
+      "term": "Term 435"
+    },
+    {
+      "term": "Term 436"
+    },
+    {
+      "term": "Term 437"
+    },
+    {
+      "term": "Term 438"
+    },
+    {
+      "term": "Term 439"
+    },
+    {
+      "term": "Term 440"
+    },
+    {
+      "term": "Term 441"
+    },
+    {
+      "term": "Term 442"
+    },
+    {
+      "term": "Term 443"
+    },
+    {
+      "term": "Term 444"
+    },
+    {
+      "term": "Term 445"
+    },
+    {
+      "term": "Term 446"
+    },
+    {
+      "term": "Term 447"
+    },
+    {
+      "term": "Term 448"
+    },
+    {
+      "term": "Term 449"
+    },
+    {
+      "term": "Term 450"
+    },
+    {
+      "term": "Term 451"
+    },
+    {
+      "term": "Term 452"
+    },
+    {
+      "term": "Term 453"
+    },
+    {
+      "term": "Term 454"
+    },
+    {
+      "term": "Term 455"
+    },
+    {
+      "term": "Term 456"
+    },
+    {
+      "term": "Term 457"
+    },
+    {
+      "term": "Term 458"
+    },
+    {
+      "term": "Term 459"
+    },
+    {
+      "term": "Term 460"
+    },
+    {
+      "term": "Term 461"
+    },
+    {
+      "term": "Term 462"
+    },
+    {
+      "term": "Term 463"
+    },
+    {
+      "term": "Term 464"
+    },
+    {
+      "term": "Term 465"
+    },
+    {
+      "term": "Term 466"
+    },
+    {
+      "term": "Term 467"
+    },
+    {
+      "term": "Term 468"
+    },
+    {
+      "term": "Term 469"
+    },
+    {
+      "term": "Term 470"
+    },
+    {
+      "term": "Term 471"
+    },
+    {
+      "term": "Term 472"
+    },
+    {
+      "term": "Term 473"
+    },
+    {
+      "term": "Term 474"
+    },
+    {
+      "term": "Term 475"
+    },
+    {
+      "term": "Term 476"
+    },
+    {
+      "term": "Term 477"
+    },
+    {
+      "term": "Term 478"
+    },
+    {
+      "term": "Term 479"
+    },
+    {
+      "term": "Term 480"
+    },
+    {
+      "term": "Term 481"
+    },
+    {
+      "term": "Term 482"
+    },
+    {
+      "term": "Term 483"
+    },
+    {
+      "term": "Term 484"
+    },
+    {
+      "term": "Term 485"
+    },
+    {
+      "term": "Term 486"
+    },
+    {
+      "term": "Term 487"
+    },
+    {
+      "term": "Term 488"
+    },
+    {
+      "term": "Term 489"
+    },
+    {
+      "term": "Term 490"
+    },
+    {
+      "term": "Term 491"
+    },
+    {
+      "term": "Term 492"
+    },
+    {
+      "term": "Term 493"
+    },
+    {
+      "term": "Term 494"
+    },
+    {
+      "term": "Term 495"
+    },
+    {
+      "term": "Term 496"
+    },
+    {
+      "term": "Term 497"
+    },
+    {
+      "term": "Term 498"
+    },
+    {
+      "term": "Term 499"
+    },
+    {
+      "term": "Term 500"
+    },
+    {
+      "oops": true
+    },
+    "not even an object"
+  ],
+  "replacements": []
+}
