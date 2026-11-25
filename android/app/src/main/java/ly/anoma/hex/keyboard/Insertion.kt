@@ -18,3 +18,28 @@ internal fun dictationInsertion(transcript: String, before: String?, after: Char
     val spaced = insertion(transcript, if (standalone) '\n' else before?.lastOrNull(), after)
     return if (spaced.isEmpty() || !standalone) spaced else "\n$spaced"
 }
+
+/** The field a dictation's text may go into. Every start Hex gets is a new number, a restart included: a browser, a
+ * WebView or a Compose screen moves between its inputs by restarting the same view, with the same package, field ID and
+ * often the same EditorInfo, so a restart can't be told from another field. The field finishing retires its number.
+ * A dictation keeps the number it was spoken in, and its text goes in only while that number is current, the editor is
+ * connected and the field isn't a password one, whether or not the keyboard shows: an app hiding the keyboard keeps its
+ * field (no start comes), so the text lands where it was spoken, and never in another field or app. */
+internal class DictationField {
+    var current = 0
+        private set
+    private var live = false
+
+    fun started() { current++; live = true }
+
+    fun finished() { current++; live = false }
+
+    /** Whether a text spoken in field [spokenIn] goes in now. */
+    fun takes(spokenIn: Int, connected: Boolean, secure: Boolean) = live && spokenIn == current && connected && !secure
+
+    companion object {
+        /** A hold on the Hex key that Android cancelled: the keyboard going away under the finger finishes the dictation,
+         * as the hide itself does; a cancel with the keyboard still up discards it. */
+        fun cancelledHoldFinishes(keyboardShown: Boolean) = !keyboardShown
+    }
+}

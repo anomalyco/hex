@@ -893,4 +893,39 @@ class InsertionTest {
         assertFalse(SwipeText.takesBack("Hello world", null, "world", letterByLetter = false))
         assertFalse(SwipeText.takesBack("Hello world!", "Hello world!", "world", letterByLetter = false))
     }
+    @Test fun aDictationGoesOnlyIntoTheFieldItWasSpokenIn() {
+        val field = DictationField()
+        field.started()
+        val spoken = field.current
+        // The app hid the keyboard: no start came, the field is still current and connected, so the text goes in,
+        // shown or not.
+        assertTrue(field.takes(spoken, connected = true, secure = false))
+        assertFalse(field.takes(spoken, connected = false, secure = false))
+    }
+    @Test fun aDictationNeverReachesAnotherFieldAppOrPasswordField() {
+        val field = DictationField()
+        field.started()
+        val spoken = field.current
+        // Any start is another field: focus moving in a native app, another app, and a restart, which is how Chrome, a
+        // WebView or a Compose screen moves between its inputs (measured: same package, field ID -1 and EditorInfo for
+        // two web inputs, restarting = true).
+        field.started()
+        assertFalse(field.takes(spoken, connected = true, secure = false))
+        // A password field never takes a dictation, even its own.
+        assertFalse(field.takes(field.current, connected = true, secure = true))
+    }
+    @Test fun aDictationWhoseFieldIsGoneIsDropped() {
+        val field = DictationField()
+        field.started()
+        val spoken = field.current
+        field.finished()
+        assertFalse(field.takes(spoken, connected = true, secure = false))
+        field.started()
+        assertFalse(field.takes(spoken, connected = true, secure = false))
+    }
+    @Test fun aHoldCutShortByTheKeyboardHidingFinishes() {
+        assertTrue(DictationField.cancelledHoldFinishes(keyboardShown = false))
+        // A cancel with the keyboard still up discards the hold's dictation, as before.
+        assertFalse(DictationField.cancelledHoldFinishes(keyboardShown = true))
+    }
 }

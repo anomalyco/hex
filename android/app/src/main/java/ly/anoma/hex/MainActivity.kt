@@ -95,7 +95,7 @@ class MainActivity : ComponentActivity() {
         capture = MicCapture(LocalSpeech(applicationContext), DictationPlace.Home,
             // Home's Dictate bar too: onStop cancels, so the screen mustn't sleep mid-dictation.
             update = { next, reason -> phase = next; notice = speechNote(reason); window.keepAwake(next) },
-            meter = {}, insert = { text, _, _ -> transcript = text })
+            meter = {}, insert = { text, _, _, _ -> transcript = text })
         // Setup is page 1 and its try page 2 (page 0, the welcome before them, is now part of page 1); Home is 3.
         page = prefs.getInt("page", 1).coerceIn(1, 3)
         // The keyboard's Settings tool opens Hex on its Keyboard page for the launch that carried the extra.

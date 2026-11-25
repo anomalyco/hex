@@ -135,7 +135,7 @@ class QuickDictationActivity : ComponentActivity(), OfflineScreen {
         window.setDimAmount(0.32f)
         capture = MicCapture(LocalSpeech(applicationContext), DictationPlace.QuickSettings,
             update = { next, reason -> phase = next; note = speechNote(reason); window.keepAwake(next) },
-            meter = {}, insert = { text, _, _ -> copy(text) })
+            meter = {}, insert = { text, _, _, _ -> copy(text) })
         setContent {
             QuickSheet(phase, note, copied, micNeedsSettings, dismiss = ::close, primary = ::primary,
                 settings = { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) })

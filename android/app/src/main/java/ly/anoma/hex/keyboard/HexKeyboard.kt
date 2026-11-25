@@ -87,6 +87,8 @@ class HexKeyboard : InputMethodService() {
     private fun voiceOnly(subtype: InputMethodSubtype? = null) =
         feedback.voiceOnly && VoiceOnly.shows(true, subtype?.mode ?: subtypeMode())
     private lateinit var capture: MicCapture
+    /** The field dictations are spoken in, so a text only ever goes back into its own. */
+    private val field = DictationField()
     internal val preferences by lazy { SpeechPreferences(this) }
     /** Labs › Learn from my fixes: the word pairs, their counts and when each was last made, and the
      * tracker's reports. */
@@ -213,7 +215,10 @@ class HexKeyboard : InputMethodService() {
         typeChanged = restarting && fieldType != attribute.inputType to attribute.imeOptions
         fieldType = attribute.inputType to attribute.imeOptions
         nextEnglish = null
-        capture.cancel() // Even a different field in the same app must not receive an old result.
+        // Another field never receives an old result. A restart counts too: browsers, WebViews and Compose restart one view
+        // to move between their inputs, which Hex can't tell from the same field.
+        field.started()
+        capture.cancel()
         engine.startInput(attribute)
     }
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
@@ -352,7 +357,7 @@ class HexKeyboard : InputMethodService() {
             return false
         }
         engine.clearForDictation()
-        capture.start(preferences.options(nextEnglish))
+        capture.start(preferences.options(nextEnglish), field.current)
         nextEnglish = null
         return true
     }
@@ -382,7 +387,7 @@ class HexKeyboard : InputMethodService() {
         }
         if (blocked != null) { voice.status(SpeechPhase.Idle, blocked); return }
         engine.clearForDictation()
-        capture.start(preferences.options(nextEnglish))
+        capture.start(preferences.options(nextEnglish), field.current)
         nextEnglish = null
     }
     /** The bar's ✓: finish the dictation, or start one again after a blocked or failed start. */
@@ -432,8 +437,10 @@ class HexKeyboard : InputMethodService() {
     private fun showLevel(level: Float) {
         bar?.setLevel(level); view?.setLevel(level)
     }
-    private fun commitSpeech(text: String, heard: String, options: SpeechOptions) {
-        if (currentInputConnection == null || engine.secure || !isInputViewShown) { leaveVoiceOnly(); return }
+    /** A dictation's text, for the field it was spoken in ([spokenIn]): typed there even with the keyboard hidden, or
+     * dropped when that field is gone. */
+    private fun commitSpeech(text: String, heard: String, options: SpeechOptions, spokenIn: Int) {
+        if (!field.takes(spokenIn, currentInputConnection != null, engine.secure)) { leaveVoiceOnly(); return }
         // Read now, so a toggle or text changed while it transcribed applies to this dictation. Hex's own
         // fields, such as Settings' practice box, never get the signature.
         val own = currentInputEditorInfo?.packageName == packageName
@@ -442,14 +449,18 @@ class HexKeyboard : InputMethodService() {
             heard, options.learnFixes && preferences.learnFixes && !options.translate)
         leaveVoiceOnly()
     }
-    private fun leaveEditor() {
+    /** The keyboard goes away. Hidden with its field still there (an app hiding it, Back), a recording stops as with ✓
+     * and its text still goes into that field; with the field gone ([fieldGone]), nothing recording or transcribing goes
+     * in. Either way the microphone closes now. */
+    private fun leaveEditor(fieldGone: Boolean) {
         bar?.removeCallbacks(pendingLeave)
         viewing = false; watchClipboard()
-        clearInline(); view?.reset(); view?.cancelGestures(); engine.leave(); nextEnglish = null; capture.cancel()
+        clearInline(); view?.reset(); view?.cancelGestures(); engine.leave(); nextEnglish = null
+        if (fieldGone) capture.cancel() else finishSpeech()
     }
-    override fun onFinishInputView(finishingInput: Boolean) { leaveEditor(); super.onFinishInputView(finishingInput) }
-    override fun onFinishInput() { leaveEditor(); super.onFinishInput() }
-    override fun onWindowHidden() { leaveEditor(); super.onWindowHidden() }
+    override fun onFinishInputView(finishingInput: Boolean) { leaveEditor(finishingInput); super.onFinishInputView(finishingInput) }
+    override fun onFinishInput() { field.finished(); leaveEditor(fieldGone = true); super.onFinishInput() }
+    override fun onWindowHidden() { leaveEditor(fieldGone = false); super.onWindowHidden() }
     // The speech model is a few hundred MB while loaded; give it back when Android runs short. Not on
     // TRIM_MEMORY_UI_HIDDEN, which only says the keyboard hid (every app switch), not that memory is low.
     override fun onTrimMemory(level: Int) {
