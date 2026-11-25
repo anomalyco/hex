@@ -297,7 +297,11 @@ struct DictationSettingsPage: View {
                 // Hidden where the keyboard dictates by itself and it would say Off.
                 if keepsWarmRow || dictation.showsKeepMicWarm {
                     HStack(spacing: 12) {
-                        SettingsRowLabel(title: String(localized: "Keep mic warm"))
+                        SettingsRowLabel(
+                            title: String(localized: "Keep mic warm"),
+                            // A privacy point too: the microphone stays open for the time picked.
+                            detail: String(localized: "Keeps the mic open after a dictation so the next starts at once")
+                        )
                         Spacer(minLength: 8)
                         SettingsSegments(
                             items: WarmSessionDuration.allCases,

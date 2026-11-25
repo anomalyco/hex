@@ -1739,6 +1739,16 @@
         }
       }
     },
+    "Keeps the mic open after a dictation so the next starts at once" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "听写后保持麦克风开启，下次听写可立即开始"
+          }
+        }
+      }
+    },
     "Keeps music playing and starts faster" : {
       "localizations" : {
         "zh-Hans" : {
