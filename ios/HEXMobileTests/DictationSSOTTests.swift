@@ -550,6 +550,7 @@ final class DictationSSOTTests: XCTestCase {
     /// to say "The keyboard can't use it right now" for six causes, and kept saying it after the
     /// cause had passed (a post on X, 2026-11-25). Each cause now says why and what happens
     /// next, and a load that failed gets Try again.
+    @MainActor
     func testTheKeyboardsSpeechModelLineSaysWhyItCouldntUseItAndWhatHappensNext() throws {
         let suite = "hex.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
