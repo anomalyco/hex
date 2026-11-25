@@ -374,7 +374,7 @@ fn localized_action_rows_share_their_geometry_and_pointer_in_every_corner() {
                 let [x, y, w, h] = row.rect;
                 assert_eq!(
                     (x, w, h),
-                    (CAPSULE_INSET + PANEL_PAD, 242., 44.),
+                    (CAPSULE_INSET + PANEL_PAD, PANEL_WIDTH - 2. * PANEL_PAD, ROW_HEIGHT),
                     "{code:?} {corner:?} {key}"
                 );
                 let child = |key| {
@@ -384,11 +384,11 @@ fn localized_action_rows_share_their_geometry_and_pointer_in_every_corner() {
                         .unwrap()
                 };
                 let [gx, gy, gw, gh] = child("glyph").rect;
-                assert_eq!((gx - x, gw, gh), (9., 16., 16.));
+                assert_eq!((gx - x, gw, gh), (ROW_PX, CAPSULE.icon, CAPSULE.icon));
                 assert_eq!(gy + gh / 2., y + h / 2.);
                 let label = child("label");
                 assert_eq!(label.text.as_deref(), Some(tr(name)));
-                assert_eq!(label.rect[0] - x, 33.);
+                assert_eq!(label.rect[0] - x, ROW_PX + CAPSULE.icon + CAPSULE.icon_gap);
                 for px in [gx + gw / 2., label.rect[0] + 1., x + w - 1.] {
                     rt.pointer_move(px, y + h / 2.);
                     rt.frame(1. / 60.);
@@ -571,7 +571,7 @@ fn tab_focus_tracks_the_whole_action_row_without_changing_its_bounds() {
             .find(|e| e.focus_visible && e.focused)
             .unwrap();
         assert_eq!(focused.key.as_deref(), Some(key));
-        assert_eq!(focused.rect[2..], [242., 44.]);
+        assert_eq!(focused.rect[2..], [PANEL_WIDTH - 2. * PANEL_PAD, ROW_HEIGHT]);
     }
     assert!(commands.try_recv().is_err());
 }

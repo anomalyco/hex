@@ -48,7 +48,7 @@ fn recording_in(corner: MeetingIndicatorCorner) -> Runtime<Capsule> {
 fn the_header_keeps_the_rows_inset_at_rest_open_and_finished() {
     use MeetingIndicatorCorner::*;
     let inset = PANEL_PAD + ROW_PX;
-    assert_eq!((REST_PX, REST_WIDTH), (14., 165.));
+    assert_eq!((REST_PX, REST_WIDTH), (16., 168.));
     for corner in [TopLeft, TopRight, BottomLeft, BottomRight] {
         let mut rt = recording_in(corner);
         let [px, _, pw, ph] = laid_out(&rt, "pill");
@@ -147,7 +147,7 @@ fn rows_that_can_both_be_filled_are_one_gap_apart() {
 fn the_field_widens_with_the_wall_one_whole_column_at_a_time() {
     let pitch = crate::rune_hud::dot_scope::Tuning::default().spacing;
     let wide = PANEL_WIDTH - 2. * REST_PX - METER_GAP - TIMER_WIDTH - panel::DISCARD_ROOM;
-    assert_eq!((waveform::WIDTH, wide), (78., 143.));
+    assert_eq!((waveform::WIDTH, wide), (78., 140.));
     for name in ["whole", "interrupted", "close", "hundred", "notice", "reduced"] {
         let shots = replayed(name);
         let (mut widest, mut flights) = (0f32, 0);
@@ -214,8 +214,8 @@ fn the_field_widens_with_the_wall_one_whole_column_at_a_time() {
         let shots = replayed(name);
         (shots[rest].columns.0, shots[open].columns.0)
     };
-    assert_eq!(columns("whole", 171, 250), (31, 56));
-    assert_eq!(columns("hundred", 19, 85), (31, 52));
+    assert_eq!(columns("whole", 171, 250), (31, 54));
+    assert_eq!(columns("hundred", 19, 85), (31, 51));
 }
 
 /// In a left corner the field kept its resting 78 pt in the open header and
@@ -321,8 +321,8 @@ fn the_field_keeps_its_light_through_the_opening() {
         }
         assert!(lit(shot) > 0.5 * lit(was), "f{frame}");
     }
-    assert!(arrived > 6, "{arrived}");
-    assert_eq!(shots[231].columns.0, 56);
+    assert!(arrived >= 5, "{arrived}");
+    assert_eq!(shots[231].columns.0, 54);
 }
 
 /// With a notice the resting pill is already the panel's width. The field

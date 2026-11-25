@@ -18,6 +18,7 @@ use super::notch;
 use super::tuning::{self, CapsuleFlow};
 use crate::desktop::i18n::tr;
 use crate::rune_hud::spring::REDUCED_FADE;
+use crate::rune_ui::controls::{CAPSULE, Paint};
 
 /// The overlay's panel: wide enough for the open list, and tall enough for
 /// it and the shadow under it.
@@ -26,8 +27,8 @@ pub(crate) const PANEL_H: f32 = 424.0;
 /// Panel points the capsule is centred on, and its top.
 pub(crate) const CX: f32 = PANEL_W * 0.5;
 pub(crate) const TOP: f32 = 22.0;
-pub(crate) const ISLAND_H: f32 = 40.0;
-pub(crate) const ISLAND_INSET: f32 = 4.0;
+pub(crate) const ISLAND_H: f32 = CAPSULE.island_h;
+pub(crate) const ISLAND_INSET: f32 = CAPSULE.chip_inset;
 pub(crate) const CHIP_H: f32 = ISLAND_H - 2.0 * ISLAND_INSET;
 /// The red dot's ink spans 12…20 of the lead's 32 pt square; the timer
 /// starts 8 pt after it.
@@ -86,7 +87,7 @@ pub(crate) const CHEVRON_W: f32 = 24.0;
 pub(crate) const LIST_W: f32 = 420.0;
 const FIELD_MIN: f32 = 120.0;
 pub(crate) const LIST_Y: f32 = TOP + ISLAND_H + 6.0;
-pub(crate) const LIST_PAD: f32 = 6.0;
+pub(crate) const LIST_PAD: f32 = CAPSULE.row_inset;
 pub(crate) const HEADER_H: f32 = 24.0;
 pub(crate) const ROW_H: f32 = 30.0;
 
@@ -98,9 +99,9 @@ pub(crate) const PICK_H: f32 = 32.0;
 pub(crate) const CARD_HINTS_H: f32 = 28.0;
 /// The capsule is a rounded rect, its corners the list's, so the two
 /// match and the square thumbnail sits in a corner that follows it.
-pub(crate) const SHELL_RADIUS: f32 = 14.0;
+pub(crate) const SHELL_RADIUS: f32 = CAPSULE.radius;
 /// A chip's corners, concentric with the shell's.
-pub(crate) const CHIP_RADIUS: f32 = SHELL_RADIUS - ISLAND_INSET;
+pub(crate) const CHIP_RADIUS: f32 = CAPSULE.inner(CAPSULE.chip_inset);
 /// The walls' corners never round more than the one-line capsule's, so
 /// the line grows into a card without its corners changing.
 pub(crate) fn corner(h: f32) -> f32 {
@@ -143,7 +144,7 @@ pub(crate) fn processing() -> &'static str {
 }
 /// Tabular digits, so a new second never changes the timer's width.
 pub(crate) fn clock_style() -> TextStyle {
-    medium().features("'tnum' 1")
+    Paint::new(false, 1.0).clock()
 }
 /// The hairline between the recording's tools and its stop and cancel.
 pub(crate) const DIVIDER_W: f32 = 1.0;
@@ -455,7 +456,7 @@ pub(crate) fn keycaps_chip_width(label: &str, style: TextStyle) -> f32 {
 
 /// Width of the left send/queued half inside the split destination chip.
 pub(crate) fn split_send_width(name: &str) -> f32 {
-    8.0 + SEND_ICON + 5.0 + measure(name, medium()) + 4.0
+    8.0 + SEND_ICON + 4.0 + measure(name, medium()) + 4.0
 }
 
 /// Total chip width of the split destination chip (one fill, no divider).

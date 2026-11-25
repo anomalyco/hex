@@ -8,7 +8,7 @@ internal enum class Style { Polished, Casual, Notes, Verbatim }
  * [DictationLanguage]; a language can be dictated without a layout of its own. */
 internal enum class Spoken(val code: String, val label: String) {
     English("en", "English"), Spanish("es", "Español"), German("de", "Deutsch"), Norwegian("no", "Norsk"),
-    French("fr", "Français"), Italian("it", "Italiano");
+    French("fr", "Français"), Italian("it", "Italiano"), Portuguese("pt", "Português");
 
     // Whisper calls Bokmål "no"; the keyboard and its model use BCP 47 "nb".
     val layoutCode get() = if (this == Norwegian) "nb" else code
@@ -26,8 +26,9 @@ internal enum class DictationLanguage(val code: String, val label: String, val l
     English("en", "English", Spoken.English), Spanish("es", "Español", Spoken.Spanish),
     German("de", "Deutsch", Spoken.German), Norwegian("no", "Norsk", Spoken.Norwegian),
     French("fr", "Français", Spoken.French), Italian("it", "Italiano", Spoken.Italian), Dutch("nl", "Nederlands", null),
-    // One entry for Brazil and Portugal: Whisper has a single "pt", and Hex has no regional rules.
-    Portuguese("pt", "Português", null),
+    // One entry for Brazil and Portugal: Whisper has a single "pt", and Hex has no regional rules. Its typing
+    // model is Brazil's, with Portugal's spellings among its real words (benchmark/typing/README.md).
+    Portuguese("pt", "Português", Spoken.Portuguese),
     // No layouts of their own yet: Polish's letters are held on the English keys, and Russian has no
     // Cyrillic keys, so a Russian speaker dictates here and types on another keyboard.
     Polish("pl", "Polski", null), Russian("ru", "Русский", null);
@@ -47,7 +48,7 @@ internal enum class DictationLanguage(val code: String, val label: String, val l
 
 /** The layout whose typing model the keyboard reads: the one pinned in Keyboard › Keyboard layout, else the
  * dictation language's own. Null when the keys are only English's stand-in for a language with no layout
- * (Português, Nederlands, Polski, Русский): English's next words and autocorrections are not that language's. */
+ * (Nederlands, Polski, Русский): English's next words and autocorrections are not that language's. */
 internal fun typingLayout(pinned: Spoken?, spoken: DictationLanguage): Spoken? = pinned ?: spoken.layout
 
 internal data class SpeechOptions(val style: Style, val spoken: DictationLanguage, val clean: Boolean, val translate: Boolean,

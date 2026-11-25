@@ -25,7 +25,7 @@ pub(super) fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) 
             row()
                 .key("delete-confirm")
                 .gap(8.0)
-                .pt(14.0)
+                .pt(12.0)
                 .child(
                     button(
                         p,
@@ -243,7 +243,7 @@ pub(super) fn follows_live_transcript(ui: &Ui, meeting: &Meeting) -> bool {
 /// The meeting's chapters, each with its start, name, line, and Copy
 /// section.
 pub(super) fn chapters(p: Paint, meeting: &Meeting, copied: &dyn Fn(&str) -> bool) -> El {
-    let mut list = col().key("chapters").gap(10.0).pb(16.0).child(body_heading(
+    let mut list = col().key("chapters").gap(12.0).pb(16.0).child(body_heading(
         p,
         "chapters-label",
         tr("Chapters"),
@@ -274,7 +274,7 @@ pub(super) fn chapters(p: Paint, meeting: &Meeting, copied: &dyn Fn(&str) -> boo
                 .child(
                     text(crate::meeting::format_duration(chapter.start_ms))
                         .key("clock")
-                        .font(p.k.ty.mono)
+                        .font(p.tabular(p.description()))
                         .color(p.faint())
                         .pt(1.0),
                 )
@@ -454,7 +454,7 @@ pub(super) fn transcript(
             Status::Interrupted | Status::Failed => tr("No recoverable transcript is available."),
         });
     }
-    let mut lines = col().key("turns").gap(14.0);
+    let mut lines = col().key("turns").gap(16.0);
     for (index, turn) in turns.iter().enumerate() {
         if selecting {
             lines = lines.child(selection::turn_row(
@@ -525,7 +525,7 @@ pub(super) fn turn_line(p: Paint, index: usize, turn: &Turn, imported: bool) -> 
                     .child(
                         text(crate::meeting::format_duration(turn.start_ms))
                             .key("clock")
-                            .font(p.k.ty.small)
+                            .font(p.tabular(p.meta()))
                             .color(p.faint()),
                     ),
             )
