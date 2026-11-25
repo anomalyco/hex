@@ -502,7 +502,7 @@ fn recording_action(ui: &Ui, p: Paint) -> El {
                     .children(active.map(|meeting| {
                         text(crate::meeting::format_duration(meeting.duration_ms))
                             .key("elapsed")
-                            .font(p.k.ty.mono)
+                            .font(p.clock())
                             .color(p.muted())
                     })),
             )
@@ -775,7 +775,6 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
                     &format!("day{index}"),
                     day_label(&meeting.day),
                     day.is_none(),
-                    ld::LEADING_INDENT,
                 ));
                 day = Some(&meeting.day);
             }

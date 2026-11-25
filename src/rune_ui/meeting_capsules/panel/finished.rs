@@ -9,74 +9,22 @@ use super::*;
 /// inset. No icon: Discard is the one red mark. `top` when the header is
 /// above it, so the buttons sit on the panel's free edge.
 pub(super) fn discard_confirm(p: Paint, top: bool, stopping: bool) -> El {
-    let choice = |key: &'static str, label: &str, variant, press: fn(&mut Capsule)| {
-        let button = Button::new(label)
-            .variant(variant)
-            .build_push(p.k)
-            .key(key)
-            .h(CONFIRM_BUTTON)
-            .w(CONFIRM_CHOICE_WIDTH);
-        if stopping {
-            button.disabled(true).opacity(0.5)
-        } else {
-            button.cursor(Cursor::Pointer).no_window_drag().on_press_tx(
-                move |c: &mut Capsule, tx| {
-                    press(c);
-                    c.stir(tx);
-                },
-            )
-        }
-    };
-    let words = col()
-        .key("discard-words")
-        .px(CONFIRM_TEXT_RAIL)
-        .gap(2.0)
-        .child(
-            text(tr("Discard recording?").to_owned())
-                .key("discard-title")
-                .font(p.k.ty.ui_medium)
-                .color(p.text())
-                .truncate(),
-        )
-        .child(
-            text(tr("Deletes its audio and transcript").to_owned())
-                .key("discard-detail")
-                .font(DESCRIPTION)
-                .color(p.muted())
-                .truncate(),
-        );
-    let choices = row()
-        .key("discard-choices")
-        .px(CONFIRM_INSET)
-        .gap(8.0)
-        .child(choice(
-            "discard-keep",
-            tr("Keep"),
-            ButtonVariant::Neutral,
-            Capsule::keep_recording,
-        ))
-        .child(choice(
-            "discard-yes",
-            tr("Discard"),
-            ButtonVariant::Danger,
-            Capsule::request_discard,
-        ));
-    let block = col()
-        .key("discard-confirm")
-        .role("alertdialog")
-        .label(tr("Discard recording?"))
-        .w(PANEL_WIDTH)
-        .h(CONFIRM_BODY)
-        .gap(12.0)
-        .child(words)
-        .child(choices);
-    // The buttons keep the panel's edge inset; the 4 pt the header leaves
-    // goes between the question and the header.
-    if top {
-        block.pt(4.0).pb(CONFIRM_INSET)
-    } else {
-        block.pt(CONFIRM_INSET).pb(4.0)
-    }
+    super::super::super::controls::capsule_confirm(
+        p,
+        tr("Discard recording?"),
+        tr("Deletes its audio and transcript"),
+        top,
+        stopping,
+        (tr("Keep"), |c: &mut Capsule, tx| {
+            c.keep_recording();
+            c.stir(tx);
+        }),
+        (tr("Discard"), |c: &mut Capsule, tx| {
+            c.request_discard();
+            c.stir(tx);
+        }),
+    )
+    .h(CONFIRM_BODY)
 }
 
 /// The finished meeting: its title and length as a link that opens it in
@@ -141,7 +89,7 @@ pub(in crate::rune_ui::meeting_capsules) fn ready(
                 .children(manifest.duration_ms.map(|duration| {
                     text(meeting::format_duration(duration))
                         .key("elapsed")
-                        .font(p.k.ty.small.features("'tnum' 1"))
+                        .font(p.tabular(p.meta()))
                         .color(p.muted())
                 })),
         )
@@ -168,10 +116,10 @@ pub(in crate::rune_ui::meeting_capsules) fn ready(
     let summary = ready_summary(manifest).map(|(summary, written)| {
         text(summary)
             .key("summary")
-            .font(DESCRIPTION)
+            .font(p.description())
             .color(if written { p.muted() } else { p.faint() })
             .max_lines(SUMMARY_LINES)
-            .px(PANEL_PAD + ROW_PX)
+            .px(CAPSULE.text_rail())
     });
     let live = &capsule.live;
     let copied = |kind| live.copied(kind).then(|| copied_hint(p));
