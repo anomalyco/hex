@@ -239,9 +239,10 @@ impl WindowsPaster {
 
     /// Pastes `text`, with Ctrl+Shift+V when `shift` asks for it or the
     /// saved Terminal paste setting is on. Java games still take Ctrl+V.
-    /// `return_to` is the window the capture started in: the desktop or a
-    /// taskbar takes no paste, so Hex returns there first and, when it can't,
-    /// leaves the transcript on the clipboard instead of sending it nowhere.
+    /// `return_to` is the window the capture started in: the desktop, a
+    /// taskbar, or the taskbar's overflow flyout takes no paste, so Hex
+    /// returns there first and, when it can't, leaves the transcript on the
+    /// clipboard instead of sending it nowhere.
     /// `standalone` pastes the text without joining the previous dictation
     /// and records no continuation for the next one (Labs › Signature).
     pub fn paste(
@@ -330,7 +331,8 @@ impl WindowsPaster {
         if copied {
             // Nothing in front takes a paste: the words stay on the
             // clipboard for Paste Last or a manual Ctrl+V instead of being
-            // sent to the desktop or taskbar and lost.
+            // sent to the desktop, a taskbar, or the taskbar's overflow
+            // flyout and lost.
             restore.keep();
             drop(restore);
             tracing::warn!(
@@ -516,9 +518,10 @@ fn key_down(key: u16) -> bool {
     unsafe { GetAsyncKeyState(i32::from(key)) < 0 }
 }
 
-/// Whether `window` is the desktop or a taskbar rather than a window a paste
-/// can land in. The window is not in front, so the foreground thread's focus
-/// says nothing about it: its class and process alone decide.
+/// Whether `window` is the desktop, a taskbar, or the taskbar's overflow
+/// flyout rather than a window a paste can land in. The window is not in
+/// front, so the foreground thread's focus says nothing about it: its class
+/// and process alone decide.
 pub(crate) fn is_shell_window(window: HWND) -> bool {
     if window.is_null() {
         return true;

@@ -949,8 +949,9 @@ Windows paste                                     // dictate.windows-paste-targe
 │   └── Still the shell -> No chord; the plain transcript stays on the
 │       clipboard with the usual history/cloud exclusion, the job reports
 │       "copied" (never "pasted"), and History and Paste Last still keep it
-└── Tray Paste Last -> The tracker skips the desktop and taskbars, so it never
-    brings one forward; the listener applies the same rule per paste
+└── Tray Paste Last -> The tracker skips the desktop, taskbars, and the
+    taskbar's overflow flyout, so it never brings one forward; the listener
+    applies the same rule per paste
 ```
 
 The fallback keeps the marking a default paste has: the transcript is left out
