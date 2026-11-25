@@ -80,7 +80,7 @@ struct ExperimentsSettingsPage: View {
         SettingsCard {
             SettingsToggleRow(
                 title: String(localized: "Two-language dictation"),
-                detail: String(localized: "Checks a second keyboard language and keeps the better match."),
+                detail: String(localized: "Checks a second keyboard language and keeps the better match"),
                 isOn: toggleBinding(
                     { TwoLanguageDictationSettings().isEnabled },
                     { TwoLanguageDictationSettings().isEnabled = $0 }
@@ -171,7 +171,7 @@ struct ExperimentsSettingsPage: View {
         SettingsCard {
             SettingsToggleRow(
                 title: String(localized: "Comma and period keys"),
-                detail: String(localized: "Puts comma and period keys beside the space bar on the letters keyboard."),
+                detail: String(localized: "Comma and period beside the space bar"),
                 isOn: keyboardBinding(\.commaPeriodKeys)
             )
 
@@ -179,7 +179,7 @@ struct ExperimentsSettingsPage: View {
 
             SettingsToggleRow(
                 title: String(localized: "Dvorak punctuation keys"),
-                detail: String(localized: "Adds comma, period and semicolon keys to the English Dvorak keyboard."),
+                detail: String(localized: "Adds comma, period and semicolon keys to the English Dvorak keyboard"),
                 isOn: keyboardBinding(\.dvorakPunctuation)
             )
 
@@ -228,7 +228,7 @@ struct ExperimentsSettingsPage: View {
 
                 SettingsToggleRow(
                     title: String(localized: "Join the keyboard when unfolded"),
-                    detail: String(localized: "On the iPhone Duo unfolded, keeps the keys on one keyboard instead of splitting them."),
+                    detail: String(localized: "On the iPhone Duo unfolded, keeps the keys on one keyboard instead of splitting them"),
                     isOn: keyboardBinding(\.joinsKeyboardWhenUnfolded)
                 )
             }
@@ -242,7 +242,7 @@ struct ExperimentsSettingsPage: View {
         SettingsCard {
             SettingsToggleRow(
                 title: String(localized: "Adaptive touch"),
-                detail: String(localized: "Learns where you tap each key."),
+                detail: String(localized: "Learns where you tap each key"),
                 isOn: toggleBinding(
                     { AdaptiveTouchSettings().isEnabled },
                     { enabled in
@@ -309,7 +309,7 @@ struct ExperimentsSettingsPage: View {
 
             SettingsToggleRow(
                 title: String(localized: "Emoji shortcodes"),
-                detail: String(localized: "Type a colon and a name, like :pizza, to pick an emoji."),
+                detail: String(localized: "Type a colon and a name, like :pizza, to pick an emoji"),
                 isOn: keyboardBinding(\.emojiShortcodes)
             )
 

@@ -1306,12 +1306,12 @@
         }
       }
     },
-    "Type a colon and a name, like :pizza, to pick an emoji." : {
+    "Type a colon and a name, like :pizza, to pick an emoji" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "输入冒号和名称，例如 :pizza，即可选择表情符号。"
+            "value" : "输入冒号和名称，例如 :pizza，即可选择表情符号"
           }
         }
       }
@@ -2405,12 +2405,12 @@
         }
       }
     },
-    "Checks a second keyboard language and keeps the better match." : {
+    "Checks a second keyboard language and keeps the better match" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "同时识别另一种键盘语言，并保留更准确的结果。"
+            "value" : "同时识别另一种键盘语言，并保留更准确的结果"
           }
         }
       }
@@ -2485,12 +2485,12 @@
         }
       }
     },
-    "Learns where you tap each key." : {
+    "Learns where you tap each key" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "学习你点击每个按键的位置。"
+            "value" : "学习你点击每个按键的位置"
           }
         }
       }
@@ -3491,22 +3491,22 @@
         }
       }
     },
-    "Adds comma, period and semicolon keys to the English Dvorak keyboard." : {
+    "Adds comma, period and semicolon keys to the English Dvorak keyboard" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "为英文 Dvorak 键盘添加逗号、句号和分号键。"
+            "value" : "为英文 Dvorak 键盘添加逗号、句号和分号键"
           }
         }
       }
     },
-    "Puts comma and period keys beside the space bar on the letters keyboard." : {
+    "Comma and period beside the space bar" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在字母键盘的空格键两侧放置逗号和句号键。"
+            "value" : "空格键两侧的逗号和句号"
           }
         }
       }
@@ -4321,12 +4321,12 @@
         }
       }
     },
-    "On the iPhone Duo unfolded, keeps the keys on one keyboard instead of splitting them." : {
+    "On the iPhone Duo unfolded, keeps the keys on one keyboard instead of splitting them" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 iPhone Duo 展开时让按键保持在一个键盘上，而不是分开。"
+            "value" : "在 iPhone Duo 展开时让按键保持在一个键盘上，而不是分开"
           }
         }
       }
