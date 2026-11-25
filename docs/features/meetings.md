@@ -2370,7 +2370,7 @@ Detail (a raised card beside the list)
     race or a Trash error leaves it listed)
 Under "Summary" and "Transcript" headings; the list's icons keep one column
 Empty: "No meetings yet" with a one-line hint, Start recording, and a note
-that meetings stay on this Mac and move to the Trash after 7 days; "No
+that meetings stay on this computer and move to the Trash after 7 days; "No
 meetings match." while searching
 System Audio Recording not allowed -> a warning above the list ("Hex can't
 hear the other participants") with Open System Settings

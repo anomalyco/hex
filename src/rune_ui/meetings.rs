@@ -901,9 +901,9 @@ fn empty_state(ui: &Ui, p: Paint) -> El {
         .retention
         .unwrap_or(MeetingRetention::DEFAULT);
     let where_kept = match kept {
-        MeetingRetention::Forever => tr("Meetings stay on this Mac.").to_owned(),
+        MeetingRetention::Forever => tr("Meetings stay on this computer.").to_owned(),
         kept => tr_fill(
-            "Meetings stay on this Mac and move to the Trash after {}.",
+            "Meetings stay on this computer and move to the Trash after {}.",
             tr(kept.label()),
         ),
     };
