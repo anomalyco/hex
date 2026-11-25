@@ -895,42 +895,32 @@ class InsertionTest {
     }
     @Test fun aDictationGoesOnlyIntoTheFieldItWasSpokenIn() {
         val field = DictationField()
-        field.started(restarting = false, app = "ai.x.grok", view = 7)
+        field.started()
         val spoken = field.current
-        // The app hid the keyboard: the field is still current and connected, so the text goes in, shown or not.
+        // The app hid the keyboard: no start came, the field is still current and connected, so the text goes in,
+        // shown or not.
         assertTrue(field.takes(spoken, connected = true, secure = false))
         assertFalse(field.takes(spoken, connected = false, secure = false))
-        // The same field restarting in place keeps it; a restart naming another view or app is another field.
-        assertTrue(field.started(restarting = true, app = "ai.x.grok", view = 7))
-        assertTrue(field.takes(spoken, connected = true, secure = false))
-        assertFalse(field.started(restarting = true, app = "ai.x.grok", view = 8))
-        assertFalse(field.takes(spoken, connected = true, secure = false))
     }
     @Test fun aDictationNeverReachesAnotherFieldAppOrPasswordField() {
         val field = DictationField()
-        field.started(restarting = false, app = "chat", view = 1)
+        field.started()
         val spoken = field.current
-        // Focus moved to another field in the same app, or to another app.
-        field.started(restarting = false, app = "chat", view = 2)
+        // Any start is another field: focus moving in a native app, another app, and a restart, which is how Chrome, a
+        // WebView or a Compose screen moves between its inputs (measured: same package, field ID -1 and EditorInfo for
+        // two web inputs, restarting = true).
+        field.started()
         assertFalse(field.takes(spoken, connected = true, secure = false))
-        field.started(restarting = false, app = "bank", view = 1)
-        assertFalse(field.takes(spoken, connected = true, secure = false))
-        // Even back in the field it was spoken in: that is a new start, and the old text stays out.
-        field.started(restarting = false, app = "chat", view = 1)
-        assertFalse(field.takes(spoken, connected = true, secure = false))
-        // A password field, including the same field turning into one in place.
-        val here = field.current
-        assertTrue(field.started(restarting = true, app = "chat", view = 1))
-        assertFalse(field.takes(here, connected = true, secure = true))
+        // A password field never takes a dictation, even its own.
+        assertFalse(field.takes(field.current, connected = true, secure = true))
     }
     @Test fun aDictationWhoseFieldIsGoneIsDropped() {
         val field = DictationField()
-        field.started(restarting = false, app = "chat", view = 1)
+        field.started()
         val spoken = field.current
         field.finished()
         assertFalse(field.takes(spoken, connected = true, secure = false))
-        // Nothing revives it, not even a restart naming the same view.
-        assertFalse(field.started(restarting = true, app = "chat", view = 1))
+        field.started()
         assertFalse(field.takes(spoken, connected = true, secure = false))
     }
     @Test fun aHoldCutShortByTheKeyboardHidingFinishes() {
