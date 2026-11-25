@@ -154,6 +154,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Terminal paste shortcut no labs.terminal_paste_shortcut + terminal_paste_hotkey (Windows, Linux)
 │                                        another shortcut dictates like the main one and always pastes with Ctrl+Shift+V; General shows its recorder while on
 ├── Caps Lock dictation no labs.caps_lock_dictation + labs.caps_lock_light (macOS)   a Caps Lock press starts and stops hands-free dictation; its light waits for the microphone, then shows recording (steady or slow blink), processing, and off
+├── Middle mouse dictation no labs.middle_mouse_dictation (macOS) holding the middle button 500 ms starts a hands-free dictation and the next long press finishes it; clicks still reach the app; Escape cancels any hands-free dictation and stays out of the app (#2838)
 ├── Smart spacing   no    labs.smart_spacing           (macOS)   a dictation pasted right after a word gets one leading space (#632)
 ├── Left and right keys no labs.sided_modifier_chords (macOS) the recorder keeps each modifier's side in a modifier-only chord: R⌘ R⌥ (#710)
 ├── Tap or hold      no    labs.tap_or_hold             (macOS, Linux) in Toggle mode, a press held past 300 ms dictates until it lifts; a short tap still locks (#711, #1144)
@@ -2157,6 +2158,61 @@ lock reset. Checks:
 with the lab on — no hardware run of the Caps Lock LED, the lock reset, the
 blink, Escape cancellation, or the off/quit cleanup. The `mac-labs` and
 `mac-labs-link` goldens were regenerated on Linux with the new row.
+
+Middle mouse dictation (`middle-mouse-dictation`, issue 2838, macOS): while
+on, holding the middle mouse button for 500 ms toggles a hands-free
+dictation. It is a narrower gesture than Labs › Mouse shortcuts: it needs no
+binding and leaves the dictation shortcut and its activation mode alone.
+
+```ts
+Labs › Middle mouse dictation on                     // labs.middle_mouse_dictation
+├── middle button held 500 ms, idle -> hands-free capture starts while the button is still down
+├── middle button held 500 ms, a hands-free capture running -> finishes and pastes normally
+├── a click shorter than 500 ms -> nothing; every middle click, long or short, still reaches the app
+├── a middle-button drag past 4 points (panning, autoscroll) -> the app's; that press never toggles dictation
+├── started by the mouse -> the dictation shortcut's next press finishes it too
+├── locked by the shortcut (Toggle, double tap, `hex dictation start`) or Caps Lock -> a long press finishes it, keeping that capture's output (Dictate without processing stays raw)
+├── a held press, a pending double tap (the dictation shortcut's or another's), Annotate recording -> a long press does nothing
+├── Escape while any hands-free capture records -> cancels, and the tap keeps Escape from the app (a terminal included), in every shortcut mode; with Labs › Confirm long cancels on, a capture past 10 s asks for a second Escape first
+├── the middle button bound as a shortcut (Labs › Mouse shortcuts) -> the gesture leaves it to that shortcut
+└── lab off -> no gesture, and Escape follows the usual cancel rules
+```
+
+The event tap ([suppression.rs](../../src/suppression.rs)) reports each
+middle-button press, drag, and release to
+[middle_mouse_dictation.rs](../../src/middle_mouse_dictation.rs) while the lab
+is on and never consumes them; a drag more than 4 points (`DRAG_SLOP`, from
+`CGEventGetLocation`) from where the press went down cancels that press. The listener
+([recognition.rs](../../src/recognition.rs)) asks on each pass (at most 20 ms
+apart) whether the held press just reached 500 ms, rechecks that the button
+still reads as down, and hands it to `Hotkeys::middle_mouse_press`
+([recognition/hotkeys.rs](../../src/recognition/hotkeys.rs)): finish the
+machine that records hands-free, or lock the dictation shortcut's machine as
+`hex dictation start` does. Escape is
+`DictationHotkey::set_escape_cancels_lock`
+([suppression/hotkey.rs](../../src/suppression/hotkey.rs)), set on every
+shortcut machine while the lab is on; `takes_escape` follows it, so the tap
+policy keeps that Escape from the app. Checks:
+`a_press_becomes_long_once_after_half_a_second`,
+`a_short_click_never_becomes_long`,
+`a_new_press_replaces_one_whose_release_was_missed`, and
+`a_dragged_press_never_becomes_long` in
+[middle_mouse_dictation.rs](../../src/middle_mouse_dictation.rs);
+`a_middle_mouse_capture_finishes_with_the_dictation_shortcut`,
+`a_middle_mouse_press_finishes_a_hands_free_capture_it_did_not_start`,
+`a_middle_mouse_press_leaves_a_held_capture_alone`,
+`a_middle_mouse_press_leaves_a_pending_double_tap_alone`, and
+`escape_cancels_a_hands_free_capture_only_with_middle_mouse_dictation` in
+[recognition.rs](../../src/recognition.rs), and
+`escape_on_a_long_hands_free_capture_asks_first_with_confirm_long_cancels`
+in [suppression/tests.rs](../../src/suppression/tests.rs) (macOS only; never
+built or run on a Mac: they were only type-checked by `cargo clippy` for
+`aarch64-apple-darwin` from Linux, against a downloaded SDK with stubbed
+Swift tooling and no transcription library);
+`the_middle_mouse_dictation_lab_is_a_macos_shortcuts_lab_off_by_default` in
+[labs.rs](../../src/labs.rs). Not yet observed: a real Mac with the lab on,
+a physical middle button, or Escape kept from a terminal. Its row is macOS
+builds only, so Linux renders of macOS scenes and their goldens leave it out.
 
 Smart spacing (`smart-spacing`, issue 632, macOS): while on, a dictation
 pasted right after typed text gets one leading space, so words don't merge

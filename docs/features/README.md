@@ -930,6 +930,18 @@ Labs > Caps Lock dictation (macOS, off)   // labs.md
      Lock capture; the normal shortcut stands down while one runs; off or
      quit clears the light and restores Caps Lock
 
+Labs > Middle mouse dictation (macOS, off)   // labs.md; issue 2838
+  -> holding the middle button 500 ms starts a hands-free capture; the next
+     long press finishes it; shorter clicks do nothing
+  -> a middle-button drag past a few points (panning, autoscroll) is the
+     app's and never toggles dictation
+  -> every middle click still reaches the app; a middle button bound as a
+     shortcut is left to that shortcut
+  -> the dictation shortcut can finish a mouse-started capture, and a long
+     press finishes one the shortcut locked, keeping its output settings
+  -> Escape cancels any hands-free capture in every mode and stays out of the
+     app; off, the usual cancel rules apply
+
 Labs > Free memory when idle (off; 5/15/30/60 min, default 15)   // labs.md; transcription/engine
   -> nothing used the model that long and nothing records -> the model unloads
   -> next press, meeting chunk, or API request -> reloads first; audio waits, nothing lost

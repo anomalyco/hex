@@ -808,6 +808,53 @@ pub fn listen(
                 hotkeys.suspend(Shortcut::CapsLock);
             }
         }
+        // Labs › Middle mouse dictation: the tap times the middle button, and
+        // a press held half a second toggles hands-free dictation here, at
+        // the moment it became long, under the same rules as Caps Lock.
+        let middle_mouse_on = crate::labs::middle_mouse_dictation();
+        if !middle_mouse_on {
+            crate::middle_mouse_dictation::reset();
+        } else if crate::middle_mouse_dictation::take_long_press(
+            CaptureInstant::now(),
+            crate::suppression::middle_button_down,
+        ) && !hotkey_capture_suspended
+            && programmatic.is_none()
+        {
+            #[cfg(hex_capture)]
+            let annotate_recording = capture_host
+                .as_mut()
+                .is_some_and(|host| host.recording_since(&input).is_some());
+            #[cfg(not(hex_capture))]
+            let annotate_recording = false;
+            if caps_lock_can_press(
+                hotkeys.any_recording(),
+                capture_owns_dictation(annotate_recording, crate::labs::dictate_while_annotating()),
+            ) && let Some((shortcut, action)) = hotkeys.middle_mouse_press()
+            {
+                tracing::info!(action = ?action, "middle mouse long press");
+                let (raw, print) = if action == HotkeyAction::Start {
+                    (false, None)
+                } else {
+                    hotkeys.resolve_action(shortcut, action)
+                };
+                let accepted = handle_hotkey_action(
+                    action,
+                    raw,
+                    print,
+                    CaptureInstant::now(),
+                    &input,
+                    &dictation_worker,
+                    &mut context,
+                    &input.device_name(),
+                    &mut events,
+                    indicator,
+                    &mut release,
+                )?;
+                if !accepted {
+                    hotkeys.suspend(shortcut);
+                }
+            }
+        }
         // The capture shortcut ignores keys while shortcuts are suspended or
         // a programmatic dictation holds them, so their releases go unseen.
         #[cfg(hex_capture)]
@@ -1825,6 +1872,111 @@ mod tests {
         assert!(hotkeys.stop_caps_lock());
         assert!(!hotkeys.caps_lock.is_recording());
         assert!(!hotkeys.stop_caps_lock(), "nothing is left to cancel");
+    }
+
+    /// Labs › Middle mouse dictation: a long press locks the dictation
+    /// machine, so the dictation shortcut's next press finishes it.
+    #[test]
+    fn a_middle_mouse_capture_finishes_with_the_dictation_shortcut() {
+        let base = CaptureInstant::from_nanos(95_000_000_000);
+        let at = |ms: u64| base + Duration::from_millis(ms);
+        let mut hotkeys = caps_lock_hotkeys(base, option_binding());
+        assert_eq!(
+            hotkeys.middle_mouse_press(),
+            Some((Shortcut::Dictation, HotkeyAction::Start))
+        );
+        assert!(hotkeys.dictation.is_locked());
+        assert_eq!(
+            hotkeys.process(InputEvent::Flags(OPTION_KEY_MASK), at(1_000)),
+            [(Shortcut::Dictation, HotkeyAction::Finish)]
+        );
+        let (raw, _) = hotkeys.resolve_action(Shortcut::Dictation, HotkeyAction::Finish);
+        assert!(!raw);
+        assert!(!hotkeys.any_recording());
+    }
+
+    /// And the reverse: a long press finishes the hands-free capture another
+    /// input locked, as that machine's own press would, keeping its output.
+    #[test]
+    fn a_middle_mouse_press_finishes_a_hands_free_capture_it_did_not_start() {
+        let base = CaptureInstant::from_nanos(96_000_000_000);
+        let mut hotkeys = caps_lock_hotkeys(base, option_binding());
+        hotkeys.raw = Some(DictationHotkey::new(base, false, option_binding()));
+        assert!(hotkeys.raw.as_mut().is_some_and(DictationHotkey::lock));
+        hotkeys.begin_capture(Shortcut::Raw, true);
+        assert_eq!(
+            hotkeys.middle_mouse_press(),
+            Some((Shortcut::Raw, HotkeyAction::Finish))
+        );
+        let (raw, _) = hotkeys.resolve_action(Shortcut::Raw, HotkeyAction::Finish);
+        assert!(raw, "the capture keeps Dictate without processing's output");
+        assert!(!hotkeys.any_recording());
+    }
+
+    /// A long press never takes over the dictation shortcut's own pending
+    /// double tap.
+    #[test]
+    fn a_middle_mouse_press_leaves_a_pending_double_tap_alone() {
+        let base = CaptureInstant::from_nanos(99_000_000_000);
+        let space = RuntimeHotkey {
+            modifiers: HotkeyModifiers::option(),
+            key_code: Some(49),
+        };
+        let mut hotkeys = caps_lock_hotkeys(base, space);
+        hotkeys.dictation.set_double_tap_enabled(true);
+        hotkeys.dictation.set_double_tap_only(true);
+        let press = InputEvent::Key {
+            code: 49,
+            down: true,
+            flags: OPTION_KEY_MASK,
+        };
+        assert!(hotkeys.process(press, base).is_empty());
+        assert!(hotkeys.dictation.has_pending_gesture());
+        assert_eq!(hotkeys.middle_mouse_press(), None);
+        assert!(!hotkeys.dictation.is_locked());
+    }
+
+    /// A long press never disturbs a press still held.
+    #[test]
+    fn a_middle_mouse_press_leaves_a_held_capture_alone() {
+        let base = CaptureInstant::from_nanos(97_000_000_000);
+        let at = |ms: u64| base + Duration::from_millis(ms);
+        let mut hotkeys = caps_lock_hotkeys(base, option_binding());
+        assert_eq!(
+            hotkeys.process(InputEvent::Flags(OPTION_KEY_MASK), at(0)),
+            [(Shortcut::Dictation, HotkeyAction::Start)]
+        );
+        assert_eq!(hotkeys.middle_mouse_press(), None);
+        assert!(hotkeys.dictation.is_recording());
+        assert!(!hotkeys.dictation.is_locked());
+    }
+
+    /// With the lab on, Escape cancels a hands-free capture even in Hold
+    /// mode, and the tap keeps it from the app; off, Hold mode's lock has no
+    /// cancel, as before.
+    #[test]
+    fn escape_cancels_a_hands_free_capture_only_with_middle_mouse_dictation() {
+        let base = CaptureInstant::from_nanos(98_000_000_000);
+        let at = |ms: u64| base + Duration::from_millis(ms);
+        let escape = InputEvent::Key {
+            code: 53,
+            down: true,
+            flags: 0,
+        };
+        let mut hotkeys = caps_lock_hotkeys(base, option_binding());
+        assert!(hotkeys.middle_mouse_press().is_some());
+        assert!(!hotkeys.takes_escape(at(500)));
+        assert!(hotkeys.process(escape, at(500)).is_empty());
+        assert!(hotkeys.dictation.is_locked());
+
+        hotkeys.dictation.set_escape_cancels_lock(true);
+        assert!(hotkeys.takes_escape(at(600)));
+        assert_eq!(
+            hotkeys.process(escape, at(600)),
+            [(Shortcut::Dictation, HotkeyAction::CancelShortcut)]
+        );
+        assert!(!hotkeys.any_recording());
+        assert!(!hotkeys.takes_escape(at(700)));
     }
 
     #[test]

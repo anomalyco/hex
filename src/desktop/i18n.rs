@@ -27,6 +27,7 @@ mod meeting_audio_source;
 mod meeting_mute;
 mod meetings;
 mod menu;
+mod middle_mouse;
 mod model_switch;
 pub(crate) mod numbers;
 mod onboarding;
@@ -409,6 +410,7 @@ pub(super) fn all_translations() -> impl Iterator<Item = &'static (&'static str,
         .chain(meeting_audio_source::TRANSLATIONS)
         .chain(meeting_mute::TRANSLATIONS)
         .chain(confirm_cancel::TRANSLATIONS)
+        .chain(middle_mouse::TRANSLATIONS)
         .chain(style::TRANSLATIONS)
         .chain(signature::TRANSLATIONS)
         .chain(clipboard_phrase::TRANSLATIONS)

@@ -5301,3 +5301,45 @@ fn a_switch_press_never_strands_a_capture() {
         Some(HotkeyAction::Finish)
     );
 }
+
+/// Labs › Middle mouse dictation's Escape on a hands-free capture follows
+/// Labs › Confirm long cancels like every other cancel: on a capture past
+/// the long-recording threshold, the first Escape asks and the second
+/// cancels.
+#[test]
+fn escape_on_a_long_hands_free_capture_asks_first_with_confirm_long_cancels() {
+    let now = capture_time();
+    let escape = InputEvent::Key {
+        code: ESCAPE_KEY_CODE,
+        down: true,
+        flags: NO_FLAGS,
+    };
+    let mut hotkey =
+        DictationHotkey::new(now, false, crate::app_settings::RuntimeHotkey::default());
+    hotkey.set_escape_cancels_lock(true);
+    hotkey.confirm_long_cancels = || true;
+    assert!(hotkey.lock());
+    let Some(started) = std::time::Instant::now()
+        .checked_sub(crate::dictation::cancel_confirm::LONG_RECORDING + Duration::from_secs(1))
+    else {
+        return;
+    };
+    hotkey.cancel_confirm.started(started);
+    assert!(hotkey.takes_escape(now));
+    assert_eq!(hotkey.process(escape, now), None, "the first Escape asks");
+    assert!(hotkey.is_locked());
+    let release = InputEvent::Key {
+        code: ESCAPE_KEY_CODE,
+        down: false,
+        flags: NO_FLAGS,
+    };
+    assert_eq!(
+        hotkey.process(release, now + Duration::from_millis(100)),
+        None
+    );
+    assert_eq!(
+        hotkey.process(escape, now + Duration::from_millis(500)),
+        Some(HotkeyAction::CancelShortcut)
+    );
+    assert!(!hotkey.is_recording());
+}

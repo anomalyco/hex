@@ -1013,6 +1013,17 @@
       ],
       "summary": "After 10 seconds, cancelling a dictation takes two presses, so one slip keeps your words",
       "title": "Confirm long cancels"
+    },
+    {
+      "added": "2026-11-25",
+      "group": "shortcuts",
+      "groupTitle": "Shortcuts",
+      "id": "middle-mouse-dictation",
+      "oses": [
+        "macos"
+      ],
+      "summary": "Hold the middle mouse button for half a second to start dictating hands-free, and again to finish. Escape cancels",
+      "title": "Middle mouse dictation"
     }
   ]
 }

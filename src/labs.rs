@@ -596,6 +596,19 @@ mod tests {
     }
 
     #[test]
+    fn the_middle_mouse_dictation_lab_is_a_macos_shortcuts_lab_off_by_default() {
+        let feature = Feature::MiddleMouseDictation;
+        assert_eq!(feature.name(), "middle-mouse-dictation");
+        assert_eq!(feature.group(), Group::Shortcuts);
+        assert_eq!(feature.audience(), Audience::Everyone);
+        assert_eq!(feature.oses(), &[Os::Macos]);
+        assert_eq!(feature.added(), 20261125);
+        assert!(!feature.on(&AppSettings::default()));
+        assert_eq!(feature.on_this_os(), cfg!(target_os = "macos"));
+        assert_eq!(Feature::from_name("middle-mouse-dictation"), Some(feature));
+    }
+
+    #[test]
     fn the_meeting_microphone_mute_lab_is_a_macos_meetings_lab_off_by_default() {
         let feature = Feature::MeetingMicrophoneMute;
         assert_eq!(feature.name(), "meeting-microphone-mute");

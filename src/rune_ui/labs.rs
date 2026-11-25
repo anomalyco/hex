@@ -781,6 +781,8 @@ fn rows(ui: &Ui) -> Vec<Row> {
         if cfg!(target_os = "macos") {
             // Up to four more, each with its own activation mode.
             rows.push(row(Feature::MoreDictationShortcuts, Some(&KEYBOARD)));
+            // The event tap times a held middle button.
+            rows.push(row(Feature::MiddleMouseDictation, Some(&MOUSE)));
             // Reads the text before the cursor through macOS Accessibility.
             rows.push(row(Feature::SmartSpacing, None));
             // macOS's recorder reads each modifier key's side.
@@ -1133,6 +1135,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::MeetingMicrophoneMute => "lab-meeting-microphone-mute",
         Feature::MeetingIndicatorDisplay => "lab-meeting-indicator-display",
         Feature::MeetingAudioSource => "lab-meeting-audio-source",
+        Feature::MiddleMouseDictation => "lab-middle-mouse-dictation",
     }
 }
 

@@ -113,6 +113,14 @@ pub(super) fn tap_masks(filter_mouse: bool) -> (u64, u64) {
     }
 }
 
+/// Whether a shortcut is the middle mouse button: Labs › Middle mouse
+/// dictation leaves that button to it.
+pub(super) fn middle_button_bound(hotkeys: RuntimeHotkeys) -> bool {
+    let code =
+        crate::app_settings::HotkeyKey::mouse_code(crate::middle_mouse_dictation::MIDDLE_BUTTON);
+    code.is_some() && mouse_bindable(hotkeys).any(|binding| binding.key_code == code)
+}
+
 /// Translate only configured mouse triggers into the shared shortcut reducer.
 /// Ordinary clicks retain their cancellation/activity semantics.
 pub(super) fn mouse_input(

@@ -102,6 +102,7 @@ impl Feature {
             Self::ConfirmLongCancels => "Confirm long cancels",
             Self::MeetingIndicatorDisplay => "Indicator on any display",
             Self::MeetingAudioSource => "Choose meeting audio",
+            Self::MiddleMouseDictation => "Middle mouse dictation",
         }
     }
 
@@ -378,6 +379,9 @@ impl Feature {
             }
             Self::MeetingAudioSource => {
                 "Record one app or one output device in meetings instead of all computer audio"
+            }
+            Self::MiddleMouseDictation => {
+                "Hold the middle mouse button for half a second to start dictating hands-free, and again to finish. Escape cancels"
             }
         }
     }
