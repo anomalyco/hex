@@ -6237,12 +6237,12 @@
         }
       }
     },
-    "Records with Apple's voice chat processing so Control Center's Mic Mode can offer Voice Isolation. Other audio may be lowered while recording, and Bluetooth headphones may switch to the call (hands-free) profile." : {
+    "Lets Mic Mode in Control Center isolate your voice. Other audio may go quiet, and Bluetooth headphones may drop to call quality while you dictate." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用 Apple 的语音聊天处理来录音，让控制中心的麦克风模式可以提供“语音突显”。录音时其他音频可能会被调低，蓝牙耳机可能会切换到通话（免提）模式。"
+            "value" : "让控制中心的麦克风模式突显你的声音。听写时其他音频可能会变小，蓝牙耳机可能会降为通话音质。"
           }
         }
       }

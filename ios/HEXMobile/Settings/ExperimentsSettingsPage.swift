@@ -91,7 +91,7 @@ struct ExperimentsSettingsPage: View {
 
             SettingsToggleRow(
                 title: String(localized: "Voice isolation"),
-                detail: String(localized: "Records with Apple's voice chat processing so Control Center's Mic Mode can offer Voice Isolation. Other audio may be lowered while recording, and Bluetooth headphones may switch to the call (hands-free) profile."),
+                detail: String(localized: "Lets Mic Mode in Control Center isolate your voice. Other audio may go quiet, and Bluetooth headphones may drop to call quality while you dictate."),
                 isOn: toggleBinding(
                     { VoiceIsolationSettings().isEnabled },
                     { VoiceIsolationSettings().isEnabled = $0 }
