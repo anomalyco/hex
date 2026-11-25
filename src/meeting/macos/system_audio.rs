@@ -492,6 +492,45 @@ impl ProcessTapSource {
         self.open(recorded)
     }
 
+    /// Starts a replacement tap for `recorded` before dropping the old one,
+    /// flushes the old tap's queued audio, drops the old tap, and discards any
+    /// pre-swap overlap from the new tap so a false-positive digital-silence
+    /// refresh drops no audio.
+    fn swap(&mut self, recorded: Recorded, sink: &PacketSink) -> Result<()> {
+        let (sender, buffers) = mpsc::sync_channel(TAP_QUEUE_CAPACITY);
+        let callbacks = Arc::new(AtomicU64::new(0));
+        let format_error = Arc::new(AtomicBool::new(false));
+        let output_uid = (self.scope == Scope::All)
+            .then(default_output_uid)
+            .flatten();
+        let (tap, rate) = Tap::start(
+            &recorded,
+            sender.clone(),
+            callbacks.clone(),
+            format_error.clone(),
+        )?;
+        let resample = To16k::new(rate)?;
+        self.flush(sink);
+        self.close();
+        // Drop buffers the new tap queued before the old tap stopped so the
+        // WAV timeline has neither a gap nor duplicate overlap.
+        while buffers.try_recv().is_ok() {}
+        self.output_uid = output_uid;
+        self.sender = sender;
+        self.buffers = buffers;
+        self.callbacks = callbacks;
+        self.format_error = format_error;
+        self.resample = Some(resample);
+        self.tap = Some(tap);
+        self.recorded = Some(recorded);
+        self.seen_callbacks = self.callbacks.load(Ordering::Relaxed);
+        self.last_callback = Instant::now();
+        self.delivered = false;
+        self.opened = Instant::now();
+        tracing::info!(scope = ?self.scope, rate, "system audio tap refreshed");
+        Ok(())
+    }
+
     /// Whether silence past [`STALL_TIMEOUT`] means this tap stopped: every
     /// output runs while Hex records, so its silence is a stall, while a
     /// chosen app's or output's tap may sit quiet from the moment it opens (an
@@ -631,6 +670,14 @@ impl LiveSource for ProcessTapSource {
             }
         }
         Ok(())
+    }
+
+    fn refresh_in_place(&mut self, sink: &PacketSink) -> Option<std::result::Result<(), String>> {
+        let recorded = self.recorded.clone()?;
+        Some(
+            self.swap(recorded, sink)
+                .map_err(|error| format!("{error:#}")),
+        )
     }
 
     fn describe(&self) -> &'static str {

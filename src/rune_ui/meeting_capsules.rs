@@ -69,6 +69,7 @@ mod stay;
 mod throw;
 mod waveform;
 
+pub(super) use panel::meeting_agent_prompt;
 use panel::{
     agent_prompt, finalizing_window_size, hex_command, ready, ready_window_size, recording,
     recording_window_size,
@@ -416,7 +417,7 @@ impl Capsule {
     }
 
     fn set_hovered(&mut self, inside: bool) {
-        if self.presentation.blocks_hover(inside) {
+        if matches!(self.state, State::Recording { .. }) && self.presentation.blocks_hover(inside) {
             return;
         }
         match &mut self.state {
@@ -1205,6 +1206,8 @@ fn poll(capsule: &mut Capsule, now: f64, tx: &mut Tx) -> bool {
     if capsule.stay_over() {
         capsule.stir(tx);
         changed = true;
+    } else {
+        capsule.wake_for_stay(tx);
     }
     if !capsule.throw.gliding() {
         return changed;
@@ -1507,7 +1510,7 @@ mod tests {
     use rune::text::TextSystem;
     use rune::{Env, Runtime};
 
-    use super::panel::shell_word;
+    use super::panel::{command_for_path, shell_word};
     use super::placement::corner_placement;
     use super::throw::nearest_corner;
     use super::*;
@@ -2430,10 +2433,21 @@ mod tests {
             assert!(shown.contains(&expected.to_string()), "{shown:?}");
         }
         assert!(shown.iter().any(|text| text.starts_with("March 26")));
+        let (_, prompt_y) = rt.find("copy-prompt").unwrap();
+        let (_, transcript_y) = rt.find("copy-all").unwrap();
+        assert!(
+            prompt_y < transcript_y,
+            "Copy agent prompt should sit above Copy transcript"
+        );
         tap(&mut rt, "copy-prompt");
         let prompt = rt.copy_request.take().unwrap();
         assert!(
             prompt.contains("meetings show ready-snap --md"),
+            "{}",
+            &*prompt
+        );
+        assert!(
+            prompt.contains("meetings search --meeting ready-snap"),
             "{}",
             &*prompt
         );
@@ -2562,6 +2576,32 @@ mod tests {
     }
 
     #[test]
+    fn an_early_stay_wake_rearms_and_later_dismisses_the_ready_panel() {
+        let (mut rt, _, _) = runtime(ready_transcript(), false, true, ready_size());
+        rt.poll = Some(poll);
+        settle_stage(&mut rt);
+        rt.settle_all();
+        rt.update(|capsule, tx| {
+            if let State::Ready { stay, .. } = &mut capsule.state {
+                *stay = stay::Stay::new(Duration::from_millis(40));
+            }
+            capsule.wake_for_stay(tx);
+        });
+        // An early frame wake lands before the stay reaches zero: the panel
+        // stays shown and re-arms a wake for what is left.
+        rt.frame(1.0);
+        assert!(rt.state.is_shown());
+        assert!(
+            rt.wake_deadline().is_some(),
+            "early wake must re-arm until the stay expires"
+        );
+        // Once the stay has elapsed, the next frame wake dismisses the panel.
+        std::thread::sleep(Duration::from_millis(55));
+        rt.frame(1.055);
+        assert!(!rt.state.is_shown());
+    }
+
+    #[test]
     fn published_after_stop_clears_stopping_and_preserves_hover() {
         let (mut rt, _, _) = runtime(live_recording("m"), false, true, RECORDING);
         let Kind::Ready(manifest) = ready_transcript() else {
@@ -2618,12 +2658,13 @@ mod tests {
              Catch up on what was said since this prompt (the first turn may repeat):\n  \
              hex meetings show 2026-11-10-1430 --from 04:18 --md\n\n\
              Find a topic, then read around the time it came up:\n  \
-             hex meetings search \"<words>\"\n  \
+             hex meetings search --meeting 2026-11-10-1430 \"<words>\"\n  \
              hex meetings show 2026-11-10-1430 --from <mm:ss> --to <mm:ss> --md\n"
         );
         let finished = agent_prompt("hex", "m", "Design sync", None);
         assert!(finished.starts_with("Use my Hex meeting \"Design sync\" as context.\n\n"));
         assert!(finished.contains("  hex meetings show m --md\n"));
+        assert!(finished.contains("  hex meetings search --meeting m \"<words>\"\n"));
         assert!(!finished.contains("--from 0"));
     }
 
@@ -2638,6 +2679,22 @@ mod tests {
             "'/Users/alex/Hex Builds/hex'"
         );
         assert_eq!(shell_word("it's"), r"'it'\''s'");
+        assert_eq!(
+            command_for_path("/Users/alex/Hex Builds/hex", false),
+            "'/Users/alex/Hex Builds/hex'"
+        );
+        assert_eq!(
+            command_for_path(r"C:\Users\alex\AppData\Roaming\hex\hex.exe", true),
+            r"C:\Users\alex\AppData\Roaming\hex\hex.exe"
+        );
+        assert_eq!(
+            command_for_path(r"C:\Program Files\Hex\hex.exe", true),
+            r"& 'C:\Program Files\Hex\hex.exe'"
+        );
+        assert_eq!(
+            command_for_path(r"C:\Users\O'Brien\Hex\hex.exe", true),
+            r"& 'C:\Users\O''Brien\Hex\hex.exe'"
+        );
     }
 
     #[test]

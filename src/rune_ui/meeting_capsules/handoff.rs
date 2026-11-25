@@ -59,6 +59,7 @@ impl Capsule {
     }
 
     pub(super) fn capture_stopped(&mut self) {
+        self.presentation.hold_hover = false;
         if let State::Recording {
             recording, hovered, ..
         } = &self.state
@@ -107,6 +108,7 @@ impl Capsule {
     }
 
     pub(super) fn published(&mut self, manifest: Box<MeetingManifest>) {
+        self.presentation.hold_hover = false;
         self.live = Live::default();
         let hover = if self.hovered() {
             ReadyHover::Hovered

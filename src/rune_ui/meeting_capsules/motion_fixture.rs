@@ -363,7 +363,7 @@ fn localized_action_rows_share_their_geometry_and_pointer_in_every_corner() {
             for (key, name) in [
                 ("stop", "Stop"),
                 ("copy-prompt", "Copy agent prompt"),
-                ("copy-all", "Copy all"),
+                ("copy-all", "Copy transcript"),
             ] {
                 let nodes = rt.elements();
                 let (idx, row) = nodes

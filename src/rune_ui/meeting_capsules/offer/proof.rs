@@ -433,3 +433,51 @@ fn pending_offers_never_mask_a_failure_or_adopt_another_start() {
     assert!(rt.find("record").is_some() && rt.find("elapsed").is_none());
 }
 
+#[test]
+fn an_offer_started_recording_stopped_without_hovering_still_pauses_the_ready_panel_on_hover() {
+    let (mut rt, _commands, _) = runtime(offer(slack_huddle()), false, false, PANEL);
+    tap(&mut rt, "record");
+    assert!(
+        rt.state.presentation.hold_hover,
+        "pressing Record holds hover while contracting to the recording pill"
+    );
+    rt.update(|c, tx| {
+        c.start_recording(
+            Recording {
+                id: "offer-ready".into(),
+                title: "Slack Huddle".into(),
+                started: Instant::now(),
+                automatic: false,
+                warning: None,
+            },
+            Anchor::default(),
+            tx,
+        );
+    });
+    // Stop from menu bar / pane / CLI without ever hovering the pill.
+    let Kind::Ready(manifest) = ready_transcript() else {
+        unreachable!()
+    };
+    rt.update(move |c, tx| {
+        c.capture_stopped();
+        assert!(!c.presentation.hold_hover);
+        c.published(manifest);
+        assert!(!c.presentation.hold_hover);
+        c.stir(tx);
+    });
+    // Hovering the finished panel must register and pause the stay ring.
+    rt.update(|c, tx| {
+        c.set_hovered(true);
+        c.wake_for_stay(tx);
+    });
+    assert!(rt.state.hovered());
+    assert!(matches!(
+        &rt.state.state,
+        State::Ready {
+            hover: ReadyHover::Hovered,
+            stay,
+            ..
+        } if !stay.running()
+    ));
+}
+
