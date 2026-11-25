@@ -63,7 +63,9 @@ internal data class SpeechOptions(val style: Style, val spoken: DictationLanguag
                                    val learnFixes: Boolean = false,
                                    /** What the recognizers hear: [vocabulary] unless the lab adds learned words.
                                     * Never used as forced spellings. */
-                                   val hints: List<String> = emptyList()) {
+                                   val hints: List<String> = emptyList(),
+                                   /** Custom vocabulary's Word replacements, applied before learned fixes. */
+                                   val replacements: List<WordReplacement> = emptyList()) {
     /** Whisper's prompt and Parakeet's vocabulary. A translated dictation gets only the custom terms, and off
      * the lab's hints are the terms exactly as they always were. */
     val recognitionHints get() = if (!learnFixes || translate) vocabulary else hints
@@ -123,6 +125,10 @@ internal class SpeechPreferences(private val context: Context) {
     var vocabularyTerms: List<String>
         get() = prefs.getString("vocabularyTerms", null)?.split('\n').orEmpty().filter(String::isNotEmpty)
         set(value) { prefs.edit().putString("vocabularyTerms", VocabularySpelling.sanitize(value).joinToString("\n")).apply() }
+    // Custom vocabulary › Word replacements, kept even while the switch is off.
+    var wordReplacements: List<WordReplacement>
+        get() = WordReplacements.decode(prefs.getString("wordReplacements", null).orEmpty())
+        set(value) { prefs.edit().putString("wordReplacements", WordReplacements.encode(WordReplacements.valid(value))).apply() }
     // Labs › Faster English dictation, off by default: English dictations use the downloaded faster model once it is there.
     var fastEnglish: Boolean
         get() = prefs.getBoolean("fastEnglish", false)
@@ -148,6 +154,7 @@ internal class SpeechPreferences(private val context: Context) {
         // as iOS's spellings do; their other words are recognition hints alone.
         val vocabulary = forcedSpellings(terms, learned, learnFixes, translated)
         return SpeechOptions(style, spoken, clean, translated, lowercase, endWithPeriod, formatLists, spokenPunctuation,
-            vocabulary, fastEnglish, learned, learnFixes, recognitionHints(terms, learned, learnFixes, translated))
+            vocabulary, fastEnglish, learned, learnFixes, recognitionHints(terms, learned, learnFixes, translated),
+            if (customVocabulary) wordReplacements else emptyList())
     }
 }

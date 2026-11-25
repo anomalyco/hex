@@ -154,6 +154,8 @@ android {
     sourceSets["main"].assets.srcDir(modelAssets)
     // The same plain-text Android policy ships in Settings and in the Play listing drafts.
     sourceSets["main"].assets.srcDir(rootProject.file("play/policy"))
+    // The Hex words file's shared cases, read by path rather than copied (docs/specs/hex-words.md).
+    sourceSets["test"].resources.srcDir("../../tests/fixtures/hex-words")
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

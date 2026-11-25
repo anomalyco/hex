@@ -3521,6 +3521,37 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
     build-tools 36.0.0, NDK 27.2.12479018); `VoiceOnlyTest` covers the bar-or-keyboard and restart
     decisions, `python3 scripts/code-shape.py --check` and `git diff --check` pass, and the repo has
     no Android CI; nothing was tried on a device or emulator.
+├── Dictation > Custom vocabulary (off) > Word replacements and Words file -> the Android side of
+│   Hex words files (`.hexwords`, [docs/specs/hex-words.md](../specs/hex-words.md)). Everything sits
+│   behind the existing Custom vocabulary switch: off, dictation, Settings and the keyboard are as
+│   before, and only a file that arrives from another app reaches the review sheet, which then offers
+│   its own Turn on Custom vocabulary switch (off until tapped). Word replacements are a list the
+│   person edits (heard words -> what to write, at most 1,000, the file's limits, no empty or blank
+│   outputs yet), kept in the `speech` preferences as one escaped line each and applied to
+│   dictations before learned fixes with `DictationFixes`' whole-word, case-following rules and up to
+│   8 heard words; a learned fix for the same heard words is left out, and learned fixes themselves are
+│   never changed. A translated dictation gets neither. `ly.anoma.hex.words` holds a strict JSON
+│   parser of its own (the check pass and parser in one walk), the reader, the phone merge and the
+│   writer. `WordsActivity` (exported, Android's VIEW filter on `content` and its SEND filter, the
+│   spec's three MIME types, no BROWSABLE, no new permission) and Settings > Custom vocabulary > Words
+│   file > Open a words file... (`ACTION_OPEN_DOCUMENT`, `*/*`) read a content address only, through
+│   a private copy in the cache (at most 8 MiB + 1 byte) deleted after Add, Cancel or a refusal, with
+│   no persistable permission. The sheet shows the file's claimed maker, what each part adds and
+│   already has, each clash (Keep mine by default, Use this one), what this phone can't use by reason
+│   and what the file skipped by reason, a switch per part, and a refusal as one sentence; file text
+│   is plain, shortened to 64 characters and direction-isolated. Add saves an Undo copy of both lists
+│   and the switch in the preferences, offered in the confirmation and as Undo last import until either
+│   list is edited or another file is imported. Export (Share... through a `FileProvider` on
+│   `cache/words-out`, and Save to... with `ACTION_CREATE_DOCUMENT`) writes `hex-words.hexwords`:
+│   the terms, the Word replacements and, with Include fixes Hex learned (off; shown only while
+│   Labs > Learn from my fixes has fixes in use), the fixes in use marked `learned`. Checks:
+│   `HexWordsCasesTest` runs the shared cases from `tests/fixtures/hex-words` (a test resource
+│   folder): all 54 read cases, the 11 phone merge cases with an Undo round trip, and the 2 phone
+│   write cases with a schema check; the desktop merge and write cases don't apply to a phone.
+│   `DictationLearningTest` covers Word replacements' order, matching and limits. `./gradlew
+│   --no-daemon --offline :app:testDebugUnitTest -x prepareSpeechModel` passed 299 tests on
+│   2026-11-24 on anomastudio (OpenJDK 21, Android SDK 36). Nothing was tried on a device or emulator
+│   yet; the repo has no Android CI.
 └── Labs > Dictation > Learn from my fixes (off) -> an Android-only port of iPhone Hex's dictation
     correction learning, with no typing side. Off, the keyboard tracks nothing, applies nothing and
     adds no hints. On, each keyboard dictation in a non-secure words field that the field lets Hex
