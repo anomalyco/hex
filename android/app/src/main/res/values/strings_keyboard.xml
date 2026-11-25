@@ -89,6 +89,19 @@
     <string name="keyboard_menu_next_dictation">Next dictation</string>
     <string name="keyboard_menu_feedback">Typing feedback</string>
     <string name="keyboard_menu_accents">More characters</string>
+    <string name="keyboard_menu_clipboard">Clipboard</string>
+    <string name="keyboard_clipboard_empty">Text you copy shows here for an hour</string>
+    <string name="keyboard_clipboard_hint">Tap to paste, hold to pin or delete</string>
+    <plurals name="keyboard_clipboard_clear_confirm">
+        <item quantity="one">Clear %d copied text? Pinned ones stay.</item>
+        <item quantity="other">Clear %d copied texts? Pinned ones stay.</item>
+    </plurals>
+    <string name="keyboard_clipboard_pin">Pin</string>
+    <string name="keyboard_clipboard_unpin">Unpin</string>
+    <string name="keyboard_clipboard_pinned">Pinned</string>
+    <string name="keyboard_clipboard_delete">Delete</string>
+    <string name="keyboard_clipboard_cancel">Cancel</string>
+    <string name="keyboard_clipboard_clear">Clear</string>
     <string name="keyboard_menu_automatic">Automatic</string>
     <string name="keyboard_paste_english">Paste in English</string>
     <string name="keyboard_paste_spoken">Paste as spoken</string>

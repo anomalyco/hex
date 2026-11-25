@@ -80,6 +80,11 @@ internal class TypingPreferences(context: Context) {
     var adaptiveTouch: Boolean
         get() = prefs.getBoolean(ADAPTIVE_TOUCH, false)
         set(value) { prefs.edit().putBoolean(ADAPTIVE_TOUCH, value).apply() }
+    /** Labs › Keyboard › Clipboard history: the last texts copied, kept on this phone and offered in the Hex menu
+     * ([ly.anoma.hex.keyboard.ClipboardHistory]). Off by default; off, the clipboard is never read for it. */
+    var clipboardHistory: Boolean
+        get() = prefs.getBoolean(CLIPBOARD_HISTORY, false)
+        set(value) { prefs.edit().putBoolean(CLIPBOARD_HISTORY, value).apply() }
     /** Labs › Keyboard › Password manager suggestions: Android's inline autofill suggestions in the
      * strip, off by default. Hex shows the service's own chips and never reads them. */
     var passwordManagerSuggestions: Boolean
@@ -144,6 +149,7 @@ internal class TypingPreferences(context: Context) {
         /** How many imported words are kept, saved with them. */
         const val IMPORTED_WORDS_COUNT = "importedWordsCount"
         const val PASSWORD_MANAGER_SUGGESTIONS = "passwordManagerSuggestions"
+        const val CLIPBOARD_HISTORY = "clipboardHistory"
         const val VOICE_ONLY = "voiceOnly"
         const val HEIGHT = "keyboardHeight"
         const val HEX_KEY_LEFT = "hexKeyLeft"

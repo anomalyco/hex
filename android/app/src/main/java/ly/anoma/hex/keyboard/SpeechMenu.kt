@@ -19,10 +19,13 @@ internal class SpeechMenu(context: Context, private val ime: HexKeyboard,
     private enum class Page(val title: Int) {
         Home(R.string.keyboard_menu), Style(R.string.keyboard_menu_style), Language(R.string.keyboard_menu_language),
         NextDictation(R.string.keyboard_menu_next_dictation), Feedback(R.string.keyboard_menu_feedback),
-        Accents(R.string.keyboard_menu_accents),
+        Accents(R.string.keyboard_menu_accents), Clipboard(R.string.keyboard_menu_clipboard),
     }
     private val body = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
     private var page = Page.Home
+    /** Labs › Keyboard › Clipboard history's page; [direct]: opened from the strip's tool, so going back leaves the menu. */
+    private val clipboard = ClipboardPage(context, body, paste = { close(); ime.pasteCopied(it) }, redraw = { show(Page.Clipboard) })
+    private var direct = false
     private val prefs get() = ime.preferences
     init { addView(body); isFillViewport = true }
     private fun dp(n: Int) = (resources.displayMetrics.density * n).roundToInt()
@@ -46,12 +49,20 @@ internal class SpeechMenu(context: Context, private val ime: HexKeyboard,
         return s(R.string.keyboard_menu_automatic) + if (choices) " · " + among.joinToString(s(R.string.language_list_separator)) { it.label } else ""
     }
     /** More characters came from a key, so going back leaves the menu. */
-    fun back() { if (page == Page.Home || page == Page.Accents) close() else home() }
+    fun back() { if (page == Page.Home || page == Page.Accents || page == Page.Clipboard && direct) close() else home() }
+    fun clipboardPage(direct: Boolean) {
+        this.direct = direct; clipboard.holding = null; clipboard.clearing = false; show(Page.Clipboard)
+    }
 
     private fun show(next: Page) {
-        page = next; title(s(next.title)); body.removeAllViews(); scrollTo(0, 0)
+        // The Clipboard page redraws in place after a hold, Pin or Clear: it keeps its scroll.
+        val again = next == Page.Clipboard && page == Page.Clipboard
+        page = next; title(s(next.title)); body.removeAllViews(); if (!again) scrollTo(0, 0)
         when (next) {
             Page.Home -> {
+                // Labs › Keyboard › Clipboard history; never in a password field.
+                if (ime.feedback.clipboardHistory && !ime.engine.secure)
+                    row(s(R.string.keyboard_menu_clipboard), s(R.string.keyboard_menu_arrow)) { clipboardPage(direct = false) }
                 row(s(R.string.keyboard_menu_style), more(s(prefs.style.label))) { show(Page.Style) }
                 row(s(R.string.keyboard_menu_language), more(prefs.language?.label ?: automatic())) { show(Page.Language) }
                 if (prefs.translation && prefs.translatable)
@@ -87,6 +98,7 @@ internal class SpeechMenu(context: Context, private val ime: HexKeyboard,
                 }
             }
             Page.Accents -> Unit
+            Page.Clipboard -> clipboard.fill()
         }
     }
 

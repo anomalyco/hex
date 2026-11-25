@@ -1,6 +1,5 @@
 package ly.anoma.hex.diagnostics
 
-import android.content.ClipData
 import android.content.ClipboardManager
 import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +28,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ly.anoma.hex.Action
+import ly.anoma.hex.keyboard.hexClip
 import ly.anoma.hex.Card
 import ly.anoma.hex.Entry
 import ly.anoma.hex.Label
@@ -95,7 +95,7 @@ internal fun DiagnosticsPage() {
         }
         Row(Modifier.padding(horizontal = 4.dp)) {
             Action(stringResource(if (copied) R.string.home_copied else R.string.diagnostics_copy)) {
-                context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("Hex diagnostics", text))
+                context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(hexClip("Hex diagnostics", text))
                 // Android 13 and later show their own copied preview.
                 copied = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
             }

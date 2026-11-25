@@ -1,7 +1,6 @@
 package ly.anoma.hex
 
 import android.app.Activity
-import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -44,6 +43,8 @@ import ly.anoma.hex.diagnostics.DiagnosticsPage
 import ly.anoma.hex.feedback.Feedback
 import ly.anoma.hex.feedback.FeedbackForm
 import ly.anoma.hex.keyboard.KeyColor
+import ly.anoma.hex.keyboard.ClipboardHistory
+import ly.anoma.hex.keyboard.hexClip
 import ly.anoma.hex.keyboard.VoiceOnly
 import ly.anoma.hex.keyboard.KeyboardHeight
 import ly.anoma.hex.speech.*
@@ -167,6 +168,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     var signatureDraft by remember { mutableStateOf(speech.signatureText) }
     val emojiSuggestions = remember(revision) { typing.emojiSuggestions }
     val keyboardTools = remember(revision) { typing.keyboardTools }
+    val clipboardHistory = remember(revision) { typing.clipboardHistory }
     val smartQuotes = remember(revision) { typing.smartQuotes }
     val swipeDeleteLetters = remember(revision) { typing.swipeDeleteLetters }
     val marksTakeFixSpace = remember(revision) { typing.marksTakeFixSpace }
@@ -295,7 +297,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             Row(Modifier.padding(horizontal = 4.dp)) {
                                 Action(stringResource(if (copied) R.string.home_copied else R.string.home_copy)) {
                                     context.getSystemService(ClipboardManager::class.java)
-                                        ?.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.app_name), transcript))
+                                        ?.setPrimaryClip(hexClip(context.getString(R.string.app_name), transcript))
                                     copied = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
                                 }
                                 Action(stringResource(R.string.home_clear), clear)
@@ -592,6 +594,13 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                     } else {
                                         Entry(stringResource(R.string.adaptive_touch_reset), action = { resettingTouch = true })
                                     }
+                                }
+                                Rule()
+                                // Labs › Keyboard › Clipboard history: off deletes every kept text at once, as its line says.
+                                Toggle(stringResource(R.string.clipboard_history), stringResource(R.string.clipboard_history_detail),
+                                    clipboardHistory, noteLines = Int.MAX_VALUE) {
+                                    typing.clipboardHistory = it
+                                    if (it) ClipboardHistory.begin(context) else ClipboardHistory.deleteAll(context)
                                 }
                                 Rule()
                                 Toggle(stringResource(R.string.password_manager_suggestions),

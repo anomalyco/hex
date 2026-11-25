@@ -1,9 +1,11 @@
 package ly.anoma.hex.keyboard
 
 import android.Manifest
+import android.content.BroadcastReceiver
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -27,6 +29,7 @@ import android.widget.inline.InlinePresentationSpec
 import androidx.autofill.inline.UiVersions
 import androidx.autofill.inline.common.TextViewStyle
 import androidx.autofill.inline.v1.InlineSuggestionUi
+import androidx.core.content.ContextCompat
 import kotlin.math.roundToInt
 import ly.anoma.hex.MainActivity
 import ly.anoma.hex.R
@@ -128,6 +131,7 @@ class HexKeyboard : InputMethodService() {
         if (key == TypingPreferences.ADAPTIVE_TOUCH) engine.adaptiveTouchChanged()
         if (key == TypingPreferences.HEX_KEY_LEFT) view?.hexKeySideChanged()
         if (key == TypingPreferences.USE_IMPORTED_WORDS || key == TypingPreferences.IMPORTED_WORDS) engine.personalWordsChanged()
+        if (key == TypingPreferences.CLIPBOARD_HISTORY) clipKeeper.sync()
     }
     // The strip's Paste tool comes and goes with the clipboard (Labs › Keyboard › Keyboard tools): the
     // listener exists only while the lab is on and the input view is shown.
@@ -144,6 +148,48 @@ class HexKeyboard : InputMethodService() {
     }
     internal val previewAllowed get() = !engine.secure
 
+    // Labs › Keyboard › Clipboard history: while the lab is on, every copy is looked at as Android announces it,
+    // with the keyboard shown or not (Android lets the default keyboard read the clipboard and shows it no notice).
+    // Off, the listener is gone and nothing is read.
+    private val clipCopied: ClipboardManager.OnPrimaryClipChangedListener =
+        ClipboardManager.OnPrimaryClipChangedListener { clipKeeper.copied() }
+    private val clipKeeper: ClipboardKeeper = ClipboardKeeper(enabled = { feedback.clipboardHistory },
+        listen = { on -> if (on) clipboard.addPrimaryClipChangedListener(clipCopied) else clipboard.removePrimaryClipChangedListener(clipCopied) },
+        read = ::keepClip, forget = { ClipboardHistory.deleteAll(this) })
+    /** A field is open: copies made in a password field, or one that asks not to be learned from, are not kept. */
+    private var inField = false
+    private fun keepClip() = ClipboardHistory.copied(this, clipboard.primaryClipDescription, { clipboard.primaryClip },
+        secureField = inField && engine.secure, noLearning = inField && !engine.learnsTyping)
+    // Expired texts leave the file when they expire, not when someone next looks: a timer for the earliest expiry while
+    // this process lives (none while nothing unpinned is kept), and a purge as the keyboard starts and each time it
+    // shows. The timer counts only while the phone is awake and never sees a clock moved on, so the screen coming on and
+    // a clock change purge too, listened for only while a text waits to expire. No alarm, no permission, nothing that
+    // keeps Hex running; if Android has stopped Hex, the next start purges.
+    private val expiry = Handler(Looper.getMainLooper())
+    private val expire = Runnable { expireClips() }
+    private val wakeOrClock = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) = expireClips()
+    }
+    private var awaitingExpiry = false
+    private fun expireClips() {
+        expiry.removeCallbacks(expire)
+        val next = if (feedback.clipboardHistory) ClipboardHistory.purge(this) else null
+        if (next != null) expiry.postDelayed(expire, (next - System.currentTimeMillis()).coerceAtLeast(0))
+        awaitExpiry(next != null)
+    }
+    private fun awaitExpiry(await: Boolean) {
+        if (await == awaitingExpiry) return
+        awaitingExpiry = await
+        if (await) ContextCompat.registerReceiver(this, wakeOrClock,
+            IntentFilter(Intent.ACTION_SCREEN_ON).apply { addAction(Intent.ACTION_TIME_CHANGED) }, ContextCompat.RECEIVER_NOT_EXPORTED)
+        else unregisterReceiver(wakeOrClock)
+    }
+    /** A text from the Hex menu's Clipboard page goes in as typed; never in a password field. */
+    internal fun pasteCopied(text: String) {
+        if (engine.secure) return
+        if (currentInputConnection?.commitText(text, 1) == true) engine.pasted()
+    }
+
     override fun onCreate() {
         setTheme(R.style.HexIme)
         super.onCreate()
@@ -153,6 +199,9 @@ class HexKeyboard : InputMethodService() {
             insert = ::commitSpeech)
         // The lab off is the keyboard it always was: never touch the system's subtype list for it.
         if (feedback.voiceOnly) VoiceOnly.setEnabled(this, true)
+        clipKeeper.sync()
+        ClipboardHistory.changed = { expiry.post(expire) }
+        expireClips()
     }
     override fun onEvaluateFullscreenMode() = false
     override fun onCreateInputView(): View = inputView()
@@ -220,9 +269,11 @@ class HexKeyboard : InputMethodService() {
         field.started(attribute.packageName)
         capture.leave()
         engine.startInput(attribute)
+        inField = true
     }
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        expireClips()
         // A subtype or lab change may have arrived while no view existed: it shows the right one.
         val voice = voiceOnly()
         if (voice != (bar != null) || (!voice && view == null)) setInputView(inputView())
@@ -499,7 +550,7 @@ class HexKeyboard : InputMethodService() {
         if (kept?.offered == true) { dropKept(); view?.notice(null) }
     }
     override fun onFinishInputView(finishingInput: Boolean) { leaveEditor(finishingInput); super.onFinishInputView(finishingInput) }
-    override fun onFinishInput() { field.finished(); leaveEditor(fieldGone = true); super.onFinishInput() }
+    override fun onFinishInput() { field.finished(); leaveEditor(fieldGone = true); inField = false; super.onFinishInput() }
     override fun onWindowHidden() { leaveEditor(fieldGone = false); super.onWindowHidden() }
     // The speech model is a few hundred MB while loaded; give it back when Android runs short. Not on
     // TRIM_MEMORY_UI_HIDDEN, which only says the keyboard hid (every app switch), not that memory is low.
@@ -512,6 +563,8 @@ class HexKeyboard : InputMethodService() {
         getSharedPreferences("typing", MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(typingChanged)
         contentResolver.unregisterContentObserver(dictionaryChanged); words.shutdownNow()
         viewing = false; watchClipboard()
+        clipKeeper.stop()
+        ClipboardHistory.changed = null; expiry.removeCallbacks(expire); awaitExpiry(false)
         bar?.removeCallbacks(pendingLeave)
         view?.cancelGestures(); view = null; bar = null; engine.surface = null; capture.close(); super.onDestroy()
     }

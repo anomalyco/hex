@@ -97,6 +97,8 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
         strip.choosing = true; strip.menuOpened(); menu.home(); strip.update()
     }
     fun openLanguageMenu() { openMenu(); menu.language() }
+    /** The strip's Clipboard tool: the menu's Clipboard page, which going back closes. */
+    fun openClipboard() { openMenu(); if (menu.visibility == VISIBLE) menu.clipboardPage(direct = true) }
     fun openAccents(accents: List<String>, from: View) {
         openMenu(); if (menu.visibility != VISIBLE) return
         heldAt = IntArray(2).also(from::getLocationInWindow).let { intArrayOf(it[0] + from.width / 2, it[1] + from.height / 2) }

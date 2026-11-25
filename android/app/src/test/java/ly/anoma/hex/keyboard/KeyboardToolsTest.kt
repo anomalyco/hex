@@ -7,9 +7,9 @@ import org.junit.Test
 
 class KeyboardToolsTest {
     private fun tools(enabled: Boolean = true, secure: Boolean = false, busy: Boolean = false,
-                      emoji: Boolean = true, hasClip: Boolean = true, canUndo: Boolean = true) =
+                      emoji: Boolean = true, hasClip: Boolean = true, canUndo: Boolean = true, history: Boolean = false) =
         KeyboardTools.tools(enabled = enabled, busy = busy, secure = { secure }, emoji = { emoji },
-            canUndo = { canUndo }, clipboard = { hasClip })
+            canUndo = { canUndo }, clipboard = { hasClip }, history = { history })
 
     @Test fun withTheLabOffThereAreNoTools() {
         assertEquals(emptyList<StripTool>(), tools(enabled = false))
@@ -51,15 +51,19 @@ class KeyboardToolsTest {
         val emoji = { asked++; true }
         val clipboard = { asked++; true }
         val canUndo = { asked++; true }
-        KeyboardTools.tools(enabled = false, busy = false, secure = secure, emoji = emoji, canUndo = canUndo, clipboard = clipboard)
-        KeyboardTools.tools(enabled = true, busy = true, secure = secure, emoji = emoji, canUndo = canUndo, clipboard = clipboard)
+        val history = { asked++; true }
+        KeyboardTools.tools(enabled = false, busy = false, secure = secure, emoji = emoji, canUndo = canUndo, clipboard = clipboard,
+            history = history)
+        KeyboardTools.tools(enabled = true, busy = true, secure = secure, emoji = emoji, canUndo = canUndo, clipboard = clipboard,
+            history = history)
         assertEquals(0, asked)
         // A password field needs only the field, not its page, the clipboard or the editor.
         KeyboardTools.tools(enabled = true, busy = false, secure = { asked++; true }, emoji = emoji, canUndo = canUndo,
-            clipboard = clipboard)
+            clipboard = clipboard, history = history)
         assertEquals(1, asked)
-        KeyboardTools.tools(enabled = true, busy = false, secure = secure, emoji = emoji, canUndo = canUndo, clipboard = clipboard)
-        assertEquals(5, asked)
+        KeyboardTools.tools(enabled = true, busy = false, secure = secure, emoji = emoji, canUndo = canUndo, clipboard = clipboard,
+            history = history)
+        assertEquals(6, asked)
     }
 
     @Test fun anEmptyFieldKeepsItsLineForTheTools() {
@@ -77,5 +81,12 @@ class KeyboardToolsTest {
         assertEquals(0, asked)
         KeyboardTools.showsInEmptyField(enabled = true, before = "") { asked++; "" }
         assertEquals(1, asked)
+    }
+
+    @Test fun clipboardShowsAfterPasteWithClipboardHistoryOn() {
+        assertEquals(listOf(StripTool.Emoji, StripTool.Paste, StripTool.Clipboard, StripTool.Settings, StripTool.Undo),
+            tools(history = true))
+        assertTrue(StripTool.Clipboard !in tools(history = false))
+        assertEquals(emptyList<StripTool>(), tools(history = true, secure = true))
     }
 }
