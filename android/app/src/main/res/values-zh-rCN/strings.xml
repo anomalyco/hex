@@ -142,6 +142,13 @@
     <string name="smart_quotes_detail">用 ’ ‘ “ ” 代替 \' 和 \"</string>
     <string name="swipe_delete_letters">逐个字母删除滑行输入的单词</string>
     <string name="swipe_delete_letters_detail">滑行输入后按删除键只删除一个字母，而不是整个单词</string>
+    <string name="adaptive_touch">自适应触控</string>
+    <string name="adaptive_touch_detail">学习你点击每个按键的位置。内容只留在这台手机上，只保存平均位置，不保存你输入的内容。</string>
+    <string name="adaptive_touch_learning">正在学习：已有 %1$d/%2$d 次轻点</string>
+    <string name="adaptive_touch_active">已生效，使用你自己的按键中心</string>
+    <string name="adaptive_touch_reset">重置触控学习</string>
+    <string name="adaptive_touch_reset_confirm">要重置触控学习吗？</string>
+    <string name="adaptive_touch_reset_action">重置</string>
     <string name="password_manager_suggestions">密码管理器建议</string>
     <string name="password_manager_suggestions_detail">在建议栏中显示自动填充服务提供的登录信息、验证码和卡片</string>
     <string name="voice_only_mode">仅语音模式</string>

@@ -10,9 +10,13 @@ internal data class KeyRect(val left: Double, val top: Double, val right: Double
     val centreY get() = (top + bottom) / 2
 }
 /** `space` is the space bar's keycap, or null when unknown: then a tap on the bottom letter row
- * is never read as a missed space. */
-internal class KeyGrid(val centres: Map<Char, KeyPoint>, val pitchX: Double, val pitchY: Double, val space: KeyRect? = null) {
-    val bottomY = centres.values.maxOf { it.y }
+ * is never read as a missed space. [plane] is the keys as Labs › Keyboard › Adaptive touch learns them, when the
+ * keyboard draws them; [bottomY] stays the drawn bottom row's when Adaptive touch moves the centres. */
+internal class KeyGrid @JvmOverloads constructor(val centres: Map<Char, KeyPoint>, val pitchX: Double, val pitchY: Double,
+                                                 val space: KeyRect? = null, val plane: TouchPlane? = null,
+                                                 val bottomY: Double = centres.values.maxOf { it.y }) {
+    /** How far a tap strays sideways from its key's centre, one standard deviation. */
+    val spreadX get() = pitchX * .29
     // R1's reference pitch is 39.5 × 56. Keep its vertical spread and its 6-nat split
     // prior on that layout. On shorter rows the travel to space is shorter: scale its
     // Gaussian (squared-distance) cost, down to the Android 2%-omission prior.
@@ -43,7 +47,7 @@ internal class SpatialDecoder(val model: TypingModel) {
         for ((c, p) in grid.centres) {
             val code = model.code(c)
             if (code == 0) continue
-            val dx = (x - p.x) / (grid.pitchX * .29)
+            val dx = (x - p.x) / grid.spreadX
             val dy = (y - p.y) / sy
             costs[code] = .5 * (dx * dx + dy * dy)
         }
@@ -268,6 +272,83 @@ internal class SpatialDecoder(val model: TypingModel) {
         }
         if (best == null && replace == null) return none
         return Decision(replace, shown.take(3))
+    }
+
+    /** Whether [decide] reading [taps] would put [reading], one word, in place of [typed]: it beats the spelling as
+     * typed by the same margin. Null for a reading of two words or more, which only [decide] can tell. Labs › Keyboard ›
+     * Adaptive touch asks with the taps read on the drawn keys, so a correction its own centres make is one the keyboard
+     * makes without them (iOS TypingDecoder.replaces). */
+    fun replaces(reading: String, typed: String, taps: List<Tap>, previous: Int, swears: Boolean): Boolean? {
+        if (' ' in reading) return null
+        if (typed.length !in 2..32 || taps.size != typed.length || model.neverSuggest.blocks(typed, swears, previous) ||
+            typed.any { model.code(it) == 0 || it == '\'' }) return false
+        // The spelling as typed, scored as decide scores it.
+        val literal = model.index(typed)
+        val personal = personal?.takeIf { it.size > 0 }
+        val yours = personal?.index(typed) ?: -1
+        val knownLiteral = literal >= 0 || model.known(typed) || yours >= 0
+        val listed = if (literal < 0 && yours < 0) model.validCost(typed) else null
+        var lm = when {
+            literal >= 0 -> model.languageCost(previous, literal)
+            listed != null -> listed
+            knownLiteral -> 15.0
+            else -> 22.0
+        }
+        if (yours >= 0) lm = minOf(lm, USER_WORD_COST)
+        var cost = lmWeight * lm
+        for (i in taps.indices) cost += taps[i].cost[model.code(typed[i])]
+        if (!cost.isFinite()) return false
+        // The reading as decide scores it: a word of the model's the never-suggest list lets through after the word
+        // before, or one of yours.
+        val lower = reading.lowercase()
+        val word = model.index(lower)
+        var readingLm = if (word >= 0 && !model.neverSuggest.blocks(word, swears, model.neverSuggest.restrictedContext(previous)))
+            model.languageCost(previous, word) else Double.POSITIVE_INFINITY
+        if ((personal?.index(lower) ?: -1) >= 0) readingLm = minOf(readingLm, USER_WORD_COST)
+        if (!readingLm.isFinite()) return false
+        val margin = if (!knownLiteral || foldAccents(lower) == foldAccents(typed) || listed != null) 2.0 else 7.0
+        val codes = IntArray(lower.length) { model.code(lower[it]) }
+        if (codes.any { it == 0 }) return false
+        // One alignment the search also tries usually clears it already: no search then.
+        aligned(codes, taps)?.let { if (cost - (it + lmWeight * readingLm) >= margin) return true }
+        val spatial = search(taps, 0, taps.size, 1, swears, previous, OneWord(codes)).firstOrNull()?.cost ?: return false
+        return cost - (spatial + lmWeight * readingLm) >= margin
+    }
+
+    // The cost of [codes] read letter for letter from the taps, or with one letter not typed at its cheapest place: never
+    // below what the search finds, so a bound to clear. Null when neither fits (another edit, a tap past MAX_TAP_COST).
+    private fun aligned(codes: IntArray, taps: List<Tap>): Double? {
+        val letters = ArrayList<Int>(codes.size)
+        for ((depth, code) in codes.withIndex()) {
+            if (code == model.apostrophe) { if (depth == 0) return null; continue }
+            letters.add(code)
+        }
+        val n = taps.size
+        fun tap(i: Int, code: Int) = taps[i].cost[code].takeIf { it <= MAX_TAP_COST }
+        if (letters.size == n) {
+            var total = 0.0
+            for (i in 0 until n) total += tap(i, letters[i]) ?: return null
+            return total
+        }
+        if (letters.size != n + 1) return null
+        // The letter not typed goes in before tap k: taps before it read letters 0 until k, the rest one letter on.
+        val prefix = DoubleArray(n + 1) { Double.POSITIVE_INFINITY }
+        prefix[0] = 0.0
+        for (i in 0 until n) prefix[i + 1] = prefix[i] + (tap(i, letters[i]) ?: Double.POSITIVE_INFINITY)
+        val suffix = DoubleArray(n + 1) { Double.POSITIVE_INFINITY }
+        suffix[n] = 0.0
+        for (i in n - 1 downTo 0) suffix[i] = suffix[i + 1] + (tap(i, letters[i + 1]) ?: Double.POSITIVE_INFINITY)
+        var best = Double.POSITIVE_INFINITY
+        for (k in 0..n) best = minOf(best, prefix[k] + suffix[k])
+        return if (best.isFinite()) best + EDIT_COST else null
+    }
+
+    // One word as a lexicon, for the search to score just it.
+    private class OneWord(private val codes: IntArray) : Lexicon {
+        override val size get() = 1
+        override fun length(word: Int) = codes.size
+        override fun child(lo: Int, hi: Int, depth: Int, code: Int): Long =
+            if (lo == 0 && hi == 1 && depth < codes.size && codes[depth] == code) 1L else 0L
     }
 
     // What a missed space can still make of taps nothing else read (iOS missedSpaceReading): the

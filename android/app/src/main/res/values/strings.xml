@@ -155,6 +155,13 @@
     <string name="smart_quotes_detail">Types ’ ‘ “ ” for \' and \"</string>
     <string name="swipe_delete_letters">Delete swiped words letter by letter</string>
     <string name="swipe_delete_letters_detail">Delete after a swipe removes one letter, not the word</string>
+    <string name="adaptive_touch">Adaptive touch</string>
+    <string name="adaptive_touch_detail">Learns where you tap each key. Stays on this phone and keeps averages, never what you type.</string>
+    <string name="adaptive_touch_learning">Learning: %1$d of %2$d taps</string>
+    <string name="adaptive_touch_active">Active, using your own key centres</string>
+    <string name="adaptive_touch_reset">Reset touch learning</string>
+    <string name="adaptive_touch_reset_confirm">Reset touch learning?</string>
+    <string name="adaptive_touch_reset_action">Reset</string>
     <string name="password_manager_suggestions">Password manager suggestions</string>
     <string name="password_manager_suggestions_detail">Show logins, codes and cards from your autofill service in the suggestion strip</string>
     <string name="voice_only_mode">Voice-only mode</string>
