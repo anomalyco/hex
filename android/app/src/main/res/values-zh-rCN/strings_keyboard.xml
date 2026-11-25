@@ -68,6 +68,18 @@
     <string name="keyboard_menu_next_dictation">下次听写</string>
     <string name="keyboard_menu_feedback">打字反馈</string>
     <string name="keyboard_menu_accents">更多字符</string>
+    <string name="keyboard_menu_clipboard">剪贴板</string>
+    <string name="keyboard_clipboard_empty">你复制的文字会在这里显示一小时</string>
+    <string name="keyboard_clipboard_hint">点按即可粘贴，长按可固定或删除</string>
+    <plurals name="keyboard_clipboard_clear_confirm">
+        <item quantity="other">要清除 %d 条复制的文字吗？已固定的会保留。</item>
+    </plurals>
+    <string name="keyboard_clipboard_pin">固定</string>
+    <string name="keyboard_clipboard_unpin">取消固定</string>
+    <string name="keyboard_clipboard_pinned">已固定</string>
+    <string name="keyboard_clipboard_delete">删除</string>
+    <string name="keyboard_clipboard_cancel">取消</string>
+    <string name="keyboard_clipboard_clear">清除</string>
     <string name="keyboard_menu_automatic">自动</string>
     <string name="keyboard_paste_english">以英语粘贴</string>
     <string name="keyboard_paste_spoken">按原话粘贴</string>

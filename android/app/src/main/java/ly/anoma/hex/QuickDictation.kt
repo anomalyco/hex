@@ -3,7 +3,6 @@ package ly.anoma.hex
 import android.Manifest
 import android.app.PendingIntent
 import android.app.StatusBarManager
-import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
@@ -38,6 +37,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import ly.anoma.hex.keyboard.hexClip
 import ly.anoma.hex.keyboard.speechNote
 import ly.anoma.hex.speech.DictationPlace
 import ly.anoma.hex.speech.LocalSpeech
@@ -175,7 +175,7 @@ class QuickDictationActivity : ComponentActivity(), OfflineScreen {
     }
 
     private fun copy(text: String) {
-        getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(getString(R.string.app_name), text))
+        getSystemService(ClipboardManager::class.java)?.setPrimaryClip(hexClip(getString(R.string.app_name), text))
         copied = true
         // MicCapture publishes a note (the 1-minute stop, low memory) right after this text: decide once it has.
         window.decorView.post {

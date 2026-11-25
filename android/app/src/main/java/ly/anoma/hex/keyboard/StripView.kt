@@ -72,6 +72,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
     private val toolsRow = LinearLayout(context)
     private val toolEmoji = toolButton(R.drawable.ic_emoji, R.string.keyboard_emoji) { host.openEmoji() }
     private val toolPaste = toolButton(R.drawable.ic_paste, R.string.keyboard_tool_paste) { ime.pasteClipboard() }
+    private val toolClipboard = toolButton(R.drawable.ic_clipboard, R.string.keyboard_menu_clipboard) { host.openClipboard() }
     private val toolSettings = toolButton(R.drawable.ic_settings, R.string.keyboard_tool_settings) { ime.openKeyboardSettings() }
     private val toolUndo = toolButton(R.drawable.ic_undo, R.string.keyboard_tool_undo) { ime.engine.undoAutocorrection() }
     private val clipboard = context.getSystemService(ClipboardManager::class.java)
@@ -174,7 +175,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         inlineArea.visibility = GONE
         idleRow.addView(inlineArea, LinearLayout.LayoutParams(0, -1, 1f))
         toolsRow.gravity = Gravity.CENTER_VERTICAL
-        listOf(toolEmoji, toolPaste, toolSettings, toolUndo).forEach {
+        listOf(toolEmoji, toolPaste, toolClipboard, toolSettings, toolUndo).forEach {
             toolsRow.addView(it, LinearLayout.LayoutParams(dp(40), -1))
         }
         toolsRow.visibility = GONE
@@ -379,7 +380,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         val tools = KeyboardTools.tools(enabled = ime.feedback.keyboardTools,
             busy = !idle || choosing || show || chips || undo || noted || hint != holdHint, secure = { ime.engine.secure },
             emoji = { ime.engine.emojiAvailable }, canUndo = { ime.engine.canUndoAutocorrection },
-            clipboard = { clipboard.hasPrimaryClip() })
+            clipboard = { clipboard.hasPrimaryClip() }, history = { ime.feedback.clipboardHistory })
         noticeRow.visibility = if (noted) VISIBLE else GONE
         undoBox.visibility = if (undo) VISIBLE else GONE
         // A note that came with text ("Stopped at 1 minute") shares the line with Undo, which then takes only its width,
@@ -413,6 +414,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         toolsRow.visibility = if (tools.isNotEmpty()) VISIBLE else GONE
         toolEmoji.visibility = if (StripTool.Emoji in tools) VISIBLE else GONE
         toolPaste.visibility = if (StripTool.Paste in tools) VISIBLE else GONE
+        toolClipboard.visibility = if (StripTool.Clipboard in tools) VISIBLE else GONE
         toolUndo.visibility = if (StripTool.Undo in tools) VISIBLE else GONE
         statusText.visibility = if (idle && !show && !chips && (!undo || spoken) && !noted && tools.isEmpty()) VISIBLE else GONE
         menuKey.text = context.getString(when {
