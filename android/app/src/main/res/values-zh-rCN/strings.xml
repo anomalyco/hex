@@ -20,6 +20,7 @@
     <string name="setup_language_first">%1$s，你手机的首选语言。要用 %2$s 听写，请按住空格键。</string>
     <string name="setup_language_or">%1$s 或 %2$s</string>
     <string name="setup_language_unsupported">%1$s。Hex 暂不能用%2$s听写。</string>
+    <string name="setup_settings">设置</string>
     <string name="setup_ready">就绪</string>
     <string name="setup_next_microphone">允许使用麦克风</string>
     <string name="setup_next_settings">打开设置</string>
