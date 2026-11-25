@@ -86,7 +86,9 @@
     <string name="dictation_end_with_period">句末加句号</string>
     <string name="dictation_end_with_period_detail">关闭后去掉末尾的句号，保留问号和感叹号</string>
     <string name="settings_translate">翻译我说的话</string>
-    <string name="settings_translate_detail">用西班牙语听写，以英语写出</string>
+    <string name="settings_translate_detail">说西班牙语，Hex 以英语写出</string>
+    <string name="settings_translate_heard">听到的西班牙语以英语写出；其他语言按原话写出</string>
+    <string name="settings_translate_needs_spanish">仅支持西班牙语译为英语。将听写语言设为 Español 即可使用</string>
     <string name="settings_clean">整理我说的话</string>
     <string name="settings_clean_detail">去掉“嗯”、重复和改口的词</string>
     <string name="dictation_vocabulary">自定词汇</string>
@@ -95,6 +97,14 @@
     <string name="settings_keyboard_layout">键盘布局</string>
     <string name="settings_layout_follows">跟随听写 · %1$s</string>
     <string name="settings_layout_automatic_detail">跟随你的听写语言</string>
+    <string name="settings_keyboard_height">高度</string>
+    <string name="keyboard_height_extra_short">特矮</string>
+    <string name="keyboard_height_short">矮</string>
+    <string name="keyboard_height_mid_short">中矮</string>
+    <string name="keyboard_height_normal">标准</string>
+    <string name="keyboard_height_mid_tall">中高</string>
+    <string name="keyboard_height_tall">高</string>
+    <string name="keyboard_height_extra_tall">特高</string>
     <string name="settings_autocorrect">自动改正</string>
     <string name="settings_autocorrect_detail">按空格时修正拼写错误</string>
     <string name="settings_spatial">按触点自动改正</string>
@@ -168,6 +178,8 @@
     <string name="password_manager_suggestions_detail">在建议栏中显示自动填充服务提供的登录信息、验证码和卡片</string>
     <string name="voice_only_mode">仅语音模式</string>
     <string name="voice_only_detail">让你从其他键盘切换到 Hex 只做听写，说完再切换回去</string>
+    <string name="hex_key_left">Hex 键放在左侧</string>
+    <string name="hex_key_left_detail">把按住说话的 Hex 键移到建议栏的左端</string>
     <!-- Hex 词汇文件与自定词汇的“词语替换”（docs/specs/hex-words.md）。 -->
     <string name="words_open_label">添加到 Hex</string>
     <string name="words_replacements">词语替换</string>
