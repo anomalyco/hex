@@ -229,7 +229,7 @@ impl Feature {
                 "Edit each mode's apps and websites, corrections, OpenCode rewrite (on or off, and its model), and transformations in a Modes pane; Output stays the read-only view"
             }
             Self::VocabularyFiles => {
-                "Import terms from a CSV file into the vocabulary sheet, merging them into the list, and export the list as a CSV file"
+                "Open and export Hex words files (.hexwords) in the Vocabulary sheet: the vocabulary and the Global mode's replacements, shared with Hex on other computers and phones and reviewed before anything is added; also import terms from a CSV file and export the list as one"
             }
             Self::VocabularyMenu => {
                 "Add a Vocabulary submenu to the menu bar, right under Speech Model: add a term or open the Vocabulary sheet, with the last five saved terms listed (macOS)"

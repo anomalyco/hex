@@ -866,8 +866,8 @@
         "windows",
         "linux"
       ],
-      "summary": "Import terms from a CSV file in the Vocabulary sheet, or save the whole list as one",
-      "title": "Vocabulary files"
+      "summary": "Share vocabulary and replacements with your other devices as a Hex words file, or import and export terms as CSV",
+      "title": "Vocabulary and replacement files"
     },
     {
       "added": "2026-11-23",

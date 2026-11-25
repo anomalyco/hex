@@ -3175,22 +3175,57 @@ fn the_language_menu_opens_on_its_chosen_language() {
     );
 }
 
-/// Labs › Vocabulary files adds Import and Export to the sheet, and only
-/// then: off, the sheet is exactly as before.
+/// Labs › Vocabulary and replacement files adds Import, Export, and the
+/// Words file menu to the sheet, and only then: off, the sheet is exactly as
+/// before.
 #[test]
 fn the_vocabulary_sheet_offers_files_only_with_its_lab_on() {
     let mut rt = runtime("mac-settings-vocabulary", true, GOLDEN_SIZE);
     settle(&mut rt);
     assert!(rt.find("add-term").is_some());
-    assert!(rt.find("import-vocabulary").is_none());
-    assert!(rt.find("export-vocabulary").is_none());
+    for key in ["import-vocabulary", "export-vocabulary", "words-file"] {
+        assert!(rt.find(key).is_none(), "{key} shows with the lab off");
+    }
     rt.state.settings.labs.vocabulary_files = true;
     rt.invalidate();
     settle(&mut rt);
     assert!(rt.find("import-vocabulary").is_some());
     assert!(rt.find("export-vocabulary").is_some());
+    assert!(rt.find("words-file").is_some());
     assert!(rt.find("add-term").is_some());
     assert!(rt.find("close-vocabulary").is_some());
+}
+
+/// A words file's review lists what Add would add, not only counts: new
+/// terms with their spellings, a listed term's new spelling, new
+/// replacements, the clash, and the maker as the file's claim.
+#[test]
+fn the_words_file_review_lists_what_add_would_add() {
+    let rt = runtime("words-review", false, GOLDEN_SIZE);
+    let shown = texts(&rt);
+    for words in [
+        "Next.js",
+        "Zoë",
+        "שלום",
+        "OpenCode",
+        "open coat",
+        "cloud code",
+        "Claude Code",
+        "toda",
+        "תודה",
+        "jet hub",
+        "Git Hub",
+        "GitHub",
+        "Hex for iPhone",
+        ", as the file says",
+    ] {
+        assert!(
+            shown.iter().any(|text| text == words),
+            "{words:?} isn't its own run in {shown:?}"
+        );
+    }
+    // Already there: listed in the counts, not as something to add.
+    assert!(!shown.iter().any(|text| text == "Rune"));
 }
 
 /// General's Vocabulary row opens the sheet, and Escape closes it.
@@ -4375,6 +4410,10 @@ fn goldens() {
             // the toast of the file running with its progress.
             "drop-hover",
             "drop-running",
+            // Labs › Vocabulary and replacement files: the sheet with Open…,
+            // Export…, and Undo, and a words file's review.
+            "vocabulary-files",
+            "words-review",
         ] {
             check_golden(scene, dark, PANE_SIZE);
         }

@@ -74,6 +74,14 @@ const PATHS: &[(&str, &str)] = &[
         "vocabulary-budget",
         "Window/General/Vocabulary · more terms than the model reads",
     ),
+    (
+        "vocabulary-files",
+        "Window/General/Vocabulary · after adding a words file",
+    ),
+    (
+        "words-review",
+        "Window/General/Vocabulary · words file review",
+    ),
     ("shortcut-row", "Window/General/Shortcut/Left Option"),
     ("shortcut-row-right", "Window/General/Shortcut/Right Option"),
     (

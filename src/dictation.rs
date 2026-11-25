@@ -20,6 +20,7 @@ pub(crate) mod diagnostics;
 #[cfg(target_os = "macos")]
 mod environment;
 pub(crate) mod filler_words;
+pub(crate) mod hex_words;
 pub(crate) mod indicator;
 pub(crate) mod live_text;
 #[cfg_attr(target_os = "macos", allow(dead_code))]

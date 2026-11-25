@@ -18,6 +18,13 @@ use crate::desktop::file_dialog::{Dialog, Filter, Pending, Target};
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::dictation::vocabulary::csv::{self, MergeSummary};
 use crate::dictation::vocabulary::{self, VocabularyEntry};
+
+mod words_file;
+
+pub(super) use words_file::{
+    MENU as WORDS_MENU, WordsFiles, fixture as words_fixture, modal as review_modal,
+    on_close as review_closed,
+};
 /// One term row: a regular text field and its padding.
 const ROW_HEIGHT: f32 = 36.0;
 /// The term list's fades; the bottom one is the gap before the footer at
@@ -40,11 +47,13 @@ struct TermRow {
     sounds_like: TextEdit,
 }
 
-/// What the last Import or Export did, under the rows.
+/// What the last Import, Export, or words file did, under the rows.
 struct Status {
     message: String,
     /// A read, parse, or write failure, shown in the danger colour.
     failed: bool,
+    /// The line confirms an import Undo can still take back.
+    undo: bool,
 }
 
 /// The term rows and the file dialogs the sheet's footer asked for.
@@ -57,12 +66,14 @@ pub(super) struct VocabularyEditor {
     /// The row Add term made last while the sheet is open: only it arrives
     /// with motion, so opening the sheet never animates its rows.
     added: Option<u64>,
-    /// Labs › Vocabulary files' last outcome, kept while the sheet stays
-    /// open.
+    /// Labs › Vocabulary and replacement files' last outcome, kept while
+    /// the sheet stays open.
     status: Option<Status>,
     /// The file dialogs Import… and Export… asked for.
     import_chooser: Option<Pending>,
     export_chooser: Option<Pending>,
+    /// Labs › Vocabulary and replacement files: Hex words files and Undo.
+    pub(super) words: WordsFiles,
 }
 
 impl VocabularyEditor {
@@ -255,10 +266,32 @@ fn remove_row(ui: &mut Ui, id: u64) {
     }
 }
 
-/// Labs › Vocabulary files on: the one switch the buttons, the status line,
-/// and the dialog answers read.
+/// Labs › Vocabulary and replacement files on: the one switch the buttons,
+/// the status line, and the dialog answers read.
 fn on(ui: &Ui) -> bool {
     crate::labs::Feature::VocabularyFiles.on(&ui.settings)
+}
+
+/// Shows `message` under the rows; `failed` in the danger colour.
+fn say(ui: &mut Ui, message: String, failed: bool) {
+    ui.vocabulary.status = Some(Status {
+        message,
+        failed,
+        undo: false,
+    });
+}
+
+/// Shows an import's confirmation with its Undo.
+fn say_with_undo(ui: &mut Ui, message: String) {
+    ui.vocabulary.status = Some(Status {
+        message,
+        failed: false,
+        undo: true,
+    });
+}
+
+fn clear_status(ui: &mut Ui) {
+    ui.vocabulary.status = None;
 }
 
 /// Redraws the window once a file dialog answers.
@@ -321,6 +354,7 @@ fn choose_export(ui: &mut Ui) {
 /// The file dialogs' answers, since the last call. True when one changed
 /// what the sheet shows or what settings hold.
 pub(super) fn poll(ui: &mut Ui) -> bool {
+    let words = words_file::poll(ui);
     // A closed sheet or the lab off takes no answer: a dialog that finishes
     // after either changes nothing.
     if !ui.is_modal(Modal::Vocabulary) || !on(ui) {
@@ -329,9 +363,9 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
         if !on(ui) {
             ui.vocabulary.status = None;
         }
-        return false;
+        return words;
     }
-    let mut changed = false;
+    let mut changed = words;
     if let Some(choice) = ui
         .vocabulary
         .import_chooser
@@ -365,12 +399,7 @@ fn import_chosen(ui: &mut Ui, choice: Result<Option<PathBuf>, String>) {
         }
     };
     match apply_import(ui, &path) {
-        Ok(message) => {
-            ui.vocabulary.status = Some(Status {
-                message,
-                failed: false,
-            });
-        }
+        Ok(message) => say(ui, message, false),
         Err(error) => import_failed(ui, error),
     }
 }
@@ -475,18 +504,20 @@ fn merge_status(summary: MergeSummary) -> String {
     }
 }
 
-/// The file to write: the chosen path, or its `.csv` name when the person
-/// left the extension off and that name is free. A name that is just
-/// `.csv` is already a CSV file, so it is never doubled.
-fn export_path(chosen: &Path) -> PathBuf {
+/// The file to write: the chosen path, or its name with `extension` (`csv`,
+/// `hexwords`) when the person left the extension off and that name is
+/// free. A name that is just `.csv` already has it, so it is never doubled.
+fn export_path(chosen: &Path, extension: &str) -> PathBuf {
     if chosen.extension().is_some()
-        || chosen
-            .file_name()
-            .is_some_and(|name| name.eq_ignore_ascii_case(".csv"))
+        || chosen.file_name().is_some_and(|name| {
+            name.to_str()
+                .and_then(|name| name.strip_prefix('.'))
+                .is_some_and(|name| name.eq_ignore_ascii_case(extension))
+        })
     {
         return chosen.to_path_buf();
     }
-    let with_extension = chosen.with_extension("csv");
+    let with_extension = chosen.with_extension(extension);
     if with_extension.exists() {
         chosen.to_path_buf()
     } else {
@@ -503,7 +534,7 @@ fn export_chosen(ui: &mut Ui, choice: Result<Option<PathBuf>, String>) {
             return;
         }
     };
-    let path = export_path(&path);
+    let path = export_path(&path, "csv");
     let entries = ui.vocabulary.project();
     match crate::durable::write(&path, csv::render(&entries).as_bytes()) {
         Ok(()) => {
@@ -512,10 +543,7 @@ fn export_chosen(ui: &mut Ui, choice: Result<Option<PathBuf>, String>) {
             } else {
                 tr_fill("Exported {} terms", &entries.len().to_string())
             };
-            ui.vocabulary.status = Some(Status {
-                message,
-                failed: false,
-            });
+            say(ui, message, false);
         }
         Err(error) => fail(
             ui,
@@ -525,10 +553,7 @@ fn export_chosen(ui: &mut Ui, choice: Result<Option<PathBuf>, String>) {
 }
 
 fn fail(ui: &mut Ui, message: String) {
-    ui.vocabulary.status = Some(Status {
-        message,
-        failed: true,
-    });
+    say(ui, message, true);
 }
 
 fn term_row(p: Paint, entry: &TermRow, added: bool) -> El {
@@ -572,7 +597,9 @@ fn term_row(p: Paint, entry: &TermRow, added: bool) -> El {
     }
 }
 
-pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
+pub(super) fn modal(ui: &Ui, p: Paint) -> Vec<El> {
+    // The words-file menu opens above the sheet.
+    let mut menus = Vec::new();
     let rows = col().key("terms").px(SIDE_ROOM).children(
         ui.vocabulary
             .rows
@@ -592,8 +619,8 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
         ButtonKind::Secondary,
         add_term,
     )];
-    // Labs › Vocabulary files: two more ways to fill the list, never main
-    // actions, so both stay Secondary.
+    // Labs › Vocabulary and replacement files: more ways to fill the list
+    // and share it, never main actions, so all stay Secondary.
     if on(ui) {
         footer.push(button(
             p,
@@ -609,6 +636,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
             ButtonKind::Secondary,
             |ui: &mut Ui, _| choose_export(ui),
         ));
+        footer.push(words_file::menu_button(ui, p, &mut menus));
     }
     footer.push(el().key("spacer").grow(1.0));
     footer.push(
@@ -663,11 +691,16 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
     if on(ui)
         && let Some(status) = &ui.vocabulary.status
     {
-        body.push(note(
+        let line = note(
             "file-status",
             &status.message,
             if status.failed { p.danger() } else { p.muted() },
-        ));
+        );
+        body.push(if status.undo && words_file::can_undo(ui) {
+            words_file::with_undo(p, line)
+        } else {
+            line
+        });
     }
     let panel = modal_panel(
         p,
@@ -677,7 +710,9 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
         body,
         footer,
     );
-    modal_sheet(p, "vocabulary", panel, close)
+    let mut layers = Vec::from(modal_sheet(p, "vocabulary", panel, close));
+    layers.extend(menus);
+    layers
 }
 
 /// A few terms, one with spellings, with the sheet open.
@@ -1064,21 +1099,24 @@ mod tests {
         let path = scratch.path("terms");
 
         // Free: the .csv name is added.
-        assert_eq!(export_path(&path), scratch.path("terms.csv"));
+        assert_eq!(export_path(&path, "csv"), scratch.path("terms.csv"));
         // Taken: the chosen name is written exactly.
         std::fs::write(scratch.path("terms.csv"), "taken").unwrap();
-        assert_eq!(export_path(&path), path);
+        assert_eq!(export_path(&path, "csv"), path);
         // Any extension is kept as chosen.
         assert_eq!(
-            export_path(&scratch.path("terms.txt")),
+            export_path(&scratch.path("terms.txt"), "csv"),
             scratch.path("terms.txt")
         );
         assert_eq!(
-            export_path(&scratch.path("terms.csv")),
+            export_path(&scratch.path("terms.csv"), "csv"),
             scratch.path("terms.csv")
         );
         // A file named just ".csv" is already a CSV file.
-        assert_eq!(export_path(&scratch.path(".csv")), scratch.path(".csv"));
+        assert_eq!(
+            export_path(&scratch.path(".csv"), "csv"),
+            scratch.path(".csv")
+        );
     }
 
     #[test]
@@ -1105,6 +1143,291 @@ mod tests {
         assert_eq!(status(3, 0, 1), "Added 3 terms, skipped 1");
         assert_eq!(status(0, 0, 2), "No terms added; skipped 2");
         assert_eq!(status(0, 0, 0), "No new terms in that file");
+    }
+
+    /// The cross-check's files exported by Hex for iPhone and Hex for
+    /// Android, byte for byte.
+    const FROM_IPHONE: &[u8] = include_bytes!("vocabulary/from-iphone.hexwords");
+    const FROM_ANDROID: &[u8] = include_bytes!("vocabulary/from-android.hexwords");
+
+    /// The sheet open with Labs › Vocabulary and replacement files on, over
+    /// a vocabulary of NextJS and a Global replacement of jet hub → Git Hub.
+    fn words_ui() -> Ui {
+        use crate::dictation::text_replacements::TextReplacement;
+        let mut settings = crate::app_settings::AppSettings::default();
+        settings.labs.vocabulary_files = true;
+        settings.vocabulary = vec![VocabularyEntry {
+            term: "NextJS".into(),
+            sounds_like: Vec::new(),
+        }];
+        settings.dictation_processing.default_mode.replacements = vec![TextReplacement {
+            matched_phrase: "jet hub".into(),
+            output: "Git Hub".into(),
+        }];
+        let mut ui = Ui::with(settings, super::super::Service::Fixture(Vec::new()));
+        open(&mut ui);
+        ui
+    }
+
+    fn lists(ui: &Ui) -> (Vec<&str>, Vec<(&str, &str)>) {
+        (
+            ui.settings
+                .vocabulary
+                .iter()
+                .map(|entry| entry.term.as_str())
+                .collect(),
+            ui.settings
+                .dictation_processing
+                .default_mode
+                .replacements
+                .iter()
+                .map(|rule| (rule.matched_phrase.as_str(), rule.output.as_str()))
+                .collect(),
+        )
+    }
+
+    fn status(ui: &Ui) -> (&str, bool) {
+        let status = ui.vocabulary.status.as_ref().unwrap();
+        (status.message.as_str(), status.failed)
+    }
+
+    #[test]
+    fn a_words_file_adds_after_its_review_in_one_save_and_undo_survives_a_restart() {
+        let scratch = Scratch::new("words-add");
+        let path = scratch.path("iphone.hexwords");
+        std::fs::write(&path, FROM_IPHONE).unwrap();
+        let store = scratch.path("hex-words-undo.json");
+        let mut ui = words_ui();
+        ui.vocabulary.words = words_file::WordsFiles::at(Some(store.clone()));
+        let before = lists(&ui);
+        let before = (before.0.join(","), format!("{:?}", before.1));
+
+        // Opening reads the file off the window's thread, then shows the
+        // review and changes nothing.
+        words_file::opened(&mut ui, Ok(Some(path.clone())));
+        assert!(ui.is_modal(Modal::Vocabulary));
+        assert_eq!(status(&ui), ("Reading that file…", false));
+        words_file::finish_reading(&mut ui);
+        assert!(ui.is_modal(Modal::WordsReview));
+        assert_eq!(ui.saved, 0);
+        assert_eq!(lists(&ui).0, ["NextJS"]);
+
+        words_file::add(&mut ui);
+        assert!(ui.is_modal(Modal::Vocabulary));
+        assert_eq!(ui.saved, 1, "both lists save in one settings save");
+        assert_eq!(
+            lists(&ui),
+            (
+                vec!["NextJS", "OpenCode", "Rune", "Next.js"],
+                vec![
+                    ("jet hub", "Git Hub"),
+                    ("cloud code", "Claude Code"),
+                    ("pie torch", "PyTorch")
+                ]
+            )
+        );
+        assert_eq!(
+            status(&ui),
+            ("Added 3 terms and 2 replacements · kept yours for 1", false)
+        );
+        assert!(words_file::can_undo(&ui));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&store).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "the undo copy is owner-only");
+        }
+
+        // A restart finds the copy, and Undo puts both lists back.
+        ui.vocabulary.words = words_file::WordsFiles::at(Some(store.clone()));
+        assert!(words_file::can_undo(&ui));
+        words_file::undo(&mut ui);
+        let after = lists(&ui);
+        assert_eq!((after.0.join(","), format!("{:?}", after.1)), before);
+        assert_eq!(status(&ui), ("Undid the last import", false));
+        assert!(!words_file::can_undo(&ui));
+        assert!(!store.exists());
+    }
+
+    /// The cross-check: the files Hex for iPhone and Hex for Android exported,
+    /// read and merged by the real reader and merger over the receiving lists,
+    /// give the counts, clash, and lists after Add that the cross-check's
+    /// expected.json gives for the desktop, and Undo gives the lists back.
+    #[test]
+    fn the_phones_files_review_add_and_undo_as_the_cross_check_expects() {
+        let scratch = Scratch::new("words-cross-check");
+        for (name, bytes, added, clashes, after) in [
+            (
+                "iphone",
+                FROM_IPHONE,
+                (3, 2, 1),
+                vec![("jet hub", "Git Hub", "GitHub")],
+                (
+                    vec!["NextJS", "OpenCode", "Rune", "Next.js"],
+                    vec![
+                        ("jet hub", "Git Hub"),
+                        ("cloud code", "Claude Code"),
+                        ("pie torch", "PyTorch"),
+                    ],
+                ),
+            ),
+            (
+                "android",
+                FROM_ANDROID,
+                (3, 2, 0),
+                vec![],
+                (
+                    vec!["NextJS", "Hex", "Zoë", "שלום"],
+                    vec![
+                        ("jet hub", "Git Hub"),
+                        ("toda", "תודה"),
+                        ("open code", "OpenCode"),
+                    ],
+                ),
+            ),
+        ] {
+            let path = scratch.path(&format!("{name}.hexwords"));
+            std::fs::write(&path, bytes).unwrap();
+            let mut ui = words_ui();
+            let before = format!("{:?}", lists(&ui));
+            words_file::opened(&mut ui, Ok(Some(path)));
+            words_file::finish_reading(&mut ui);
+            let preview = words_file::preview(&ui).expect("the review is open");
+            let (terms, replacements, kept) = added;
+            let summary = preview.summary;
+            assert_eq!(
+                (
+                    summary.added_terms,
+                    summary.updated_terms,
+                    summary.already_have_terms,
+                    summary.added_replacements,
+                    summary.changed_replacements,
+                    summary.kept_yours,
+                    summary.already_have_replacements,
+                ),
+                (terms, 0, 0, replacements, 0, kept, 0),
+                "{name}"
+            );
+            assert!(preview.over_limit.is_empty(), "{name}");
+            let found: Vec<_> = preview
+                .clashes
+                .iter()
+                .map(|clash| {
+                    (
+                        clash.index,
+                        clash.heard.as_str(),
+                        clash.yours.as_str(),
+                        clash.theirs.as_str(),
+                    )
+                })
+                .collect();
+            let expected: Vec<_> = clashes
+                .iter()
+                .map(|&(heard, yours, theirs)| (0, heard, yours, theirs))
+                .collect();
+            assert_eq!(found, expected, "{name}");
+            words_file::add(&mut ui);
+            assert_eq!(lists(&ui), after, "{name}");
+            words_file::undo(&mut ui);
+            assert_eq!(format!("{:?}", lists(&ui)), before, "{name}: Undo");
+        }
+    }
+
+    #[test]
+    fn cancel_changes_nothing_and_an_edit_ends_undo() {
+        let scratch = Scratch::new("words-cancel");
+        let path = scratch.path("iphone.hexwords");
+        std::fs::write(&path, FROM_IPHONE).unwrap();
+        let mut ui = words_ui();
+        words_file::opened(&mut ui, Ok(Some(path.clone())));
+        words_file::finish_reading(&mut ui);
+        words_file::cancel(&mut ui);
+        assert!(ui.is_modal(Modal::Vocabulary));
+        assert_eq!(ui.saved, 0);
+        assert_eq!(lists(&ui).0, ["NextJS"]);
+        assert!(!words_file::can_undo(&ui));
+
+        words_file::opened(&mut ui, Ok(Some(path)));
+        words_file::finish_reading(&mut ui);
+        words_file::add(&mut ui);
+        assert!(words_file::can_undo(&ui));
+        ui.vocabulary.rows[0].term = TextEdit::new("Next JS");
+        words_file::poll(&mut ui);
+        assert!(!words_file::can_undo(&ui), "an edited list can't be undone");
+    }
+
+    #[test]
+    fn a_file_that_isnt_a_words_file_is_refused_with_why() {
+        let scratch = Scratch::new("words-refused");
+        let mut ui = words_ui();
+        for (bytes, why) in [
+            (
+                &b"{\"format\": \"hex.words\", \"version\": 1,}"[..],
+                "it isn't valid JSON",
+            ),
+            (
+                b"{\"format\": \"hex.typing\", \"version\": 1}",
+                "it isn't a Hex words file",
+            ),
+            (b"\xff\xfe{", "the file isn't UTF-8 text"),
+        ] {
+            let path = scratch.path("refused.hexwords");
+            std::fs::write(&path, bytes).unwrap();
+            words_file::opened(&mut ui, Ok(Some(path)));
+            words_file::finish_reading(&mut ui);
+            assert!(ui.is_modal(Modal::Vocabulary));
+            assert_eq!(
+                status(&ui),
+                (format!("Couldn't open that file: {why}").as_str(), true)
+            );
+        }
+        assert_eq!(ui.saved, 0);
+    }
+
+    #[test]
+    fn an_export_writes_the_global_replacements_and_says_other_modes_stay() {
+        use crate::app_settings::DictationMode;
+        use crate::dictation::text_replacements::TextReplacement;
+        let scratch = Scratch::new("words-export");
+        let mut settings = crate::app_settings::AppSettings::default();
+        settings.labs.vocabulary_files = true;
+        settings.vocabulary = vec![VocabularyEntry {
+            term: "OpenCode".into(),
+            sounds_like: vec!["open code".into()],
+        }];
+        settings.dictation_processing.default_mode.replacements = vec![TextReplacement {
+            matched_phrase: "um".into(),
+            output: String::new(),
+        }];
+        settings.dictation_processing.modes = vec![DictationMode {
+            name: "Chat".into(),
+            replacements: vec![TextReplacement {
+                matched_phrase: "dash dash".into(),
+                output: "--".into(),
+            }],
+            ..DictationMode::default()
+        }];
+        let mut ui = Ui::with(settings, super::super::Service::Fixture(Vec::new()));
+        open(&mut ui);
+        words_file::export_to(&mut ui, Ok(Some(scratch.path("hex-words"))));
+        assert_eq!(
+            status(&ui),
+            (
+                "Exported 1 term and 1 replacement · other modes' replacements stay on this computer",
+                false
+            )
+        );
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(scratch.path("hex-words.hexwords")).unwrap())
+                .unwrap();
+        assert_eq!(
+            written["vocabulary"],
+            serde_json::json!([{"term": "OpenCode", "soundsLike": ["open code"]}])
+        );
+        assert_eq!(
+            written["replacements"],
+            serde_json::json!([{"heard": "um", "write": ""}])
+        );
     }
 
     #[test]

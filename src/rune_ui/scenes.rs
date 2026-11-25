@@ -581,6 +581,16 @@ pub(super) const SCENES: &[Scene] = &[
         ui.settings.vocabulary = entries;
         ui.vocabulary.reload(&ui.settings.vocabulary);
     }),
+    // Labs › Vocabulary and replacement files: the sheet after adding a
+    // words file, with Undo, and that file's review.
+    ("vocabulary-files", |ui| {
+        *ui = mac_fixture();
+        vocabulary::words_fixture(ui, false);
+    }),
+    ("words-review", |ui| {
+        *ui = mac_fixture();
+        vocabulary::words_fixture(ui, true);
+    }),
     ("mac-settings-recording", |ui| {
         *ui = mac_fixture();
         let held = crate::app_settings::HotkeyModifiers {
