@@ -26,7 +26,12 @@ In-keyboard dictation listens from touch-down, so a tap's or hold's first
 words are kept; moving
 more than 10 pt first opens the style menu, dropping that capture; releasing over a row picks it, and releasing elsewhere leaves
 the menu open for taps (`HexKeyGesture`). VoiceOver activation dictates,
-and the **Dictation styles** action opens the menu.
+and the **Dictation styles** action opens the menu. Its last row, **Open Hex**, set apart by a
+line below the translation rows, opens Hex at Home (`KeyboardLaunchRequest.home`, which closes
+Settings back to Home and starts no session); like every Open Hex it is a tap that says so, so
+still nothing opens Hex unless Open Hex is tapped. Without Full Access a hold on the Hex key
+shows the Full Access hint instead of the menu, so the row isn't offered there. The dictation
+bar has no such menu: its styles and languages are trays of chips.
 
 ## Auto-start
 

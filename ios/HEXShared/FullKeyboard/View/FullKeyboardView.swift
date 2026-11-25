@@ -1271,6 +1271,11 @@ final class FullKeyboardView: UIView {
             self?.model.onTranslationTargetSelected?(target)
             self?.dismissStyleMenu()
         }
+        menu.onOpenHex = { [weak self] in
+            self?.typingLog?.ui("open_hex", [TypingLogField("from", .string("hex_menu"))])
+            self?.dismissStyleMenu()
+            self?.model.onOpenURL?(KeyboardLaunchRequest.home.url)
+        }
         menu.onStyle = { [weak self] style in
             self?.typingLog?.ui("style", [
                 TypingLogField("style", .string(style.rawValue)),

@@ -83,6 +83,8 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
     /// Jumps through Hex to iOS Settings › Apps › Hex so Paste from Other Apps can be set to
     /// Allow without hunting through Settings.
     case pasteSettings
+    /// Opens Hex at Home: the Hex key menu's Open Hex.
+    case home
     case startSession(requestedAt: TimeInterval?)
     case startRecording(
         jobID: String,
@@ -112,6 +114,8 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
             self = .translationSettings
         case "/paste-settings":
             self = .pasteSettings
+        case "/home":
+            self = .home
         case "/start":
             self = .startSession(requestedAt: requestedAt)
         case "/record":
@@ -129,14 +133,14 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
     /// Opens a page of Hex, starting no session.
     var opensPage: Bool {
         switch self {
-        case .setup, .translationSettings, .pasteSettings: true
+        case .setup, .translationSettings, .pasteSettings, .home: true
         case .startSession, .startRecording: false
         }
     }
 
     var requestedAt: TimeInterval? {
         switch self {
-        case .setup, .translationSettings, .pasteSettings:
+        case .setup, .translationSettings, .pasteSettings, .home:
             nil
         case .startSession(let ts), .startRecording(_, let ts, _):
             ts
@@ -163,6 +167,9 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
 
         case .pasteSettings:
             components.path = "/paste-settings"
+
+        case .home:
+            components.path = "/home"
 
         case .startSession(let requestedAt):
             components.path = "/start"
