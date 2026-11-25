@@ -2045,6 +2045,16 @@ final class DictationControllerTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(200))
         XCTAssertTrue(UltraStubProtocol.requested.isEmpty, "nothing requested over mobile data")
 
+        // English picked mid-wait stops it (`multilingualParakeetChanged`): Wi-Fi coming back
+        // leaves it be. Multilingual picked again waits again.
+        await download.stop()
+        network.report(unmetered: true)
+        XCTAssertEqual(download.state, .idle)
+        XCTAssertFalse(download.isRunning)
+        network.report(unmetered: false)
+        download.start()
+        XCTAssertTrue(download.isWaitingForWiFi)
+
         network.allowMobileData(for: .multilingual)
         download.start()
         try await waitUntil { download.state == .loading }
