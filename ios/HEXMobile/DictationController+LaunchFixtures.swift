@@ -240,13 +240,30 @@ extension DictationController {
     /// Dictation › Model with that model picked and its download in that state. Waiting is the
     /// real rule: pass `--simulate-cellular` and the keyboard has measured room for the model,
     /// so only the connection holds it. The other states leave the keyboard unmeasured, so
-    /// nothing really downloads on the simulator's Wi-Fi.
+    /// nothing really downloads on the simulator's Wi-Fi. English also has what the keyboard
+    /// said about a downloaded model, preparing|short|noengine|failed|unknown (unknown: an
+    /// older keyboard's unavailable without a reason), and toosmall, a keyboard limit under
+    /// KeyboardParakeetBudget.requiredLimit.
     private func applySpeechModelFixture(_ scene: String) {
         let multilingual = scene.contains("-multilingual-")
         let step = scene.split(separator: "-").last.map(String.init) ?? "waiting"
-        KeyboardParakeetDownload.shared.applyFixture(multilingual ? "model-card-waiting" : "model-card-\(step)")
+        let keyboardSaid: [String: (KeyboardParakeetSettings.KeyboardState, KeyboardParakeetSettings.UnavailableReason?)] = [
+            "preparing": (.preparing, nil),
+            "short": (.unavailable, .shortOfMemory),
+            "noengine": (.unavailable, .noNeuralEngine),
+            "failed": (.unavailable, .loadFailed),
+            "unknown": (.unavailable, nil),
+        ]
+        let said = multilingual ? nil : keyboardSaid[step]
+        let card = multilingual ? "waiting" : said == nil ? step : "ready"
+        KeyboardParakeetDownload.shared.applyFixture("model-card-\(card)")
         if step == "waiting" {
             KeyboardParakeetSettings().recordKeyboardLimit(KeyboardParakeetBudget.requiredLimit)
+        } else if step == "toosmall" {
+            KeyboardParakeetSettings().recordKeyboardLimit(KeyboardParakeetBudget.requiredLimit - 32 * KeyboardParakeetBudget.megabyte)
+        }
+        if let said {
+            KeyboardParakeetSettings().setKeyboardState(said.0, reason: said.1)
         }
         MultilingualParakeetSettings().isEnabled = multilingual
         downloadNetwork.forgetMobileData()

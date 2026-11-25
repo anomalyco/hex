@@ -502,9 +502,15 @@ final class DictationSSOTTests: XCTestCase {
         }
         XCTAssertNil(multilingual(downloaded: false, .ready))
         XCTAssertEqual(multilingual(.ready), "Ready in the keyboard")
-        XCTAssertEqual(multilingual(.preparing), "Getting ready in the keyboard")
+        XCTAssertEqual(
+            multilingual(.preparing),
+            "Getting ready in the keyboard. After a download or an update, this takes a little longer."
+        )
         XCTAssertEqual(multilingual(nil), "Downloaded. The keyboard gets it ready the next time it opens.")
-        XCTAssertEqual(multilingual(fits: false, nil), "The keyboard can't use it right now, so it uses Apple's speech recognition.")
+        XCTAssertEqual(
+            multilingual(fits: false, nil),
+            "This iPhone's keyboard doesn't have the memory for it, so it uses Apple's speech recognition."
+        )
         XCTAssertEqual(
             multilingual(takes: false, .ready),
             "Not for this dictation language, so the keyboard uses Apple's speech recognition."
@@ -538,6 +544,81 @@ final class DictationSSOTTests: XCTestCase {
 
         let names = SpeechModelChoice.multilingualLanguages
         XCTAssertTrue(names.contains("Dutch") && names.contains("Ukrainian") && names.contains("English"), names)
+    }
+
+    /// Settings › Dictation's speech model line once the keyboard couldn't use the model: it used
+    /// to say "The keyboard can't use it right now" for six causes, and kept saying it after the
+    /// cause had passed (a post on X, 2026-11-25). Each cause now says why and what happens
+    /// next, and a load that failed gets Try again.
+    func testTheKeyboardsSpeechModelLineSaysWhyItCouldntUseItAndWhatHappensNext() throws {
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = KeyboardParakeetSettings(defaults: defaults)
+        let now = Date()
+
+        // What the keyboard writes, and what Hex reads back.
+        settings.setKeyboardState(.unavailable, reason: .shortOfMemory)
+        XCTAssertEqual(settings.unavailableReason, .shortOfMemory)
+        settings.setKeyboardState(.preparing)
+        XCTAssertNil(settings.unavailableReason, "only .unavailable carries a reason")
+        XCTAssertNil(defaults.string(forKey: KeyboardParakeetSettings.keyboardStateReasonKey))
+        settings.setKeyboardState(.unavailable)
+        XCTAssertNil(settings.unavailableReason, "an older keyboard's word, without a reason")
+
+        func line(
+            _ reason: KeyboardParakeetSettings.UnavailableReason?,
+            state: KeyboardParakeetSettings.KeyboardState = .unavailable
+        ) -> String? {
+            KeyboardParakeetStatus.line(
+                state: .idle, isDownloaded: true, hold: nil, keyboardState: (state, now), reason: reason, now: now
+            )
+        }
+        XCTAssertEqual(
+            line(.shortOfMemory),
+            "Not enough free memory when the keyboard last opened, so it used Apple's speech recognition. It tries again the next time it opens."
+        )
+        XCTAssertEqual(
+            line(.noNeuralEngine),
+            "This iPhone can't run it in the keyboard, so the keyboard uses Apple's speech recognition."
+        )
+        XCTAssertEqual(line(.loadFailed), "The keyboard couldn't load it, so it uses Apple's speech recognition.")
+        XCTAssertEqual(line(.notOnNeuralEngine), line(.loadFailed))
+        XCTAssertEqual(
+            line(nil),
+            "The keyboard couldn't use it when it last opened, so it used Apple's speech recognition. It tries again the next time it opens."
+        )
+        XCTAssertEqual(line(.loadFailed, state: .ready), "Ready in the keyboard", "a reason only counts with .unavailable")
+        XCTAssertEqual(
+            KeyboardParakeetStatus.line(state: .idle, isDownloaded: false, hold: .keyboardTooSmall, keyboardState: nil, now: now),
+            "This iPhone's keyboard doesn't have the memory for it, so it uses Apple's speech recognition.",
+            "a limit under 131 MB never changes, so it doesn't say right now"
+        )
+        XCTAssertEqual(
+            KeyboardParakeetStatus.multilingualLine(
+                isDownloaded: true, takesLanguage: true, fitsKeyboard: true,
+                keyboardState: (.unavailable, now), reason: .shortOfMemory, now: now
+            ),
+            line(.shortOfMemory)
+        )
+        let reasons: [KeyboardParakeetSettings.UnavailableReason?] = [.shortOfMemory, .noNeuralEngine, .notOnNeuralEngine, .loadFailed, nil]
+        for reason in reasons {
+            XCTAssertFalse(line(reason)?.contains("right now") ?? true)
+        }
+
+        // Try again, beside a load that failed: the keyboard drops its compiled copies and tries
+        // again the next time it opens, even in the process that set it aside.
+        settings.setKeyboardState(.unavailable, reason: .loadFailed)
+        KeyboardParakeetStatus.retryInKeyboard(settings)
+        XCTAssertTrue(settings.purgesCompiled)
+        XCTAssertNil(settings.keyboardState)
+        XCTAssertEqual(
+            KeyboardParakeetStatus.line(
+                state: .idle, isDownloaded: true, hold: nil, keyboardState: settings.keyboardState,
+                reason: settings.unavailableReason, now: now
+            ),
+            "Downloaded. The keyboard gets it ready the next time it opens."
+        )
     }
 
     func testWantedDictationLanguagePrecedenceAndSelfDictationHandoffReason() throws {

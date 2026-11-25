@@ -466,8 +466,18 @@ again, or moved, compiles again, so the log calls a load "cold" by its time (5 s
 more), and moving a legacy folder forgets the app's compile record for it
 (`ParakeetCompileRecord.forget`), so V2 says it's optimizing for this iPhone and Ultra
 gets ready beside the engine that dictates. The Settings › Dictation row says what it's doing: downloading,
-downloaded, getting ready in the keyboard, ready, or that the keyboard can't use it now
-(`KeyboardParakeetSettings.keyboardState`, written by the keyboard). Dictating in another
+downloaded, getting ready in the keyboard, ready, or why the keyboard couldn't use it
+(`KeyboardParakeetSettings.keyboardState` and `unavailableReason`, written by the keyboard):
+too little memory left when it last opened ("It tries again the next time it opens"), no
+Neural Engine, or a load that failed or didn't land on the Neural Engine (with **Try again**,
+which has the keyboard drop its compiled copies and load it again at its next open, even in
+the process that set it aside, via `purgesCompiled`). A keyboard limit under 131 MB says this
+iPhone's keyboard doesn't have the memory for it. Until 2026-11-25 all of these read "The
+keyboard can't use it right now", which stayed up after the cause had passed: only the
+keyboard's next load, the switch or removing the model clears what it said, and unlike
+"Getting ready" (3 minutes) it never expires, so each line now says what happens next
+rather than that it's so now. A load still going after `loadPatience` (180 s) is only logged;
+it used to say the keyboard couldn't use it. Dictating in another
 language than English, Hinglish included, it says "Only for English dictation." even once
 downloaded: Apple's speech recognition takes that dictation whatever the keyboard last wrote
 (build 147 said "Ready in the keyboard", which reads as Parakeet taking Hinglish). Each dictation logs

@@ -51,7 +51,7 @@ final class KeyboardParakeet {
     private var releasesAfterTranscription = false
     private var lastNote = ""
 
-    /// iOS ends nothing for a load past this; the keyboard stops saying it's getting ready.
+    /// A load past this is logged; it goes on, and Hex's row stops saying it's getting ready.
     static let loadPatience: TimeInterval = 180
     /// Evidence the model is on the Neural Engine: the keyboard's Neural Engine memory, which
     /// rose 468 MB (V2) and 607 MB (Ultra) on the iPhone 17 Pro.
@@ -78,19 +78,21 @@ final class KeyboardParakeet {
         }
         guard let choice = Self.choice() else { return }
         if loaded?.multilingual == choice.multilingual { return }
+        let settings = KeyboardParakeetSettings()
+        // Try again in Hex, or a model Hex removed: what didn't load in this process may load now.
+        if settings.purgesCompiled { setAside.removeAll() }
         guard loadTask == nil, !setAside.contains(choice.multilingual) else { return }
         if let warned = memoryWarnedAt, Date().timeIntervalSince(warned) < Self.reloadAfterWarning { return }
         let memory = Self.memory()
-        let settings = KeyboardParakeetSettings()
         guard KeyboardParakeetBudget.allowsLoad(footprint: memory.footprint, available: memory.available) else {
             note("parakeet: \(choice.label) not loaded, short of memory \(memory)")
-            settings.setKeyboardState(.unavailable)
+            settings.setKeyboardState(.unavailable, reason: .shortOfMemory)
             return
         }
         guard Self.hasNeuralEngine else {
             note("parakeet: no Neural Engine here")
             setAside.insert(choice.multilingual)
-            settings.setKeyboardState(.unavailable)
+            settings.setKeyboardState(.unavailable, reason: .noNeuralEngine)
             return
         }
         if loaded != nil { release(reason: "language changed") }
@@ -120,7 +122,7 @@ final class KeyboardParakeet {
                 guard onEngine else {
                     await manager.cleanup()
                     self.setAside.insert(choice.multilingual)
-                    settings.setKeyboardState(.unavailable)
+                    settings.setKeyboardState(.unavailable, reason: .notOnNeuralEngine)
                     KeyboardProbeLog.shared.write("parakeet: \(choice.label) not on the Neural Engine, Apple's speech recognition \(Self.memory())")
                     return
                 }
@@ -135,14 +137,16 @@ final class KeyboardParakeet {
                 guard let self else { return }
                 self.loadTask = nil
                 self.setAside.insert(choice.multilingual)
-                settings.setKeyboardState(.unavailable)
+                settings.setKeyboardState(.unavailable, reason: .loadFailed)
                 KeyboardProbeLog.shared.write("parakeet: \(choice.label) didn't load: \(error) \(Self.memory())")
             }
         }
+        // A load still going isn't one the keyboard can't use, so it's only logged. It used to
+        // say `.unavailable`: a keyboard suspended mid-load that came back after 3 minutes said
+        // so seconds before the load finished.
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(Self.loadPatience))
             guard let self, self.loadTask != nil, self.loaded == nil else { return }
-            KeyboardParakeetSettings().setKeyboardState(.unavailable)
             KeyboardProbeLog.shared.write("parakeet: \(choice.label) still loading after \(Int(Self.loadPatience)) s")
         }
     }
