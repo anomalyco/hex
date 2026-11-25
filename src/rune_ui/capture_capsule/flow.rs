@@ -762,6 +762,23 @@ struct Routed {
     queued: bool,
 }
 
+impl Routed {
+    /// Compact finished capsule with reachable destinations still awaiting a
+    /// send (`Copied [→ ACME ⌄]`, `Annotation copied [Send to…]`, or folded
+    /// `Taken back [Send to…]`): pressing the capture shortcut opens search.
+    pub(super) fn compact_searchable(&self) -> bool {
+        self.open.is_none()
+            && !self.sending
+            && !self.delivered
+            && self.already_with.is_none()
+            && !matches!(
+                self.route,
+                Route::Rule { .. } | Route::ResolvingRule { .. } | Route::Unreachable { .. }
+            )
+            && sections(&self.route) != (&[][..], &[][..])
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct Open {
     query: Box<TextEdit>,
@@ -1211,8 +1228,8 @@ impl Flow {
     }
 
     /// The keys the capsule takes from Hex's tap: the picker's, an open
-    /// list's (Escape only in a list Kit opened or the picker). Closed or
-    /// routed with nothing open, it takes none.
+    /// list's (Escape only in a list Kit opened or the picker), or a compact
+    /// finished capsule's shortcut to open session search.
     pub(crate) fn keys(&self) -> Option<crate::capture_host::CapsuleKeys> {
         use crate::capture_host::CapsuleKeys;
         match &self.phase {
@@ -1231,10 +1248,14 @@ impl Flow {
                     search: self.aimed,
                 }
             }),
-            Phase::Routed(Routed {
-                route: Route::Unreachable { .. },
-                ..
-            }) => None,
+            Phase::Routed(routed) if routed.compact_searchable() => Some(CapsuleKeys::Suggest {
+                cycle: false,
+                search: false,
+            }),
+            Phase::Queued { .. } => Some(CapsuleKeys::Suggest {
+                cycle: false,
+                search: false,
+            }),
             // While the `Always…` configurator is open, listen for clicks away
             // without taking keys from the app in front.
             Phase::Sent(Sent {
@@ -2033,6 +2054,7 @@ mod tests {
     fn flow_keys_after_send() -> Option<crate::capture_host::CapsuleKeys> {
         let mut flow = Flow::new();
         flow.input(Input::Routed(guess()), 0.0);
+        flow.input(Input::OpenList, 0.5);
         flow.input(Input::SendRow(0), 1.0);
         flow.keys()
     }
@@ -2210,7 +2232,14 @@ mod tests {
         let closed = done(&flow, 2.0);
         assert_eq!(closed.text, "Taken back");
         assert_eq!(closed.ask.as_deref(), Some("Send to…"));
-        assert_eq!(flow.keys(), None);
+        assert_eq!(
+            flow.keys(),
+            Some(crate::capture_host::CapsuleKeys::Suggest {
+                cycle: false,
+                search: false,
+            }),
+            "folded capsule releases Escape while keeping the shortcut for search"
+        );
         assert_eq!(flow.next_due(2.0), Some(2.0 + hold));
         assert!(!flow.tick(2.0 + hold - 0.1));
         flow.input(Input::OpenList, 2.5);
@@ -2623,7 +2652,14 @@ mod tests {
         assert_eq!(flow.keys(), Some(CapsuleKeys::List));
         flow.hover(false, 0.65);
         assert!(flow.input(Input::ClickAway, 0.7).is_empty());
-        assert_eq!(flow.keys(), None, "back to the compact capsule");
+        assert_eq!(
+            flow.keys(),
+            Some(CapsuleKeys::Suggest {
+                cycle: false,
+                search: false,
+            }),
+            "back to the compact capsule, keeping the shortcut for search"
+        );
         assert!(matches!(flow.pres(0.8), Pres::Done(_)));
         flow.input(Input::ClickAway, 0.9);
         assert!(matches!(flow.pres(0.9), Pres::Done(_)), "the chips stay");
@@ -3144,7 +3180,13 @@ mod tests {
         let folded = done(&flow, 1.0);
         assert_eq!(folded.open, None);
         assert_eq!(folded.ask.as_deref(), Some("Send to…"));
-        assert_eq!(flow.keys(), None);
+        assert_eq!(
+            flow.keys(),
+            Some(crate::capture_host::CapsuleKeys::Suggest {
+                cycle: false,
+                search: false,
+            })
+        );
         let mut flow = Flow::new();
         flow.input(Input::Routed(guess()), 0.0);
         flow.tick(tuning::get().done_hold_s);
@@ -3880,5 +3922,90 @@ mod tests {
         flow.input(Input::NeedsPermission(screen, AskedBy::Capture), 2.0);
         flow.input(Input::Permission(screen, Grant::Ready), 3.0);
         assert_eq!(flow.click(Id::Ask, 4.0), vec![Action::Record(Mode::Screen)]);
+    }
+
+    #[test]
+    fn second_shortcut_on_compact_copied_capsule_opens_session_search() {
+        use crate::capture_host::CapsuleKeys;
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(guess()), 0.0);
+        let compact = done(&flow, 0.0);
+        assert_eq!(compact.text, "Copied");
+        assert!(compact.open.is_none());
+        assert_eq!(
+            flow.keys(),
+            Some(CapsuleKeys::Suggest {
+                cycle: false,
+                search: false,
+            }),
+            "compact Copied capsule claims the capture shortcut for search"
+        );
+        // Second shortcut opens the searchable session list without recording.
+        assert!(flow.input(Input::Record, 0.5).is_empty());
+        let (_, list) = done(&flow, 0.5).open.expect("search list opens");
+        assert_eq!(list.title, "All sessions");
+        assert!(!list.suggesting());
+        assert_eq!(
+            flow.keys(),
+            Some(CapsuleKeys::List),
+            "open search list hands the shortcut back to the listener to record anew"
+        );
+        // Once search is already open, Record does not hijack or mutate it.
+        assert!(flow.input(Input::Record, 0.8).is_empty());
+        assert_eq!(flow.keys(), Some(CapsuleKeys::List));
+    }
+
+    #[test]
+    fn second_shortcut_on_compact_queued_capsule_opens_session_search() {
+        use crate::capture_host::CapsuleKeys;
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(guess()), 0.0);
+        flow.input(
+            Input::Delivered(Delivered::Queued {
+                to: "SEER".into(),
+                why: "OpenCode is offline".into(),
+            }),
+            0.5,
+        );
+        let compact = done(&flow, 0.5);
+        assert_eq!(compact.text, "Queued");
+        assert!(compact.open.is_none());
+        assert_eq!(
+            flow.keys(),
+            Some(CapsuleKeys::Suggest {
+                cycle: false,
+                search: false,
+            }),
+            "compact Queued capsule claims the capture shortcut for search"
+        );
+        assert!(flow.input(Input::Record, 1.0).is_empty());
+        let (_, list) = done(&flow, 1.0).open.expect("search list opens");
+        assert_eq!(list.title, "All sessions");
+        assert!(list.queued);
+        assert_eq!(flow.keys(), Some(CapsuleKeys::List));
+    }
+
+    #[test]
+    fn clipboard_only_and_unreachable_capsules_never_claim_the_shortcut() {
+        let mut clipboard_only = Flow::new();
+        clipboard_only.input(Input::Routed(Route::Nothing { recent: Vec::new() }), 0.0);
+        assert_eq!(clipboard_only.keys(), None);
+        assert!(clipboard_only.input(Input::Record, 0.5).is_empty());
+        assert!(done(&clipboard_only, 0.5).open.is_none());
+
+        let mut no_answer_empty = Flow::new();
+        no_answer_empty.input(Input::Routed(Route::NoAnswer { recent: Vec::new() }), 0.0);
+        assert_eq!(no_answer_empty.keys(), None);
+
+        let mut unreachable = Flow::new();
+        unreachable.input(
+            Input::Routed(Route::Unreachable {
+                why: "OpenCode isn't running".into(),
+            }),
+            0.0,
+        );
+        assert_eq!(unreachable.keys(), None);
+        assert!(unreachable.input(Input::Record, 0.5).is_empty());
+        assert!(done(&unreachable, 0.5).open.is_none());
     }
 }

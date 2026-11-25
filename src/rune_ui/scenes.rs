@@ -120,21 +120,34 @@ pub(super) const SCENES: &[Scene] = &[
         ui.history = history::HistoryPane::fixture_selection();
         ui.pane = Pane::History;
     }),
-    // Labs › Screenshots' Captures: a shot, a recording with its words, and
-    // an older shot; and before any.
+    // Annotate's Captures tab with Labs › Screenshots on: a shot, a recording
+    // with its words, and an older shot; and before any.
     #[cfg(hex_capture)]
     ("captures", |ui| {
         *ui = portal_fixture();
+        ui.settings.capture.enabled = true;
         ui.settings.labs.screenshots = true;
+        ui.platform.scrawl = Some(platform::ScrawlView::preview());
         ui.captures = captures::CapturesPane::fixture();
-        ui.pane = Pane::Captures;
+        ui.pane = Pane::Annotate;
     }),
     #[cfg(hex_capture)]
     ("captures-empty", |ui| {
         *ui = portal_fixture();
+        ui.settings.capture.enabled = true;
         ui.settings.labs.screenshots = true;
+        ui.platform.scrawl = Some(platform::ScrawlView::preview());
         ui.captures = captures::CapturesPane::fixture_empty();
-        ui.pane = Pane::Captures;
+        ui.pane = Pane::Annotate;
+    }),
+    // Annotate's default Annotations tab (without Labs › Screenshots).
+    #[cfg(hex_capture)]
+    ("mac-annotate", |ui| {
+        *ui = mac_fixture();
+        ui.settings.capture.enabled = true;
+        ui.platform.scrawl = Some(platform::ScrawlView::preview());
+        ui.captures = captures::CapturesPane::fixture();
+        ui.pane = Pane::Annotate;
     }),
     ("history-empty", |ui| {
         *ui = portal_fixture();
@@ -1064,6 +1077,7 @@ fn scrawl_fixture(ui: &mut Ui, enabled: bool, adjust: fn(&mut platform::ScrawlVi
     let mut view = platform::ScrawlView::preview();
     adjust(&mut view);
     ui.platform.scrawl = Some(view);
+    ui.captures.view = scrawl::View::Settings;
     ui.pane = Pane::Annotate;
 }
 

@@ -946,6 +946,7 @@ impl Pump {
                     &published.settings,
                     &published.preparation,
                 );
+                crate::macos_rune::status_item::update_annotate(&published.settings);
                 crate::macos_rune::status_item::update_paste_last(&published.settings);
             }
             self.model_menu_at = now + MODEL_MENU_REFRESH;
@@ -992,6 +993,16 @@ impl Pump {
             StatusItemAction::CancelModelPreparation => {
                 let _ = self.runtime.send(Request::CancelModel);
                 self.model_menu_at = Instant::now();
+            }
+            StatusItemAction::ToggleAnnotate => {
+                #[cfg(hex_capture)]
+                {
+                    let (reply, _) = std::sync::mpsc::sync_channel(1);
+                    let _ = self.runtime.recognition(RecognitionControl::ScrawlCapture {
+                        action: crate::control::ScrawlCaptureAction::Toggle,
+                        reply,
+                    });
+                }
             }
             StatusItemAction::PasteLast => {
                 let _ = self

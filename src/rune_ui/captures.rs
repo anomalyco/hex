@@ -101,6 +101,7 @@ impl Listed {
 
 #[derive(Default)]
 pub(super) struct CapturesPane {
+    pub(super) view: super::scrawl::View,
     pub(super) confirm_trash: Option<(u64, PathBuf)>,
     pub(super) entries: Vec<Listed>,
     search: TextEdit,
@@ -493,19 +494,29 @@ pub(super) fn trash(ui: &mut Ui, id: u64) {
 /// The search over the list, or the empty state.
 pub(super) fn pane(ui: &Ui, p: Paint) -> El {
     let pane = &ui.captures;
+    let screenshots = ui.settings.labs.screenshots;
     let searching = !pane.searched.trim().is_empty();
     if pane.entries.is_empty() && !searching {
-        return ld::empty_state(
-            p,
-            "captures-empty",
-            &CAPTURES_ICON,
-            tr("No captures yet."),
-            Some(tr(
-                "Shots, recordings, and annotations from the last 30 days show here.",
-            )),
-        );
+        let (icon, title, detail) = if screenshots {
+            (
+                &CAPTURES_ICON,
+                tr("No captures yet."),
+                tr("Shots, recordings, and annotations from the last 30 days show here."),
+            )
+        } else {
+            (
+                &super::sidebar::SCRAWL_ICON,
+                tr("No annotations yet."),
+                tr("Annotations from the last 30 days show here."),
+            )
+        };
+        return ld::empty_state(p, "captures-empty", icon, title, Some(detail));
     }
-    let mut list = col().key("captures-list").label(tr("Captures"));
+    let mut list = col().key("captures-list").label(if screenshots {
+        tr("Captures")
+    } else {
+        tr("Annotations")
+    });
     let count = pane.entries.len();
     for (index, entry) in pane.entries.iter().enumerate() {
         list = list.child(item(ui, p, entry).position_in_set(index + 1, count));
@@ -515,12 +526,20 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
             p,
             "captures-empty",
             ld::SEARCH_ICON,
-            tr("No captures match."),
+            if screenshots {
+                tr("No captures match.")
+            } else {
+                tr("No annotations match.")
+            },
             None,
         ));
     }
     let search = TextInput::new(&pane.search)
-        .placeholder(tr("Search captures"))
+        .placeholder(if screenshots {
+            tr("Search captures")
+        } else {
+            tr("Search annotations")
+        })
         .width(None)
         .leading_icon(p.k.glyph.search)
         .on_edit(|ui: &mut Ui| &mut ui.captures.search)

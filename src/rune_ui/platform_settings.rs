@@ -218,6 +218,7 @@ pub(super) fn update_shown_permissions(ui: &mut Ui) {
             #[cfg(hex_capture)]
             if ui.pane == Pane::Annotate
                 && ui.settings.capture.enabled
+                && ui.captures.view == super::scrawl::View::Settings
                 && ui
                     .platform
                     .scrawl
