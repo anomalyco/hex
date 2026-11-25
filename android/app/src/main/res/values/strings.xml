@@ -107,6 +107,7 @@
     <string name="settings_haptics_detail">A light tap as you press Hex’s keys</string>
     <string name="settings_test_keyboard">Test keyboard…</string>
     <string name="settings_privacy_line">Your voice and words stay on this phone</string>
+    <!-- Hex Preview has its own copy, with its update check (src/preview/res/values): edit both. -->
     <string name="settings_privacy_detail">Hex turns speech into text on this phone and never uploads your voice or what you type with its keyboard. It keeps no keystrokes or transcripts. Two labs keep what they learn on this phone, and only once you turn them on: Learn from my fixes keeps the word pairs you corrected after dictating, and Adaptive touch keeps an average of where you tap each key. Delete what Hex learned in Labs removes both. Feedback leaves the phone only when you tap Send in Send feedback: then your message, the pictures you keep, your email if you add one and details about Hex and this phone go to Anomaly’s feedback inbox (Bellhop). Your dictations, recordings, vocabulary and corrections are never included.</string>
     <string name="settings_privacy_policy">Privacy policy</string>
     <string name="settings_licences">Open-source licences</string>
