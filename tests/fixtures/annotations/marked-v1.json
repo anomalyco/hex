@@ -1,0 +1,11 @@
+{
+  "version": 1, "id": "chart-note", "createdAtMs": 1777000000123, "durationMs": 3200,
+  "target": {"mode":"window","app":"Example","displayId":1,"frame":{"x":0,"y":0,"width":400,"height":300,"scale":1}},
+  "transcript": {"source":"hex","text":"Move this","segments":[{"t0":400,"t1":1050,"text":"Move this"}],"words":[{"t0":400,"t1":650,"text":"Move"},{"t0":700,"t1":1050,"text":"this"}]},
+  "strokes": [{"t0":600,"t1":790,"fw":400,"fh":300,"pts":[1000,2000,0,5000,2000,190]}],
+  "marks": [{"id":"m1","strokes":[0],"t0":600,"t1":790,"boxNorm":[0.1,0.2,0.5,0.2],"shape":"line","description":"underline","frame":"frames/frame-01.png"}],
+  "events": [],
+  "keyframes": [{"index":1,"t":790,"reason":"mark","file":"frames/frame-01.png","event":"underline","markId":"m1"}],
+  "contactSheet":"contact-sheet.png","video":"recording.mp4","videoOffsetMs":120,"audio":"audio.wav","audioStoppedAtMs":3000,
+  "destination":{"session":"example-session","title":"Example","via":"chosen"}
+}

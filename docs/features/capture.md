@@ -11,7 +11,7 @@ mirror) and narration from Hex's microphone, takes ink and clicks (Shift on
 macOS and Windows, or the Annotate key held or the pen), transcribes the
 narration with word timestamps on Hex's loaded model (a model that gives
 none, GigaAM v3 say, has its text spread over the recording as estimated
-times), writes a Scrawl bundle into Scrawl's captures folder, copies it to
+times), writes a [Hex Annotation](../hex-annotation.md) under Hex's application data (or the chosen folder), copies it to
 the clipboard, and sends it to an OpenCode session with Scrawl's router
 (`crates/router`), run in Hex's process. Settings › Annotate (under Labs in
 the sidebar) holds its settings. Scrawl's capsule (switch chips, the
@@ -70,7 +70,7 @@ Draw                                     // capture.draw (capture_host::drawing)
 │   Check: capture_host the_shortcut_records_once_its_keys_come_up; none
 │   physical for the hold on a portal desktop ("Annotate pen" is logged)
 ├── Ink holds 650 ms, then fades over 650 ms on screen; every stroke stays in
-│   the bundle (keyframes, contact sheet, scrawl.json)
+│   the bundle (keyframes, contact sheet, annotation.json)
 ├── Linux: strokes are placed on the recorded screen in the ink overlay's
 │   own points. A native Wayland layer surface lays out in the desktop's
 │   logical points: a monitor pick whose portal names the output
@@ -199,7 +199,7 @@ On Linux                                 // capture.linux
 ├── Words -> one foreground job on the listener's engine (its loaded model)
 ├── Copy -> the summary text through Hex's Linux clipboard (wl-copy or the
 │   X11 clipboard), as the Mac copies it; Labs › Copy a capture as one file puts
-│   `<stem>.scrawl.slim.zip` there instead, as a `text/uri-list` file
+│   `<stem>.hexannotation.slim.zip` there instead, as a `text/uri-list` file
 ├── Paste -> as the Mac: the contact sheet (image/png), then the summary,
 │   each with Hex's own Ctrl+V (linux/paste). An app that takes no image (a
 │   terminal) gets only the summary, which names the contact sheet; the Mac
@@ -350,11 +350,11 @@ Annotate pane                            // capture.pane
 │   with its keys. Check: rune_ui::scrawl tests
 ├── After an annotation (on) -> Keep (capture.media_days / bundle_days;
 │   Scrawl's presets or imported days), then Folder (capture.folder, default
-│   Scrawl's; path on the second line, Reveal | Change…). Change… opens the
-│   native folder chooser ("Annotations folder") on every OS: macOS's host
-│   saves the pick, Linux and Windows save it from the window; a cancel
-│   changes nothing, and a chooser that couldn't open or a refused save shows
-│   under the row. Check: rune_ui::scrawl::folder tests (the save, cancel,
+│   `<Hex support>/annotations`; path on the second line, Reveal | Change…).
+│   Change… opens the native folder chooser ("Annotations folder") on every OS:
+│   macOS's host saves the pick, Linux and Windows save it from the window; a
+│   cancel changes nothing, and a chooser that couldn't open or a refused save
+│   shows under the row. Check: rune_ui::scrawl::folder tests (the save, cancel,
 │   and error; no live dialog)
 ├── Advanced (on, macOS) -> a fold, closed until pressed (not saved):
 │   ├── Transcriber (capture.transcriber) -> Parakeet (default) | Apple
@@ -943,7 +943,7 @@ While a capture records                  // capture.input
     at the start -> the first Shift drag inks
 
 hex capture start                        // capture.start; needs a listening Hex
-├── Creates <captures folder>/<unix ms>.scrawl (owner-only) -> reply: recording + bundle path
+├── Creates <captures folder>/<id>.hexannotation (owner-only) -> reply: recording + bundle path
 ├── Two stopped captures still writing -> refused `busy`
 ├── Copies the dictation timeline from now into a bounded sink (no second stream)
 ├── In the background: Scrawl's engine starts on the active display
@@ -971,7 +971,7 @@ Never on Hex's path                      // capture.isolation
 Retention                                // capture.retention
 ├── Hex's own thread: Scrawl's retention pass with capture.*'s policy, 90 s after
 │   captures turn on, then hourly; skipped while a capture records or writes,
-│   or while Scrawl.app runs (it cleans the shared folder then)
+│   or while Scrawl.app runs; Hex only cleans complete Hex v1 packages
 ├── Linux sends media to the desktop Trash itself (the freedesktop.org Trash
 │   layout, no `trash` command; macOS uses /usr/bin/trash, Windows the
 │   Recycle Bin), so file managers can restore it
@@ -1014,14 +1014,13 @@ hex capture stop                         // capture.stop
     │   `words_for_editor`)
     ├── Past 8 h -> audio.wav stops growing and the rest is one gap; a disk
     │   guard, never a memory bound (iPhone and replay narration are decoded in
-    │   memory and so are not covered by it), and scrawl.json's
+    │   memory and so are not covered by it), and the manifest's
     │   audioStoppedAtMs makes summary.md say "Audio stopped at 8:00:00; the
     │   rest of this capture has no audio" (a failed audio write says where too)
     ├── Cancel or a failed screen source -> the partial audio is closed and
-    │   removed with the bundle; a crash leaves it, and retention trashes it
-    │   like any other media (a movie and a partial are never a bundle recover
-    │   rebuilds)
-    ├── recording.mp4, capture.json, audio.wav, frames/, scrawl.json,
+    │   removed with the bundle; a crash leaves it. With no published manifest,
+    │   Hex neither retries the build nor removes the partial media on startup
+    ├── recording.mp4, capture.json, audio.wav, frames/, annotation.json,
     │   summary.md; then every file 0600 and folder 0700
     ├── Keyframes decoded from recording.mp4 by scrawl-helper (beside `hex`: in
     │   Hex.app's Contents/MacOS or target/<profile>; or $SCRAWL_HELPER); helper
@@ -1041,7 +1040,7 @@ Copying a written capture                 // capture.copy; Labs › Copy a captu
 │   macOS and Windows through Scrawl's handoff (Windows may also put the
 │   contact sheet PNG when the clipboardImage experiment is on), Linux the
 │   summary text through Hex's paster
-├── On -> crates/capture/src/slim_zip.rs writes <stem>.scrawl.slim.zip inside
+├── On -> crates/capture/src/slim_zip.rs writes <package-name>.slim.zip inside
 │   the bundle (a temp name, then rename) and puts only that file on the
 │   clipboard: macOS a file URL through handoff::copy_file_to_clipboard (the
 │   screenshot card's file copy uses it too), Windows CF_HDROP (a DROPFILES
@@ -1061,7 +1060,7 @@ Copying a written capture                 // capture.copy; Labs › Copy a captu
 │   ├── Refused rather than written as ZIP64 at 0xFFFF files or 0xFFFFFFFF
 │   │   bytes
 │   ├── A terminal paste gets no text: the clipboard holds only the file
-│   ├── scrawl.json and summary.md still name media the zip leaves out
+│   ├── The manifest and summary.md still name media the zip leaves out
 │   │   (recording.mp4, audio.wav, frames-full/), because they describe the
 │   │   whole capture
 │   └── The capsule's Paste, Inspect, Send to…, routing, and retention still
@@ -1109,8 +1108,8 @@ What a send carries                      // capture.send (router opencode::send_
 Where it goes                            // capture.route; capture.routing's autoSend on
 ├── Once recording starts -> a capture-look thread reads the tab,
 │   terminal, and sessions in front (Scrawl's router, in Hex's process, with
-│   Scrawl's own router folders, so `scrawl router undo` and its evals see Hex's
-│   sends as Scrawl's). The whole look has 15 s: steps not begun by then are
+│   Hex's own annotation-router folder, not the standalone app's undo or outbox).
+│   The whole look has 15 s: steps not begun by then are
 │   skipped, and routing waits 1 s more for the one under way, then goes on
 │   without it. The newest-session list starts beside local sensing; exact
 │   folders are read in the other lane as soon as the clues name them (at most
@@ -1234,7 +1233,7 @@ hex annotate inspect|zoom|frames|skill   // capture.agents; labs.annotate_agent_
 ├── inspect [<capture>=latest] -> `summary.md` (sketch::summary_markdown)
 │   ├── --marks -> one `agent_context::MarkEntry::line()` per mark, time order,
 │   │   or `No marks`; --marks --json -> the entries as a JSON array
-│   └── --json -> `scrawl.json` pretty-printed as written
+│   └── --json -> `annotation.json` (or legacy `scrawl.json`) pretty-printed as written
 ├── zoom [<capture>=latest] (--at <M:SS|secs|phrase> | --mark <n|id> [--frame N])
 │   [--span secs=2] [--frames N=12] [--full] -> `zoom::zoom` into a sheet at
 │   `<bundle>/zoom/zoom-<from>-<to>.png`; prints the sheet's path,
@@ -1282,9 +1281,9 @@ transcribing between chunks and keep their audio (shutdown waits ≤ 2 s)
 │   └── Display plug/unplug (`CGDisplayRegisterReconfigurationCallback`) or a
 │       stopped stream -> reopens on the active display with bounded backoff
 ├── `hex capture replay` (`hex annotate replay`) -> exports up to 15 s (`> 15 s`
-│   is rejected by ScreenCaptureKit `-3812`) into `<captures>/<unix ms>.scrawl`
+│   is rejected by ScreenCaptureKit `-3812`) into `<captures>/<id>.hexannotation`
 │   without stopping the buffer, probes and decodes keyframes with `scrawl-helper`,
-│   writes `capture.json` and `scrawl.json` (`missing: "no_audio"`), copies to
+│   writes `capture.json` and `annotation.json` (`missing: "no_audio"`), copies to
 │   the clipboard, and feeds `capture.route`
 └── `capture.replay_hotkey` (unbound by default; recordable in
     Settings › Annotate while the lab is on, or `hex settings set capture.replay_hotkey`)
@@ -1295,7 +1294,7 @@ transcribing between chunks and keep their audio (shutdown waits ≤ 2 s)
         transcribed with word timestamps, and anchored onto the final keyframe
 ```
 
-`scrawl.json` is Scrawl's bundle manifest. Its `transcript.words` are
+`annotation.json` wraps the same capture payload that old `scrawl.json` files carry. Its `transcript.words` are
 `{t0, t1, text}` in milliseconds from the capture's start (`t0_boot_ns`, the
 boot-time clock audio and shortcuts share), and `audio.wav` starts at that
 start too, padded with silence when the microphone began late or dropped

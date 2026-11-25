@@ -16,7 +16,7 @@ pub struct CaptureSettings {
     /// to export the last 15 s, or hold to narrate over it.
     pub replay_hotkey: Option<HotkeyBinding>,
     pub transcriber: CaptureTranscriber,
-    /// Where new captures go; `None` is Scrawl's own captures folder.
+    /// Where new captures go; `None` is Hex's own annotations folder.
     pub folder: Option<PathBuf>,
     /// Days a capture keeps its video, audio, and full-size frames; `None`
     /// keeps them.
@@ -136,7 +136,21 @@ impl CaptureSettings {
     pub fn captures_dir(&self) -> PathBuf {
         self.folder
             .clone()
-            .unwrap_or_else(scrawl_capture::handoff::builtin_captures_dir)
+            .unwrap_or_else(|| crate::app_paths::annotations_dir().unwrap_or_default())
+    }
+
+    /// Only discovery gets the old default as well. A custom data root (a
+    /// fixture or a test build) must never enumerate the user's library.
+    pub fn annotation_roots(&self) -> Vec<PathBuf> {
+        let mut roots = vec![self.captures_dir()];
+        if self.folder.is_none()
+            && !cfg!(test)
+            && !crate::app_paths::is_macos_test_build()
+            && std::env::var_os("HEX_APPLICATION_SUPPORT_DIR").is_none()
+        {
+            roots.push(scrawl_capture::handoff::builtin_captures_dir());
+        }
+        roots
     }
 
     pub fn retention(&self) -> scrawl_capture::retention::Policy {
@@ -216,4 +230,17 @@ pub fn scrawl_app_running() -> bool {
 #[cfg(hex_capture)]
 pub fn set_scrawl_app_running(running: bool) {
     SCRAWL_APP_RUNNING.store(running, Ordering::Release);
+}
+
+#[cfg(all(test, hex_capture))]
+#[test]
+fn hex_annotation_location_respects_the_hex_data_root_and_an_explicit_folder() {
+    let mut settings = CaptureSettings::default();
+    let owned = crate::app_paths::annotations_dir().unwrap();
+    assert_eq!(settings.captures_dir(), owned);
+    assert_eq!(settings.annotation_roots(), [owned]); // no implicit legacy search in tests
+    let chosen = std::env::temp_dir().join("chosen");
+    settings.folder = Some(chosen.clone());
+    assert_eq!(settings.captures_dir(), chosen);
+    assert_eq!(settings.annotation_roots(), [chosen]);
 }

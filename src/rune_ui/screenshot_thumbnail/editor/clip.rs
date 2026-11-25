@@ -339,6 +339,10 @@ pub(crate) fn recorded(bundle: &std::path::Path) -> anyhow::Result<(PathBuf, Vec
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("the recording has no movie"))?,
     );
+    anyhow::ensure!(
+        movie.is_file(),
+        "The annotation’s movie is no longer available"
+    );
     let offset = loaded.video_offset_ms;
     let words = loaded
         .transcript
@@ -354,7 +358,8 @@ pub(crate) fn recorded(bundle: &std::path::Path) -> anyhow::Result<(PathBuf, Vec
 }
 
 /// Reads the recording `movie`, with the `words` said over it: its length
-/// and filmstrip. Takes a second or so; off the main thread.
+/// and filmstrip. `recorded` above only resolves the package, without starting a helper.
+/// Takes a second or so; off the main thread.
 #[cfg(target_os = "macos")]
 pub(super) fn load(movie: PathBuf, words: Vec<Word>) -> anyhow::Result<Clip> {
     use scrawl_capture::helper::{self, FrameTimes};
@@ -424,6 +429,49 @@ impl Shrink {
     }
 }
 
+/// Exercises the editor's media reader without opening a window. Requires
+/// the helper built *by this Hex checkout*, not the standalone app's.
+#[cfg(all(test, target_os = "macos"))]
+#[test]
+#[ignore = "run with bash scripts/test-annotation-files.sh --editor-media"]
+fn annotation_packages_open_in_the_editor_with_hexs_own_decoder() {
+    use scrawl_capture::bundle::{publish, read_manifest};
+    use std::fs;
+    let tmp = std::env::temp_dir().join(scrawl_capture::pipeline::make_bundle_id());
+    fs::create_dir(&tmp).unwrap();
+    let old = tmp.join("legacy.scrawl");
+    let new = tmp.join("hex.hexannotation");
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/annotations/marked-v1.json"
+    ));
+    let movie = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/media/rgbw.mp4"
+    ));
+    fs::create_dir(&old).unwrap();
+    fs::write(old.join("scrawl.json"), bytes).unwrap();
+    fs::create_dir(&new).unwrap();
+    publish(&new, &read_manifest(&old).unwrap()).unwrap();
+    for dir in [&old, &new] {
+        let video = dir.join("recording.mp4");
+        fs::write(&video, movie).unwrap();
+        let (file, words) = recorded(dir).unwrap();
+        assert_eq!(words[0].t0, 280, "on the movie's clock");
+        let clip = load(file, words).unwrap();
+        assert!(!clip.frames.is_empty());
+        assert!(clip.picture().is_some());
+        assert_eq!(clip.words[1].text, "this");
+        let copy = tmp.join("export.mp4");
+        write_span(&clip.movie, None, None, &copy, &mut |_| {}).unwrap();
+        assert_eq!(fs::read(&copy).unwrap(), movie);
+        fs::remove_file(&video).unwrap();
+        assert!(recorded(dir).is_err());
+        assert_eq!(read_manifest(dir).unwrap().marks[0].t0, 600);
+    }
+    assert_eq!(fs::read(old.join("scrawl.json")).unwrap(), bytes);
+    fs::remove_dir_all(tmp).unwrap();
+}
 /// The span kept of `movie` written to `out`: copied when it's the whole
 /// recording, else cut without re-encoding, or re-encoded smaller as
 /// `shrink` says, at utility priority, handing `progress` the share done.

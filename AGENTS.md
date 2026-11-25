@@ -1290,7 +1290,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   records the screen, runs with `SharedResources::none()` (Hex never calls
   `install_shared_resources`: no ingest server, ingest token, or global
   shortcuts), logs to tracing, and writes only to the captures folder
-  (`capture.folder`, Scrawl's own by default) and Scrawl's router folders. A
+  (`capture.folder`, `<support>/annotations` by default) and Hex's
+  `<support>/annotation-router`. See [the package contract](docs/hex-annotation.md)
+  for read-only legacy discovery, retries and the rollout boundary. A
   written capture is copied to the clipboard (never pasted) and, with
   `capture.routing`'s autoSend on, routed by Scrawl's router in Hex's process
   (`capture_host::routing`): one `capture-look` thread per stop, one

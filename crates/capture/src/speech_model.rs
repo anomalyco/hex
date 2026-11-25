@@ -332,7 +332,8 @@ pub fn mark_pending(bundle_dir: &Path) {
     }
 }
 
-/// Every marked bundle in `captures`.
+/// Every marked Hex annotation package in `captures`. Legacy `.scrawl`
+/// packages stay read-only even in a shared folder.
 pub fn transcribe_pending(captures: &Path) {
     let Ok(entries) = std::fs::read_dir(captures) else {
         return;
@@ -340,7 +341,10 @@ pub fn transcribe_pending(captures: &Path) {
     let pending: Vec<PathBuf> = entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .filter(|dir| dir.join(PENDING).is_file())
+        .filter(|dir| {
+            scrawl_router::bundle::manifest_name(dir) == Some(scrawl_router::bundle::MANIFEST)
+                && dir.join(PENDING).is_file()
+        })
         .collect();
     for dir in pending {
         transcribe_one(&dir);
@@ -385,13 +389,11 @@ pub fn transcribe_again(dir: &Path) -> Result<bool> {
         frame.said = said;
     }
     bundle.transcript = transcript;
-    std::fs::write(
-        dir.join("scrawl.json"),
-        serde_json::to_vec_pretty(&bundle).context("Could not encode scrawl.json")?,
-    )?;
-    std::fs::write(
-        dir.join("summary.md"),
-        crate::sketch::summary_markdown(&bundle, &dir),
+    scrawl_router::bundle::publish(&dir, &bundle)
+        .context("Could not publish annotation manifest")?;
+    scrawl_router::bundle::replace_private(
+        &dir.join("summary.md"),
+        crate::sketch::summary_markdown(&bundle, &dir).as_bytes(),
     )?;
     let _ = std::fs::remove_file(dir.join(PENDING));
     Ok(true)
@@ -531,5 +533,19 @@ mod tests {
                     .reason
                     .starts_with("Speech Recognition is off for Scrawl.")
         );
+    }
+
+    #[test]
+    fn hex_annotation_transcribe_pending_leaves_legacy_scrawl_bundles_untouched() {
+        let root = std::env::temp_dir().join(crate::pipeline::make_bundle_id());
+        let legacy = root.join("legacy.scrawl");
+        std::fs::create_dir_all(&legacy).unwrap();
+        let bytes = include_bytes!("../../../tests/fixtures/annotations/marked-v1.json");
+        std::fs::write(legacy.join("scrawl.json"), bytes).unwrap();
+        std::fs::write(legacy.join(PENDING), b"").unwrap();
+        transcribe_pending(&root);
+        assert!(legacy.join(PENDING).is_file());
+        assert_eq!(std::fs::read(legacy.join("scrawl.json")).unwrap(), bytes);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

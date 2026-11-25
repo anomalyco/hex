@@ -32,7 +32,9 @@ pub(crate) fn inspect(capture: &str, marks: bool, json: bool) -> Result<String, 
     }
     if json {
         // The manifest as written, not a re-serialization of what loads.
-        let path = dir.join("scrawl.json");
+        let name =
+            scrawl_capture::bundle::manifest_name(&dir).ok_or_else(|| library::unreadable(&dir))?;
+        let path = dir.join(name);
         let text = std::fs::read_to_string(&path).map_err(|error| {
             ControlError::new(
                 "not-found",
@@ -290,6 +292,15 @@ mod tests {
             manifest.contains("\n  \"note\": \"hello\",\n"),
             "{manifest}"
         );
+        let hex_dir = root.join("1792933491955.hexannotation");
+        std::fs::create_dir_all(&hex_dir).unwrap();
+        let parsed = scrawl_capture::bundle::read_manifest(&plain).unwrap();
+        scrawl_capture::bundle::publish(&hex_dir, &parsed).unwrap();
+        let hex_json: serde_json::Value =
+            serde_json::from_str(&inspect(hex_dir.to_str().unwrap(), false, true).unwrap())
+                .unwrap();
+        assert_eq!(hex_json["formatVersion"], 1);
+        assert_eq!(hex_json["annotation"]["note"], "hello");
         let _ = std::fs::remove_dir_all(root);
     }
 

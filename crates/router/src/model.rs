@@ -125,6 +125,10 @@ pub struct ScrawlBundle {
     /// the full frames are kept beside them).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autocrop: Option<AutocropInfo>,
+    /// Optional directory of un-inked keyframe plates (`frames-clean/`) for non-destructive ink
+    /// editing after the source movie has been pruned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clean_frames: Option<String>,
     /// The OpenCode session a Mac capture of a dev site was sent to (`routing`), so `scrawl send`
     /// recovers to the same place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -133,6 +137,10 @@ pub struct ScrawlBundle {
     /// it recorded no frame: it carries its voice and marks alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_screen: Option<String>,
+    /// Additive v1.x fields written by newer builds (such as non-destructive `inkEdits` layers),
+    /// preserved across destination updates and re-transcription without a v2 format break.
+    #[serde(default, flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -590,6 +598,7 @@ pub enum KeyframeReason {
     Laser,
     SceneChange,
     Speech,
+    #[serde(alias = "start")]
     Initial,
 }
 

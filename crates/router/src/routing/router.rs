@@ -1119,7 +1119,7 @@ pub fn eval(since: Duration, limit: usize, lines: bool, screen: bool) -> Result<
         .with_context(|| format!("couldn't read {}", captures.display()))?
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|e| e == "scrawl") && p.join(super::RECORD).is_file())
+        .filter(|p| crate::bundle::manifest_name(p).is_some() && p.join(super::RECORD).is_file())
         .filter_map(|p| {
             let (_, bundle) = crate::bundle::load_bundle(&p).ok()?;
             (bundle.created_at_ms >= cutoff).then_some((bundle.created_at_ms, p))
@@ -1580,6 +1580,7 @@ fn short(dir: &std::path::Path) -> String {
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
         .trim_start_matches("scrawl-")
         .trim_end_matches(".scrawl")
+        .trim_end_matches(".hexannotation")
         .to_owned()
 }
 

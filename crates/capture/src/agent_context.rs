@@ -894,8 +894,10 @@ mod tests {
             windows: Vec::new(),
             cursor: Vec::new(),
             autocrop: None,
+            clean_frames: None,
             destination: None,
             no_screen: None,
+            extra: Default::default(),
         }
     }
 

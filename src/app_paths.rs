@@ -53,6 +53,18 @@ pub fn models_dir() -> Result<PathBuf> {
     machine_local(&MODELS, "models")
 }
 
+/// Where Hex Annotate writes new `.hexannotation` packages by default:
+/// `<support>/annotations`, except on Windows without an explicit
+/// `HEX_APPLICATION_SUPPORT_DIR`, where `%LOCALAPPDATA%\hex\annotations` keeps
+/// large screen-recording media out of Roaming Profiles.
+pub fn annotations_dir() -> Result<PathBuf> {
+    let roaming = support_dir()?.join("annotations");
+    Ok(match local_support_dir() {
+        Some(local) => move_once(&roaming, &local.join("annotations")),
+        None => roaming,
+    })
+}
+
 /// `name` in the support folder, except on Windows, where logs and models
 /// belong to this computer: `%LOCALAPPDATA%\hex`, not the Roaming
 /// `%APPDATA%\hex`, which managed networks copy to a server at every sign-in.
