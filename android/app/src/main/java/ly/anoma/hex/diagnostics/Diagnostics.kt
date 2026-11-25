@@ -36,6 +36,10 @@ import ly.anoma.hex.speech.DictationTimes
 import ly.anoma.hex.speech.Engine
 import ly.anoma.hex.speech.LanguageChoice
 import ly.anoma.hex.speech.ModelAtTick
+import ly.anoma.hex.speech.ModelChoice
+import ly.anoma.hex.speech.ModelChoiceState
+import ly.anoma.hex.speech.ModelChoiceStore
+import ly.anoma.hex.speech.NotCounted
 import ly.anoma.hex.speech.ModelStore
 import ly.anoma.hex.speech.RanOn
 import ly.anoma.hex.speech.SpeechPreferences
@@ -206,7 +210,9 @@ internal object Diagnostics {
                 "; dictation threads: ${SpeechModel.threads} ${runCatching { poolWords(SpeechModel.dictationCores()) }.getOrDefault("not known")}",
             fasterEnglishLine(SpeechPreferences(c).fastEnglish, ModelStore.english.installed(c) != null,
                 engineFor(SpeechPreferences(c).options(null))),
-        ) + haptics(c)
+        ) + SpeechPreferences(c).let { s ->
+            modelChoiceLines(s.pickModel, s.fastEnglishOffByHand, s.fastEnglish, ModelChoiceStore(c).state, ModelChoiceStore.decodeScale())
+        } + haptics(c)
     }
 
     private fun haptics(c: Context): List<String> {
@@ -456,6 +462,34 @@ internal fun threadWords(t: LongArray) = "${t[6]} threads" + if (t.size >= 8) " 
 internal fun fasterEnglishLine(on: Boolean, downloaded: Boolean, engine: Engine) =
     "Faster English dictation: ${if (on) "on" else "off"}, ${if (downloaded) "downloaded" else "not downloaded"}; " +
         "the dictation language now uses ${if (engine == Engine.English && downloaded) "faster" else "standard"} dictation"
+
+/** Labs › Pick the English model for this phone in the report: whether it is on, what it decided and when, the median it
+ * decides on against the threshold, how far along the English dictations in a row are, and how many dictations didn't
+ * count, by reason. Numbers only, as the phone keeps them; never names an engine. [scale] is a debug build's stand-in
+ * (HexDecodeScale), said so a report can't pass for a phone's. */
+internal fun modelChoiceLines(on: Boolean, offByHand: Boolean, fastEnglish: Boolean, state: ModelChoiceState, scale: Double = 1.0): List<String> {
+    if (!on) return listOf("Model choice: off; nothing measured or kept")
+    fun n(value: Double) = String.format(Locale.ROOT, "%.2f", value)
+    val threshold = n(ModelChoice.THRESHOLD)
+    val median = ModelChoice.median(state.ratios)
+    // The ratios themselves, oldest first, so a report shows whether the median rests on steady numbers or a spread.
+    val ratios = if (state.ratios.isEmpty()) "" else " (${state.ratios.joinToString(", ") { n(it) }})"
+    val head = "Model choice: on" + (if (scale != 1.0) " (debug decode scale ×${scale.toString().removeSuffix(".0")})" else "") + "; "
+    val first = head + when {
+        state.decided -> "chose faster English dictation for this phone on ${java.time.LocalDate.ofEpochDay(state.decidedDay!!)}, " +
+            "median ${n(state.decidedMedian ?: 0.0)} s of decoding per second of speech over the last ${state.ratios.size} " +
+            "dictations counted$ratios (threshold $threshold)" + if (offByHand) "; faster English dictation since turned off by hand, so it stays off" else ""
+        offByHand -> "faster English dictation was turned off by hand, so Hex doesn't choose it; nothing is measured"
+        fastEnglish -> "faster English dictation is already on, so nothing is measured"
+        else -> (if (median == null) "no dictation counted yet" else "median ${n(median)} s of decoding per second of speech over the last " +
+            "${state.ratios.size} of ${ModelChoice.SAMPLES} dictations needed$ratios") + " (threshold $threshold); " +
+            "${state.englishInARow} of ${ModelChoice.WINDOW} English dictations in a row; standard dictation stays for now"
+    }
+    fun skipped(reason: NotCounted) = state.skipped[reason] ?: 0
+    return listOf(first, "  dictations counted: ${state.counted}; not counted: ${skipped(NotCounted.TooShort)} too short " +
+        "(under ${ModelChoice.MIN_KEPT_MS / 1000} s kept), ${skipped(NotCounted.OtherLanguage)} another language or translated, " +
+        "${skipped(NotCounted.ModelLoading)} model still loading, ${skipped(NotCounted.Retried)} decoded again")
+}
 
 /** Which build of the speech library runs, in words that can't be read as Faster English dictation (whose own line says
  * "faster") or name an engine. */

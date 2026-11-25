@@ -38,11 +38,12 @@ internal fun waitsForWifi(mobileDataChosen: Boolean, unmetered: Boolean?) = !mob
 internal interface OfflineScreen
 
 /** Hex's network operation: an explicit, fixed model GET from Hex's own screens, each file pinned by revision, size and
- * SHA-256 ([small] from setup or Dictation settings, [english] from Labs). The keyboard never calls it. A wifiFirst
- * download waits for an unmetered network ([State.WaitingForWifi]) unless the person chooses mobile data. */
+ * SHA-256 ([small] from setup or Dictation settings, [english] from Labs or, with Labs › Pick the English model for this
+ * phone, when Hex is opened). The keyboard never calls it. A wifiFirst download (both models, whoever asked) waits for
+ * an unmetered network ([State.WaitingForWifi]) unless the person chooses mobile data. */
 internal class ModelStore private constructor(private val name: String, private val size: Long, private val hash: String,
                                               private val url: String, private val extension: String,
-                                              private val wifiFirst: Boolean = false) {
+                                              internal val wifiFirst: Boolean = false) {
     companion object {
         /** Whisper small, the default speech model. */
         val small = ModelStore("whisper-small", 190085487L, "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
@@ -51,7 +52,7 @@ internal class ModelStore private constructor(private val name: String, private 
         /** Labs › Faster English dictation: NVIDIA's Parakeet TDT-CTC 110M, as transcribe.cpp's authors converted it. */
         val english = ModelStore("parakeet-tdt_ctc-110m", 135373280L, "7dd44c74a331d788a4e5f8b16913b3feb29ced22cf5613aad0e0f6cd30516296",
             "https://huggingface.co/handy-computer/parakeet-tdt_ctc-110m-gguf/resolve/1c3f0d5378fdd358905cc410a93ed9e64f52d170/parakeet-tdt_ctc-110m-Q8_0.gguf",
-            "gguf")
+            "gguf", wifiFirst = true)
     }
 
     enum class Problem { Connection, Server, Space }
@@ -165,11 +166,16 @@ internal class ModelStore private constructor(private val name: String, private 
         override fun onActivityDestroyed(activity: Activity) = Unit
     }
 
+    /** Whether a download asked for now starts at once: always for a file that isn't Wi-Fi-first, else unless the network
+     * charges for data ([unmetered] false) and the person didn't choose mobile data. A tap and Labs › Pick the English model
+     * for this phone ask the same way ([download]); only Use mobile data ([useMobileData]) chooses it. */
+    internal fun startsNow(mobileDataChosen: Boolean, unmetered: Boolean?) = !wifiFirst || !waitsForWifi(mobileDataChosen, unmetered)
+
     @Synchronized fun download(context: Context) {
         val app = context.applicationContext
         if (installed(app) != null) { progress.value = State.Ready; return }
         if (running) return
-        if (wifiFirst && waitsForWifi(mobileDataChosen(app), unmeteredNetwork(app))) {
+        if (!startsNow(mobileDataChosen(app), unmeteredNetwork(app))) {
             waiting = true; progress.value = State.WaitingForWifi; watchNetwork(app); return
         }
         running = true; waiting = false
@@ -193,7 +199,7 @@ internal class ModelStore private constructor(private val name: String, private 
                     part.delete(); path(app).delete(); progress.value = State.Available
                 // A Wi-Fi-first download whose Wi-Fi went away waits for it again rather than saying there's no connection.
                 } else if (result == State.Retry(Problem.Connection) && (started == 0 || stops != since ||
-                        wifiFirst && waitsForWifi(mobileDataChosen(app), unmeteredNetwork(app)))) {
+                        !startsNow(mobileDataChosen(app), unmeteredNetwork(app)))) {
                     waiting = true
                     if (started > 0) download(app)
                 } else progress.value = result

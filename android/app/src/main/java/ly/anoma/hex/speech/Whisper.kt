@@ -26,6 +26,9 @@ internal interface Recognizer {
     fun abort(job: Long) {}
     /** [job]'s decode times for Labs › Diagnostics, once it has run; null for another or none. */
     fun spent(job: Long): SpeechModel.Spent? = null
+    /** A dictation's durations once it went in, with the options it started with (Labs › Pick the English model for this
+     * phone). */
+    fun timed(times: DictationTimes, options: SpeechOptions) {}
 }
 
 /** Shown when a shortage of memory sent an English dictation to today's model; at most once a day. */
@@ -40,6 +43,7 @@ internal class LocalSpeech(private val app: Context) : Recognizer {
     }
     override fun abort(job: Long) = SpeechModel.abort(job)
     override fun spent(job: Long) = SpeechModel.spent(job)
+    override fun timed(times: DictationTimes, options: SpeechOptions) = ModelChoiceStore(app).dictated(times, options)
 
     private fun lowMemoryNoteDue(): Boolean {
         val prefs = app.getSharedPreferences("speech", Context.MODE_PRIVATE)
