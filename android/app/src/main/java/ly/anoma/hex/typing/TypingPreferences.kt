@@ -99,6 +99,10 @@ internal class TypingPreferences(context: Context) {
         set(value) { prefs.edit().putString(KEY_COLOR, value.key).apply() }
     /** The colours the keys are drawn in: [keyColor] while the lab is on, else Automatic. */
     val drawnKeyColor get() = if (keyColors) keyColor else KeyColor.Automatic
+    /** Labs › Keyboard › Test keyboard on Home: the practice field moves from Keyboard to Home (#2801). Off by default. */
+    var testKeyboardOnHome: Boolean
+        get() = prefs.getBoolean(TEST_KEYBOARD_ON_HOME, false)
+        set(value) { prefs.edit().putBoolean(TEST_KEYBOARD_ON_HOME, value).apply() }
 
     // Remember only explicit rejection of this exact pair in this language; never save typed text.
     private fun pair(language: String, original: String, replacement: String): String {
@@ -129,5 +133,6 @@ internal class TypingPreferences(context: Context) {
         const val HEX_KEY_LEFT = "hexKeyLeft"
         const val KEY_COLORS = "keyColors"
         const val KEY_COLOR = "keyColor"
+        const val TEST_KEYBOARD_ON_HOME = "testKeyboardOnHome"
     }
 }

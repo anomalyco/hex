@@ -173,6 +173,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     var quickDictation by remember { mutableStateOf(QuickDictation.enabled(context)) }
     val keyColors = remember(revision) { typing.keyColors }
     val keyColor = remember(revision) { typing.keyColor }
+    val testOnHome = remember(revision) { typing.testKeyboardOnHome }
     // A hidden field or leaving Labs shows the saved line again, never an unsaved draft.
     LaunchedEffect(page, signature) { if (page != Page.Labs || !signature) signatureDraft = speech.signatureText }
     LaunchedEffect(page, learnFixes) { if (page != Page.Labs || !learnFixes) forgetting = false }
@@ -197,16 +198,21 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     // Home's dictation result, painted over in the form's picture of Hex: a transcript never leaves the phone.
     var transcriptCard by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     var transcriptCut by remember { mutableStateOf(false) }
+    // With Labs › Keyboard › Test keyboard on Home, what was typed there is painted over too.
+    var practiceCard by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    var practiceCut by remember { mutableStateOf(false) }
     var capturing by remember { mutableStateOf(false) }
     val cardRadius = with(LocalDensity.current) { 14.dp.toPx() }
     fun sendFeedback() {
         val activity = context as? Activity ?: return
         if (capturing) return
         capturing = true
-        val hide = transcriptCard?.takeIf { transcript.isNotEmpty() }
         // Square when scrolled part out of view, so the cut edge's corners are covered too.
-        Feedback.captureWindow(activity, hide?.let { android.graphics.RectF(it.left, it.top, it.right, it.bottom) },
-            if (transcriptCut) 0f else cardRadius) { picture ->
+        val hide = listOfNotNull(
+            transcriptCard?.takeIf { transcript.isNotEmpty() }?.let { it to transcriptCut },
+            practiceCard?.takeIf { testOnHome && practice.isNotEmpty() }?.let { it to practiceCut },
+        ).map { (r, cut) -> android.graphics.RectF(r.left, r.top, r.right, r.bottom) to if (cut) 0f else cardRadius }
+        Feedback.captureWindow(activity, hide) { picture ->
             capturing = false
             Feedback.start("Home", picture)
             open(Page.Feedback)
@@ -284,6 +290,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             }
                         }
                         if (notice != null) Label(notice, muted = true, size = 14, lines = 3)
+                        if (testOnHome) PracticeCard(practice, Modifier.onGloballyPositioned {
+                            practiceCard = it.boundsInWindow()
+                            practiceCut = practiceCard!!.height < it.size.height - 1 || practiceCard!!.width < it.size.width - 1
+                        }) { practice = it }
                         Updates.HomeCard()
                         Card {
                             listOf(Page.Dictation, Page.Keyboard, Page.Privacy, Page.Labs).forEachIndexed { i, dest ->
@@ -365,15 +375,8 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             Rule(); Toggle(stringResource(R.string.settings_popups), stringResource(R.string.settings_popups_detail), popups) { typing.popups = it }
                             Rule(); Toggle(stringResource(R.string.settings_haptics), stringResource(R.string.settings_haptics_detail), haptics) { typing.haptics = it }
                         }
-                        val ink = colorResource(R.color.ink)
-                        Card {
-                            BasicTextField(value = practice, onValueChange = { practice = it }, maxLines = 4,
-                                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                                textStyle = TextStyle(color = ink, fontFamily = inter, fontSize = 16.sp),
-                                cursorBrush = SolidColor(ink), decorationBox = { field ->
-                                    Box { if (practice.isEmpty()) Label(stringResource(R.string.settings_test_keyboard), muted = true); field() }
-                                })
-                        }
+                        // With Labs › Keyboard › Test keyboard on Home, the field is on Home instead.
+                        if (!testOnHome) PracticeCard(practice) { practice = it }
                     }
                     Page.Privacy -> {
                         // A statement, not rows that look tappable.
@@ -569,6 +572,9 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                     Entry(stringResource(R.string.key_color), value = stringResource(keyColor.label),
                                         action = { open(Page.KeyColors) })
                                 }
+                                Rule()
+                                Toggle(stringResource(R.string.test_keyboard_on_home), stringResource(R.string.test_keyboard_on_home_detail),
+                                    testOnHome) { typing.testKeyboardOnHome = it }
                             }
                             // Hex Preview and debug builds only.
                             if (BuildConfig.DIAGNOSTICS) {
@@ -695,5 +701,19 @@ private fun reflow(lines: List<String>) = buildString {
             .padding(3.dp), contentAlignment = if (on) Alignment.CenterEnd else Alignment.CenterStart) {
             Spacer(Modifier.size(17.dp).background(colorResource(if (on) R.color.page else R.color.key), RoundedCornerShape(50)))
         }
+    }
+}
+
+/** The Test keyboard… field: Keyboard's practice field, or Home's with Labs › Keyboard › Test keyboard on Home. */
+@Composable
+private fun PracticeCard(practice: String, mod: Modifier = Modifier, change: (String) -> Unit) {
+    val ink = colorResource(R.color.ink)
+    Card(mod) {
+        BasicTextField(value = practice, onValueChange = change, maxLines = 4,
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            textStyle = TextStyle(color = ink, fontFamily = inter, fontSize = 16.sp),
+            cursorBrush = SolidColor(ink), decorationBox = { field ->
+                Box { if (practice.isEmpty()) Label(stringResource(R.string.settings_test_keyboard), muted = true); field() }
+            })
     }
 }

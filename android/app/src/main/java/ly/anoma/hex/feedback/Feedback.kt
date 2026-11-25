@@ -136,15 +136,19 @@ internal object Feedback {
     }
 
     /** Hex's own window, drawn just before the form opens: never the whole screen, the keyboard or another app.
-     * [hide] is painted over with an empty card first (Home's dictation result), so no transcript leaves the phone. */
-    fun captureWindow(activity: Activity, hide: RectF?, hideRadius: Float, done: (Picture?) -> Unit) {
+     * Each of [hide] is painted over with an empty card first, with its corner radius (Home's dictation result and,
+     * with Labs › Keyboard › Test keyboard on Home, what was typed there), so no transcript leaves the phone. */
+    fun captureWindow(activity: Activity, hide: List<Pair<RectF, Float>>, done: (Picture?) -> Unit) {
         val view = activity.window.decorView
         if (view.width <= 0 || view.height <= 0) return done(null)
         val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
         val sheet = activity.getColor(ly.anoma.hex.R.color.sheet)
         PixelCopy.request(activity.window, bitmap, { result ->
             if (result != PixelCopy.SUCCESS) { bitmap.recycle(); return@request done(null) }
-            if (hide != null) Canvas(bitmap).drawRoundRect(hide, hideRadius, hideRadius, Paint().apply { color = sheet })
+            if (hide.isNotEmpty()) Canvas(bitmap).let { canvas ->
+                val paint = Paint().apply { color = sheet }
+                hide.forEach { (rect, radius) -> canvas.drawRoundRect(rect, radius, radius, paint) }
+            }
             thread(name = "hex-feedback-picture") {
                 val picture = picture(bitmap, window = true)
                 main.post { done(picture) }

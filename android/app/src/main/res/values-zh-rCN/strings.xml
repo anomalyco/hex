@@ -189,6 +189,8 @@
     <string name="key_color_forest">森林绿</string>
     <string name="key_color_ember">余烬</string>
     <string name="key_color_burgundy">勃艮第红</string>
+    <string name="test_keyboard_on_home">在主页测试键盘</string>
+    <string name="test_keyboard_on_home_detail">将“测试键盘”输入框从键盘页面移到主页</string>
     <!-- Hex 词汇文件与自定词汇的“词语替换”（docs/specs/hex-words.md）。 -->
     <string name="words_open_label">添加到 Hex</string>
     <string name="words_replacements">词语替换</string>
