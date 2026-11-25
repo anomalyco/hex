@@ -1502,6 +1502,16 @@ Check: `numbers_only_transcripts_skip_the_rewrite` in
 [dictation/processor.rs](../../src/dictation/processor.rs). The prompt rules
 were not run against a live model.
 
+**Fixed November 25, 2026 (issue 2849):** a rewrite whose mode names a model
+that OpenCode answers "Model not found" for, as it can while that provider is
+still loading at startup, waits briefly and asks once more within the same
+deadline, as "Model unavailable" already did; a second failure still pastes
+the corrected transcript. A rewrite naming no model is not retried on it.
+Check: `a_chosen_model_not_found_at_startup_is_retried_once` and
+`only_model_unavailability_is_retried` in
+[dictation/processor.rs](../../src/dictation/processor.rs); not run against a
+live OpenCode startup.
+
 Built-in text transformations run natively. Custom transformations come from
 `~/.config/hex/hex.config.ts` and run in Hex's embedded script engine, each
 under its own `timeout` (1 s by default, 30 s when the config uses host APIs,

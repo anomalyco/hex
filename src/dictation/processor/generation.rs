@@ -63,7 +63,9 @@ pub(super) fn generate_single_model(
         let remaining = remaining_generation_deadline(started, deadline)?;
         match post(&data, remaining, cancelled)? {
             Response::Success { data } => return Ok(data.text),
-            Response::Error { message } if attempt == 0 && retryable_generation_error(&message) => {
+            Response::Error { message }
+                if attempt == 0 && retryable_generation_error(&message, model.is_some()) =>
+            {
                 tracing::warn!(%message, "OpenCode model unavailable during startup; retrying");
                 wait_for_generation_retry(started, deadline, cancelled)?;
             }
@@ -121,8 +123,13 @@ fn route_missing(response: &crate::desktop::opencode_service::Response) -> bool 
         })
 }
 
-pub(super) fn retryable_generation_error(message: &str) -> bool {
+/// OpenCode answers a model it is still loading with "Model unavailable", and
+/// a named model whose provider hasn't finished loading with "Model not found"
+/// (#2849); either is asked once more within the same deadline. A request that
+/// names no model never sees the latter.
+pub(super) fn retryable_generation_error(message: &str, names_model: bool) -> bool {
     message.starts_with("Model unavailable:")
+        || (names_model && message.starts_with("Model not found:"))
 }
 
 pub(super) fn wait_for_generation_retry(
