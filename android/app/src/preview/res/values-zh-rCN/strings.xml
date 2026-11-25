@@ -1,11 +1,6 @@
 <resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
-    <string name="setup_welcome_detail">Hex Preview 只在下载语音模型（190 MB，以及你在实验室中添加的模型）、向 GitHub 检查更新，以及你点按“发送”提交反馈时使用网络。你的声音和文字都保留在这台设备上。</string>
-    <string name="setup_title">设置 Hex Preview</string>
-    <string name="setup_detail">允许使用麦克风，然后选择 Hex Preview 作为键盘。</string>
-    <string name="setup_microphone_detail">让 Hex Preview 能听见你</string>
     <string name="setup_keyboard">Hex Preview 键盘</string>
     <string name="setup_keyboard_enabled">在列表中选择 Hex Preview</string>
-    <string name="setup_keyboard_off">在“设置”中打开 Hex Preview</string>
     <string name="setup_choose_hex">选择 Hex Preview 键盘</string>
     <string name="keyboard_hint_microphone">请在 Hex Preview 中允许使用麦克风</string>
     <!-- Main's settings_privacy_detail (src/main/res/values-zh-rCN) plus the update check: keep the two in step. -->

@@ -1,7 +1,10 @@
 package ly.anoma.hex.speech
 
+import android.app.LocaleManager
 import android.content.Context
 import android.content.res.Resources
+import android.os.Build
+import java.util.Locale
 
 internal enum class Style { Polished, Casual, Notes, Verbatim }
 /** A keyboard layout's language: its keys, accents and typing model. Dictation languages are
@@ -50,6 +53,32 @@ internal enum class DictationLanguage(val code: String, val label: String, val l
         fun candidates(keyboard: DictationLanguage, system: List<String>, picked: DictationLanguage?): List<DictationLanguage> =
             (listOf(keyboard) + system.mapNotNull(::matching) + listOfNotNull(picked)).distinct().take(3)
     }
+}
+
+/** What setup says about the dictation language: [spoken], the phone's first language in its own name when Hex can't
+ * dictate it ([unsupported]), and the phone's other languages Hex dictates, a hold of the space bar away ([others]).
+ * A language chosen in Settings or a pinned layout is the reason itself ([automatic] false), so neither carries the rest. */
+internal data class PhoneLanguage(val spoken: DictationLanguage, val unsupported: String? = null,
+                                  val others: List<DictationLanguage> = emptyList(), val automatic: Boolean = true,
+                                  /** Labs › Automatic listens for the language: the languages it chooses among, when several. */
+                                  val listensAmong: List<DictationLanguage> = emptyList())
+
+/** The phone's languages, in the person's order: Android's system list, never Hex's own App language. From Android 13
+ * an app language is folded into the process's configuration, Resources.getSystem()'s included, so only
+ * LocaleManager still has the system's own list. */
+internal fun systemLocales(context: Context): List<Locale> {
+    val locales = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+        context.getSystemService(LocaleManager::class.java)?.systemLocales else null) ?: Resources.getSystem().configuration.locales
+    return (0 until locales.size()).map { locales[it] }
+}
+
+internal fun phoneLanguage(chosen: DictationLanguage?, pinned: Spoken?, system: List<Locale>): PhoneLanguage {
+    val spoken = chosen ?: DictationLanguage.automatic(pinned, system.map { it.language })
+    if (chosen != null || pinned != null) return PhoneLanguage(spoken, automatic = false)
+    val unsupported = system.firstOrNull()?.takeIf { DictationLanguage.matching(it.language) == null }
+        ?.let { it.getDisplayLanguage(it).replaceFirstChar { c -> c.titlecase(it) } }?.takeIf { it.isNotEmpty() }
+    if (unsupported != null) return PhoneLanguage(spoken, unsupported)
+    return PhoneLanguage(spoken, others = system.mapNotNull { DictationLanguage.matching(it.language) }.distinct() - spoken)
 }
 
 /** The layout whose typing model the keyboard reads: the one pinned in Keyboard › Keyboard layout, else the
@@ -116,12 +145,16 @@ internal class SpeechPreferences(private val context: Context) {
         }
     // Keyboard › Keyboard layout when chosen there (null while the layout follows dictation).
     private val typing = context.getSharedPreferences("typing", Context.MODE_PRIVATE)
-    private fun phoneLanguages() = Resources.getSystem().configuration.locales.let { locales -> (0 until locales.size()).map { locales[it].language } }
+    private fun phoneLanguages() = systemLocales(context).map { it.language }
     /** The language Automatic dictates in without listening: the keyboard's layout's, else the phone's. */
     val automaticLanguage: DictationLanguage
         get() = DictationLanguage.automatic(Spoken.matching(typing.getString("layout", null)), phoneLanguages())
     val spoken: DictationLanguage
         get() = language ?: automaticLanguage
+    /** What setup's Language row says: what Automatic dictates in and why, from the same languages. */
+    val phoneLanguage: PhoneLanguage
+        get() = phoneLanguage(language, Spoken.matching(typing.getString("layout", null)), systemLocales(context))
+            .copy(listensAmong = candidates.takeIf { it.size > 1 } ?: emptyList())
     // Labs › Automatic listens for the language, off by default.
     var listenForLanguage: Boolean
         get() = prefs.getBoolean("listenForLanguage", false)

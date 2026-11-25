@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.colorResource
@@ -38,7 +39,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.text.style.TextAlign
 import kotlinx.coroutines.delay
 import ly.anoma.hex.keyboard.speechNote
 import ly.anoma.hex.speech.*
@@ -48,6 +48,17 @@ import ly.anoma.hex.updates.Updates
 internal data class Setup(val mic: Boolean = false, val enabled: Boolean = false, val chosen: Boolean = false,
                          val micNeedsSettings: Boolean = false) {
     val ready get() = mic && enabled && chosen
+    /** Setup's one button: the next step Android needs a person for, in order, so a step already done is skipped. */
+    val next get() = when {
+        !mic -> if (micNeedsSettings) Next.MicrophoneSettings else Next.Microphone
+        !enabled -> Next.Keyboard
+        !chosen -> Next.Choose
+        else -> Next.Try
+    }
+}
+internal enum class Next(val label: Int) {
+    Microphone(R.string.setup_next_microphone), MicrophoneSettings(R.string.setup_next_settings),
+    Keyboard(R.string.setup_next_keyboard), Choose(R.string.setup_next_choose), Try(R.string.setup_next_try)
 }
 
 class MainActivity : ComponentActivity() {
@@ -67,8 +78,11 @@ class MainActivity : ComponentActivity() {
     private var phase by mutableStateOf(SpeechPhase.Idle)
     private var transcript by mutableStateOf("")
     private var notice by mutableStateOf<String?>(null)
-    /** Enable was tapped: back from Android's keyboard list with Hex on, the keyboard picker opens by itself. */
-    private var enabling = false
+    /** Enable was tapped: back from Android's keyboard list with Hex on, the keyboard picker opens by itself. Kept in
+     * preferences, so it still does when Android ended Hex's process while its list was open. */
+    private var enabling: Boolean
+        get() = prefs.getBoolean("enabling", false)
+        set(value) { prefs.edit().putBoolean("enabling", value).apply() }
     private lateinit var capture: MicCapture
     private val changed = object : ContentObserver(Handler(Looper.getMainLooper())) {
         override fun onChange(selfChange: Boolean) = refresh()
@@ -82,7 +96,8 @@ class MainActivity : ComponentActivity() {
             // Home's Dictate bar too: onStop cancels, so the screen mustn't sleep mid-dictation.
             update = { next, reason -> phase = next; notice = speechNote(reason); window.keepAwake(next) },
             meter = {}, insert = { text, _, _ -> transcript = text })
-        page = prefs.getInt("page", 0).coerceIn(0, 3)
+        // Setup is page 1 and its try page 2 (page 0, the welcome before them, is now part of page 1); Home is 3.
+        page = prefs.getInt("page", 1).coerceIn(1, 3)
         // The keyboard's Settings tool opens Hex on its Keyboard page for the launch that carried the extra.
         // The task keeps its base intent, so a Recents relaunch still carries it: a restored or history
         // launch ignores it.
@@ -104,7 +119,8 @@ class MainActivity : ComponentActivity() {
         ModelStore.english.refresh(this)
         setContent {
             HexTheme {
-                BackHandler(page in 1..2) { go(page - 1) }
+                BackHandler(page == 2) { go(1) }
+                BackHandler(page == 1 && setup.ready) { go(3) }
                 val model = ModelStore.small.state.collectAsState().value
                 if (page == 3) HexSettings(setup, speech, typing, model, ::modelRowAction,
                     phase, transcript, notice, ::dictate, capture::cancel, { transcript = "" }, { go(it) },
@@ -112,8 +128,8 @@ class MainActivity : ComponentActivity() {
                     startPage = startPage)
                 else SetupScreen(page, setup, ::go, ::askForMic,
                     enable = { enabling = true; startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) },
-                    choose = { imm.showInputMethodPicker() }, model = model,
-                    download = { ModelStore.small.download(this) }, rowAction = ::modelRowAction)
+                    choose = { imm.showInputMethodPicker() }, model = model, download = ::downloadModel, rowAction = ::modelRowAction,
+                    language = remember(LocalConfiguration.current) { speech.phoneLanguage })
             }
         }
     }
@@ -127,12 +143,15 @@ class MainActivity : ComponentActivity() {
             SpeechPhase.Transcribing -> Unit
         }
     }
+    /** The speech model's download, from setup's first tap: it waits for Wi-Fi on mobile data (ModelStore). */
+    private fun downloadModel() = ModelStore.small.download(this)
     /** The speech model row's action: Download or Try again, or, while it waits for Wi-Fi, the download on mobile data. */
     private fun modelRowAction() {
         if (ModelStore.small.state.value == ModelStore.State.WaitingForWifi) ModelStore.small.useMobileData(this)
         else ModelStore.small.download(this)
     }
-    private fun go(next: Int) {
+    private fun go(target: Int) {
+        val next = target.coerceIn(1, 3)
         if (page == 3 && next != 3) { capture.cancel(); transcript = "" }
         page = next
         prefs.edit().putInt("page", next).apply()
@@ -181,9 +200,9 @@ internal fun HexTheme(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun SetupScreen(page: Int, setup: Setup, go: (Int) -> Unit, ask: () -> Unit,
-                        enable: () -> Unit, choose: () -> Unit, model: ModelStore.State, download: () -> Unit,
-                        rowAction: () -> Unit) {
+private fun SetupScreen(page: Int, setup: Setup, go: (Int) -> Unit, ask: () -> Unit, enable: () -> Unit, choose: () -> Unit,
+                        model: ModelStore.State, download: () -> Unit, rowAction: () -> Unit,
+                        language: PhoneLanguage) {
     val colors = MaterialTheme.colorScheme
     var text by remember(page) { mutableStateOf("") }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -191,67 +210,47 @@ private fun SetupScreen(page: Int, setup: Setup, go: (Int) -> Unit, ask: () -> U
         Box(Modifier.safeDrawingPadding(), contentAlignment = Alignment.TopCenter) {
             Column(Modifier.widthIn(max = 520.dp).fillMaxWidth().fillMaxHeight().padding(horizontal = 24.dp)) {
                 Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (page in 1..2) IconButton(onClick = { go(page - 1) }) {
+                    if (page == 2) IconButton(onClick = { go(1) }) {
                         Icon(painterResource(R.drawable.ic_back), stringResource(R.string.back), Modifier.size(22.dp))
                     } else {
                         Icon(painterResource(R.drawable.hex_mark), null, Modifier.size(24.dp))
                         Spacer(Modifier.width(8.dp))
                         Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                     }
-                    Spacer(Modifier.weight(1f))
-                    Text(stringResource(R.string.setup_step, page + 1, 3), color = colors.onSurfaceVariant,
-                        style = MaterialTheme.typography.labelLarge)
                 }
-                Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
-                    verticalArrangement = if (page == 0) Arrangement.Center else Arrangement.Top) {
-                    when (page) {
-                        0 -> {
-                            Welcome()
+                Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    if (page == 2) Practice(text, { text = it }, setup, choose, model)
+                    else {
+                        // Moves on by itself once the last step is done here, as iPhone Hex's setup does
+                        // (not when Back returns to a page that was already done).
+                        var wasReady by remember { mutableStateOf(setup.ready) }
+                        LaunchedEffect(setup.ready) {
+                            if (setup.ready && !wasReady) { delay(800); go(2) }
+                            wasReady = setup.ready
                         }
-                        1 -> {
-                            // Moves on by itself once the last row is done here, as iPhone Hex's setup does
-                            // (not when Back returns to a page that was already done).
-                            var wasReady by remember { mutableStateOf(setup.ready) }
-                            LaunchedEffect(setup.ready) {
-                                if (setup.ready && !wasReady) { delay(800); go(2) }
-                                wasReady = setup.ready
-                            }
-                            Spacer(Modifier.height(26.dp))
-                            Heading(stringResource(R.string.setup_title))
-                            Detail(stringResource(R.string.setup_detail))
-                            Spacer(Modifier.height(24.dp))
-                            Column(Modifier.fillMaxWidth().background(colors.surfaceVariant, RoundedCornerShape(16.dp))
-                                .padding(horizontal = 16.dp)) {
-                                SetupRow(stringResource(R.string.setup_microphone), stringResource(R.string.setup_microphone_detail), setup.mic,
-                                    stringResource(if (setup.micNeedsSettings) R.string.setup_settings else R.string.setup_allow), ask)
-                                HorizontalDivider(color = colors.outline)
-                                SetupRow(stringResource(R.string.setup_keyboard), stringResource(when {
-                                    setup.chosen -> R.string.setup_keyboard_chosen
-                                    setup.enabled -> R.string.setup_keyboard_enabled
-                                    else -> R.string.setup_keyboard_off
-                                }), setup.chosen, stringResource(if (setup.enabled) R.string.setup_choose else R.string.setup_enable),
-                                    if (setup.enabled) choose else enable)
-                                HorizontalDivider(color = colors.outline)
-                                ModelRow(model, rowAction)
-                            }
+                        Spacer(Modifier.height(20.dp))
+                        OnDevice()
+                        Spacer(Modifier.height(14.dp))
+                        Heading(stringResource(R.string.setup_welcome_title))
+                        Spacer(Modifier.height(24.dp))
+                        Column(Modifier.fillMaxWidth().background(colors.surfaceVariant, RoundedCornerShape(16.dp))
+                            .padding(horizontal = 16.dp)) {
+                            SetupRow(stringResource(R.string.setup_microphone), stringResource(
+                                if (setup.micNeedsSettings) R.string.setup_microphone_blocked else R.string.setup_microphone_note), setup.mic)
+                            HorizontalDivider(color = colors.outline)
+                            SetupRow(stringResource(R.string.setup_keyboard), stringResource(when {
+                                setup.chosen -> R.string.setup_keyboard_chosen
+                                setup.enabled -> R.string.setup_keyboard_enabled
+                                else -> R.string.setup_keyboard_off
+                            }), setup.chosen)
+                            HorizontalDivider(color = colors.outline)
+                            ModelRow(model, rowAction)
+                            HorizontalDivider(color = colors.outline)
+                            SetupRow(stringResource(R.string.setup_language), languageNote(language), false)
                         }
-                        2 -> {
-                            Spacer(Modifier.height(16.dp))
-                            Heading(stringResource(R.string.setup_try_title))
-                            Detail(stringResource(R.string.setup_try_detail))
-                            Spacer(Modifier.height(20.dp))
-                            val focus = remember { FocusRequester() }
-                            OutlinedTextField(value = text, onValueChange = { text = it },
-                                modifier = Modifier.fillMaxWidth().focusRequester(focus),
-                                placeholder = { Text(stringResource(R.string.setup_try_hint)) }, minLines = 2, maxLines = 4,
-                                shape = RoundedCornerShape(12.dp), keyboardOptions = KeyboardOptions(
-                                    capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.None))
-                            val windowFocused = LocalWindowInfo.current.isWindowFocused
-                            LaunchedEffect(windowFocused) {
-                                if (windowFocused) { focus.requestFocus(); keyboard?.show() }
-                            }
-                            if (!setup.chosen) TextButton(onClick = choose) { Text(stringResource(R.string.setup_choose_hex)) }
-                        }
+                        // Said before Android's own warning, which every keyboard gets, so it isn't a surprise.
+                        if (setup.next == Next.Keyboard) Detail(stringResource(R.string.setup_keyboard_warning))
+                        Spacer(Modifier.height(16.dp))
                     }
                 }
                 if (page == 2 && text.isBlank()) {
@@ -259,22 +258,76 @@ private fun SetupScreen(page: Int, setup: Setup, go: (Int) -> Unit, ask: () -> U
                         Text(stringResource(R.string.setup_skip))
                     }
                 } else {
+                    val next = setup.next
                     Button(onClick = {
-                        when (page) {
-                            0 -> { download(); go(1) }
-                            1 -> go(2)
-                            2 -> { keyboard?.hide(); go(3) }
+                        if (page == 2) { keyboard?.hide(); go(3) }
+                        else {
+                            // The first tap starts the speech model's download, as Get started did.
+                            download()
+                            when (next) {
+                                Next.Microphone, Next.MicrophoneSettings -> ask()
+                                Next.Keyboard -> enable()
+                                Next.Choose -> choose()
+                                Next.Try -> go(2)
+                            }
                         }
-                    }, enabled = page != 1 || setup.ready, shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                        Text(stringResource(listOf(R.string.setup_get_started, R.string.setup_continue, R.string.setup_done)[page]),
-                            style = MaterialTheme.typography.titleMedium)
+                    }, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                        Text(stringResource(if (page == 2) R.string.setup_done else next.label), style = MaterialTheme.typography.titleMedium)
                     }
                 }
                 Spacer(Modifier.height(16.dp))
             }
         }
     }
+}
+
+/** The try page: a field with Hex's keyboard up. A first dictation is confirmed, and when the smaller built-in model
+ * wrote it (the download still running), that is said too, so its result isn't taken for Hex's own. */
+@Composable
+private fun Practice(text: String, change: (String) -> Unit, setup: Setup, choose: () -> Unit, model: ModelStore.State) {
+    val keyboard = LocalSoftwareKeyboardController.current
+    Spacer(Modifier.height(16.dp))
+    Heading(stringResource(R.string.setup_try_title))
+    Detail(stringResource(R.string.setup_try_detail))
+    Spacer(Modifier.height(20.dp))
+    val focus = remember { FocusRequester() }
+    OutlinedTextField(value = text, onValueChange = change,
+        modifier = Modifier.fillMaxWidth().focusRequester(focus),
+        placeholder = { Text(stringResource(R.string.setup_try_hint)) }, minLines = 2, maxLines = 4,
+        shape = RoundedCornerShape(12.dp), keyboardOptions = KeyboardOptions(
+            capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.None))
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    LaunchedEffect(windowFocused) {
+        if (windowFocused) { focus.requestFocus(); keyboard?.show() }
+    }
+    if (!setup.chosen) TextButton(onClick = choose) { Text(stringResource(R.string.setup_choose_hex)) }
+    // The keyboard and this page share Hex's process: a dictation the keyboard put in since the page opened.
+    val before = remember { lastDictation.value }
+    val last by lastDictation.collectAsState()
+    // Null until a dictation went in; then whether the smaller built-in model wrote it. The model is loaded for the
+    // decode itself, so the download's state as the text goes in is the model that wrote it.
+    var builtIn by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(last) {
+        val dictation = last
+        if (dictation != null && dictation !== before && dictation.place == DictationPlace.Keyboard && dictation.insertedMs != null)
+            builtIn = model != ModelStore.State.Ready
+    }
+    val note = when {
+        builtIn == true -> when (model) {
+            is ModelStore.State.Loading -> stringResource(R.string.setup_try_built_in_loading, model.percent)
+            ModelStore.State.Ready -> stringResource(R.string.setup_try_built_in_ready)
+            else -> stringResource(R.string.setup_try_built_in)
+        }
+        builtIn == false -> null
+        model is ModelStore.State.Loading -> stringResource(R.string.setup_try_model_loading, model.percent)
+        model is ModelStore.State.Retry || model == ModelStore.State.WaitingForWifi -> modelStatus(model)
+        else -> null
+    }
+    if (builtIn != null) {
+        Spacer(Modifier.height(16.dp))
+        Text(stringResource(R.string.setup_try_done), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+    }
+    if (note != null) Detail(note)
 }
 
 @Composable private fun Heading(text: String) = Text(text, fontSize = 34.sp, lineHeight = 39.sp,
@@ -286,36 +339,40 @@ private fun SetupScreen(page: Int, setup: Setup, go: (Int) -> Unit, ask: () -> U
 }
 
 @Composable
-private fun SetupRow(title: String, note: String, ready: Boolean, action: String, onClick: () -> Unit) {
+private fun SetupRow(title: String, note: String, ready: Boolean) {
     Row(Modifier.fillMaxWidth().heightIn(min = 76.dp).padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, fontWeight = FontWeight.Medium)
             Text(note, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
-        if (ready) Text(stringResource(R.string.setup_ready), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
-        else TextButton(onClick) { Text(action) }
+        if (ready) Text(stringResource(R.string.setup_ready), color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 12.dp))
     }
 }
 
-@Composable private fun Welcome() {
-    val colors = MaterialTheme.colorScheme
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(painterResource(R.drawable.hex_mark), stringResource(R.string.app_name), Modifier.size(64.dp))
-        Spacer(Modifier.height(20.dp))
-        Row(Modifier.height(28.dp).background(colors.surfaceVariant, RoundedCornerShape(50))
-            .padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(painterResource(R.drawable.ic_lock), null, Modifier.size(13.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(stringResource(R.string.setup_on_device), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-        }
-        Spacer(Modifier.height(16.dp))
-        Text(stringResource(R.string.setup_welcome_title), fontSize = 28.sp, lineHeight = 32.sp,
-            letterSpacing = (-0.4).sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(12.dp))
-        Text(stringResource(R.string.setup_welcome_detail),
-            modifier = Modifier.widthIn(max = 320.dp), color = colors.onSurfaceVariant,
-            textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium)
+/** "100% on device", as the welcome page had it. */
+@Composable private fun OnDevice() {
+    Row(Modifier.height(28.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50))
+        .padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(painterResource(R.drawable.ic_lock), null, Modifier.size(13.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(stringResource(R.string.setup_on_device), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/** The language row's line: what Automatic dictates in and why, or the language chosen in Settings. */
+@Composable private fun languageNote(language: PhoneLanguage): String {
+    val spoken = language.spoken.label
+    val others = language.others.map { it.label }
+    return when {
+        // Listening, Automatic chooses among these as you speak, as Settings and the Hex menu list them.
+        language.listensAmong.isNotEmpty() -> language.listensAmong.joinToString(stringResource(R.string.language_list_separator)) { it.label }
+        !language.automatic -> spoken
+        language.unsupported != null -> stringResource(R.string.setup_language_unsupported, spoken, language.unsupported)
+        others.size >= 2 -> stringResource(R.string.setup_language_first, spoken, stringResource(R.string.setup_language_or, others[0], others[1]))
+        others.size == 1 -> stringResource(R.string.setup_language_first, spoken, others[0])
+        else -> stringResource(R.string.setup_language_phone, spoken)
     }
 }
 
@@ -343,9 +400,11 @@ internal fun modelAction(state: ModelStore.State) = when (state) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 54.dp)) {
             Column(Modifier.weight(1f)) {
                 Text(stringResource(R.string.model_title), fontWeight = FontWeight.Medium)
-                Text(modelStatus(state), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                Text(if (state == ModelStore.State.Available) stringResource(R.string.setup_model_size) else modelStatus(state),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
-            modelAction(state)?.let { TextButton(onClick = download) { Text(stringResource(it)) } }
+            // Setup's first tap starts the download; the row keeps Try again and, waiting for Wi-Fi, Use mobile data.
+            if (state != ModelStore.State.Available) modelAction(state)?.let { TextButton(onClick = download) { Text(stringResource(it)) } }
         }
         if (state is ModelStore.State.Loading) LinearProgressIndicator(progress = { state.percent / 100f },
             modifier = Modifier.fillMaxWidth(), trackColor = MaterialTheme.colorScheme.outline)
