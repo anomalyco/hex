@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nothing Hex keeps leaves this phone: no cloud backup and no transfer to a new phone. allowBackup="false"
+     already stops the cloud backup, but Android 12 and later ignore it for a device-to-device transfer of an app
+     that targets them (BackupEligibilityRules.IGNORE_ALLOW_BACKUP_IN_D2D), so the transfer has its own rules.
+     Every domain, credential- and device-encrypted, so a file added later is left out too. Cross-platform
+     transfers (Android 16 QPR2) are opt-in, and Hex declares none. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+        <exclude domain="device_root" path="." />
+        <exclude domain="device_file" path="." />
+        <exclude domain="device_database" path="." />
+        <exclude domain="device_sharedpref" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+        <exclude domain="device_root" path="." />
+        <exclude domain="device_file" path="." />
+        <exclude domain="device_database" path="." />
+        <exclude domain="device_sharedpref" path="." />
+    </device-transfer>
+</data-extraction-rules>
