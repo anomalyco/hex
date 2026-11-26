@@ -270,6 +270,7 @@ extension DictationController {
             if #available(iOS 26.0, *) {
                 transcriber = AppleSpeechTranscriber(language: SpeechLanguage(locale: Locale(identifier: "en-US"), module: .speech))
             }
+            applyFixtureDictationLanguage()
             let file = ParakeetTranscriber.cacheDirectory.appendingPathComponent("fixture.bin")
             FileManager.default.createFile(atPath: file.path, contents: nil)
             let handle = try? FileHandle(forWritingTo: file)

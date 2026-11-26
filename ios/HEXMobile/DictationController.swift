@@ -322,6 +322,12 @@ final class DictationController {
         didTransitionPhase(from: oldPhase)
     }
 
+    /// Snapshot scenes: the dictation language the fixture stored, without preparing a model
+    /// for it (Settings › Dictation would otherwise prepare one as it appears).
+    func applyFixtureDictationLanguage() {
+        dictationLanguage = languageSettings.dictationLanguage
+    }
+
     func setWarmSession(_ newSession: Session, remaining explicitRemaining: TimeInterval? = nil) {
         warmSession = newSession
         let remaining: TimeInterval
