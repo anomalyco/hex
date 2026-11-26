@@ -595,6 +595,19 @@ pub fn api_timestamps() -> bool {
     feature_on(Feature::ApiTimestamps)
 }
 
+/// Labs › Connected apps: apps on this computer may ask, in Hex's permission
+/// window, to transcribe audio or record (read as each consent or recording
+/// request arrives).
+pub fn connected_apps() -> bool {
+    feature_on(Feature::ConnectedApps)
+}
+
+/// Labs › Connected apps' Allow websites to use Hex: with the lab on, the
+/// websites the person allowed may ask too.
+pub fn connected_apps_websites() -> bool {
+    connected_apps() && CONNECTED_APPS_WEBSITES.load(Ordering::Acquire)
+}
+
 /// Labs › Smaller model files: your own speech model imports may use Q6_K,
 /// Q5_K, or Q4_K weights (macOS, where Metal has their kernels; read where an
 /// import's header is checked and where a saved selection loads).

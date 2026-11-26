@@ -2274,6 +2274,7 @@ version = "3.5.0"
 dependencies = [
  "anyhow",
  "arboard",
+ "base64 0.22.1",
  "block2 0.6.2",
  "capture-core",
  "cc",
@@ -2291,6 +2292,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.4.3",
  "hound",
+ "image",
  "libc",
  "objc2 0.6.5",
  "objc2-app-kit 0.3.2",

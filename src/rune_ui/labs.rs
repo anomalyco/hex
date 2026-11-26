@@ -7,6 +7,7 @@
 //! and is hidden while off.
 
 mod clipboard_phrase;
+pub(super) mod connected_apps;
 mod group;
 #[cfg(target_os = "macos")]
 mod hud_height;
@@ -49,9 +50,14 @@ pub(super) fn main_panes(ui: &Ui) -> Vec<Pane> {
     }
     panes.push(Pane::History);
     #[cfg(hex_capture)]
-    let optional = [Pane::Meetings, Pane::Annotate, Pane::VoiceFilter];
+    let optional = [
+        Pane::Meetings,
+        Pane::Annotate,
+        Pane::VoiceFilter,
+        Pane::ConnectedApps,
+    ];
     #[cfg(not(hex_capture))]
-    let optional = [Pane::Meetings, Pane::VoiceFilter];
+    let optional = [Pane::Meetings, Pane::VoiceFilter, Pane::ConnectedApps];
     panes.extend(optional.into_iter().filter(|pane| pane.shown(ui)));
     panes
 }
@@ -922,6 +928,10 @@ fn rows(ui: &Ui) -> Vec<Row> {
     });
     rows.push(row(Feature::ApiProcessing, None));
     rows.push(row(Feature::ApiTimestamps, None));
+    rows.push(connected_apps::lab_card(
+        ui,
+        row(Feature::ConnectedApps, Some(connected_apps::ICON)),
+    ));
     rows.push(row(Feature::SpeakersOnly, None));
     rows.push(row(Feature::KeepMicrophoneOpen, Some(&TIMER)));
     // macOS opens dictation's microphone through Apple's voice processing, so
@@ -1114,6 +1124,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::YoloMode => "lab-yolo-mode",
         Feature::ApiProcessing => "lab-api-processing",
         Feature::ApiTimestamps => "lab-api-timestamps",
+        Feature::ConnectedApps => "lab-connected-apps",
         Feature::SpeakersOnly => "lab-speakers-only",
         Feature::KeepMicrophoneOpen => "lab-keep-microphone-open",
         Feature::VoicePrompt => "lab-voice-prompt",
@@ -1428,6 +1439,23 @@ fn keep_microphone_open_for(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         },
         layer,
     )
+}
+
+/// Adopted settings may hide the pane on screen: the Hex Microphone turned off
+/// from `hex settings` hides Voice Filter, and Labs › Modes editor turned off
+/// while the editor shows hides Modes. The window leaves, Output standing in
+/// for the editor it replaced. Returns whether the pane moved.
+pub(super) fn leave_hidden_pane(ui: &mut Ui) -> bool {
+    if ui.pane.shown(ui) {
+        return false;
+    }
+    ui.pane = match ui.pane {
+        Pane::Modes => Pane::Output,
+        _ => Pane::General,
+    };
+    ui.close_modal();
+    ui.open = None;
+    true
 }
 
 #[cfg(test)]

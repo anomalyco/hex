@@ -57,6 +57,7 @@ pub(super) fn run_runtime(
         activity,
         last_completed_at,
         started_at: shared.started_at,
+        record: shared.record.clone(),
     };
     let mut settings_checked = Instant::now();
     loop {
@@ -146,6 +147,8 @@ pub(super) struct Runtime {
     /// When this runtime started, in the event log's wall-clock ms. Failures
     /// older than this belong to the previous session.
     pub(super) started_at: u64,
+    /// Consented recordings the window can stop or cancel.
+    pub(super) record: Option<Arc<crate::local_api::RecordSessions>>,
 }
 
 impl Runtime {
@@ -186,6 +189,30 @@ impl Runtime {
                 self.preparation.cancel();
             }
             Request::SwapModel => self.swap_model(),
+            Request::RecordControl { id, stop } => {
+                if let Some(record) = &self.record {
+                    if stop {
+                        record.stop(id);
+                    } else {
+                        record.cancel(id);
+                    }
+                }
+            }
+            Request::RevokePermission { id } => {
+                if let Some(record) = &self.record {
+                    record.revoke_permission(id);
+                }
+            }
+            Request::RevokeRecordGrant { id } => {
+                if let Some(record) = &self.record {
+                    record.revoke(id);
+                }
+            }
+            Request::Website { origin, action } => {
+                if let Some(record) = &self.record {
+                    record.website(&origin, action);
+                }
+            }
             Request::ReloadSettings => self.reload_settings(),
             Request::Desktop(_)
             | Request::CaptureShortcutFor(_)
@@ -491,6 +518,22 @@ impl Runtime {
             update_notes: UPDATER.get().and_then(crate::updater::Updater::notes),
             settings: self.settings.clone(),
             preparation,
+            record: self.record.as_ref().and_then(|record| record.view()),
+            permissions: self
+                .record
+                .as_ref()
+                .map(|r| r.permissions())
+                .unwrap_or_default(),
+            grants: self
+                .record
+                .as_ref()
+                .map(|record| record.grants())
+                .unwrap_or_default(),
+            websites: self
+                .record
+                .as_ref()
+                .map(|record| record.websites())
+                .unwrap_or_default(),
         }
     }
 }

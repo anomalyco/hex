@@ -1124,11 +1124,28 @@ pub(super) fn disclosure_link(
     open: bool,
     flip: impl Fn(&mut Ui) + 'static,
 ) -> El {
+    disclosure(p, key, label, None, open, flip)
+}
+
+/// A disclosure on the page's text edge: `label`, an optional count after
+/// it, and the arrow; `toggle` opens or closes what follows it.
+pub(super) fn disclosure(
+    p: Paint,
+    key: &str,
+    label: &str,
+    count: Option<usize>,
+    open: bool,
+    toggle: impl Fn(&mut Ui) + 'static,
+) -> El {
     let c = &p.k.c;
+    let said = match count {
+        Some(count) => format!("{label}, {count}"),
+        None => label.to_owned(),
+    };
     row()
         .key(key)
         .role("button")
-        .label(label)
+        .label(said)
         .expanded(open)
         .h(18.0)
         .px(6.0)
@@ -1141,13 +1158,20 @@ pub(super) fn disclosure_link(
         .press(c.pressed)
         .focusable(true)
         .focus_ring(2.0, 0.0, c.border_focus)
-        .on_press(flip)
+        .on_press(toggle)
         .child(
             text(label)
                 .key("title")
                 .font(p.k.ty.ui.lh(16.0))
                 .color(c.text_muted),
         )
+        .children(count.map(|count| {
+            text(count.to_string())
+                .key("count")
+                .font(p.k.ty.ui.lh(16.0))
+                .color(c.text_faint)
+                .ml(4.0)
+        }))
         .child(
             rune::icon(
                 if open {

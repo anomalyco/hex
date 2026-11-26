@@ -67,6 +67,27 @@ impl Backend {
                 self.chords = None;
                 Ok(())
             }
+            request @ (Request::RecordControl { .. }
+            | Request::RevokePermission { .. }
+            | Request::RevokeRecordGrant { .. }
+            | Request::Website { .. }) => {
+                let Some(record) = self.runtime.as_ref().map(RuntimeHandle::record) else {
+                    return Ok(());
+                };
+                // Stop transcribes and Cancel waits on the capture loop, so
+                // neither holds the window's thread.
+                let _ = std::thread::Builder::new()
+                    .name("hex-consent-request".into())
+                    .spawn(move || match request {
+                        Request::RecordControl { id, stop: true } => _ = record.stop(id),
+                        Request::RecordControl { id, stop: false } => record.cancel(id),
+                        Request::RevokePermission { id } => _ = record.revoke_permission(id),
+                        Request::RevokeRecordGrant { id } => _ = record.revoke(id),
+                        Request::Website { origin, action } => _ = record.website(&origin, action),
+                        _ => {}
+                    });
+                Ok(())
+            }
             request => match &self.runtime {
                 Some(runtime) => runtime.send(request),
                 None => Err(color_eyre::eyre::eyre!("Hex's runtime is not running")),
@@ -109,7 +130,9 @@ impl Backend {
     }
 
     pub(super) fn state(&self) -> Option<HostState> {
-        let published = self.runtime.as_ref()?.published()?;
+        let runtime = self.runtime.as_ref()?;
+        let published = runtime.published()?;
+        let record = runtime.record();
         Some(HostState {
             view: ServiceView {
                 listener: published.listener.clone(),
@@ -119,6 +142,10 @@ impl Backend {
                 update_notes: published.update_notes.clone(),
                 update_blocked: published.update_blocked,
                 editing: false,
+                record: record.view(),
+                permissions: record.permissions(),
+                grants: record.grants(),
+                websites: record.websites(),
             },
             settings: published.settings.clone(),
         })

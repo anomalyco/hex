@@ -246,6 +246,11 @@ pub(super) const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         output::trust_fixture(ui);
     }),
+    // The live recording card over General.
+    ("record-active", |ui| {
+        *ui = mac_fixture();
+        connected_apps::fixture::recording(ui);
+    }),
     ("output-empty", |ui| {
         *ui = portal_fixture();
         ui.pane = Pane::Output;
@@ -944,6 +949,44 @@ pub(super) const SCENES: &[Scene] = &[
         ui.settings.labs.screenshots = true;
         ui.lab_store.group = Some(crate::labs::Feature::Screenshots.group());
     }),
+    // Labs › Connected apps' card while on: its switch and summary; its
+    // settings are the Connected apps pane's.
+    ("mac-labs-connected-apps", |ui| {
+        labs_with_some_on(ui);
+        ui.settings.labs.connected_apps = true;
+        ui.settings.labs.connected_apps_websites = true;
+        ui.lab_store.search = rune::TextEdit::new("Connected apps".to_owned());
+        ui.lab_store.group = Some(crate::labs::Feature::ConnectedApps.group());
+    }),
+    // The Connected apps pane: two apps and two websites connected (one app
+    // allowed once), two websites asking, and the allowed and blocked
+    // websites folded away.
+    ("connected-apps", |ui| {
+        *ui = mac_fixture();
+        connected_apps::fixture::connected(ui);
+        ui.pane = Pane::ConnectedApps;
+    }),
+    // The same with the allowed and blocked websites unfolded.
+    ("connected-apps-lists", |ui| {
+        *ui = mac_fixture();
+        connected_apps::fixture::connected(ui);
+        ui.connected.unfold();
+        ui.pane = Pane::ConnectedApps;
+    }),
+    // Websites off: the lists hide, and the switch says why.
+    ("connected-apps-websites-off", |ui| {
+        *ui = mac_fixture();
+        connected_apps::fixture::connected(ui);
+        ui.settings.labs.connected_apps_websites = false;
+        ui.pane = Pane::ConnectedApps;
+    }),
+    // The pane with nothing connected and no website asking.
+    ("connected-apps-empty", |ui| {
+        *ui = mac_fixture();
+        ui.settings.labs.connected_apps = true;
+        ui.settings.labs.connected_apps_websites = true;
+        ui.pane = Pane::ConnectedApps;
+    }),
     // Labs › YOLO mode's card while on, limited to two apps.
     ("mac-labs-yolo-mode", |ui| {
         labs_with_some_on(ui);
@@ -1263,6 +1306,10 @@ pub(super) fn fixture(shortcuts: DesktopShortcuts) -> Ui {
         update_notes: None,
         update_blocked: None,
         editing: false,
+        record: None,
+        permissions: Vec::new(),
+        grants: Vec::new(),
+        websites: Default::default(),
     });
     ui
 }

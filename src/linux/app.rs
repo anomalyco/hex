@@ -12,7 +12,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -32,12 +32,16 @@ use crate::linux::service::{
     self as linux_service, Activation, Control, Published, ShortcutRoute, Status,
 };
 
+mod consent;
 mod control;
 mod host;
 mod model;
 mod save;
 use self::model::{PendingPreparation, TranscriptionPreparation};
 use self::save::{gnome_shortcuts_key, save_listening, save_with, settings_modified};
+mod request;
+use consent::Consent;
+pub(crate) use request::HostRequest;
 
 /// The host's refresh while it starts, stops, or prepares something.
 const REFRESH_INTERVAL: Duration = Duration::from_millis(20);
@@ -185,31 +189,6 @@ pub(crate) struct HostSnapshot {
     pub(crate) editing: bool,
 }
 
-/// What the window asks of the host. Settings edits go through
-/// [`HostHandle::save_settings`].
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum HostRequest {
-    Desktop(DesktopAction),
-    ReloadSettings,
-    /// Stops listening while the window records a shortcut.
-    CaptureShortcutFor(ShortcutTarget),
-    CancelShortcut,
-    /// The chord the window recorded, for the host to register and save.
-    SetShortcut {
-        target: ShortcutTarget,
-        shortcut: DesktopShortcut,
-    },
-    ChooseModel {
-        model: crate::transcription::models::TranscriptionModelId,
-        language: String,
-    },
-    CancelModel,
-    /// Labs › Model switch shortcut: swaps the dictation model with the saved
-    /// other one, through the same installed-only preparation as a picker
-    /// choice.
-    SwapModel,
-}
-
 struct Shared {
     host: Mutex<LinuxDesktopHost>,
     waker: Mutex<Option<Waker>>,
@@ -222,6 +201,9 @@ struct Shared {
     /// Why the window's app stopped, once it panicked (#979): the window
     /// and overlays are gone until Hex restarts.
     window_failure: Mutex<Option<String>>,
+    /// The permission window's asks and the recordings they allow, once
+    /// the local API serves them.
+    consent: OnceLock<Consent>,
     shutdown: &'static AtomicBool,
 }
 
@@ -241,6 +223,7 @@ impl HostHandle {
             refreshed_cv: Condvar::new(),
             window_visible: Mutex::new(None),
             window_failure: Mutex::new(None),
+            consent: OnceLock::new(),
             shutdown,
         }))
     }
@@ -293,6 +276,13 @@ impl HostHandle {
                     if !host.is_running() && host.status == ListenerStatus::Enabling {
                         host.status = ListenerStatus::ModelRequired;
                     }
+                    Ok(())
+                }
+                request @ (HostRequest::RecordControl { .. }
+                | HostRequest::RevokePermission { .. }
+                | HostRequest::RevokeRecordGrant { .. }
+                | HostRequest::Website { .. }) => {
+                    self.record_request(request);
                     Ok(())
                 }
             }
@@ -472,6 +462,9 @@ pub(crate) fn run(
     let (control_calls, control_receiver) = mpsc::sync_channel(8);
     let (dictation_controls, dictations) = mpsc::sync_channel(8);
     let processing = crate::dictation::modes::ProcessingState::from_settings(&launch.settings);
+    // A listed page's ask is answered in Hex's permission window, so the
+    // local API can wait on it without ever handing the page the API token.
+    let (consent, app_consent) = Consent::start(dictation_controls.clone());
     let local_api = crate::local_api::LocalApi::start_for_app(
         &event_path,
         control_calls,
@@ -479,6 +472,7 @@ pub(crate) fn run(
         Some(crate::local_api::Processing::installed(
             crate::local_api::processing::dictation_processor(processing.clone()),
         )),
+        Some(app_consent),
     );
     let enable_on_launch = launch.settings.enable_on_launch;
     let mut host = LinuxDesktopHost::new(
@@ -493,6 +487,7 @@ pub(crate) fn run(
         host.start();
     }
     let host = HostHandle::new(host, shutdown);
+    host.set_consent(consent);
     let session = linux_service::Session::current();
     let published = Arc::new(Published::default());
     *published.status.lock().unwrap() = Some(host.status(host.snapshot(), session.clone()));
@@ -572,6 +567,7 @@ fn run_window(
         Err(panic) => panic_reason(panic.as_ref()),
     };
     tracing::error!(%failed, "the Hex window failed; Hex keeps running without it");
+    host.consent_window_gone();
     // `hex window show` and `hex status` say so instead of reporting
     // a window that can no longer open (#979).
     host.window_failed(failed);

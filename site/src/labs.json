@@ -699,6 +699,19 @@
       "title": "Timestamps in API transcripts"
     },
     {
+      "added": "2026-11-19",
+      "group": "output",
+      "groupTitle": "Output",
+      "id": "connected-apps",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "Let apps and websites ask to use Hex's transcription and microphone",
+      "title": "Connected apps"
+    },
+    {
       "added": "2026-11-09",
       "group": "dictation",
       "groupTitle": "Dictation",

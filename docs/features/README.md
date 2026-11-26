@@ -2873,7 +2873,29 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 │   ├── ?process=global -> Global mode's output processing (Labs › Process API transcripts)
 │   └── ?timestamps=segment|word -> The model's own segment or word times
 │       └── 422 unsupported-timestamps when it has no such level (Labs › Timestamps in API transcripts)
-├── A web page's fetch -> Never allowed: no CORS, OPTIONS is 401
+├── A web page's fetch -> Never allowed: no CORS, OPTIONS is 401 (except Connected apps' own routes, below)
+├── An app or web page asks -> Labs › Connected apps
+│   ├── Lab off -> the routes answer as before; a pending dialog withdrawn, a live recording cancelled
+│   ├── Website, Allow websites to use Hex off -> 403 origin-not-allowed, no CORS, nothing listed
+│   ├── Unknown website -> 403 website-not-allowed + CORS, listed once under Asking to connect (Allow / Block)
+│   ├── Blocked website -> 403 website-blocked, never listed again (Unblock)
+│   ├── Who asks -> the window's identity card: icon, verified name (macOS bundle), identifier, how verified;
+│   │   a website's address, its favicon if it sent a valid data: URL (never fetched), its claimed name
+│   ├── Connected apps pane (sidebar, while on) -> Connected (Revoke), Websites switch, Asking to connect,
+│   │   Allowed and Blocked websites folded; names and icons kept with grants for offline display
+│   ├── POST /connect/authorize -> Hex's permission window asks; Allow Once or Always Allow -> code + PKCE
+│   │   ├── Deny, Escape, timeout -> 403, no code, and a 30 s cooldown for that recipient in both asks
+│   │   └── Code, then token: one plain POST /transcriptions from that origin, then spent
+│   │       └── No bearer token, microphone, /dictations, /streams, or /control (docs/connect.md)
+│   ├── POST /record/pair -> "Allow microphone recording?"
+│   │   ├── Web: allowed Origin; native: owner-only record.sock / pipe + OS-verified identity
+│   │   ├── Allow Once / Always Allow -> code, PKCE grant; Deny or no answer -> 403 + 30 s cooldown
+│   │   ├── One start (Once) or repeated starts (Always), each its own session
+│   │   ├── Runs while the client checks in (10 s lease, no length cap); card: elapsed, Stop recording / Cancel
+│   │   ├── Grant bound to Origin or native peer process; one session at a time
+│   │   ├── Revoke in Labs › Connected apps or POST /record/revoke ends it
+│   │   └── Transcript only: no raw audio, levels, partials, or other route
+│   └── CORS: any http(s) origin, on /connect/*, /record/*, and a grant's upload only
 ├── Running desktop capture API -> Separate microphone ownership protocol
 │   ├── No capture silence gate           // model output, unlike hotkey dictation;
 │   │   └── its whole-clip run still drops a Whisper clip's silent edges,
@@ -2940,6 +2962,62 @@ response unchanged; off, a timed request is `403 timestamps-disabled`, and a
 model without that native level is `422 unsupported-timestamps`. Nothing
 estimates the times, and `/streams` and `/dictations` are unchanged
 ([labs.md](labs.md), [service contract](../specs/local-transcription-service.md)).
+
+Browser connect and recording ([contract](../connect.md)) are the narrower
+asks of Labs › Connected apps (off by default, independent of Browser
+access): an app, or with Allow websites to use Hex a website the person
+allowed in the lab's card, calls
+`POST /connect/authorize` without the token, Hex's permission window (its own
+floating window on every OS, shown whether or not the main window is open, with
+both allows disabled for its first second and after every key; it takes the
+keyboard on every OS, and Wayland without layer-shell answers unavailable, its Labs card
+disabled with a note saying so) names its verified
+origin and offers Deny / Allow Once / Always Allow, and an allowed PKCE exchange mints one
+upload token that spends itself on one plain `POST /transcriptions` from the
+same origin. Codes and tokens expire in two minutes, a Deny or no answer
+starts a 30 s cooldown for that recipient in both asks, and the dialog is answered (Return and Escape deny) rather than
+dismissed. `local_api` tests cover the whole exchange, origin binding, one-use
+codes and tokens, expiry, the scope refusals, and deny/timeout. The window's
+rendering proof is the `consent_window` snapshot test and one Xvfb (X11) run
+of the Linux app ([connect.md](../connect.md#what-is-not-proven)); no real
+browser page was run. Its copy is translated like the rest of the window.
+
+The recording slice adds `POST /record/pair|token` plus a revocable
+`X-Hex-Record-Grant`, and per-recording `start` (grant) then
+`status|finish|cancel` (session token). Pairing asks once and starts nothing;
+each start mints a separate short-lived session, so an Always Allow client records
+again without another prompt until the grant is revoked in Labs › Connected
+apps or with `POST /record/revoke`. Web clients use an allowed Origin and the
+lab's own CORS on these routes; native clients (Electron main, Rune, Rust) use the owner-only
+`record.sock` (a named pipe on Windows), whose peer the OS names: on macOS
+the signing identifier and team `Security.framework` resolves from its audit
+token, on Linux its Flatpak or Snap app id or executable, on Windows its
+image's Authenticode publisher or path (docs/connect.md). Consent names that verified identity, the grant
+and its sessions are bound to it, and Hex's window shows a non-modal card with
+Stop recording and Cancel while it records. A recording has no length cap:
+it runs while the client checks in (`POST /record/heartbeat`, the 10 s
+dictation lease) and stops itself once the check-ins stop. Grant tokens are
+memory-only. Always Allow saves the capability and either a verified native
+identity or an origin plus a digest of the page's permission proof.
+Revoking in the Connected apps pane removes the permission across restarts.
+An unknown website gets no dialog; it is listed under Asking to connect for
+the person to Allow or Block, so with both switches on any website can ask
+to be let in. The permission window and the pane show a native app's icon
+and the name Hex derived from verified data (its bundle on macOS, its desktop
+entry on Linux, its version info on Windows; marked "Name not verified" when
+no signature backs it), and a website's favicon when
+the page sent a valid PNG or ICO `data:` URL with its ask; Hex never fetches
+one.
+Allow Once records one session and saves nothing. See the contract for the
+loopback Origin trust boundary and why a changed macOS binary asks again.
+`local_api` tests drive the whole exchange with a fake recording backend
+(never a microphone), including one prompt for repeated recordings, distinct
+sessions, revoke, the lease, deny, the one-session rule, and neither token's
+ability to reach any other route; one macOS test goes through the real socket
+and peer audit token, pairing, recording twice, and revoking, skipping when
+the test binary has no signing identity. Dialog, card, and revoke rows are
+snapshots only, no real recording or Electron process was run, and copy is
+English only.
 
 The [SDK guide](../../sdk/typescript/README.md),
 [service contract](../specs/local-transcription-service.md), and

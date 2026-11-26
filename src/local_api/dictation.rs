@@ -193,6 +193,105 @@ pub(in crate::local_api) fn start(
     )
 }
 
+/// One consented recording on Hex's own capture loop: the programmatic
+/// dictation `/dictations` already drives, with no client-facing audio.
+pub(in crate::local_api) struct DictationRecording {
+    control: Control,
+}
+
+impl DictationRecording {
+    pub(in crate::local_api) fn new(control: Control) -> Self {
+        Self { control }
+    }
+}
+
+impl super::record::Recording for DictationRecording {
+    fn start(&self) -> Result<super::record::Started, String> {
+        let owner = generate_token().map_err(|error| error.to_string())?;
+        // Nobody observes levels for a consented recording; the capture loop
+        // treats a dropped channel as an unobserved recording.
+        let (levels, _) = mpsc::sync_channel(1);
+        let started = call_recognition(
+            &self.control,
+            DEVELOPER_CONTROL_TIMEOUT,
+            HttpResponse::code(503, "capture-unavailable"),
+            |reply| DictationControl::Start {
+                source: "Consented recording".into(),
+                owner_token: owner.clone(),
+                levels,
+                partials: None,
+                reply,
+            },
+        )
+        .map_err(|response| format!("capture loop refused: {}", response.status))?;
+        Ok(super::record::Started {
+            id: started.id,
+            owner,
+        })
+    }
+
+    fn renew(&self, started: &super::record::Started) -> Result<(), String> {
+        match call_recognition(
+            &self.control,
+            DEVELOPER_CONTROL_TIMEOUT,
+            HttpResponse::code(503, "capture-unavailable"),
+            |reply| DictationControl::Heartbeat {
+                id: started.id,
+                owner_token: started.owner.clone(),
+                reply,
+            },
+        ) {
+            Ok(()) => Ok(()),
+            // The loop no longer has this recording.
+            Err(response) if response.status == 409 => {
+                Err(format!("capture loop refused: {}", response.status))
+            }
+            // A busy or slow loop: the next renewal comes well inside its lease.
+            Err(response) => {
+                tracing::debug!(
+                    status = response.status,
+                    "could not renew a consented recording yet"
+                );
+                Ok(())
+            }
+        }
+    }
+
+    fn finish(
+        &self,
+        started: &super::record::Started,
+    ) -> Result<super::record::Transcript, String> {
+        call_recognition(
+            &self.control,
+            DICTATION_CONTROL_TIMEOUT,
+            HttpResponse::code(504, "dictation-timeout"),
+            |reply| DictationControl::Finish {
+                id: started.id,
+                owner_token: started.owner.clone(),
+                reply,
+            },
+        )
+        .map(|result| super::record::Transcript {
+            text: result.transcript,
+            duration_ms: result.duration_ms,
+        })
+        .map_err(|response| format!("capture loop refused: {}", response.status))
+    }
+
+    fn cancel(&self, started: &super::record::Started) {
+        let _ = call_recognition(
+            &self.control,
+            DEVELOPER_CONTROL_TIMEOUT,
+            HttpResponse::code(503, "capture-unavailable"),
+            |reply| DictationControl::Cancel {
+                id: started.id,
+                owner_token: started.owner.clone(),
+                reply,
+            },
+        );
+    }
+}
+
 /// Sends one control to the capture loop and waits for its typed reply.
 /// A full control queue is `503 service-capture-busy`; a rejected control is
 /// `409` with the loop's code; `on_timeout` covers a silent loop.

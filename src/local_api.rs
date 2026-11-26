@@ -14,14 +14,40 @@ use serde::Serialize;
 use crate::app_settings::AppSettings;
 use crate::desktop::events::{EventLog, VoiceEvent, now_ms};
 
+mod access;
+mod connect;
+mod consent;
+mod consent_routes;
+mod control;
 mod dictation;
 mod discovery;
 mod http;
+pub(crate) mod icon;
+#[cfg(target_os = "macos")]
+mod mac_app;
 mod meeting_events;
+mod native;
+mod origin;
+pub(crate) mod permissions;
 pub(crate) mod processing;
+mod record;
 mod streams;
 pub(crate) mod timestamps;
 mod transcriptions;
+
+pub(crate) use access::{Access, AppConsent};
+pub(crate) use connect::Connect;
+pub(crate) use consent::{
+    Answer, ConsentGate, ConsentIcon, Intent, Prompt, Recipient, SandboxKind, Verification,
+};
+#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
+pub(crate) use permissions::Permissions;
+pub(crate) use permissions::View as PermissionView;
+pub(crate) use permissions::{Capability as PermissionCapability, WebsiteAction, Websites};
+pub(crate) use record::View as RecordView;
+pub(crate) use record::{
+    GrantView as RecordGrant, Phase as RecordPhase, Sessions as RecordSessions,
+};
 
 #[cfg(debug_assertions)]
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
@@ -32,10 +58,17 @@ pub(crate) use discovery::{Discovered, Endpoint, discover, error_code};
 pub use discovery::{ExitWatch, watch_running};
 pub use discovery::{call_control, running_pid};
 use http::*;
+use origin::CorsOrigin;
 pub use processing::Processing;
 pub use timestamps::Timestamps;
 use transcriptions::transcribe_audio;
 const API_VERSION: &str = "2";
+
+pub(crate) use native::socket_path as native_socket_path;
+/// The recording slice's app-facing names.
+#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
+pub(crate) use record::app_sessions as record_sessions;
+
 const LIVE_PROBE_TIMEOUT: Duration = Duration::from_millis(150);
 /// The longest the accept loop sleeps without a connection. Shutdown wakes
 /// it at once ([`wake_acceptor`]); this only bounds a shutdown whose wake
@@ -72,6 +105,7 @@ pub struct LocalApi {
     events: EventLog,
     stop_observed: Arc<AtomicBool>,
     transcription_service: Option<crate::transcription::service::TranscriptionService>,
+    native: Option<native::Listener>,
     _instance: Option<crate::desktop::instance::InstanceLock>,
 }
 
@@ -107,6 +141,14 @@ struct HttpContext {
     meeting_events: meeting_events::Source,
     processing: processing::Processing,
     timestamps: timestamps::Timestamps,
+    /// Labs › Connected apps, when this API serves its asks: the consent
+    /// routes' own CORS.
+    connected: Option<Access>,
+    /// Browser connect (Labs › Connected apps): a web page's
+    /// one-transcription ask. Absent without a window to ask.
+    connect: Option<connect::Connect>,
+    /// Consented one-recording sessions; absent without a capture loop.
+    record: Option<Arc<record::Sessions>>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -131,6 +173,8 @@ struct CapabilitiesResponse {
     output_processing: bool,
     developer_control: bool,
     control: bool,
+    /// The browser connect routes, with a window that can ask.
+    connect: bool,
 }
 
 /// Optional control channels the running app exposes through its local API.
@@ -153,6 +197,16 @@ pub struct LocalApiOptions {
     /// Where `/streams` finds its engine; the running app's shared engine
     /// when unset.
     pub(crate) stream_engine: Option<crate::transcription::stream::EngineSource>,
+    /// Browser connect (Labs › Connected apps): the window's
+    /// consent gate and one-use grants. `None` leaves the routes answering
+    /// `403 connect-unavailable`.
+    pub(crate) connect: Option<Connect>,
+    /// Consented one-recording sessions, when the app can record and ask.
+    pub(crate) record: Option<Arc<record::Sessions>>,
+    /// Where native clients' owner-only socket binds (on Windows, the file
+    /// that names their pipe); unset leaves them without one (the app sets
+    /// it; tests use a temporary path).
+    pub(crate) native_socket: Option<PathBuf>,
 }
 
 impl LocalApi {
@@ -176,7 +230,11 @@ impl LocalApi {
         control: SyncSender<crate::control::ControlCall>,
         dictation_control: Option<dictation::Control>,
         processing: Option<Processing>,
+        consent: Option<AppConsent>,
     ) -> Option<Self> {
+        let (connect, record) = consent.map_or((None, None), |consent| {
+            (Some(consent.connect), Some(consent.record))
+        });
         let started = EventLog::create(event_path)
             .map_err(Into::into)
             .and_then(|events| {
@@ -186,6 +244,9 @@ impl LocalApi {
                         control: Some(control),
                         dictation_control,
                         processing: processing.unwrap_or_default(),
+                        connect,
+                        record,
+                        native_socket: native_socket_path(),
                         ..Default::default()
                     },
                 )
@@ -267,6 +328,7 @@ impl LocalApi {
         let stop_observed = Arc::new(AtomicBool::new(false));
         let worker_stop_observed = stop_observed.clone();
         let unexpected_shutdown = worker_shutdown.clone();
+        let native_socket = options.native_socket.clone();
         let http_context = HttpContext {
             token: token.into(),
             health,
@@ -285,12 +347,24 @@ impl LocalApi {
             meeting_events,
             processing: options.processing,
             timestamps: options.timestamps,
+            connected: options
+                .connect
+                .as_ref()
+                .map(connect::Connect::access)
+                .or_else(|| options.record.as_ref().map(|record| record.access())),
+            connect: options.connect,
+            record: options.record,
         };
+        let http_context = Arc::new(http_context);
+        // Native recording clients get their own owner-only socket; it
+        // serves `/record/*` only and needs a capture loop to be useful.
+        let native =
+            native::start_if_configured(native_socket.as_deref(), &http_context, &shutdown);
         let (ready, readiness) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
             .name("local-api".into())
             .spawn(move || {
-                serve(listener, http_context, ready);
+                serve(listener, http_context.clone(), ready);
                 if !unexpected_shutdown.load(Ordering::Acquire) {
                     if let Some((path, document)) = worker_discovery {
                         remove_discovery_if_owned(&path, &document);
@@ -324,6 +398,7 @@ impl LocalApi {
             events,
             stop_observed,
             transcription_service: Some(transcription_service),
+            native,
             _instance: instance,
         })
     }
@@ -349,6 +424,9 @@ impl LocalApi {
         }
         self.shutdown.store(true, Ordering::Release);
         wake_acceptor(self.document.port);
+        if let Some(native) = self.native.take() {
+            native.shutdown();
+        }
         if worker.join().is_err() {
             tracing::error!("local API thread panicked during shutdown");
         }
@@ -449,11 +527,10 @@ fn observe_stopped(events: &EventLog, observed: &AtomicBool) {
     }
 }
 
-fn serve(listener: TcpListener, context: HttpContext, ready: mpsc::SyncSender<bool>) {
+fn serve(listener: TcpListener, context: Arc<HttpContext>, ready: mpsc::SyncSender<bool>) {
     let (connections, pending) = mpsc::sync_channel(CONNECTION_QUEUE_CAPACITY);
     let pending = Arc::new(Mutex::new(pending));
     let shutdown = context.shutdown.clone();
-    let context = Arc::new(context);
     let workers = (0..HTTP_WORKERS)
         .filter_map(|index| {
             let pending = pending.clone();
@@ -566,20 +643,28 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
             tracing::debug!(%error, "could not set local API write timeout");
             continue;
         }
-        let action = match read_request(&mut stream, &context.shutdown) {
+        let (action, cors) = match read_request(&mut stream, &context.shutdown) {
             Ok(request) => handle_request(request, &context),
-            Err(RequestReadError::TooLarge) => RequestAction::Respond(HttpResponse::empty(431)),
-            Err(RequestReadError::Invalid) => RequestAction::Respond(HttpResponse::empty(400)),
-            Err(RequestReadError::Deadline) => RequestAction::Respond(HttpResponse::empty(408)),
+            Err(RequestReadError::TooLarge) => {
+                (RequestAction::Respond(HttpResponse::empty(431)), None)
+            }
+            Err(RequestReadError::Invalid) => {
+                (RequestAction::Respond(HttpResponse::empty(400)), None)
+            }
+            Err(RequestReadError::Deadline) => {
+                (RequestAction::Respond(HttpResponse::empty(408)), None)
+            }
             Err(RequestReadError::Shutdown) => return,
             Err(RequestReadError::Io(error)) => {
                 tracing::debug!(%error, "local API client disconnected while sending a request");
                 continue;
             }
         };
+        // Only Labs › Connected apps' routes ever name an origin.
+        let cors = cors.as_ref();
         match action {
             RequestAction::Respond(response) => {
-                if let Err(error) = write_response(&mut stream, response) {
+                if let Err(error) = write_response_for(&mut stream, response, cors) {
                     tracing::debug!(%error, "local API client disconnected");
                 }
             }
@@ -614,7 +699,7 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                     &context,
                 );
                 if let Some(response) = response
-                    && let Err(error) = write_response(&mut stream, response)
+                    && let Err(error) = write_response_for(&mut stream, response, cors)
                 {
                     tracing::debug!(%error, "transcription client disconnected");
                 }
@@ -623,7 +708,7 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                 content_length,
                 body_prefix,
             } => {
-                let response = developer_control(
+                let response = control::developer_control(
                     &mut stream,
                     content_length,
                     body_prefix,
@@ -638,7 +723,7 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                 content_length,
                 body_prefix,
             } => {
-                let response = control(
+                let response = control::control(
                     &mut stream,
                     content_length,
                     body_prefix,
@@ -669,11 +754,43 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
             RequestAction::MeetingEvents(subscription) => {
                 meeting_events::stream(&mut stream, subscription, &context);
             }
+            RequestAction::Connect(call) => {
+                let response = match context.connect.as_ref() {
+                    Some(connect) => connect.respond(call, &mut stream, &context.shutdown),
+                    None => HttpResponse::code(403, "connect-unavailable"),
+                };
+                if let Err(error) = write_response_for(&mut stream, response, cors) {
+                    tracing::debug!(%error, "connect client disconnected");
+                }
+            }
+            RequestAction::Record(request) => {
+                let response = request.respond(&context, &mut stream, &context.shutdown);
+                if let Err(error) = write_response_for(&mut stream, response, cors) {
+                    tracing::debug!(%error, "record client disconnected");
+                }
+            }
         }
     }
 }
 
-fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction {
+/// Routes one request. Labs › Connected apps' routes come first, before the
+/// bearer token (`consent_routes`); only they ever name an origin.
+fn handle_request(
+    request: HttpRequest,
+    context: &HttpContext,
+) -> (RequestAction, Option<CorsOrigin>) {
+    let cors = consent_routes::cors(&request, context);
+    if let Some(preflight) = consent_routes::preflight(&request, cors.as_ref()) {
+        return (preflight, cors);
+    }
+    let request = match consent_routes::intercept(request, context) {
+        consent_routes::Intercepted::Action(action) => return (action, cors),
+        consent_routes::Intercepted::Pass(request) => request,
+    };
+    (route(request, context), cors)
+}
+
+fn route(request: HttpRequest, context: &HttpContext) -> RequestAction {
     let path = request.path.split('?').next().unwrap_or("/");
     if request.authorization.as_deref() != Some(&format!("Bearer {}", context.token)) {
         context
@@ -687,6 +804,7 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
             &context.transcription,
             &context.processing,
             &context.timestamps,
+            false,
         );
     }
     if request.method == "POST" && path == "/dev/control" {
@@ -754,6 +872,7 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
                 output_processing: context.processing.available(),
                 developer_control: context.developer_control.is_some(),
                 control: context.control.is_some(),
+                connect: context.connect.is_some(),
             },
         ),
         ("GET", "/profile/vitals") => match procwatch::snapshot() {
@@ -762,6 +881,7 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
                 reason: reason(200),
                 content_type: Some("application/json"),
                 body: snapshot.to_json().into_bytes(),
+                headers: Vec::new(),
             },
             None => HttpResponse::code(503, "vitals-unavailable"),
         },
@@ -802,21 +922,37 @@ fn transcription_action(
     transcription: &crate::transcription::service::TranscriptionServiceHandle,
     processing: &processing::Processing,
     timestamps: &timestamps::Timestamps,
+    connect_grant: bool,
 ) -> RequestAction {
-    let guard = match processing::wanted(&request.path) {
-        Ok(wanted) => match processing::gate(wanted, processing) {
-            Ok(guard) => guard,
-            Err(response) => return RequestAction::Respond(response),
-        },
-        Err(code) => return RequestAction::Respond(HttpResponse::code(400, code)),
-    };
-    let requested = match timestamps::requested(&request.path) {
-        Ok(requested) => requested,
-        Err(code) => return RequestAction::Respond(HttpResponse::code(400, code)),
-    };
-    if let Err(response) = timestamps::gate(requested, timestamps) {
+    // A browser connect grant is one plain transcription: no output
+    // processing, no timings, nothing beyond the upload and the model.
+    if connect_grant && let Some(response) = connect::connect_scope_refusal(&request.path) {
         return RequestAction::Respond(response);
     }
+    let guard = if connect_grant {
+        None
+    } else {
+        match processing::wanted(&request.path) {
+            Ok(wanted) => match processing::gate(wanted, processing) {
+                Ok(guard) => guard,
+                Err(response) => return RequestAction::Respond(response),
+            },
+            Err(code) => return RequestAction::Respond(HttpResponse::code(400, code)),
+        }
+    };
+    let requested = if connect_grant {
+        crate::transcription::transcript::TimestampLevel::None
+    } else {
+        let requested = match timestamps::requested(&request.path) {
+            Ok(requested) => requested,
+            Err(code) => return RequestAction::Respond(HttpResponse::code(400, code)),
+        };
+        if let Err(response) = timestamps::gate(requested, timestamps) {
+            return RequestAction::Respond(response);
+        }
+        requested
+    };
+
     if !request.has_content_type("audio/wav") {
         return RequestAction::Respond(HttpResponse::code(415, "unsupported-audio"));
     }
@@ -905,106 +1041,6 @@ fn dictation_path(path: &str) -> Option<(u64, &str)> {
     let id = parts.next()?.parse().ok()?;
     let action = parts.next()?;
     (parts.next().is_none()).then_some((id, action))
-}
-
-fn developer_control(
-    stream: &mut TcpStream,
-    content_length: usize,
-    mut body: Vec<u8>,
-    controls: Option<&SyncSender<crate::control::developer_control::DeveloperCall>>,
-    shutdown: &AtomicBool,
-) -> HttpResponse {
-    if let Err(error) = read_body_bounded(
-        stream,
-        content_length,
-        &mut body,
-        shutdown,
-        MAX_DEVELOPER_CONTROL_BYTES,
-        DEVELOPER_CONTROL_TIMEOUT,
-    ) {
-        return body_read_response(error);
-    }
-    let Ok(command) = serde_json::from_slice(&body) else {
-        return HttpResponse::code(400, "invalid-developer-command");
-    };
-    let Some(controls) = controls else {
-        return HttpResponse::code(404, "developer-control-unavailable");
-    };
-    let (reply, response) = mpsc::sync_channel(1);
-    match controls.try_send(crate::control::developer_control::DeveloperCall { command, reply }) {
-        Ok(()) => {}
-        Err(TrySendError::Full(_)) => {
-            return HttpResponse::code(503, "developer-control-busy");
-        }
-        Err(TrySendError::Disconnected(_)) => {
-            return HttpResponse::code(503, "developer-control-unavailable");
-        }
-    }
-    match response.recv_timeout(DEVELOPER_CONTROL_TIMEOUT) {
-        Ok(reply) => HttpResponse::json(200, &reply),
-        Err(RecvTimeoutError::Timeout) => HttpResponse::code(504, "developer-ui-timeout"),
-        Err(RecvTimeoutError::Disconnected) => {
-            HttpResponse::code(503, "developer-control-unavailable")
-        }
-    }
-}
-
-/// Hands one `hex` control request to the app and waits for its reply.
-/// Refusals travel as a 200 `ControlReply::Error`; an HTTP error means the
-/// request never reached the app.
-fn control(
-    stream: &mut TcpStream,
-    content_length: usize,
-    mut body: Vec<u8>,
-    controls: Option<&SyncSender<crate::control::ControlCall>>,
-    shutdown: &AtomicBool,
-) -> HttpResponse {
-    use crate::control::{ControlCall, ControlReply, ControlRequest, ControlResponse};
-
-    if let Err(error) = read_body_bounded(
-        stream,
-        content_length,
-        &mut body,
-        shutdown,
-        MAX_CONTROL_BYTES,
-        DEVELOPER_CONTROL_TIMEOUT,
-    ) {
-        return body_read_response(error);
-    }
-    let request = match serde_json::from_slice::<ControlRequest>(&body) {
-        Ok(request) => request,
-        // A newer `hex` may name a command this app doesn't know.
-        Err(_) => match serde_json::from_slice::<serde_json::Value>(&body)
-            .ok()
-            .and_then(|value| value.get("version")?.as_u64())
-        {
-            Some(version) if version != u64::from(crate::control::CONTROL_VERSION) => {
-                let error = crate::control::version_mismatch(version);
-                return HttpResponse::json(200, &ControlResponse::from(ControlReply::from(error)));
-            }
-            _ => return HttpResponse::code(400, "invalid-control-command"),
-        },
-    };
-    if let Err(error) = crate::control::check_version(&request) {
-        return HttpResponse::json(200, &ControlResponse::from(ControlReply::from(error)));
-    }
-    let Some(controls) = controls else {
-        return HttpResponse::code(404, "control-unavailable");
-    };
-    let deadline = request.command.deadline();
-    let (reply, response) = mpsc::sync_channel(1);
-    match controls.try_send(ControlCall { request, reply }) {
-        Ok(()) => {}
-        Err(TrySendError::Full(_)) => return HttpResponse::code(503, "control-busy"),
-        Err(TrySendError::Disconnected(_)) => {
-            return HttpResponse::code(503, "control-unavailable");
-        }
-    }
-    match response.recv_timeout(deadline) {
-        Ok(reply) => HttpResponse::json(200, &reply),
-        Err(RecvTimeoutError::Timeout) => HttpResponse::code(504, "control-timeout"),
-        Err(RecvTimeoutError::Disconnected) => HttpResponse::code(503, "control-unavailable"),
-    }
 }
 
 fn transcription_selection(
@@ -1347,6 +1383,10 @@ enum RequestAction {
     },
     Stream(streams::StreamAction),
     MeetingEvents(crate::meeting::finished_events::Subscription),
+    /// A browser page's connect request, answered after its body arrives.
+    Connect(connect::Call),
+    /// A consented-recording request, answered after its body arrives.
+    Record(record::Request),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1397,6 +1437,9 @@ mod tests {
 
     use super::*;
     use crate::dictation::service::DictationControl;
+
+    mod connected_apps;
+    mod requester_icons;
 
     static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
     /// How long a test waits on another thread before failing instead of hanging.
@@ -2068,13 +2111,19 @@ mod tests {
                 authorization: None,
                 dictation_token: None,
                 stream_token: None,
+                connect_token: None,
+                record_grant: None,
+                record_token: None,
                 content_type: Some("audio/webm".into()),
                 content_length: Some(10),
+                origin: None,
+                private_network: false,
                 body_prefix: Vec::new(),
             },
             &transcription,
             &Processing::default(),
             &Timestamps::default(),
+            false,
         );
         let RequestAction::Respond(response) = action else {
             panic!("unsupported audio must be rejected before upload");
@@ -2088,13 +2137,19 @@ mod tests {
                 authorization: None,
                 dictation_token: None,
                 stream_token: None,
+                connect_token: None,
+                record_grant: None,
+                record_token: None,
                 content_type: Some("audio/wav".into()),
                 content_length: Some(MAX_AUDIO_BYTES + 1),
+                origin: None,
+                private_network: false,
                 body_prefix: Vec::new(),
             },
             &transcription,
             &Processing::default(),
             &Timestamps::default(),
+            false,
         );
         let RequestAction::Respond(response) = action else {
             panic!("unsafe body size must be rejected before upload");
@@ -2126,16 +2181,24 @@ mod tests {
             meeting_events: meeting_events::Source::default(),
             processing: Processing::default(),
             timestamps: Timestamps::default(),
+            connected: None,
+            connect: None,
+            record: None,
         };
-        let action = handle_request(
+        let (action, _) = handle_request(
             HttpRequest {
                 method: "POST".into(),
                 path: "/models/parakeet_v2/prepare".into(),
                 authorization: Some("Bearer test-token".into()),
                 dictation_token: None,
                 stream_token: None,
+                connect_token: None,
+                record_grant: None,
+                record_token: None,
                 content_type: None,
                 content_length: None,
+                origin: None,
+                private_network: false,
                 body_prefix: Vec::new(),
             },
             &context,
@@ -2279,6 +2342,514 @@ mod tests {
         LocalApi::start_bound(None, Arc::new(test_health), events, options, None)
     }
 
+    fn on() -> bool {
+        true
+    }
+
+    /// Labs › Connected apps on, websites included.
+    fn connected() -> Access {
+        Access::gated(on, on)
+    }
+
+    /// `store` with `origins` allowed to ask in Labs › Connected apps.
+    fn allowing(store: Arc<Permissions>, origins: &[String]) -> Arc<Permissions> {
+        for origin in origins {
+            assert!(store.website_action(origin, WebsiteAction::Allow));
+        }
+        store
+    }
+
+    fn app_origin() -> Vec<String> {
+        vec!["https://app.example".to_owned()]
+    }
+
+    fn two_origins() -> Vec<String> {
+        vec![
+            "https://app.example".to_owned(),
+            "https://other.example".to_owned(),
+        ]
+    }
+
+    /// A consent gate with a fixed answer, remembering every ask.
+    struct ScriptedGate {
+        answer: Answer,
+        asked: Mutex<Vec<Prompt>>,
+    }
+
+    impl ScriptedGate {
+        fn new(answer: Answer) -> Arc<Self> {
+            Arc::new(Self {
+                answer,
+                asked: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn asks(&self) -> usize {
+            self.asked.lock().unwrap().len()
+        }
+
+        fn last_prompt(&self) -> Option<Prompt> {
+            self.asked.lock().unwrap().last().cloned()
+        }
+    }
+
+    impl ConsentGate for ScriptedGate {
+        fn ask(&self, prompt: &Prompt, _wait: Duration) -> Answer {
+            self.asked.lock().unwrap().push(prompt.clone());
+            self.answer
+        }
+    }
+
+    fn start_connect(
+        origins: fn() -> Vec<String>,
+        gate: Arc<dyn ConsentGate>,
+        timings: Option<(Duration, Duration, Duration, Duration)>,
+    ) -> LocalApi {
+        let directory = temp_directory();
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        // Labs › Connected apps on, with `origins` allowed to ask.
+        let store = allowing(
+            Permissions::new(Some(directory.join("permissions.json"))),
+            &origins(),
+        );
+        let connect = match timings {
+            Some((code, token, wait, cooldown)) => connect::Connect::with_timings(
+                connected(),
+                Some(gate),
+                store,
+                code,
+                token,
+                wait,
+                cooldown,
+            ),
+            None => connect::Connect::new(connected(), Some(gate), store),
+        };
+        start_unpublished(
+            events,
+            LocalApiOptions {
+                connect: Some(connect),
+                stream_engine: Some(crate::transcription::stream::tests::fake_source()),
+                ..LocalApiOptions::default()
+            },
+        )
+        .unwrap()
+    }
+
+    /// The RFC 7636 S256 example: verifier, and the challenge it hashes to.
+    const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    const CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+
+    /// A browser's JSON POST from `origin`, optionally with a connect token.
+    fn connect_post(port: u16, origin: &str, path: &str, body: &str) -> String {
+        connect_post_with(port, origin, path, None, "application/json", body)
+    }
+
+    fn connect_post_with(
+        port: u16,
+        origin: &str,
+        path: &str,
+        token: Option<&str>,
+        content_type: &str,
+        body: &str,
+    ) -> String {
+        let token = token.map_or_else(String::new, |token| {
+            format!("X-Hex-Connect-Token: {token}\r\n")
+        });
+        raw_request(
+            port,
+            &format!(
+                "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {origin}\r\n{token}Content-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            ),
+        )
+    }
+
+    /// One full consent, answered with `answer`, returning (port, code).
+    fn authorize(port: u16, origin: &str) -> String {
+        let response = connect_post(
+            port,
+            origin,
+            connect::AUTHORIZE_PATH,
+            &format!(
+                r#"{{"codeChallenge":"{CHALLENGE}","codeChallengeMethod":"S256","state":"s1","clientName":"Field Notes"}}"#
+            ),
+        );
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        serde_json::from_str::<serde_json::Value>(response_body(&response)).unwrap()["code"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    fn exchange(port: u16, origin: &str, code: &str) -> String {
+        connect_post(
+            port,
+            origin,
+            connect::TOKEN_PATH,
+            &format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#),
+        )
+    }
+
+    fn upload_token(response: &str) -> String {
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        serde_json::from_str::<serde_json::Value>(response_body(response)).unwrap()["audioToken"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    fn body_code(response: &str) -> String {
+        serde_json::from_str::<serde_json::Value>(response_body(response))
+            .unwrap()
+            .get("code")
+            .and_then(|code| code.as_str())
+            .unwrap_or_default()
+            .to_owned()
+    }
+
+    #[test]
+    fn an_allowed_page_trades_one_code_for_one_upload() {
+        let gate = ScriptedGate::new(Answer::Once);
+        let api = start_connect(app_origin, gate.clone(), None);
+        let port = api.document.port;
+
+        let response = connect_post(
+            port,
+            "https://app.example",
+            connect::AUTHORIZE_PATH,
+            &format!(
+                r#"{{"codeChallenge":"{CHALLENGE}","state":"s1","clientName":"Field Notes"}}"#
+            ),
+        );
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        assert!(
+            response.contains("Access-Control-Allow-Origin: https://app.example\r\n"),
+            "{response}"
+        );
+        let answered: serde_json::Value = serde_json::from_str(response_body(&response)).unwrap();
+        assert_eq!(answered["origin"], "https://app.example");
+        assert_eq!(answered["scope"], "transcription:transcribe");
+        assert_eq!(answered["state"], "s1");
+        let code = answered["code"].as_str().unwrap().to_owned();
+        // The dialog named the page and its verified origin.
+        let prompt = gate.last_prompt().unwrap();
+        assert_eq!(prompt.recipient.label(), "https://app.example");
+        assert_eq!(prompt.recipient.claimed_name(), Some("Field Notes"));
+        assert_eq!(prompt.intent, Intent::Transcribe);
+
+        let token = upload_token(&exchange(port, "https://app.example", &code));
+        // The code was spent by its exchange.
+        let reused = exchange(port, "https://app.example", &code);
+        assert!(reused.starts_with("HTTP/1.1 403"), "{reused}");
+        assert_eq!(body_code(&reused), "invalid-grant");
+
+        // The token reaches the transcription route (a non-WAV body is the
+        // route's own refusal, after auth), and only once.
+        let upload = connect_post_with(
+            port,
+            "https://app.example",
+            "/transcriptions",
+            Some(&token),
+            "audio/webm",
+            "not a wav",
+        );
+        assert!(upload.starts_with("HTTP/1.1 415"), "{upload}");
+        assert_eq!(body_code(&upload), "unsupported-audio");
+        let again = connect_post_with(
+            port,
+            "https://app.example",
+            "/transcriptions",
+            Some(&token),
+            "audio/webm",
+            "not a wav",
+        );
+        assert!(again.starts_with("HTTP/1.1 401"), "{again}");
+    }
+
+    #[test]
+    fn a_denied_page_gets_no_code_and_a_short_cooldown() {
+        let gate = ScriptedGate::new(Answer::Deny);
+        let api = start_connect(app_origin, gate.clone(), None);
+        let port = api.document.port;
+        let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
+        let denied = connect_post(port, "https://app.example", connect::AUTHORIZE_PATH, &body);
+        assert!(denied.starts_with("HTTP/1.1 403"), "{denied}");
+        assert_eq!(body_code(&denied), "consent-denied");
+        assert!(!denied.contains("hexc_"));
+
+        // The page may not reopen the dialog at once, and the gate was not
+        // asked a second time.
+        let cooled = connect_post(port, "https://app.example", connect::AUTHORIZE_PATH, &body);
+        assert!(cooled.starts_with("HTTP/1.1 429"), "{cooled}");
+        assert_eq!(body_code(&cooled), "consent-cooldown");
+        assert_eq!(gate.asks(), 1);
+    }
+
+    /// A page denied (or ignored) in one ask can't open the other at once:
+    /// the cooldown is per recipient, across transcription and recording.
+    #[test]
+    fn a_refused_page_cools_down_across_both_asks() {
+        for refusal in [Answer::Deny, Answer::Timeout] {
+            let gate = ScriptedGate::new(refusal);
+            let directory = temp_directory();
+            let store = allowing(
+                Permissions::new(Some(directory.join("permissions.json"))),
+                &app_origin(),
+            );
+            let sessions = Arc::new(record::Sessions::with_timings(
+                connected(),
+                Some(gate.clone()),
+                FakeRecording::with_text("unused"),
+                store.clone(),
+                record::Timings {
+                    cooldown: Duration::from_secs(30),
+                    ..record_timings()
+                },
+            ));
+            let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+            let api = start_unpublished(
+                events,
+                LocalApiOptions {
+                    connect: Some(Connect::new(connected(), Some(gate.clone()), store)),
+                    record: Some(sessions.clone()),
+                    stream_engine: Some(crate::transcription::stream::tests::fake_source()),
+                    ..LocalApiOptions::default()
+                },
+            )
+            .unwrap();
+            let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
+            let refused = connect_post(
+                api.document.port,
+                "https://app.example",
+                connect::AUTHORIZE_PATH,
+                &body,
+            );
+            assert!(refused.starts_with("HTTP/1.1 403"), "{refused}");
+            let paired = sessions.pair(
+                record::Channel::Web("https://app.example".into()),
+                body.as_bytes(),
+            );
+            assert_eq!(paired.status, 429, "{refusal:?}");
+            assert_eq!(gate.asks(), 1);
+        }
+    }
+
+    #[test]
+    fn an_unlisted_page_never_reaches_the_dialog() {
+        let gate = ScriptedGate::new(Answer::Once);
+        let api = start_connect(app_origin, gate.clone(), None);
+        let port = api.document.port;
+        let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
+        let other = connect_post(
+            port,
+            "https://other.example",
+            connect::AUTHORIZE_PATH,
+            &body,
+        );
+        // Labs › Connected apps lists it instead, and answers CORS so the
+        // page can read why.
+        assert!(other.starts_with("HTTP/1.1 403"), "{other}");
+        assert_eq!(body_code(&other), "website-not-allowed");
+        assert!(other.contains("Access-Control-Allow-Origin: https://other.example"));
+
+        // No Origin at all is not a browser page Hex knows.
+        let missing = raw_request(
+            port,
+            &format!(
+                "POST {} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                connect::AUTHORIZE_PATH,
+                body.len()
+            ),
+        );
+        assert!(missing.starts_with("HTTP/1.1 403"), "{missing}");
+        assert_eq!(body_code(&missing), "origin-not-allowed");
+        assert_eq!(gate.asks(), 0);
+    }
+
+    #[test]
+    fn only_a_browser_json_post_can_prompt() {
+        let gate = ScriptedGate::new(Answer::Once);
+        let api = start_connect(app_origin, gate.clone(), None);
+        let port = api.document.port;
+        let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
+        // A plain text body would skip the browser's preflight, so it is not
+        // a request this flow accepts.
+        let simple = connect_post_with(
+            port,
+            "https://app.example",
+            connect::AUTHORIZE_PATH,
+            None,
+            "text/plain",
+            &body,
+        );
+        assert!(simple.starts_with("HTTP/1.1 415"), "{simple}");
+        // A GET is not the exchange.
+        let get = raw_request(
+            port,
+            &format!(
+                "GET {} HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: https://app.example\r\nConnection: close\r\n\r\n",
+                connect::AUTHORIZE_PATH
+            ),
+        );
+        assert!(get.starts_with("HTTP/1.1 401"), "{get}");
+        // A challenge that is not a SHA-256 digest is refused before the
+        // dialog.
+        let bad = connect_post(
+            port,
+            "https://app.example",
+            connect::AUTHORIZE_PATH,
+            r#"{"codeChallenge":"not-a-digest"}"#,
+        );
+        assert!(bad.starts_with("HTTP/1.1 400"), "{bad}");
+        assert_eq!(gate.asks(), 0);
+    }
+
+    #[test]
+    fn a_code_is_bound_to_its_origin_and_its_verifier() {
+        let gate = ScriptedGate::new(Answer::Once);
+        let api = start_connect(two_origins, gate, None);
+        let port = api.document.port;
+        let code = authorize(port, "https://app.example");
+        let stolen = exchange(port, "https://other.example", &code);
+        assert!(stolen.starts_with("HTTP/1.1 403"), "{stolen}");
+        assert_eq!(body_code(&stolen), "invalid-grant");
+        // The failed exchange spent the code, so the real page cannot use it.
+        let spent = exchange(port, "https://app.example", &code);
+        assert_eq!(body_code(&spent), "invalid-grant");
+
+        let code = authorize(port, "https://app.example");
+        let wrong = connect_post(
+            port,
+            "https://app.example",
+            connect::TOKEN_PATH,
+            &format!(r#"{{"code":"{code}","codeVerifier":"{}"}}"#, "a".repeat(43)),
+        );
+        assert!(wrong.starts_with("HTTP/1.1 403"), "{wrong}");
+        assert_eq!(body_code(&wrong), "invalid-grant");
+    }
+
+    #[test]
+    fn expired_grants_are_refused() {
+        let gate = ScriptedGate::new(Answer::Once);
+        let api = start_connect(
+            app_origin,
+            gate.clone(),
+            Some((
+                Duration::ZERO,
+                Duration::from_secs(60),
+                Duration::from_secs(1),
+                Duration::ZERO,
+            )),
+        );
+        let port = api.document.port;
+        let code = authorize(port, "https://app.example");
+        let expired = exchange(port, "https://app.example", &code);
+        assert!(expired.starts_with("HTTP/1.1 403"), "{expired}");
+        assert_eq!(body_code(&expired), "invalid-grant");
+
+        // A token that expires at once cannot upload.
+        let api = start_connect(
+            app_origin,
+            gate,
+            Some((
+                Duration::from_secs(60),
+                Duration::ZERO,
+                Duration::from_secs(1),
+                Duration::ZERO,
+            )),
+        );
+        let port = api.document.port;
+        let code = authorize(port, "https://app.example");
+        let token = upload_token(&exchange(port, "https://app.example", &code));
+        let upload = connect_post_with(
+            port,
+            "https://app.example",
+            "/transcriptions",
+            Some(&token),
+            "audio/webm",
+            "not a wav",
+        );
+        assert!(upload.starts_with("HTTP/1.1 401"), "{upload}");
+    }
+
+    #[test]
+    fn an_upload_token_reaches_no_other_route_and_no_other_scope() {
+        let gate = ScriptedGate::new(Answer::Once);
+        let api = start_connect(app_origin, gate, None);
+        let port = api.document.port;
+        let code = authorize(port, "https://app.example");
+        let token = upload_token(&exchange(port, "https://app.example", &code));
+
+        for (method, path) in [
+            ("GET", "/health"),
+            ("GET", "/capabilities"),
+            ("POST", "/control"),
+            ("POST", "/dev/control"),
+            ("POST", "/dictations"),
+            ("POST", "/streams"),
+        ] {
+            let response = raw_request(
+                port,
+                &format!(
+                    "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: https://app.example\r\nX-Hex-Connect-Token: {token}\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+                ),
+            );
+            assert!(
+                response.starts_with("HTTP/1.1 401"),
+                "{method} {path}: {response}"
+            );
+        }
+
+        // Even the upload route refuses processing and timings: the grant is
+        // one plain transcript.
+        let scoped = connect_post_with(
+            port,
+            "https://app.example",
+            "/transcriptions?process=global",
+            Some(&token),
+            "audio/webm",
+            "not a wav",
+        );
+        assert!(scoped.starts_with("HTTP/1.1 403"), "{scoped}");
+        assert_eq!(body_code(&scoped), "connect-scope");
+
+        // A token tried from another origin is refused, and spent.
+        let code = authorize(port, "https://app.example");
+        let token = upload_token(&exchange(port, "https://app.example", &code));
+        let wrong_origin = connect_post_with(
+            port,
+            "https://other.example",
+            "/transcriptions",
+            Some(&token),
+            "audio/webm",
+            "not a wav",
+        );
+        assert!(wrong_origin.starts_with("HTTP/1.1 401"), "{wrong_origin}");
+        let spent = connect_post_with(
+            port,
+            "https://app.example",
+            "/transcriptions",
+            Some(&token),
+            "audio/webm",
+            "not a wav",
+        );
+        assert!(spent.starts_with("HTTP/1.1 401"), "{spent}");
+    }
+
+    #[test]
+    fn a_timed_out_ask_answers_without_a_code() {
+        let gate = ScriptedGate::new(Answer::Timeout);
+        let api = start_connect(app_origin, gate, None);
+        let response = connect_post(
+            api.document.port,
+            "https://app.example",
+            connect::AUTHORIZE_PATH,
+            &format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#),
+        );
+        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+        assert_eq!(body_code(&response), "consent-timeout");
+    }
+
     fn test_health() -> HealthResponse {
         HealthResponse {
             version: "test",
@@ -2371,14 +2942,1663 @@ mod tests {
         response.split_once("\r\n\r\n").unwrap().1
     }
 
+    /// A fresh, empty directory. Test runners such as nextest give each
+    /// test its own process, and an OS may reuse a finished test's process
+    /// id, so the id and counter alone can name a directory an earlier run
+    /// left files in.
     fn temp_directory() -> PathBuf {
         let path = std::env::temp_dir().join(format!(
             "hex-local-api-{}-{}",
             std::process::id(),
             NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
         ));
+        let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    // -----------------------------------------------------------------------
+    // Consented one-recording sessions
+
+    /// A recording backend that never touches a microphone.
+    #[derive(Default)]
+    struct FakeRecording {
+        starts: AtomicU64,
+        finishes: AtomicU64,
+        cancels: AtomicU64,
+        renews: AtomicU64,
+        /// The capture loop lost the recording (microphone gone).
+        lost: AtomicBool,
+        /// Finishing fails (the capture loop busy, or a timeout).
+        finish_fails: AtomicBool,
+        text: Mutex<String>,
+    }
+
+    impl FakeRecording {
+        fn with_text(text: &str) -> Arc<Self> {
+            Arc::new(Self {
+                text: Mutex::new(text.to_owned()),
+                ..Self::default()
+            })
+        }
+
+        fn starts(&self) -> u64 {
+            self.starts.load(Ordering::Acquire)
+        }
+
+        fn finishes(&self) -> u64 {
+            self.finishes.load(Ordering::Acquire)
+        }
+
+        fn cancels(&self) -> u64 {
+            self.cancels.load(Ordering::Acquire)
+        }
+
+        fn renews(&self) -> u64 {
+            self.renews.load(Ordering::Acquire)
+        }
+    }
+
+    impl record::Recording for FakeRecording {
+        fn start(&self) -> Result<record::Started, String> {
+            self.starts.fetch_add(1, Ordering::AcqRel);
+            Ok(record::Started {
+                id: 42,
+                owner: "owner".into(),
+            })
+        }
+
+        fn renew(&self, started: &record::Started) -> Result<(), String> {
+            assert_eq!(started.id, 42);
+            self.renews.fetch_add(1, Ordering::AcqRel);
+            if self.lost.load(Ordering::Acquire) {
+                Err("dictation-not-active".into())
+            } else {
+                Ok(())
+            }
+        }
+
+        fn finish(&self, started: &record::Started) -> Result<record::Transcript, String> {
+            assert_eq!(started.id, 42);
+            self.finishes.fetch_add(1, Ordering::AcqRel);
+            if self.finish_fails.load(Ordering::Acquire) {
+                return Err("service-capture-busy".into());
+            }
+            Ok(record::Transcript {
+                text: self.text.lock().unwrap().clone(),
+                duration_ms: 1234,
+            })
+        }
+
+        fn cancel(&self, started: &record::Started) {
+            assert_eq!(started.id, 42);
+            self.cancels.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    fn record_timings() -> record::Timings {
+        record::Timings {
+            code: Duration::from_secs(60),
+            lease: Duration::from_secs(60),
+            grace: Duration::from_secs(60),
+            prompt: Duration::from_secs(1),
+            cooldown: Duration::ZERO,
+        }
+    }
+
+    fn start_record_api(
+        gate: Arc<dyn ConsentGate>,
+        recording: Arc<dyn record::Recording>,
+        timings: record::Timings,
+    ) -> (LocalApi, Arc<record::Sessions>) {
+        let directory = temp_directory();
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        let sessions = Arc::new(record::Sessions::with_timings(
+            connected(),
+            Some(gate),
+            recording,
+            allowing(
+                Permissions::new(Some(directory.join("permissions.json"))),
+                &app_origin(),
+            ),
+            timings,
+        ));
+        let api = start_unpublished(
+            events,
+            LocalApiOptions {
+                record: Some(sessions.clone()),
+                stream_engine: Some(crate::transcription::stream::tests::fake_source()),
+                ..LocalApiOptions::default()
+            },
+        )
+        .unwrap();
+        (api, sessions)
+    }
+
+    /// One `/record` request: a JSON body for pairing/token, a bare request
+    /// for the grant and session actions.
+    fn record_request(
+        port: u16,
+        method: &str,
+        path: &str,
+        origin: &str,
+        grant: Option<&str>,
+        token: Option<&str>,
+        body: Option<&str>,
+    ) -> String {
+        let grant = grant.map_or_else(String::new, |grant| {
+            format!("X-Hex-Record-Grant: {grant}\r\n")
+        });
+        let token = token.map_or_else(String::new, |token| {
+            format!("X-Hex-Record-Token: {token}\r\n")
+        });
+        let (headers, body) = match body {
+            Some(body) => (
+                format!(
+                    "Content-Type: application/json\r\nContent-Length: {}\r\n",
+                    body.len()
+                ),
+                body,
+            ),
+            None => ("Content-Length: 0\r\n".to_owned(), ""),
+        };
+        raw_request(
+            port,
+            &format!(
+                "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {origin}\r\n{grant}{token}{headers}Connection: close\r\n\r\n{body}"
+            ),
+        )
+    }
+
+    /// A browser keeps the secret from its first Always Allow response. The
+    /// secret is scoped to this capability; normal requests still use PKCE.
+    fn web_consent(port: u16, origin: &str, path: &str, proof: Option<&str>) -> String {
+        connect_post(
+            port,
+            origin,
+            path,
+            &serde_json::json!({"codeChallenge": CHALLENGE, "state":"r1", "permissionProof":proof})
+                .to_string(),
+        )
+    }
+
+    fn consent_json(response: &str) -> serde_json::Value {
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        serde_json::from_str(response_body(response)).unwrap()
+    }
+
+    fn record_pair(port: u16, origin: &str) -> String {
+        consent_json(&web_consent(port, origin, record::PAIR_PATH, None))["code"]
+            .as_str()
+            .unwrap()
+            .into()
+    }
+
+    /// `POST /record/token`: the pairing code for a grant token.
+    fn record_grant(port: u16, origin: &str, code: &str) -> (String, u64) {
+        let body = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
+        let response = record_request(
+            port,
+            "POST",
+            record::TOKEN_PATH,
+            origin,
+            None,
+            None,
+            Some(&body),
+        );
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        let value: serde_json::Value = serde_json::from_str(response_body(&response)).unwrap();
+        (
+            value["grantToken"].as_str().unwrap().to_owned(),
+            value["grantId"].as_u64().unwrap(),
+        )
+    }
+
+    /// `POST /record/start`: one recording session under a grant.
+    fn record_start(port: u16, origin: &str, grant: &str) -> (String, u64, String) {
+        let response = record_request(
+            port,
+            "POST",
+            record::START_PATH,
+            origin,
+            Some(grant),
+            None,
+            None,
+        );
+        assert!(response.starts_with("HTTP/1.1 201"), "{response}");
+        let value: serde_json::Value = serde_json::from_str(response_body(&response)).unwrap();
+        (
+            value["sessionToken"].as_str().unwrap().to_owned(),
+            value["id"].as_u64().unwrap(),
+            value["state"].as_str().unwrap().to_owned(),
+        )
+    }
+
+    #[test]
+    fn allow_once_recording_is_spent_and_never_saved() {
+        let gate = ScriptedGate::new(Answer::Once);
+        let recording = FakeRecording::with_text("only once");
+        let (api, sessions) = start_record_api(gate.clone(), recording.clone(), record_timings());
+        let port = api.document.port;
+        let origin = "https://app.example";
+        let grant = record_grant(port, origin, &record_pair(port, origin)).0;
+        let session = record_start(port, origin, &grant).0;
+        assert!(
+            record_request(
+                port,
+                "POST",
+                record::FINISH_PATH,
+                origin,
+                None,
+                Some(&session),
+                None
+            )
+            .starts_with("HTTP/1.1 200")
+        );
+        assert!(
+            record_request(
+                port,
+                "POST",
+                record::START_PATH,
+                origin,
+                Some(&grant),
+                None,
+                None
+            )
+            .starts_with("HTTP/1.1 401")
+        );
+        assert_eq!(recording.starts(), 1);
+        assert!(sessions.permissions().is_empty());
+        record_pair(port, origin);
+        assert_eq!(gate.asks(), 2);
+    }
+
+    #[test]
+    fn always_survives_restart_and_revoking_one_capability_preserves_the_other() {
+        let directory = temp_directory();
+        let path = directory.join("permissions.json");
+        let gate = ScriptedGate::new(Answer::Always);
+        let recording = FakeRecording::with_text("saved");
+        let start = || {
+            let store = allowing(Permissions::new(Some(path.clone())), &app_origin());
+            let sessions = Arc::new(record::Sessions::with_timings(
+                connected(),
+                Some(gate.clone()),
+                recording.clone(),
+                store.clone(),
+                record_timings(),
+            ));
+            let api = start_unpublished(
+                EventLog::create(&temp_directory().join("events.ndjson")).unwrap(),
+                LocalApiOptions {
+                    connect: Some(Connect::new(connected(), Some(gate.clone()), store)),
+                    record: Some(sessions.clone()),
+                    ..LocalApiOptions::default()
+                },
+            )
+            .unwrap();
+            (api, sessions)
+        };
+        let origin = "https://app.example";
+        let (audio_proof, mic_proof);
+        {
+            let (api, _) = start();
+            let proof = |path| {
+                consent_json(&web_consent(api.document.port, origin, path, None))["permissionProof"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            };
+            audio_proof = proof(connect::AUTHORIZE_PATH);
+            mic_proof = proof(record::PAIR_PATH);
+            assert_eq!(recording.starts(), 0);
+            assert_eq!(gate.asks(), 2);
+        }
+        {
+            let (api, sessions) = start();
+            let port = api.document.port;
+            for (path, wrong) in [
+                (record::PAIR_PATH, &audio_proof),
+                (connect::AUTHORIZE_PATH, &mic_proof),
+            ] {
+                for proof in [None, Some(wrong.as_str())] {
+                    assert_eq!(
+                        body_code(&web_consent(port, origin, path, proof)),
+                        "permission-proof-required"
+                    );
+                }
+            }
+            let code_for = |path, proof: &str| {
+                consent_json(&web_consent(port, origin, path, Some(proof)))["code"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            };
+            let code = code_for(connect::AUTHORIZE_PATH, &audio_proof);
+            let token = upload_token(&exchange(
+                port,
+                origin,
+                &code_for(connect::AUTHORIZE_PATH, &audio_proof),
+            ));
+            let grant = record_grant(port, origin, &code_for(record::PAIR_PATH, &mic_proof)).0;
+            record_start(port, origin, &grant);
+            assert_eq!(gate.asks(), 2);
+            for p in sessions.permissions() {
+                if p.capability == PermissionCapability::MicrophoneRecording {
+                    assert!(sessions.revoke_permission(p.id));
+                }
+            }
+            assert_eq!(recording.cancels(), 1);
+            assert!(
+                record_request(
+                    port,
+                    "POST",
+                    record::START_PATH,
+                    origin,
+                    Some(&grant),
+                    None,
+                    None
+                )
+                .starts_with("HTTP/1.1 401")
+            );
+            code_for(connect::AUTHORIZE_PATH, &audio_proof);
+            assert_eq!(gate.asks(), 2);
+            let perms = sessions.permissions();
+            assert_eq!(perms.len(), 1);
+            assert!(sessions.revoke_permission(perms[0].id));
+            assert!(exchange(port, origin, &code).starts_with("HTTP/1.1 403"));
+            assert!(
+                connect_post_with(
+                    port,
+                    origin,
+                    "/transcriptions",
+                    Some(&token),
+                    "audio/wav",
+                    "x"
+                )
+                .starts_with("HTTP/1.1 401")
+            );
+        }
+        let (api, sessions) = start();
+        assert!(sessions.permissions().is_empty());
+        authorize(api.document.port, origin);
+        record_pair(api.document.port, origin);
+        assert_eq!(gate.asks(), 4);
+    }
+
+    #[test]
+    fn pairing_once_allows_repeated_distinct_recordings() {
+        let gate = ScriptedGate::new(Answer::Always);
+        let recording = FakeRecording::with_text("the paired words");
+        let (api, sessions) = start_record_api(gate.clone(), recording.clone(), record_timings());
+        let port = api.document.port;
+        let origin = "https://app.example";
+
+        let code = record_pair(port, origin);
+        let prompt = gate.last_prompt().unwrap();
+        assert_eq!(prompt.intent, Intent::Record);
+        assert_eq!(prompt.recipient.label(), origin);
+        // Pairing asks once and starts nothing.
+        assert_eq!(recording.starts(), 0);
+        assert_eq!(gate.asks(), 1);
+
+        let (grant, grant_id) = record_grant(port, origin, &code);
+        assert_eq!(grant_id, 1);
+        assert_eq!(sessions.grants().len(), 1);
+        assert_eq!(sessions.grants()[0].id, grant_id);
+        assert_eq!(recording.starts(), 0);
+        // Pairing the same verified recipient again is refused, not asked.
+        let again = record_request(
+            port,
+            "POST",
+            record::PAIR_PATH,
+            origin,
+            None,
+            None,
+            Some(&format!(
+                r#"{{"codeChallenge":"{CHALLENGE}","codeChallengeMethod":"S256"}}"#
+            )),
+        );
+        assert!(again.starts_with("HTTP/1.1 409"), "{again}");
+        assert_eq!(body_code(&again), "already-paired");
+        assert_eq!(gate.asks(), 1);
+
+        let (first, first_id, state) = record_start(port, origin, &grant);
+        assert_eq!(state, "recording");
+        assert_eq!(recording.starts(), 1);
+
+        let status = record_request(
+            port,
+            "GET",
+            record::STATUS_PATH,
+            origin,
+            None,
+            Some(&first),
+            None,
+        );
+        assert!(status.starts_with("HTTP/1.1 200"), "{status}");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(response_body(&status)).unwrap()["state"],
+            "recording"
+        );
+
+        let finished = record_request(
+            port,
+            "POST",
+            record::FINISH_PATH,
+            origin,
+            None,
+            Some(&first),
+            None,
+        );
+        assert!(finished.starts_with("HTTP/1.1 200"), "{finished}");
+        let body: serde_json::Value = serde_json::from_str(response_body(&finished)).unwrap();
+        assert_eq!(body["transcript"], "the paired words");
+        assert_eq!(body["durationMs"], 1234);
+        assert_eq!(recording.finishes(), 1);
+
+        // The transcript is handed over once.
+        let repeated = record_request(
+            port,
+            "POST",
+            record::FINISH_PATH,
+            origin,
+            None,
+            Some(&first),
+            None,
+        );
+        assert!(repeated.starts_with("HTTP/1.1 409"), "{repeated}");
+        assert_eq!(body_code(&repeated), "session-finished");
+
+        // The same grant opens another, distinct recording without asking
+        // again.
+        let (second, second_id, _) = record_start(port, origin, &grant);
+        assert_ne!(second, first);
+        assert_ne!(second_id, first_id);
+        assert_eq!(recording.starts(), 2);
+        let finished = record_request(
+            port,
+            "POST",
+            record::FINISH_PATH,
+            origin,
+            None,
+            Some(&second),
+            None,
+        );
+        assert!(finished.starts_with("HTTP/1.1 200"), "{finished}");
+        assert_eq!(recording.finishes(), 2);
+        assert_eq!(gate.asks(), 1);
+    }
+
+    #[test]
+    fn revoking_a_grant_ends_its_session_and_further_starts() {
+        let gate = ScriptedGate::new(Answer::Always);
+        let recording = FakeRecording::with_text("revoked words");
+        let (api, sessions) = start_record_api(gate.clone(), recording.clone(), record_timings());
+        let port = api.document.port;
+        let origin = "https://app.example";
+
+        let code = record_pair(port, origin);
+        let (grant, _) = record_grant(port, origin, &code);
+        let (session, _, _) = record_start(port, origin, &grant);
+        assert_eq!(
+            sessions.view().map(|view| view.phase),
+            Some(record::Phase::Recording)
+        );
+
+        let revoked = record_request(
+            port,
+            "POST",
+            record::REVOKE_PATH,
+            origin,
+            Some(&grant),
+            None,
+            None,
+        );
+        assert!(revoked.starts_with("HTTP/1.1 204"), "{revoked}");
+        assert_eq!(recording.cancels(), 1);
+        assert!(sessions.grants().is_empty());
+        assert!(sessions.view().is_none());
+
+        // The live session is cancelled and the grant opens nothing more.
+        let cancelled = record_request(
+            port,
+            "GET",
+            record::STATUS_PATH,
+            origin,
+            None,
+            Some(&session),
+            None,
+        );
+        assert!(cancelled.starts_with("HTTP/1.1 200"), "{cancelled}");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(response_body(&cancelled)).unwrap()["state"],
+            "cancelled"
+        );
+        let start = record_request(
+            port,
+            "POST",
+            record::START_PATH,
+            origin,
+            Some(&grant),
+            None,
+            None,
+        );
+        assert!(start.starts_with("HTTP/1.1 401"), "{start}");
+        let again = record_request(
+            port,
+            "POST",
+            record::REVOKE_PATH,
+            origin,
+            Some(&grant),
+            None,
+            None,
+        );
+        assert!(again.starts_with("HTTP/1.1 401"), "{again}");
+
+        // Revoking lets the recipient pair again, with a fresh prompt.
+        let code = record_pair(port, origin);
+        let (grant, _) = record_grant(port, origin, &code);
+        let (_, _, _) = record_start(port, origin, &grant);
+        assert_eq!(gate.asks(), 2);
+        assert_eq!(recording.starts(), 2);
+    }
+
+    #[test]
+    fn revoking_drops_pairing_codes_issued_before_it() {
+        let gate = ScriptedGate::new(Answer::Always);
+        let recording = FakeRecording::with_text("codes");
+        let (api, _sessions) = start_record_api(gate, recording, record_timings());
+        let port = api.document.port;
+        let origin = "https://app.example";
+
+        // Two allowed asks arrive before either is exchanged; the first
+        // becomes the grant.
+        let paired = consent_json(&web_consent(port, origin, record::PAIR_PATH, None));
+        let first = paired["code"].as_str().unwrap().to_owned();
+        let second = consent_json(&web_consent(
+            port,
+            origin,
+            record::PAIR_PATH,
+            paired["permissionProof"].as_str(),
+        ))["code"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let (grant, _) = record_grant(port, origin, &first);
+        let revoked = record_request(
+            port,
+            "POST",
+            record::REVOKE_PATH,
+            origin,
+            Some(&grant),
+            None,
+            None,
+        );
+        assert!(revoked.starts_with("HTTP/1.1 204"), "{revoked}");
+
+        // The code that was still outstanding cannot pair the same
+        // recipient behind the person's back.
+        let body = format!(r#"{{"code":"{second}","codeVerifier":"{VERIFIER}"}}"#);
+        let late = record_request(
+            port,
+            "POST",
+            record::TOKEN_PATH,
+            origin,
+            None,
+            None,
+            Some(&body),
+        );
+        assert!(late.starts_with("HTTP/1.1 403"), "{late}");
+        assert_eq!(body_code(&late), "invalid-grant");
+    }
+
+    #[test]
+    fn a_denied_pairing_never_pairs_and_cools_down() {
+        let gate = ScriptedGate::new(Answer::Deny);
+        let recording = FakeRecording::with_text("never");
+        let mut timings = record_timings();
+        timings.cooldown = Duration::from_secs(30);
+        let (api, sessions) = start_record_api(gate.clone(), recording.clone(), timings);
+        let port = api.document.port;
+        let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
+        let denied = record_request(
+            port,
+            "POST",
+            record::PAIR_PATH,
+            "https://app.example",
+            None,
+            None,
+            Some(&body),
+        );
+        assert!(denied.starts_with("HTTP/1.1 403"), "{denied}");
+        assert_eq!(body_code(&denied), "consent-denied");
+        assert_eq!(recording.starts(), 0);
+        assert!(sessions.grants().is_empty());
+
+        let cooled = record_request(
+            port,
+            "POST",
+            record::PAIR_PATH,
+            "https://app.example",
+            None,
+            None,
+            Some(&body),
+        );
+        assert!(cooled.starts_with("HTTP/1.1 429"), "{cooled}");
+        assert_eq!(gate.asks(), 1);
+    }
+
+    #[test]
+    fn a_grant_and_session_reach_no_other_route_and_no_other_origin() {
+        let gate = ScriptedGate::new(Answer::Always);
+        let recording = FakeRecording::with_text("private words");
+        let (api, _sessions) = start_record_api(gate, recording, record_timings());
+        let port = api.document.port;
+        let origin = "https://app.example";
+        let code = record_pair(port, origin);
+        let (grant, _) = record_grant(port, origin, &code);
+        let (session, _, _) = record_start(port, origin, &grant);
+
+        for (method, path) in [
+            ("GET", "/health"),
+            ("GET", "/capabilities"),
+            ("POST", "/control"),
+            ("POST", "/dev/control"),
+            ("POST", "/dictations"),
+            ("POST", "/transcriptions"),
+            ("GET", "/record/audio"),
+            ("GET", "/record/levels"),
+        ] {
+            let response = record_request(
+                port,
+                method,
+                path,
+                origin,
+                Some(&grant),
+                Some(&session),
+                None,
+            );
+            assert!(
+                !response.starts_with("HTTP/1.1 200") && !response.starts_with("HTTP/1.1 201"),
+                "{method} {path}: {response}"
+            );
+        }
+
+        // Neither token crosses to another origin.
+        for (grant_header, session_header) in
+            [(Some(grant.as_str()), None), (None, Some(session.as_str()))]
+        {
+            let stolen = record_request(
+                port,
+                "POST",
+                record::START_PATH,
+                "https://other.example",
+                grant_header,
+                session_header,
+                None,
+            );
+            assert!(stolen.starts_with("HTTP/1.1 401"), "{stolen}");
+        }
+        let right = record_request(
+            port,
+            "POST",
+            record::START_PATH,
+            origin,
+            Some(&grant),
+            None,
+            None,
+        );
+        // The first session is still open, so a second is refused; the grant
+        // itself is accepted.
+        assert!(right.starts_with("HTTP/1.1 409"), "{right}");
+        assert_eq!(body_code(&right), "session-busy");
+    }
+
+    #[test]
+    fn a_recording_stops_when_its_client_never_checks_in() {
+        let gate = ScriptedGate::new(Answer::Always);
+        let recording = FakeRecording::with_text("lease words");
+        let mut timings = record_timings();
+        timings.lease = Duration::from_millis(60);
+        timings.grace = Duration::from_millis(60);
+        let (api, sessions) = start_record_api(gate, recording.clone(), timings);
+        let port = api.document.port;
+        let origin = "https://app.example";
+        let code = record_pair(port, origin);
+        let (grant, _) = record_grant(port, origin, &code);
+        let (session, id, _) = record_start(port, origin, &grant);
+        // The lease stops the recording on its own.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while recording.finishes() == 0 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(recording.finishes(), 1);
+        assert_eq!(
+            sessions.view().map(|view| (view.id, view.phase)),
+            Some((id, record::Phase::Stopped))
+        );
+        // The client can still collect the transcript inside the grace.
+        let finished = record_request(
+            port,
+            "POST",
+            record::FINISH_PATH,
+            origin,
+            None,
+            Some(&session),
+            None,
+        );
+        assert!(finished.starts_with("HTTP/1.1 200"), "{finished}");
+        assert_eq!(recording.cancels(), 0);
+    }
+
+    /// `POST /record/heartbeat` with a session token.
+    fn record_heartbeat(port: u16, origin: &str, token: &str) -> String {
+        record_request(
+            port,
+            "POST",
+            record::HEARTBEAT_PATH,
+            origin,
+            None,
+            Some(token),
+            None,
+        )
+    }
+
+    fn wait_for(mut done: impl FnMut() -> bool) {
+        let deadline = Instant::now() + TEST_WAIT;
+        while !done() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(done(), "timed out");
+    }
+
+    fn lease_timings(lease_ms: u64) -> record::Timings {
+        let mut timings = record_timings();
+        timings.lease = Duration::from_millis(lease_ms);
+        timings
+    }
+
+    /// A recording has no length of its own: one that keeps checking in runs
+    /// for many leases (accelerated here; the real lease is 10 s, so this is
+    /// the old two-minute cap many times over in lease terms), and Hex keeps
+    /// the capture loop's own lease alive the whole time.
+    #[test]
+    fn a_recording_runs_for_as_long_as_its_client_checks_in() {
+        let gate = ScriptedGate::new(Answer::Always);
+        let recording = FakeRecording::with_text("a long talk");
+        let lease = 400;
+        let (api, sessions) = start_record_api(gate, recording.clone(), lease_timings(lease));
+        let port = api.document.port;
+        let origin = "https://app.example";
+        let (grant, _) = record_grant(port, origin, &record_pair(port, origin));
+        let (session, id, _) = record_start(port, origin, &grant);
+        let began = Instant::now();
+        while began.elapsed() < Duration::from_millis(lease * 12) {
+            let beat = record_heartbeat(port, origin, &session);
+            assert!(beat.starts_with("HTTP/1.1 204"), "{beat}");
+            thread::sleep(Duration::from_millis(lease / 8));
+        }
+        let view = sessions.view().unwrap();
+        assert_eq!((view.id, view.phase), (id, record::Phase::Recording));
+        assert!(view.elapsed_ms >= lease * 12, "{}", view.elapsed_ms);
+        assert!(recording.renews() >= 12, "{}", recording.renews());
+        assert_eq!(recording.finishes() + recording.cancels(), 0);
+        let status = record_request(
+            port,
+            "GET",
+            record::STATUS_PATH,
+            origin,
+            None,
+            Some(&session),
+            None,
+        );
+        let status: serde_json::Value = serde_json::from_str(response_body(&status)).unwrap();
+        assert_eq!(status["state"], "recording");
+        assert_eq!(status["leaseMs"], lease);
+        assert!(status.get("maxRecordingMs").is_none());
+
+        let finished = record_request(
+            port,
+            "POST",
+            record::FINISH_PATH,
+            origin,
+            None,
+            Some(&session),
+            None,
+        );
+        assert!(finished.starts_with("HTTP/1.1 200"), "{finished}");
+        assert!(finished.contains("a long talk"));
+    }
+
+    /// The real lease, past the old two-minute cap, in real time. Slow, so
+    /// it runs by name, outside nextest's hang guard:
+    /// `cargo test --bin hex -- --ignored --exact local_api::tests::a_checked_in_recording_runs_past_two_minutes`.
+    #[test]
+    #[ignore = "runs for two minutes"]
+    fn a_checked_in_recording_runs_past_two_minutes() {
+        let gate = ScriptedGate::new(Answer::Always);
+        let recording = FakeRecording::with_text("still going");
+        let mut timings = record_timings();
+        timings.lease = record::LEASE;
+        let (api, sessions) = start_record_api(gate, recording.clone(), timings);
+        let port = api.document.port;
+        let origin = "https://app.example";
+        let (grant, _) = record_grant(port, origin, &record_pair(port, origin));
+        let (session, _, _) = record_start(port, origin, &grant);
+        let began = Instant::now();
+        while began.elapsed() < Duration::from_secs(125) {
+            let beat = record_heartbeat(port, origin, &session);
+            assert!(beat.starts_with("HTTP/1.1 204"), "{beat}");
+            thread::sleep(Duration::from_secs(3));
+        }
+        assert_eq!(sessions.view().unwrap().phase, record::Phase::Recording);
+        assert_eq!(recording.finishes() + recording.cancels(), 0);
+        let finished = record_request(
+            port,
+            "POST",
+            record::FINISH_PATH,
+            origin,
+            None,
+            Some(&session),
+            None,
+        );
+        assert!(finished.contains("still going"), "{finished}");
+    }
+
+    /// A check-in after the lease lapsed is refused: the recording stayed
+    /// stopped, and its transcript is still the client's within the grace.
+    #[test]
+    fn a_late_check_in_never_revives_a_recording() {
+        let gate = ScriptedGate::new(Answer::Always);
+        let recording = FakeRecording::with_text("cut short");
+        let (api, sessions) = start_record_api(gate, recording.clone(), lease_timings(60));
+        let port = api.document.port;
+        let origin = "https://app.example";
+        let (grant, _) = record_grant(port, origin, &record_pair(port, origin));
+        let (session, _, _) = record_start(port, origin, &grant);
+        thread::sleep(Duration::from_millis(150));
+        let late = record_heartbeat(port, origin, &session);
+        assert!(late.starts_with("HTTP/1.1 409"), "{late}");
+        assert_eq!(body_code(&late), "stopped");
+        wait_for(|| recording.finishes() == 1);
+        assert_eq!(sessions.view().unwrap().phase, record::Phase::Stopped);
+        let renews = recording.renews();
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(
+            recording.renews(),
+            renews,
+            "nothing renews a stopped recording"
+        );
+        let finished = record_request(
+            port,
+            "POST",
+            record::FINISH_PATH,
+            origin,
+            None,
+            Some(&session),
+            None,
+        );
+        assert!(finished.contains("cut short"), "{finished}");
+        let after = record_heartbeat(port, origin, &session);
+        assert_eq!(body_code(&after), "session-finished");
+        assert_eq!(recording.starts(), 1);
+    }
+
+    /// Only the session's own token, from its own origin, renews it; a
+    /// stream of anything else lets the lease lapse.
+    #[test]
+    fn only_the_sessions_own_check_in_renews_it() {
+        let gate = ScriptedGate::new(Answer::Always);
+        let recording = FakeRecording::with_text("x");
+        let (api, sessions) = start_record_api(gate, recording.clone(), lease_timings(150));
+        let port = api.document.port;
+        let origin = "https://app.example";
+        let (grant, _) = record_grant(port, origin, &record_pair(port, origin));
+        let (session, _, _) = record_start(port, origin, &grant);
+        let began = Instant::now();
+        while recording.finishes() == 0 && began.elapsed() < TEST_WAIT {
+            // Another origin with the right token.
+            let stolen = record_heartbeat(port, "https://other.example", &session);
+            assert!(stolen.starts_with("HTTP/1.1 401"), "{stolen}");
+            // The grant token where a session token belongs.
+            let grant_as_session = record_heartbeat(port, origin, &grant);
+            assert_eq!(body_code(&grant_as_session), "record-not-found");
+            // The grant header on the heartbeat route.
+            let wrong_header = record_request(
+                port,
+                "POST",
+                record::HEARTBEAT_PATH,
+                origin,
+                Some(&grant),
+                None,
+                None,
+            );
+            assert!(wrong_header.starts_with("HTTP/1.1 401"), "{wrong_header}");
+            // A made-up token, and the right one carrying a body.
+            let guessed = record_heartbeat(port, origin, "hexs_guess");
+            assert_eq!(body_code(&guessed), "record-not-found");
+            let with_body = record_request(
+                port,
+                "POST",
+                record::HEARTBEAT_PATH,
+                origin,
+                None,
+                Some(&session),
+                Some("{}"),
+            );
+            assert!(with_body.starts_with("HTTP/1.1 400"), "{with_body}");
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(recording.finishes(), 1);
+        assert!(began.elapsed() >= Duration::from_millis(150));
+        assert_eq!(sessions.view().unwrap().phase, record::Phase::Stopped);
+    }
+
+    /// Stop, Cancel, and Revoke still end a recording that is checking in,
+    /// and its check-ins are refused after.
+    #[test]
+    fn stop_cancel_and_revoke_end_a_checked_in_recording() {
+        let origin = "https://app.example";
+        for end in ["stop", "cancel", "revoke-window", "revoke-client"] {
+            let gate = ScriptedGate::new(Answer::Always);
+            let recording = FakeRecording::with_text("ended");
+            let (api, sessions) = start_record_api(gate, recording.clone(), lease_timings(100));
+            let port = api.document.port;
+            let (grant, grant_id) = record_grant(port, origin, &record_pair(port, origin));
+            let (session, id, _) = record_start(port, origin, &grant);
+            let beat = record_heartbeat(port, origin, &session);
+            assert!(beat.starts_with("HTTP/1.1 204"), "{end}: {beat}");
+            let expected = match end {
+                "stop" => {
+                    assert!(sessions.stop(id));
+                    "stopped"
+                }
+                "cancel" => {
+                    sessions.cancel(id);
+                    "session-cancelled"
+                }
+                "revoke-window" => {
+                    assert!(sessions.revoke(grant_id));
+                    "session-cancelled"
+                }
+                _ => {
+                    let revoked = record_request(
+                        port,
+                        "POST",
+                        record::REVOKE_PATH,
+                        origin,
+                        Some(&grant),
+                        None,
+                        None,
+                    );
+                    assert!(revoked.starts_with("HTTP/1.1 204"), "{end}: {revoked}");
+                    "session-cancelled"
+                }
+            };
+            let refused = record_heartbeat(port, origin, &session);
+            assert!(refused.starts_with("HTTP/1.1 409"), "{end}: {refused}");
+            assert_eq!(body_code(&refused), expected, "{end}");
+            let renews = recording.renews();
+            thread::sleep(Duration::from_millis(80));
+            assert_eq!(recording.renews(), renews, "{end}: still renewing");
+            if end == "stop" {
+                assert_eq!(recording.finishes(), 1);
+            } else {
+                assert_eq!(recording.cancels(), 1, "{end}");
+            }
+        }
+    }
+
+    /// When the capture loop loses the recording (the microphone went
+    /// away), the session ends instead of waiting for check-ins.
+    #[test]
+    fn a_recording_the_capture_loop_lost_is_cancelled() {
+        let gate = ScriptedGate::new(Answer::Always);
+        let recording = FakeRecording::with_text("x");
+        let (api, sessions) = start_record_api(gate, recording.clone(), lease_timings(60));
+        let port = api.document.port;
+        let origin = "https://app.example";
+        let (grant, _) = record_grant(port, origin, &record_pair(port, origin));
+        let (session, _, _) = record_start(port, origin, &grant);
+        recording.lost.store(true, Ordering::Release);
+        wait_for(|| sessions.view().is_none());
+        let refused = record_heartbeat(port, origin, &session);
+        assert_eq!(body_code(&refused), "session-cancelled");
+        assert_eq!(recording.finishes(), 0);
+    }
+
+    #[test]
+    fn one_recording_session_at_a_time() {
+        let gate = ScriptedGate::new(Answer::Always);
+        let recording = FakeRecording::with_text("first");
+        let (api, _sessions) = start_record_api(gate, recording, record_timings());
+        let port = api.document.port;
+        let origin = "https://app.example";
+        let code = record_pair(port, origin);
+        let (grant, _) = record_grant(port, origin, &code);
+        let (session, _, _) = record_start(port, origin, &grant);
+
+        let busy = record_request(
+            port,
+            "POST",
+            record::START_PATH,
+            origin,
+            Some(&grant),
+            None,
+            None,
+        );
+        assert!(busy.starts_with("HTTP/1.1 409"), "{busy}");
+        assert_eq!(body_code(&busy), "session-busy");
+
+        let cancelled = record_request(
+            port,
+            "POST",
+            record::CANCEL_PATH,
+            origin,
+            None,
+            Some(&session),
+            None,
+        );
+        assert!(cancelled.starts_with("HTTP/1.1 204"), "{cancelled}");
+        let (second, _, _) = record_start(port, origin, &grant);
+        assert_ne!(second, session);
+    }
+
+    #[test]
+    fn a_native_grant_is_bound_to_the_verified_peer() {
+        let gate = ScriptedGate::new(Answer::Always);
+        let recording = FakeRecording::with_text("native words");
+        let sessions = Arc::new(record::Sessions::with_timings(
+            connected(),
+            Some(gate),
+            recording,
+            allowing(
+                Permissions::new(Some(temp_directory().join("permissions.json"))),
+                &app_origin(),
+            ),
+            record_timings(),
+        ));
+        let identity = record::Identity {
+            identifier: "com.example.recorder".into(),
+            cdhash: "fixture-digest".into(),
+            verification: crate::local_api::Verification::MacSignature {
+                team: Some("ABCDE12345".into()),
+            },
+            name: None,
+            icon: None,
+        };
+        let peer = record::PeerId([1, 2, 3, 4, 5, 6, 7, 8]);
+        let channel = record::Channel::Native { peer, identity };
+        let body = format!(
+            r#"{{"codeChallenge":"{CHALLENGE}","codeChallengeMethod":"S256","clientName":"ignored"}}"#
+        );
+        let response = sessions.pair(channel.clone(), body.as_bytes());
+        assert_eq!(response.status, 200, "{:?}", response.body);
+        let code: String =
+            serde_json::from_slice::<serde_json::Value>(&response.body).unwrap()["code"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+
+        // Another process's peer cannot spend this code, even with the right
+        // verifier; the code is spent by that attempt.
+        let other = record::Channel::Native {
+            peer: record::PeerId([9, 9, 9, 9, 9, 9, 9, 9]),
+            identity: record::Identity {
+                identifier: "com.example.other".into(),
+                cdhash: "fixture-digest".into(),
+                verification: crate::local_api::Verification::MacSignature { team: None },
+                name: None,
+                icon: None,
+            },
+        };
+        let exchange = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
+        let stolen = sessions.exchange(other.clone(), exchange.as_bytes());
+        assert_eq!(stolen.status, 403);
+        let spent = sessions.exchange(channel.clone(), exchange.as_bytes());
+        assert_eq!(spent.status, 403);
+
+        // A fresh pairing mints a grant bound to the verified peer.
+        let response = sessions.pair(channel.clone(), body.as_bytes());
+        let code: String =
+            serde_json::from_slice::<serde_json::Value>(&response.body).unwrap()["code"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+        let exchange = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
+        let minted = sessions.exchange(channel.clone(), exchange.as_bytes());
+        assert_eq!(minted.status, 200);
+        let grant: String =
+            serde_json::from_slice::<serde_json::Value>(&minted.body).unwrap()["grantToken"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+        assert_eq!(sessions.start(&grant, &other).status, 401);
+        let started = sessions.start(&grant, &channel);
+        assert_eq!(started.status, 201);
+        let session: String =
+            serde_json::from_slice::<serde_json::Value>(&started.body).unwrap()["sessionToken"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+        assert_eq!(sessions.heartbeat(&session, &other).status, 404);
+        assert_eq!(sessions.heartbeat(&session, &channel).status, 204);
+        assert_eq!(
+            record::action("POST", record::HEARTBEAT_PATH),
+            Some(record::Action::Heartbeat)
+        );
+        assert_eq!(sessions.revoke_token(&grant, &other).status, 401);
+    }
+
+    #[test]
+    fn a_native_client_name_never_becomes_its_identity() {
+        let gate = ScriptedGate::new(Answer::Always);
+        let sessions = Arc::new(record::Sessions::with_timings(
+            connected(),
+            Some(gate.clone()),
+            FakeRecording::with_text("x"),
+            allowing(
+                Permissions::new(Some(temp_directory().join("permissions.json"))),
+                &app_origin(),
+            ),
+            record_timings(),
+        ));
+        let body = format!(r#"{{"codeChallenge":"{CHALLENGE}","clientName":"Totally Trusted"}}"#);
+        let response = sessions.pair(
+            record::Channel::Native {
+                peer: record::PeerId([3; 8]),
+                identity: record::Identity {
+                    identifier: "com.example.recorder".into(),
+                    cdhash: "fixture-digest".into(),
+                    verification: crate::local_api::Verification::MacSignature {
+                        team: Some("ABCDE12345".into()),
+                    },
+                    name: None,
+                    icon: None,
+                },
+            },
+            body.as_bytes(),
+        );
+        assert_eq!(response.status, 200);
+        let prompt = gate.last_prompt().unwrap();
+        assert_eq!(prompt.recipient.label(), "com.example.recorder");
+        assert!(prompt.recipient.claimed_name().is_none());
+    }
+
+    /// One HTTP exchange over the native recording socket (on Windows, the
+    /// pipe `socket` names).
+    fn native_request(socket: &Path, request: &str) -> (u16, String) {
+        #[cfg(unix)]
+        let mut stream = {
+            let stream = std::os::unix::net::UnixStream::connect(socket).unwrap();
+            stream.set_read_timeout(Some(TEST_WAIT)).unwrap();
+            stream
+        };
+        #[cfg(windows)]
+        let mut stream = native::tests::connect(socket);
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut response = String::new();
+        let _ = stream.read_to_string(&mut response);
+        let status = response
+            .split_whitespace()
+            .nth(1)
+            .and_then(|status| status.parse().ok())
+            .unwrap_or(0);
+        (status, response)
+    }
+
+    static NATIVE_LAB: AtomicBool = AtomicBool::new(false);
+
+    fn native_lab() -> bool {
+        NATIVE_LAB.load(Ordering::Acquire)
+    }
+
+    /// A quiet client of the native channel: connected, sending nothing.
+    #[cfg(unix)]
+    fn native_client(socket: &Path) -> std::os::unix::net::UnixStream {
+        let stream = std::os::unix::net::UnixStream::connect(socket).unwrap();
+        stream.set_read_timeout(Some(TEST_WAIT)).unwrap();
+        stream
+    }
+
+    #[cfg(windows)]
+    fn native_client(socket: &Path) -> fs::File {
+        native::tests::connect(socket)
+    }
+
+    /// The native channel exists only while Labs › Connected apps is on,
+    /// serves a few clients at once (one more hears it is busy), and closes
+    /// with its connections when the lab turns off.
+    #[test]
+    fn the_native_channel_follows_its_lab_and_serves_a_few_at_once() {
+        let directory = temp_directory();
+        let socket = directory.join(if cfg!(windows) {
+            "record.pipe"
+        } else {
+            "record.sock"
+        });
+        let sessions = Arc::new(record::Sessions::with_timings(
+            Access::gated(native_lab, native_lab),
+            Some(ScriptedGate::new(Answer::Deny)),
+            FakeRecording::with_text("unused"),
+            Permissions::new(Some(temp_directory().join("permissions.json"))),
+            record_timings(),
+        ));
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        let mut api = start_unpublished(
+            events,
+            LocalApiOptions {
+                record: Some(sessions),
+                native_socket: Some(socket.clone()),
+                stream_engine: Some(crate::transcription::stream::tests::fake_source()),
+                ..LocalApiOptions::default()
+            },
+        )
+        .unwrap();
+        let settles = |present: bool| {
+            let deadline = Instant::now() + TEST_WAIT;
+            while socket.exists() != present && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(20));
+            }
+            socket.exists() == present
+        };
+        thread::sleep(Duration::from_millis(500));
+        assert!(!socket.exists(), "no channel while the lab is off");
+
+        NATIVE_LAB.store(true, Ordering::Release);
+        assert!(settles(true), "the channel opens with the lab");
+        // Eight quiet clients hold every place. Past them, a client is
+        // answered busy once its request has arrived, and one that sends
+        // nothing is dropped after the busy wait without holding up the next.
+        let mut quiet: Vec<_> = (0..8).map(|_| native_client(&socket)).collect();
+        let silent = native_client(&socket);
+        let (status, response) = native_request(
+            &socket,
+            "GET /record/status HTTP/1.1\r\nHost: hex\r\nConnection: close\r\n\r\n",
+        );
+        assert_eq!(status, 503, "{response}");
+        assert!(response.contains("native-busy"));
+        // A request that arrives in pieces is still read whole first.
+        let mut slow = native_client(&socket);
+        slow.write_all(b"GET /record/status HTTP/1.1\r\n").unwrap();
+        thread::sleep(Duration::from_millis(300));
+        slow.write_all(b"Host: hex\r\nConnection: close\r\n\r\n")
+            .unwrap();
+        let mut answer = String::new();
+        let _ = slow.read_to_string(&mut answer);
+        assert!(answer.contains("native-busy"), "{answer}");
+        drop(silent);
+        quiet.truncate(1);
+
+        NATIVE_LAB.store(false, Ordering::Release);
+        assert!(settles(false), "the channel closes with the lab");
+        // Its open connection ends too.
+        let mut rest = Vec::new();
+        let _ = quiet[0].read_to_end(&mut rest);
+        api.shutdown();
+    }
+
+    #[test]
+    fn a_native_socket_client_pairs_then_records_twice_under_its_identity() {
+        let directory = temp_directory();
+        // On Windows, the file naming the pipe.
+        let socket = directory.join(if cfg!(windows) {
+            "record.pipe"
+        } else {
+            "record.sock"
+        });
+        let gate = ScriptedGate::new(Answer::Always);
+        let recording = FakeRecording::with_text("native words");
+        let sessions = Arc::new(record::Sessions::with_timings(
+            connected(),
+            Some(gate.clone()),
+            recording.clone(),
+            allowing(
+                Permissions::new(Some(temp_directory().join("permissions.json"))),
+                &app_origin(),
+            ),
+            record_timings(),
+        ));
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        let mut api = start_unpublished(
+            events,
+            LocalApiOptions {
+                record: Some(sessions),
+                native_socket: Some(socket.clone()),
+                stream_engine: Some(crate::transcription::stream::tests::fake_source()),
+                ..LocalApiOptions::default()
+            },
+        )
+        .unwrap();
+
+        // The channel opens with the lab, which these tests keep on.
+        let deadline = Instant::now() + TEST_WAIT;
+        while !socket.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        let body = format!(r#"{{"codeChallenge":"{CHALLENGE}","clientName":"Totally Trusted"}}"#);
+        let pair = format!(
+            "POST {} HTTP/1.1\r\nHost: hex\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            record::PAIR_PATH,
+            body.len()
+        );
+        let (status, response) = native_request(&socket, &pair);
+        if status == 403 && response.contains("identity-unverified") {
+            // An unsigned test binary has no identity to verify. The native
+            // refusal itself is the contract then; the browser tests cover
+            // the rest of the flow.
+            eprintln!("skipping native identity flow: this test binary has no signing identity");
+            return;
+        }
+        assert_eq!(status, 200, "{response}");
+        let code: String = serde_json::from_str::<serde_json::Value>(response_body(&response))
+            .unwrap()["code"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let prompt = gate.last_prompt().unwrap();
+        assert!(matches!(prompt.recipient, Recipient::Native { .. }));
+        assert_eq!(prompt.intent, Intent::Record);
+        // This unsigned (on macOS at most ad-hoc signed, so unanchored)
+        // test binary is named by its executable.
+        {
+            let Some(Verification::Executable { path }) = prompt.recipient.verification() else {
+                panic!("{:?}", prompt.recipient);
+            };
+            assert!(same_file::is_same_file(path, std::env::current_exe().unwrap()).unwrap());
+        }
+        #[cfg(windows)]
+        assert!(
+            fs::read_to_string(&socket)
+                .unwrap()
+                .starts_with(r"\\.\pipe\anomaly.hex.record.")
+        );
+        // The claimed name never becomes the identity.
+        assert!(prompt.recipient.claimed_name().is_none());
+        assert_eq!(recording.starts(), 0);
+
+        let exchange = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
+        let token_path = format!(
+            "POST {} HTTP/1.1\r\nHost: hex\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{exchange}",
+            record::TOKEN_PATH,
+            exchange.len()
+        );
+        let (status, response) = native_request(&socket, &token_path);
+        assert_eq!(status, 200, "{response}");
+        let grant: String = serde_json::from_str::<serde_json::Value>(response_body(&response))
+            .unwrap()["grantToken"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let grant_request = |path: &str| {
+            format!(
+                "POST {path} HTTP/1.1\r\nHost: hex\r\nX-Hex-Record-Grant: {grant}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+        };
+        let session_request = |path: &str, method: &str, token: &str| {
+            format!(
+                "{method} {path} HTTP/1.1\r\nHost: hex\r\nX-Hex-Record-Token: {token}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+        };
+        let mut sessions_seen = Vec::new();
+        for _ in 0..2 {
+            let (status, response) = native_request(&socket, &grant_request(record::START_PATH));
+            assert_eq!(status, 201, "{response}");
+            let started: serde_json::Value =
+                serde_json::from_str(response_body(&response)).unwrap();
+            let token = started["sessionToken"].as_str().unwrap().to_owned();
+            sessions_seen.push(token.clone());
+            assert_eq!(recording.starts() as usize, sessions_seen.len());
+            let (status, response) = native_request(
+                &socket,
+                &session_request(record::FINISH_PATH, "POST", &token),
+            );
+            assert_eq!(status, 200, "{response}");
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(response_body(&response)).unwrap()["transcript"],
+                "native words"
+            );
+        }
+        assert_ne!(sessions_seen[0], sessions_seen[1]);
+        assert_eq!(gate.asks(), 1);
+
+        // The native socket is not the local API: no health, no bearer route.
+        let (status, _) = native_request(
+            &socket,
+            "GET /health HTTP/1.1\r\nHost: hex\r\nConnection: close\r\n\r\n",
+        );
+        assert_eq!(status, 404);
+        let (status, _) = native_request(
+            &socket,
+            &format!(
+                "GET /health HTTP/1.1\r\nHost: hex\r\nAuthorization: Bearer {}\r\nConnection: close\r\n\r\n",
+                api.document.token
+            ),
+        );
+        assert_eq!(status, 404);
+
+        // The paired client can give its grant back over the same socket.
+        let (status, response) = native_request(&socket, &grant_request(record::REVOKE_PATH));
+        assert_eq!(status, 204, "{response}");
+        let (status, _) = native_request(&socket, &grant_request(record::START_PATH));
+        assert_eq!(status, 401);
+
+        // Shut down, Hex takes its socket (or the pipe's name) away.
+        api.shutdown();
+        assert!(!socket.exists());
+    }
+
+    /// Sessions that always allow `https://app.example`, with `grace`, and
+    /// a grant (Always) for it with one recording started.
+    fn recording_session(
+        recording: &Arc<FakeRecording>,
+        grace: Duration,
+    ) -> (Arc<record::Sessions>, record::Channel, String, String) {
+        let sessions = Arc::new(record::Sessions::with_timings(
+            connected(),
+            Some(ScriptedGate::new(Answer::Always)),
+            recording.clone(),
+            allowing(
+                Permissions::new(Some(temp_directory().join("permissions.json"))),
+                &app_origin(),
+            ),
+            record::Timings {
+                grace,
+                ..record_timings()
+            },
+        ));
+        let channel = record::Channel::Web("https://app.example".into());
+        let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
+        let paired = sessions.pair(channel.clone(), body.as_bytes());
+        let code = serde_json::from_slice::<serde_json::Value>(&paired.body).unwrap()["code"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let exchange = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
+        let minted: serde_json::Value =
+            serde_json::from_slice(&sessions.exchange(channel.clone(), exchange.as_bytes()).body)
+                .unwrap();
+        let grant = minted["grantToken"].as_str().unwrap().to_owned();
+        let started = sessions.start(&grant, &channel);
+        assert_eq!(started.status, 201);
+        let session =
+            serde_json::from_slice::<serde_json::Value>(&started.body).unwrap()["sessionToken"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+        (sessions, channel, grant, session)
+    }
+
+    /// A consent gate that panics answers unavailable, and the next ask
+    /// still reaches the window instead of answering consent-busy.
+    #[test]
+    fn a_panicking_gate_leaves_the_next_ask_free() {
+        struct Panics(AtomicU64);
+        impl ConsentGate for Panics {
+            fn ask(&self, _: &Prompt, _: Duration) -> Answer {
+                self.0.fetch_add(1, Ordering::AcqRel);
+                panic!("the window went away");
+            }
+        }
+        let gate = Arc::new(Panics(AtomicU64::new(0)));
+        let sessions = Arc::new(record::Sessions::with_timings(
+            connected(),
+            Some(gate.clone()),
+            FakeRecording::with_text("unused"),
+            allowing(
+                Permissions::new(Some(temp_directory().join("permissions.json"))),
+                &app_origin(),
+            ),
+            record_timings(),
+        ));
+        let channel = record::Channel::Web("https://app.example".into());
+        let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
+        for _ in 0..2 {
+            let answered = sessions.pair(channel.clone(), body.as_bytes());
+            assert_eq!(body_code_of(&answered.body), "record-unavailable");
+        }
+        assert_eq!(gate.0.load(Ordering::Acquire), 2);
+    }
+
+    fn body_code_of(body: &[u8]) -> String {
+        serde_json::from_slice::<serde_json::Value>(body).unwrap()["code"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned()
+    }
+
+    /// An Allow Once grant left unused lapses with its code's lifetime, so
+    /// "one recording" can't start hours later without a new ask.
+    #[test]
+    fn an_unused_allow_once_grant_lapses() {
+        let sessions = Arc::new(record::Sessions::with_timings(
+            connected(),
+            Some(ScriptedGate::new(Answer::Once)),
+            FakeRecording::with_text("late words"),
+            allowing(
+                Permissions::new(Some(temp_directory().join("permissions.json"))),
+                &app_origin(),
+            ),
+            record::Timings {
+                code: Duration::from_millis(100),
+                ..record_timings()
+            },
+        ));
+        let channel = record::Channel::Web("https://app.example".into());
+        let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
+        let paired = sessions.pair(channel.clone(), body.as_bytes());
+        let code = serde_json::from_slice::<serde_json::Value>(&paired.body).unwrap()["code"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let exchange = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
+        let minted: serde_json::Value =
+            serde_json::from_slice(&sessions.exchange(channel.clone(), exchange.as_bytes()).body)
+                .unwrap();
+        assert_eq!(minted["duration"], "once");
+        let grant = minted["grantToken"].as_str().unwrap().to_owned();
+        thread::sleep(Duration::from_millis(250));
+        assert_eq!(sessions.start(&grant, &channel).status, 401);
+        assert!(sessions.grants().is_empty());
+    }
+
+    /// Stopped from Hex's window and never collected, a recording is
+    /// discarded after the grace, as a lapsed lease's is, and frees the one
+    /// session for the next start.
+    #[test]
+    fn a_recording_stopped_in_the_window_expires_without_a_finish() {
+        let recording = FakeRecording::with_text("window words");
+        let (sessions, channel, grant, session) =
+            recording_session(&recording, Duration::from_millis(50));
+        let id = sessions.view().unwrap().id;
+        assert!(sessions.stop(id));
+        assert_eq!(sessions.start(&grant, &channel).status, 409);
+        let deadline = Instant::now() + TEST_WAIT;
+        while sessions.view().is_some() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(sessions.view().is_none(), "the stopped recording expired");
+        assert_eq!(sessions.finish(&session, &channel).status, 409);
+        assert_eq!(sessions.start(&grant, &channel).status, 201);
+    }
+
+    /// A finish that fails ends the recording like a failed Stop: cancelled,
+    /// cleared, and no longer holding the session another start needs.
+    #[test]
+    fn a_failed_finish_ends_the_recording() {
+        let recording = FakeRecording::with_text("lost words");
+        recording.finish_fails.store(true, Ordering::Release);
+        let (sessions, channel, grant, session) =
+            recording_session(&recording, Duration::from_secs(60));
+        let finished = sessions.finish(&session, &channel);
+        assert_eq!(finished.status, 500);
+        assert_eq!(recording.cancels(), 1);
+        assert!(sessions.view().is_none());
+        assert_eq!(sessions.finish(&session, &channel).status, 409);
+        recording.finish_fails.store(false, Ordering::Release);
+        assert_eq!(sessions.start(&grant, &channel).status, 201);
+    }
+
+    #[test]
+    fn the_window_stops_or_cancels_a_live_recording() {
+        let gate = ScriptedGate::new(Answer::Always);
+        let recording = FakeRecording::with_text("window words");
+        let sessions = Arc::new(record::Sessions::with_timings(
+            connected(),
+            Some(gate),
+            recording.clone(),
+            allowing(
+                Permissions::new(Some(temp_directory().join("permissions.json"))),
+                &app_origin(),
+            ),
+            record_timings(),
+        ));
+        let origin = "https://app.example";
+        let channel = record::Channel::Web(origin.into());
+        let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
+        let paired = sessions.pair(channel.clone(), body.as_bytes());
+        let code: String =
+            serde_json::from_slice::<serde_json::Value>(&paired.body).unwrap()["code"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+        let exchange = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
+        let minted: serde_json::Value =
+            serde_json::from_slice(&sessions.exchange(channel.clone(), exchange.as_bytes()).body)
+                .unwrap();
+        let grant = minted["grantToken"].as_str().unwrap().to_owned();
+        let started = sessions.start(&grant, &channel);
+        assert_eq!(started.status, 201);
+        let session =
+            serde_json::from_slice::<serde_json::Value>(&started.body).unwrap()["sessionToken"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+        let id = sessions.view().map(|view| view.id).unwrap();
+        assert_eq!(
+            sessions.view().map(|view| view.phase),
+            Some(record::Phase::Recording)
+        );
+
+        // The window's Stop keeps the transcript for the client.
+        assert!(sessions.stop(id));
+        assert_eq!(recording.finishes(), 1);
+        assert_eq!(
+            sessions.view().map(|view| view.phase),
+            Some(record::Phase::Stopped)
+        );
+        let finished = sessions.finish(&session, &channel);
+        assert_eq!(finished.status, 200);
+
+        // A second recording cancelled from the window is discarded.
+        let started = sessions.start(&grant, &channel);
+        assert_eq!(started.status, 201);
+        let id = sessions.view().map(|view| view.id).unwrap();
+        sessions.cancel(id);
+        assert_eq!(recording.cancels(), 1);
+        assert!(sessions.view().is_none());
     }
 
     fn unused_port() -> u16 {

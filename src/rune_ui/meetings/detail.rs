@@ -36,7 +36,7 @@ pub(super) fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) 
                             tr("Trash recording")
                         },
                         ButtonKind::Danger,
-                        move |ui: &mut Ui, _| trash(ui, id.clone()),
+                        move |ui: &mut Ui, tx| trash(ui, tx, id.clone()),
                     )
                     .default_button(),
                 )
@@ -45,7 +45,9 @@ pub(super) fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) 
                     "meeting-cancel-delete",
                     tr("Cancel"),
                     ButtonKind::Secondary,
-                    |ui: &mut Ui, _| ui.meetings.delete_armed = None,
+                    |ui: &mut Ui, tx| {
+                        cancel_delete(ui, tx);
+                    },
                 )),
         );
     } else if !renaming && !selecting {
@@ -396,8 +398,10 @@ pub(super) fn overflow(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>
             menu = menu.separator();
         }
         let id = meeting.id.clone();
-        menu = menu
-            .item(MenuItem::new(tr("Delete…")).on_select(move |ui: &mut Ui| trash(ui, id.clone())));
+        menu = menu.item(
+            MenuItem::new(tr("Delete…"))
+                .on_select_tx(move |ui: &mut Ui, tx| trash(ui, tx, id.clone())),
+        );
         items += 1;
     }
     if items == 0 {

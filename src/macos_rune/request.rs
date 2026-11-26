@@ -35,6 +35,23 @@ pub(crate) enum Request {
     /// Snapshot from the main-thread TIS observer, not a shortcut event.
     InputSourceChanged(Option<String>),
     CancelModel,
+    /// The window stopped (`stop`) or cancelled a consented recording.
+    RecordControl {
+        id: u64,
+        stop: bool,
+    },
+    /// The window withdrew a paired client's grant to start recordings.
+    RevokePermission {
+        id: u64,
+    },
+    RevokeRecordGrant {
+        id: u64,
+    },
+    /// The window moved a website between Labs › Connected apps' lists.
+    Website {
+        origin: String,
+        action: crate::local_api::WebsiteAction,
+    },
     /// The window saved `settings.json`; adopt it.
     ReloadSettings,
 }

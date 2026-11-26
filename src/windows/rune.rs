@@ -74,6 +74,25 @@ pub(crate) enum Request {
     /// Labs › Model switch shortcut, or `hex model switch`: swap the
     /// dictation model with the saved other one, installed only.
     SwapModel,
+    /// The window stopped (`stop`) or cancelled a consented recording;
+    /// handled in the window's host (`rune_ui::host`).
+    RecordControl {
+        id: u64,
+        stop: bool,
+    },
+    /// The window withdrew a saved permission (Labs › Connected apps).
+    RevokePermission {
+        id: u64,
+    },
+    /// The window withdrew a client's grant to start recordings.
+    RevokeRecordGrant {
+        id: u64,
+    },
+    /// The window moved a website between Labs › Connected apps' lists.
+    Website {
+        origin: String,
+        action: crate::local_api::WebsiteAction,
+    },
     /// The window saved `settings.json`; adopt it.
     ReloadSettings,
     /// The tray's Enable / Disable Hex.
@@ -139,6 +158,8 @@ pub(crate) struct RuntimeHandle {
     requests: Sender<Request>,
     shared: Arc<Shared>,
     history: Option<History>,
+    /// The consented recordings the window stops, cancels, and revokes.
+    record: Arc<crate::local_api::RecordSessions>,
 }
 
 impl RuntimeHandle {
@@ -154,6 +175,10 @@ impl RuntimeHandle {
 
     pub(crate) fn history(&self) -> Option<History> {
         self.history.clone()
+    }
+
+    pub(crate) fn record(&self) -> Arc<crate::local_api::RecordSessions> {
+        self.record.clone()
     }
 
     /// Wakes `wake` after every publication.
@@ -227,6 +252,18 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     let meetings = crate::meeting::runtime::Meetings::install(&mut app, shutdown)
         .inspect_err(|error| tracing::error!(%error, "meetings could not start"))
         .ok();
+    // A listed page's ask is answered in Hex's permission window: its own
+    // overlay, so it shows whether the main window is open or not and never
+    // opens it. The local API waits on it without handing the page a token.
+    let (dictation_controls, dictations) = mpsc::sync_channel(8);
+    let desk = Arc::new(crate::desktop::consent::Desk::default());
+    let consent = crate::local_api::AppConsent::new(desk.clone(), dictation_controls.clone());
+    desk.watch(crate::rune_ui::consent_window::install(&mut app, {
+        let desk = desk.clone();
+        Arc::new(move |id, answer| {
+            desk.answer(id, answer);
+        })
+    }));
     let added_tray = match adding_tray {
         Ok(thread) => thread
             .join()
@@ -260,10 +297,10 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
             requests: requests.clone(),
             shared: shared.clone(),
             history: history.clone(),
+            record: consent.record.clone(),
         })
         .map_err(|_| eyre!("the Hex runtime already started"))?;
     let (control_calls, control_receiver) = mpsc::sync_channel(8);
-    let (dictation_controls, dictations) = mpsc::sync_channel(8);
     let processing = crate::dictation::modes::ProcessingState::from_settings(&settings);
     let local_api = crate::local_api::LocalApi::start_for_app(
         &event_path,
@@ -272,6 +309,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
         Some(crate::local_api::Processing::installed(
             crate::local_api::processing::dictation_processor(processing.clone()),
         )),
+        Some(consent),
     );
     let quit = window.clone();
     let runtime_tray = tray.clone();

@@ -37,6 +37,7 @@ pub(super) fn merged(
             super::middle_mouse::FRENCH,
             super::model_switch::FRENCH,
             super::confirm_cancel::FRENCH,
+            super::connected_apps::FRENCH,
         ],
         Language::Portuguese => &[
             PORTUGUESE,
@@ -55,6 +56,7 @@ pub(super) fn merged(
             super::middle_mouse::PORTUGUESE,
             super::model_switch::PORTUGUESE,
             super::confirm_cancel::PORTUGUESE,
+            super::connected_apps::PORTUGUESE,
         ],
         Language::Russian => &[
             RUSSIAN,
@@ -73,6 +75,7 @@ pub(super) fn merged(
             super::middle_mouse::RUSSIAN,
             super::model_switch::RUSSIAN,
             super::confirm_cancel::RUSSIAN,
+            super::connected_apps::RUSSIAN,
         ],
         Language::Hungarian => &[
             HUNGARIAN,
@@ -91,6 +94,7 @@ pub(super) fn merged(
             super::middle_mouse::HUNGARIAN,
             super::model_switch::HUNGARIAN,
             super::confirm_cancel::HUNGARIAN,
+            super::connected_apps::HUNGARIAN,
         ],
     };
 

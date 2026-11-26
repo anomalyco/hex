@@ -158,6 +158,10 @@ scrawl-capture = { path = "crates/capture", default-features = false, features =
 pollster = "1.0.1"
 # Screenshot PNGs and the screenshot editor's export.
 png = "0.18"
+# Requester icons in Hex's permission window: a page's favicon (PNG or ICO),
+# decoded and scaled locally. Both already build for Rune.
+image = { version = "0.25", default-features = false, features = ["png", "ico"] }
+base64 = "0.22"
 # The local API's `/profile/vitals`; it reports nothing off macOS.
 procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "9d4b4636f1f7e6d172053a0b6469a334c0bfc227" }
 rune = { git = "https://github.com/anomalyco/rune.git", rev = "9d4b4636f1f7e6d172053a0b6469a334c0bfc227", features = ["native-file-dialog", "macos-background-cursor"] }
@@ -177,12 +181,19 @@ windows-sys = { version = "0.61.2", features = [
   "Win32_Networking_WinHttp",
   "Win32_Networking_WinSock",
   "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Security_Cryptography",
+  "Win32_Security_Cryptography_Catalog",
+  "Win32_Security_Cryptography_Sip",
+  "Win32_Security_WinTrust",
   "Win32_Storage_FileSystem",
   "Win32_System_Console",
   "Win32_System_DataExchange",
+  "Win32_System_IO",
   "Win32_System_JobObjects",
   "Win32_System_LibraryLoader",
   "Win32_System_Memory",
+  "Win32_System_Pipes",
   "Win32_System_Power",
   "Win32_System_SystemInformation",
   "Win32_System_Threading",

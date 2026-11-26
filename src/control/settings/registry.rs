@@ -791,6 +791,18 @@ pub(super) const KEYS: &[Key] = &[
          in a transcript, as the speech model heard them (timestamps=segment|word)",
     ),
     key(
+        "labs.connected_apps",
+        Kind::Bool,
+        "Labs: apps on this computer can ask, in Hex's permission window, to transcribe audio or \
+         record from the microphone; each needs your Allow",
+    ),
+    key(
+        "labs.connected_apps_websites",
+        Kind::Bool,
+        "Labs: with labs.connected_apps on, websites can ask too, once you allow each one in \
+         Labs › Connected apps",
+    ),
+    key(
         "labs.speakers_only",
         Kind::Bool,
         "Labs: While dictating applies only while the default output is speakers; headphones are \

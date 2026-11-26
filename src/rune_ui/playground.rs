@@ -282,6 +282,16 @@ const PATHS: &[(&str, &str)] = &[
         "mac-voice-filter-driver-missing",
         "Window/Voice Filter/Driver missing",
     ),
+    ("connected-apps", "Window/Connected apps/Connected apps"),
+    (
+        "connected-apps-lists",
+        "Window/Connected apps/Websites unfolded",
+    ),
+    (
+        "connected-apps-websites-off",
+        "Window/Connected apps/Websites off",
+    ),
+    ("connected-apps-empty", "Window/Connected apps/Empty"),
     ("mac-hud-lab", "Window/HUD Lab/HUD Lab"),
     ("mac-labs", "Window/General/Labs"),
     ("mac-labs-link", "Window/General/Labs link"),
@@ -290,6 +300,10 @@ const PATHS: &[(&str, &str)] = &[
     ("mac-labs-category", "Window/General/Labs category"),
     ("mac-labs-search", "Window/General/Labs search"),
     ("mac-labs-settings", "Window/General/Labs settings"),
+    (
+        "mac-labs-connected-apps",
+        "Window/General/Labs connected apps",
+    ),
     ("mac-labs-yolo-mode", "Window/General/Labs YOLO mode"),
     (
         "mac-labs-yolo-mode-picker",
@@ -305,6 +319,7 @@ const PATHS: &[(&str, &str)] = &[
         "Window/General/Labs transcribe audio",
     ),
     ("mac-production", "Window/General/Production build"),
+    ("record-active", "Window/General/Recording · live"),
     ("mac-activity", "Window/Activity/Activity"),
     ("mac-onboarding", "Window/Onboarding/Setting up Hex"),
     (

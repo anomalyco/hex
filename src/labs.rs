@@ -166,6 +166,13 @@ static UNLOAD_IDLE_MINUTES: AtomicU64 = AtomicU64::new(15);
 /// The seconds a capture's microphone keeps open after it ends, paired with
 /// `Feature::KeepMicrophoneOpen` in [`BANK`]: 0 turns it off.
 static MICROPHONE_LINGER_SECONDS: AtomicU64 = AtomicU64::new(0);
+/// Labs › Connected apps' Allow websites to use Hex, published beside the
+/// lab's bit in [`BANK`].
+static CONNECTED_APPS_WEBSITES: AtomicBool = AtomicBool::new(false);
+
+/// What a change to Labs › Connected apps calls, so a pending ask and a live
+/// recording the switches no longer allow end at once (`local_api`).
+static CONNECTED_APPS_WATCHERS: Mutex<Vec<Box<dyn Fn() + Send>>> = Mutex::new(Vec::new());
 
 /// Labs › HUD height's gap in points above the Dock, paired with
 /// `Feature::HudHeight` in [`BANK`].
@@ -247,6 +254,14 @@ fn linger_seconds(settings: &LabsSettings) -> u64 {
     settings
         .keep_microphone_open_for()
         .map_or(0, |window| window.as_secs())
+}
+
+/// Calls `watcher` after every change to Labs › Connected apps' switches.
+pub(crate) fn watch_connected_apps(watcher: impl Fn() + Send + 'static) {
+    CONNECTED_APPS_WATCHERS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .push(Box::new(watcher));
 }
 
 /// Records the trigger phrase matching reads; an invalid value never turns
@@ -331,6 +346,13 @@ fn store_all(settings: &LabsSettings) {
         .write()
         .unwrap_or_else(|error| error.into_inner()) =
         (settings.yolo_mode && reaches(Feature::YoloMode)).then(|| settings.yolo_mode_apps.clone());
+    // Websites read on only while the lab is.
+    CONNECTED_APPS_WEBSITES.store(
+        settings.connected_apps
+            && settings.connected_apps_websites
+            && reaches(Feature::ConnectedApps),
+        Ordering::Release,
+    );
     store_voice_prompt_phrase(&settings.voice_prompt_phrase);
     store_stop_phrase_text(&settings.stop_phrase_text);
     store_signature_text(&settings.signature_text);
@@ -359,10 +381,20 @@ pub fn window_dark(labs: &LabsSettings, system_dark: bool) -> bool {
 
 /// Records the switches the loaded or saved settings hold.
 pub(crate) fn apply(settings: &LabsSettings) {
+    let connected_were = (connected_apps(), connected_apps_websites());
     {
         let _guard = WRITE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         store_all(settings);
         LOADED.store(true, Ordering::Release);
+    }
+    if (connected_apps(), connected_apps_websites()) != connected_were {
+        for watcher in CONNECTED_APPS_WATCHERS
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .iter()
+        {
+            watcher();
+        }
     }
     // Labs › Pause from menu bar: turning it off resumes at once, without
     // waiting for the menu to refresh; the menu row hides itself there.

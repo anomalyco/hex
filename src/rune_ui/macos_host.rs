@@ -154,6 +154,10 @@ impl Backend {
                 update_notes: published.update_notes.clone(),
                 update_blocked: None,
                 editing: false,
+                record: published.record.clone(),
+                permissions: published.permissions.clone(),
+                grants: published.grants.clone(),
+                websites: published.websites.clone(),
             },
             settings: published.settings.clone(),
         })

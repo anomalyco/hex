@@ -896,7 +896,7 @@ fn the_modes_editor_lab_brings_modes_back_to_the_sidebar() {
     // does while the window shows it.
     crate::labs::Feature::ModesEditor.set(&mut rt.state.settings, false);
     assert!(!Pane::Modes.shown(&rt.state));
-    assert!(leave_hidden_pane(&mut rt.state));
+    assert!(labs::leave_hidden_pane(&mut rt.state));
     rt.invalidate();
     settle(&mut rt);
     assert_eq!(rt.state.pane, Pane::Output);

@@ -96,6 +96,8 @@ use crate::desktop::i18n::{tr, tr_fill};
 use crate::transcription::models::TranscriptionModelId;
 use controls::{METRICS, Paint};
 use host::{Backend, Request, ShortcutTarget};
+pub(crate) use labs::connected_apps::consent_window;
+use labs::connected_apps::{self, record_panel};
 use onboarding_kit::live::Page;
 use scenes::{SCENES, Scene, fixture, mac_fixture, portal_fixture};
 use settings::Capture;
@@ -136,6 +138,7 @@ pub(crate) fn run_app(
         app = app.float_on_open();
     }
     crate::linux::rune_hud::install(&mut app);
+    host::install_consent(&mut app, &host);
     live_text::install(&mut app, crate::rune_hud::live_text_place);
     // The capture capsule, picker, and ink.
     let _capture_overlays =
@@ -585,6 +588,12 @@ struct ServiceView {
     update_blocked: Option<&'static str>,
     /// The service is recording or saving a shortcut.
     editing: bool,
+    /// Connected apps: a live consented recording, the saved permissions
+    /// and grants the window can revoke, and the website lists.
+    record: Option<crate::local_api::RecordView>,
+    permissions: Vec<crate::local_api::PermissionView>,
+    grants: Vec<crate::local_api::RecordGrant>,
+    websites: crate::local_api::Websites,
 }
 
 /// The one modal sheet currently open over the window.
@@ -673,6 +682,7 @@ pub(crate) struct Ui {
     find: find_popover::Find,
     /// The panes whose Advanced fold is open.
     advanced: Vec<Pane>,
+    connected: connected_apps::State,
     /// The Labs page shows in place of a pane.
     labs_open: bool,
     /// The Labs store's search, tab, and chip.
@@ -824,6 +834,7 @@ impl Ui {
             mic_level: general::MicLevel::default(),
             find: Default::default(),
             advanced: Vec::new(),
+            connected: Default::default(),
             labs_open: false,
             lab_store: labs::Store::default(),
             #[cfg(all(target_os = "macos", hex_capture))]
@@ -1314,7 +1325,7 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
     } else if ui.open.is_some() {
         ui.open = None;
         true
-    } else if meetings::cancel_edit(ui) {
+    } else if meetings::cancel_edit(ui, tx) {
         true
     } else {
         ui.pane == Pane::History && ui.history.cancel_delete(tx)
@@ -1351,6 +1362,7 @@ fn local_meetings(ui: &mut Ui) -> bool {
 fn setup(ui: &mut Ui, waker: Waker) {
     ui.modes.waker = Some(waker.clone());
     ui.modes.icon_cache = Some(rune::ImageCache::new(waker.clone()));
+    connected_apps::setup(ui, &waker);
     #[cfg(hex_capture)]
     ui.captures.set_cache(rune::ImageCache::new(waker.clone()));
     if let Service::Pending(connect) = &mut ui.service {
@@ -1476,12 +1488,13 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
         }
         if let Some(settings) = settings {
             changed |= ui.adopt(settings);
-            changed |= leave_hidden_pane(ui);
+            changed |= labs::leave_hidden_pane(ui);
         }
     }
     // The lab, the selected meeting's status, or its notes can take the
     // selection away between frames.
     changed |= meetings::settle_selection(ui);
+    changed |= record_panel::poll(ui);
     let preparing = ui
         .view
         .as_ref()
@@ -1502,23 +1515,6 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
         changed |= scrawl::routing_rules::poll(ui, clock, visible);
     }
     changed | settings::advance_capture(ui, clock, tx)
-}
-
-/// Adopted settings may hide the pane on screen: the Hex Microphone turned off
-/// from `hex settings` hides Voice Filter, and Labs › Modes editor turned off
-/// while the editor shows hides Modes. The window leaves, Output standing in
-/// for the editor it replaced. Returns whether the pane moved.
-fn leave_hidden_pane(ui: &mut Ui) -> bool {
-    if ui.pane.shown(ui) {
-        return false;
-    }
-    ui.pane = match ui.pane {
-        Pane::Modes => Pane::Output,
-        _ => Pane::General,
-    };
-    ui.close_modal();
-    ui.open = None;
-    true
 }
 
 // ---------------------------------------------------------------------------
@@ -1549,6 +1545,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         #[cfg(hex_capture)]
         Pane::Annotate => (Vec::new(), scrawl::pane(ui, p, &mut layer)),
         Pane::VoiceFilter => (Vec::new(), fun::pane(ui, p)),
+        Pane::ConnectedApps => (Vec::new(), connected_apps::pane(ui, p)),
         Pane::HudLab => hud_lab::pane(ui, p),
         Pane::Activity => activity::pane(ui, p),
         Pane::WhatsNew => (Vec::new(), whats_new::feed(ui, p)),
@@ -1615,6 +1612,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     if let Some(first_run) = onboarding_kit::live::overlay(ui, p, cx.is_reduced_motion()) {
         layer.push(first_run);
     }
+    layer.extend(record_panel::panel(ui, p));
     find_popover::layer(ui, p, &mut layer);
     // A file drag shows over everything else in the window, the first run
     // included.

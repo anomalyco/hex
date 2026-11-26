@@ -358,11 +358,13 @@ fn finish_rename(ui: &mut Ui) {
     }
 }
 
-/// The first press arms the confirmation; the confirmation trashes.
-fn trash(ui: &mut Ui, id: String) {
+/// The first press arms the confirmation and focuses its Cancel; the
+/// confirmation trashes.
+fn trash(ui: &mut Ui, tx: &mut Tx, id: String) {
     ui.open = None;
     if ui.meetings.delete_armed.as_deref() != Some(id.as_str()) {
         ui.meetings.delete_armed = Some(id);
+        tx.focus("meeting-cancel-delete", tx.focus_visible());
         return;
     }
     ui.meetings.delete_armed = None;
@@ -395,13 +397,23 @@ pub(super) fn status_tag(p: Paint, status: Status, stop_pending: bool) -> Option
 /// Escape in the Meetings pane: the selection's confirmation or selection
 /// itself, a rename, or a meeting delete's confirmation. False when none is
 /// waiting.
-pub(super) fn cancel_edit(ui: &mut Ui) -> bool {
+pub(super) fn cancel_edit(ui: &mut Ui, tx: &mut Tx) -> bool {
     if ui.meetings.selection.escape() {
         return true;
     }
     let renaming = ui.meetings.renaming.take().is_some();
-    let deleting = ui.meetings.delete_armed.take().is_some();
-    renaming || deleting
+    renaming | cancel_delete(ui, tx)
+}
+
+/// Escape or Cancel: the meeting delete stops asking, and focus returns to
+/// the ⋯ menu it came from.
+fn cancel_delete(ui: &mut Ui, tx: &mut Tx) -> bool {
+    if ui.meetings.delete_armed.take().is_some() {
+        tx.focus("meeting-more", tx.focus_visible());
+        true
+    } else {
+        false
+    }
 }
 
 /// The opt-in card while Meetings is off; otherwise the header's view

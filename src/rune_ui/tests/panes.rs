@@ -1778,6 +1778,18 @@ fn deleting_a_meeting_takes_the_menu_then_a_confirmation() {
             .all(|m| m.id != "preview-notes")
     );
 
+    // The confirmation keeps the keyboard: Cancel takes focus, and Escape
+    // hands it back to the ⋯ menu.
+    let mut rt = runtime("meetings", true, PANE_SIZE);
+    tap(&mut rt, "meeting-more");
+    let delete = menu_item(&rt, "meeting-actions", "Delete…");
+    tap(&mut rt, &delete);
+    assert!(focused(&rt).ends_with("/meeting-cancel-delete"));
+    key(&mut rt, Key::Escape, Mods::default());
+    settle(&mut rt);
+    assert!(rt.state.meetings.delete_armed.is_none(), "Escape cancels");
+    assert!(focused(&rt).ends_with("/meeting-more"));
+
     let mut rt = runtime("meetings-delete", true, PANE_SIZE);
     key(&mut rt, Key::Escape, Mods::default());
     assert!(rt.state.meetings.delete_armed.is_none(), "Escape cancels");
@@ -2560,7 +2572,7 @@ fn hud_lab_picks_dot_scope_processing_placement_and_level() {
 
 #[test]
 fn labs_lists_every_toggle_off_by_default() {
-    let mut rt = runtime("mac-production", true, (980.0, 2200.0));
+    let mut rt = runtime("mac-production", true, (980.0, 2400.0));
     rt.state.settings.experimental.hex_microphone = false;
     rt.state.platform.hex_microphone = None;
     refresh(&mut rt);
@@ -3823,6 +3835,39 @@ fn live_typing_says_when_the_desktop_cannot_use_it() {
     refresh(&mut rt);
     tap(&mut rt, "lab-live-typing");
     assert!(rt.state.settings.labs.live_typing);
+}
+
+/// Labs › Connected apps says when this desktop can't show Hex's permission
+/// window, and refuses to turn on; on already, it still turns off.
+#[test]
+fn connected_apps_says_when_the_desktop_cannot_show_its_window() {
+    let mut rt = runtime("linux-labs", false, PANE_SIZE);
+    rt.state.platform.consent_window_unsupported = true;
+    refresh(&mut rt);
+    open_labs(&mut rt);
+    rt.state.lab_store.search = rune::TextEdit::new("Connected apps".to_owned());
+    refresh(&mut rt);
+    tap(&mut rt, "lab-connected-apps");
+    assert!(
+        !rt.state.settings.labs.connected_apps,
+        "the switch stays off"
+    );
+    let says = |rt: &rune::Runtime<Ui>| {
+        texts(rt)
+            .iter()
+            .any(|text| text.starts_with("This desktop can't show Hex's permission window"))
+    };
+    assert!(says(&rt), "its card says why");
+    rt.state.settings.labs.connected_apps = true;
+    refresh(&mut rt);
+    assert!(says(&rt), "the note stays while it's on");
+    tap(&mut rt, "lab-connected-apps");
+    assert!(!rt.state.settings.labs.connected_apps);
+    rt.state.platform.consent_window_unsupported = false;
+    refresh(&mut rt);
+    assert!(!says(&rt));
+    tap(&mut rt, "lab-connected-apps");
+    assert!(rt.state.settings.labs.connected_apps);
 }
 
 /// Labs › Clean up with Apple Intelligence says why Apple Intelligence can't

@@ -108,13 +108,38 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
 /// Says why a lab just turned on can't work in this session (Labs › Live
 /// typing on a compositor that offers no input method).
 fn announce_note(feature: Feature, on: bool) {
-    if on
-        && feature == Feature::LiveTyping
-        && feature.managed().is_none()
-        && let Some(note) = live_typing_note()
-    {
+    if on && let Some(note) = desktop_note(feature) {
         println!("Note: {note}.");
     }
+}
+
+/// Why an unlocked lab can't work on this desktop, if it can't: Live
+/// typing without an input method, Connected apps without a permission
+/// window.
+fn desktop_note(feature: Feature) -> Option<&'static str> {
+    if feature.managed().is_some() {
+        return None;
+    }
+    match feature {
+        Feature::LiveTyping => live_typing_note(),
+        Feature::ConnectedApps => connected_apps_note(),
+        _ => None,
+    }
+}
+
+/// Why Labs › Connected apps can't ask here: a Wayland compositor without
+/// layer-shell (GNOME) can't show Hex's permission window, so every ask
+/// answers unavailable. `None` elsewhere.
+#[cfg(target_os = "linux")]
+fn connected_apps_note() -> Option<&'static str> {
+    crate::linux::meeting_capsules::without_layer_shell().then_some(
+        "This desktop can't show Hex's permission window (GNOME on Wayland can't), so apps and websites can't ask",
+    )
+}
+
+#[cfg(not(target_os = "linux"))]
+fn connected_apps_note() -> Option<&'static str> {
+    None
 }
 
 /// Why Labs › Live typing can't work here, on this Wayland compositor: it
@@ -263,9 +288,7 @@ fn list(settings: &AppSettings) -> String {
         let on = feature.on(settings)
             || (feature == Feature::VoiceFilter
                 && crate::audio::hex_microphone::driver_bundle_installed());
-        let note = (feature == Feature::LiveTyping && feature.managed().is_none())
-            .then(live_typing_note)
-            .flatten()
+        let note = desktop_note(feature)
             .map(|note| format!(" ({note})"))
             .unwrap_or_default();
         out.push_str(&format!(

@@ -1097,6 +1097,19 @@ pub(super) fn button_enabled(
     enabled: bool,
     press: impl Fn(&mut Ui, &mut Tx) + 'static,
 ) -> El {
+    state_button(p, key, label, kind, !enabled, press)
+}
+
+/// A [`button`] for any view's state (an overlay's), drawn and read as
+/// disabled, and pressing nothing, while `disabled`.
+pub(super) fn state_button<S: 'static>(
+    p: Paint,
+    key: &str,
+    label: &str,
+    kind: ButtonKind,
+    disabled: bool,
+    press: impl Fn(&mut S, &mut Tx) + 'static,
+) -> El {
     let variant = match kind {
         ButtonKind::Primary => ButtonVariant::Contrast,
         ButtonKind::Secondary => ButtonVariant::Neutral,
@@ -1104,7 +1117,7 @@ pub(super) fn button_enabled(
     };
     Button::new(label)
         .variant(variant)
-        .disabled(!enabled)
+        .disabled(disabled)
         .on_press_tx(press)
         .build_push(p.k)
         .key(key)

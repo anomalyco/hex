@@ -184,6 +184,22 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // checks: local_api::timestamps (parse, 403 before the body, response fields,
 │                                        // clamping, empty arrays), transcription::service (the 422 decision), and
 │                                        // gguf_session (chunk offsets); no real-model transcript with times
+├── Connected apps  no    labs.connected_apps + labs.connected_apps_websites (every OS)
+│                                        apps on this computer may ask, in Hex's permission window, to transcribe
+│                                        audio or start recordings (docs/connect.md). While on it adds the Connected
+│                                        apps pane to the sidebar; the card keeps only its switch and summary.
+│                                        The pane: Connected (every app and website with a saved grant: icon, name,
+│                                        who it is, what it may do, Revoke), then Websites: Allow websites to use Hex,
+│                                        and while that is on, Asking to connect (an unknown website gets no dialog,
+│                                        403 website-not-allowed, listed once with origin and time; Allow or Block),
+│                                        and Allowed and Blocked websites folded behind disclosures (Remove,
+│                                        Unblock; blocked ones answer 403 website-blocked). Off, the routes
+│                                        answer as before, a pending dialog is withdrawn, a live consented recording is
+│                                        cancelled, and grants and lists are kept unused. Any website may ask to
+│                                        be let in while both switches are on
+│                                        // checks: local_api::tests::connected_apps, local_api::permissions website-list
+│                                        // tests, local_api::tests::requester_icons, rune_ui::labs::connected_apps tests
+│                                        // (pane states, every OS); not observed from a real browser page
 ├── Use model files where they are no labs.model_in_place the picker adds a model file without copying it, so accounts can share one (#941)
 ├── Smaller model files no labs.k_quant_models         (macOS) adding a model file also accepts Q6_K, Q5_K, and Q4_K weights, smaller than Q8_0 and unverified
 │                                        // checks: k_quants_are_known_only_where_the_caller_runs_them,

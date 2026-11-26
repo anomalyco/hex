@@ -101,6 +101,13 @@ pub(crate) struct Published {
     pub(crate) update_notes: Option<crate::desktop::host::UpdateNotes>,
     pub(crate) settings: AppSettings,
     preparation: crate::transcription::preparation::PreparationStatus,
+    /// A consented recording Hex's window can stop or cancel.
+    pub(crate) record: Option<crate::local_api::RecordView>,
+    /// Clients paired to start recordings, which the window can revoke.
+    pub(crate) permissions: Vec<crate::local_api::PermissionView>,
+    pub(crate) grants: Vec<crate::local_api::RecordGrant>,
+    /// Labs › Connected apps' website lists.
+    pub(crate) websites: crate::local_api::Websites,
 }
 
 type Wake = Arc<dyn Fn() + Send + Sync>;
@@ -114,6 +121,8 @@ struct Shared {
     /// When this run began, in the event log's wall-clock ms, captured before
     /// the listener thread starts.
     started_at: u64,
+    /// The consented-recording sessions the window can stop or cancel.
+    record: Option<Arc<crate::local_api::RecordSessions>>,
 }
 
 impl Shared {
@@ -347,6 +356,17 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     let (developer_sender, developer_receiver) = mpsc::sync_channel(8);
     let (control_sender, control_receiver) = mpsc::sync_channel(8);
     let (recognition_controls, recognition_control_receiver) = mpsc::sync_channel(8);
+    // A web page's ask is answered in this process's window, so the local API
+    // can wait on it without ever handing the page the API token.
+    let consent = Arc::new(crate::desktop::consent::Desk::default());
+    // One consented recording runs on the listener's own programmatic
+    // dictation; the window can stop or cancel it.
+    let permissions = crate::local_api::Permissions::app();
+    let record = crate::local_api::record_sessions(
+        consent.clone(),
+        recognition_controls.clone(),
+        permissions.clone(),
+    );
     let mut local_api = crate::local_api::LocalApi::start(
         event_log.clone(),
         crate::local_api::LocalApiOptions {
@@ -354,6 +374,13 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
             dictation_control: Some(recognition_controls.clone()),
             control: Some(control_sender),
             processing: crate::local_api::processing::profiles_processing(transformations.clone()),
+            connect: Some(crate::local_api::Connect::new(
+                crate::local_api::Access::app(),
+                Some(consent.clone()),
+                permissions,
+            )),
+            record: Some(record.clone()),
+            native_socket: crate::local_api::native_socket_path(),
             ..Default::default()
         },
     )?;
@@ -435,6 +462,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     let shared = Arc::new(Shared {
         event_path: event_path.clone(),
         started_at,
+        record: Some(record),
         ..Shared::default()
     });
     let handle = RuntimeHandle {
@@ -527,6 +555,18 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
             move |id| show(&window, Destination::Meetings(Some(id))),
         )
     };
+    // Hex's permission window: its own floating window, so an ask shows
+    // whether the main window is open or not and never raises it.
+    let consent_window = {
+        let desk = consent.clone();
+        crate::rune_ui::consent_window::install(
+            &mut app,
+            Arc::new(move |id, answer| {
+                desk.answer(id, answer);
+            }),
+        )
+    };
+    consent.watch(consent_window);
     let hud = crate::rune_hud::install(&mut app);
     crate::rune_ui::live_text::install(&mut app, crate::rune_hud::live_text_place);
     #[cfg(hex_capture)]

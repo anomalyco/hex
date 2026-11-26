@@ -136,14 +136,20 @@ impl Backend {
     }
 
     pub(super) fn state(&self) -> Option<HostState> {
-        let (desktop, settings, editing) = match self {
+        let (desktop, settings, editing, record) = match self {
             Self::Host(host, _) => {
                 let snapshot = host.snapshot();
-                (snapshot.desktop, snapshot.settings, snapshot.editing)
+                let record = host.consent().map(|consent| consent.record.clone());
+                (
+                    snapshot.desktop,
+                    snapshot.settings,
+                    snapshot.editing,
+                    record,
+                )
             }
             Self::Status(status, _) => {
                 let status = *status.clone()?;
-                (status.desktop, status.settings, status.editing)
+                (status.desktop, status.settings, status.editing, None)
             }
         };
         Some(HostState {
@@ -155,6 +161,19 @@ impl Backend {
                 update_notes: desktop.update_notes,
                 update_blocked: None,
                 editing,
+                record: record.as_ref().and_then(|record| record.view()),
+                permissions: record
+                    .as_ref()
+                    .map(|record| record.permissions())
+                    .unwrap_or_default(),
+                grants: record
+                    .as_ref()
+                    .map(|record| record.grants())
+                    .unwrap_or_default(),
+                websites: record
+                    .as_ref()
+                    .map(|record| record.websites())
+                    .unwrap_or_default(),
             },
             settings,
         })
@@ -227,4 +246,18 @@ pub(super) fn launch_at_login() -> Option<Result<bool, String>> {
 pub(super) fn set_launch_at_login(enabled: bool) -> Result<bool, String> {
     crate::linux::login_item::set_enabled(enabled).map_err(|error| format!("{error:#}"))?;
     crate::linux::login_item::is_enabled().map_err(|error| format!("{error:#}"))
+}
+
+/// Hex's permission window: its own overlay, so an ask shows whether the
+/// main window is open or not and never opens it.
+pub(super) fn install_consent(app: &mut rune::App<super::Ui>, host: &HostHandle) {
+    if let Some(consent) = host.consent().cloned() {
+        let desk = consent.desk.clone();
+        consent.desk.watch(super::consent_window::install(
+            app,
+            Arc::new(move |id, answer| {
+                desk.answer(id, answer);
+            }),
+        ));
+    }
 }
