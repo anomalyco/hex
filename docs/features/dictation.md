@@ -847,8 +847,16 @@ picker (closing one that is open) and the writer. Check:
 
 ```ts
 Tap, Paste Last menu, or hex paste-last → newest ready, noncancelled dictation or marked annotation
-Hold 200 ms on the Mac event tap → up to eight recent items, without taking focus
-├── Rows are read from the press, so the picker fades in as the hold passes
+Hold 200 ms on the Mac event tap → recent items, without taking focus
+├── Rows are read from the press, so the picker fades in as the hold passes: the
+│   newest 16 first, then up to 300 read after it opens, the selection kept on its
+│   item (each capture is a manifest read, so the deep list never delays opening)
+├── The rail shows eight rows and scrolls through the rest: wheel, trackpad, and
+│   ↑/↓ (the selection scrolls into view); only rows in view are built, so only
+│   their pictures load. With ⌥⇧ still held a mouse wheel turns sideways (macOS
+│   turns it before Rune sees it), and the rail turns it back (paste_picker/wheel.rs)
+├── Works while an Annotate capture or a meeting records: neither stops, and the
+│   capture records none of the picker's clicks, scrolls, or keys (nor inks them)
 ├── Centred on the display under the pointer; stays open once the keys come up
 ├── Rows down a rail (a capture's picture or a dictation's mark, first words, kind · age)
 │   beside the selected row's preview: a capture's first keyframe (else its contact
@@ -865,16 +873,27 @@ Hold 200 ms on the Mac event tap → up to eight recent items, without taking fo
 └── Escape, a click outside the card, another key, or changed focus → close without touching the clipboard
 ```
 
-Check: `a_tap_pastes_and_a_hold_opens_a_picker_that_stays_until_escape` and
-`a_click_selects_a_second_pastes_and_a_capture_opens_in_its_editor` in
-[paste/browse.rs](../../src/paste/browse.rs). Scenes: `mac-paste-picker` (a
+Check: `a_tap_pastes_and_a_hold_opens_a_picker_that_stays_until_escape`,
+`a_click_selects_a_second_pastes_and_a_capture_opens_in_its_editor`,
+`the_deep_list_replaces_the_first_rows_and_keeps_the_selection_on_its_item` and
+`an_open_picker_keeps_its_clicks_scrolls_and_keys_out_of_a_capture` in
+[paste/browse.rs](../../src/paste/browse.rs);
+`the_first_rows_open_and_the_deep_list_reaches_far_back` in
+[paste/recent.rs](../../src/paste/recent.rs); the rail's wheel, Shift-turned
+wheel, click, and key-reveal tests in
+[rune_ui/paste_picker/tests.rs](../../src/rune_ui/paste_picker/tests.rs);
+`paste_last_taps_and_holds_while_annotate_records` in
+[recognition/paste_picker.rs](../../src/recognition/paste_picker.rs) and
+`the_paste_picker_works_over_annotate_and_meetings` in
+[recognition.rs](../../src/recognition.rs). Not run on a real Mac: a physical
+wheel with ⌥⇧ held over the panel, and ⌥⇧V over a live capture or meeting. Scenes: `mac-paste-picker` (a
 capture selected) and `mac-paste-picker-dictation`, on fixture rows and drawn
 pictures. Not yet run natively: a real capture's picture loading from its
 bundle, Copy, and Open in Editor from the picker.
 
 With it on, the Mac History puts dictations, annotations, screenshots and
 screen recordings in one list. All types is the default. Search works inside the
-selected type and beyond the eight picker rows. Capture files keep their
+selected type and beyond the picker's rows. Capture files keep their
 editor, copy, reveal, drag and Trash actions. Clear dictation history affects
 the dictation owner only. A shared-library bundle can be visible without
 being eligible for global paste; that needs the Hex writer's ready receipt.

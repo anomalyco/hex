@@ -27,6 +27,7 @@ pub(super) struct Lab {
     engine: Option<Arc<TranscriptionEngine>>,
     picker: Option<Picker>,
     writer: Option<super::cancelled_words::Writer>,
+    chord: Chord,
 }
 
 impl Lab {
@@ -36,6 +37,27 @@ impl Lab {
             engine,
             picker: None,
             writer: None,
+            chord: Chord::default(),
+        }
+    }
+    /// Paste Last pressed while an Annotate capture holds the dictation
+    /// shortcut: it isn't dictation, so it works as it always does (a tap
+    /// pastes, a hold opens the picker) and the capture records on. The
+    /// press starts no dictation, so there is no provisional capture to
+    /// withdraw.
+    pub fn press_over_capture(
+        &mut self,
+        event: InputEvent,
+        at: CaptureInstant,
+        worker: &DictationWorker,
+    ) -> Result<(), &'static str> {
+        let binding = crate::app_settings::runtime_hotkeys().paste_last;
+        let Some(binding) = binding.filter(|&binding| self.chord.fresh(event, binding)) else {
+            return Ok(());
+        };
+        match self.picker.as_mut() {
+            Some(picker) => picker.press(binding, at, worker),
+            None => worker.paste_last(),
         }
     }
     pub fn sync(&mut self, on: bool) {
@@ -63,6 +85,27 @@ impl Lab {
             self.writer = super::cancelled_words::Writer::start(history, engine);
         }
         self.writer.as_ref()
+    }
+}
+
+/// Paste Last's key as the listener sees it when no dictation machine
+/// does: a fresh press of the whole chord, never its repeats.
+#[derive(Default)]
+struct Chord {
+    held: bool,
+}
+
+impl Chord {
+    fn fresh(&mut self, event: InputEvent, binding: RuntimeHotkey) -> bool {
+        let InputEvent::Key { code, down, flags } = event else {
+            return false;
+        };
+        if binding.key_code != Some(code) {
+            return false;
+        }
+        let fresh = down && !self.held && binding.matches_key_press(code, flags);
+        self.held = down;
+        fresh
     }
 }
 
@@ -213,17 +256,26 @@ impl Picker {
     /// Asks the one bounded reader for this invocation's rows.
     fn read(&mut self, epoch: u64) -> Result<(), &'static str> {
         if self.reader.is_none() {
-            let (tx, rx) = mpsc::sync_channel(1);
+            let (tx, rx) = mpsc::sync_channel(4);
             let history = self.history.clone();
             std::thread::Builder::new()
                 .name("paste-choices".into())
                 .spawn(move || {
-                    while let Ok(epoch) = rx.recv() {
-                        let rows = history
-                            .as_ref()
-                            .map(recent::current_rows)
-                            .unwrap_or_default();
-                        browse::show(epoch, rows);
+                    while let Ok(mut epoch) = rx.recv() {
+                        // Only the newest press can still be current.
+                        while let Ok(newer) = rx.try_recv() {
+                            epoch = newer;
+                        }
+                        let Some(history) = history.as_ref() else {
+                            browse::show(epoch, Vec::new());
+                            continue;
+                        };
+                        // The first rows open the picker at once; the deep
+                        // list follows, unless a tap or a choice came first.
+                        browse::show(epoch, recent::current_rows(history, recent::FIRST));
+                        if browse::wants(epoch) {
+                            browse::extend(epoch, recent::current_rows(history, recent::DEEP));
+                        }
                     }
                 })
                 .map_err(|_| "paste list is unavailable")?;
@@ -252,6 +304,49 @@ impl Drop for Picker {
 mod tests {
     use super::*;
     use crate::paste::gesture::Effect;
+
+    /// While an Annotate capture holds the dictation shortcut, Paste Last
+    /// still reaches the picker: a fresh press of its whole chord taps or
+    /// holds as usual (the capture is never asked to stop), and its repeats,
+    /// its key alone or with other modifiers, and Annotate's own ⌥⇧S don't.
+    #[test]
+    fn paste_last_taps_and_holds_while_annotate_records() {
+        use crate::app_settings::{
+            COMMAND_KEY_MASK, HotkeyBinding, OPTION_KEY_MASK, SHIFT_KEY_MASK,
+        };
+        let binding = HotkeyBinding::paste_last_default().runtime();
+        let v = binding.key_code.expect("Paste Last binds a key");
+        let key = |code, down, flags| InputEvent::Key { code, down, flags };
+        let held = OPTION_KEY_MASK | SHIFT_KEY_MASK;
+        // Annotate keeps the dictation shortcut: dictation starts nothing.
+        assert!(super::super::guards::capture_owns_dictation(true, false));
+        let mut chord = Chord::default();
+        assert!(chord.fresh(key(v, true, held), binding));
+        assert!(!chord.fresh(key(v, true, held), binding), "a repeat");
+        assert!(!chord.fresh(key(v, false, held), binding));
+        assert!(!chord.fresh(key(v, true, 0), binding), "V alone");
+        assert!(!chord.fresh(key(v, false, 0), binding));
+        assert!(!chord.fresh(key(v, true, held | COMMAND_KEY_MASK), binding));
+        assert!(!chord.fresh(key(v, false, held), binding));
+        assert!(
+            !chord.fresh(key(1, true, held), binding),
+            "⌥⇧S is Annotate's"
+        );
+        assert!(!chord.fresh(InputEvent::Flags(held), binding));
+        assert!(chord.fresh(key(v, true, held), binding), "pressed again");
+
+        // The press then runs the same gesture as anywhere else: a tap
+        // pastes, a hold opens the picker.
+        let at = |ms| CaptureInstant::from_nanos(ms * 1_000_000u64);
+        let mut lab = Lab::new(None, None);
+        lab.sync(true);
+        let picker = lab.picker().unwrap();
+        assert_eq!(picker.hold.press(binding, at(0), true), Effect::Wait);
+        let up = key(v, false, held);
+        assert_eq!(picker.hold.edge(up, at(90)), Effect::PasteLatest);
+        assert_eq!(picker.hold.press(binding, at(1_000), true), Effect::Wait);
+        assert_eq!(picker.hold.tick(at(1_400)), Effect::Browse);
+    }
 
     #[test]
     fn toggling_the_lab_after_start_changes_what_holding_paste_last_does() {

@@ -2055,6 +2055,7 @@ impl LiveInput {
     /// rules (Hex's windows are this process's).
     fn forward(&self, received: Receiver<(CaptureInstant, Tapped)>) {
         let mut pill = CapsulePill::default();
+        let mut picker = drawing::Picker::default();
         for (at, tapped) in received {
             let mut state = self.state();
             let InputState::Attached(target) = &mut *state else {
@@ -2077,7 +2078,8 @@ impl LiveInput {
                 #[cfg(not(target_os = "macos"))]
                 Tapped::Key { .. } => continue,
             };
-            let Some(event) = target.rules.translate(t_ms, input).map(drawing::as_pen) else {
+            let event = target.rules.translate(t_ms, input);
+            let Some(event) = event.and_then(|e| picker.pen(e)) else {
                 continue;
             };
             // A press or scroll on the capsule's pill is Hex's; anywhere

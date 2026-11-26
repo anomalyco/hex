@@ -17,6 +17,7 @@ use view::{Act, Shown, Size};
 
 mod fixture;
 mod view;
+mod wheel;
 
 /// A calm appear and a quicker leave; the card never moves or scales.
 const FADE_IN: Duration = Duration::from_millis(120);
@@ -77,6 +78,7 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) {
                 return;
             }
             let was = s.view.open;
+            let cursor = s.view.cursor;
             if next.open {
                 if !was {
                     s.pictures
@@ -92,6 +94,10 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) {
                 s.view.open = false;
             }
             tx.instant();
+            if s.view.open {
+                let reveal = view::reveal(!was, cursor, s.view.cursor, s.view.rows.len());
+                view::follow(tx, reveal);
+            }
             if s.view.open && !was {
                 handle.fade_in(FADE_IN);
             } else if !s.view.open && was {
@@ -112,8 +118,9 @@ fn panel(s: &Panel, cx: &mut rune::Cx<Panel>) -> El {
             now: crate::history::now_ms(),
             trigger: &trigger,
         },
+        s,
         p,
-        &|path, size| s.pixels(path, size),
+        |s: &Panel, path: &Path, size| s.pixels(path, size),
         move |s: &mut Panel, act, tx| perform(s, epoch, act, tx),
     )
 }
@@ -205,11 +212,12 @@ impl Preview {
 
 /// The picker over the window for the `mac-paste-picker` scenes, on fixed
 /// rows that resolve to nothing.
-pub(super) fn preview(preview: &Preview, p: Paint) -> Option<El> {
+pub(super) fn preview(ui: &super::Ui, p: Paint) -> Option<El> {
+    let preview = &ui.paste_preview;
     if !preview.shown {
         return None;
     }
-    let rows = fixture::rows();
+    let rows = fixture::rows().into();
     let trigger = ["⌥", "⇧", "V"].map(str::to_owned);
     Some(
         view::stage(
@@ -219,8 +227,9 @@ pub(super) fn preview(preview: &Preview, p: Paint) -> Option<El> {
                 now: fixture::NOW,
                 trigger: &trigger,
             },
+            ui,
             p,
-            &fixture::pixels,
+            |_: &super::Ui, path: &Path, size| fixture::pixels(path, size),
             |ui: &mut super::Ui, act, _| ui.paste_preview.perform(act),
         )
         .absolute(0.0, 0.0),
@@ -229,3 +238,5 @@ pub(super) fn preview(preview: &Preview, p: Paint) -> Option<El> {
 
 #[cfg(test)]
 mod proof;
+#[cfg(test)]
+mod tests;

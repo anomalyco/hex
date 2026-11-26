@@ -396,6 +396,24 @@ pub(super) fn end_stroke() {
     );
 }
 
+/// Paste Last's picker open over the capture: its clicks, scrolls, and keys
+/// are Hex's, so they choose a row and never mark the recording, or ink it
+/// while drawing (macOS, the only picker).
+#[derive(Default)]
+pub(super) struct Picker(#[cfg(target_os = "macos")] crate::paste::browse::Over);
+
+impl Picker {
+    /// `event` as the capture records it, drawn with the pen while drawing;
+    /// None for what the picker takes, asked before the pen can press.
+    pub(super) fn pen(&mut self, event: InputEvent) -> Option<InputEvent> {
+        #[cfg(target_os = "macos")]
+        if self.0.takes(&event) {
+            return None;
+        }
+        Some(as_pen(event))
+    }
+}
+
 /// While drawing, every pointer event draws as if Shift alone were held,
 /// whatever the keys (the Annotate key's own modifiers included).
 pub(super) fn as_pen(event: InputEvent) -> InputEvent {

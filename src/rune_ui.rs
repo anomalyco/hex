@@ -1611,7 +1611,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         None => {}
     }
     #[cfg(all(target_os = "macos", hex_capture))]
-    layer.extend(paste_picker::preview(&ui.paste_preview, p));
+    layer.extend(paste_picker::preview(ui, p));
     if let Some(first_run) = onboarding_kit::live::overlay(ui, p, cx.is_reduced_motion()) {
         layer.push(first_run);
     }

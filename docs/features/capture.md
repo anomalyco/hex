@@ -485,6 +485,9 @@ While a capture records                  // capture.quiet
 │   assertion, and it never counts as an intentional dictation
 ├── Stop, cancel, discard, failed start, captures off, quit -> released; a
 │   switch carries it to the next capture without restoring in between
+├── Paste Last (⌥⇧V) -> pastes on a tap, and a hold opens Labs › Paste Last
+│   picker, as without a capture; the capture records on, and the open
+│   picker's clicks, scrolls, and keys never reach it (drawing::Picker)
 ├── Dictation shortcut -> starts nothing while it records
 │   (macOS: recognition.rs swallows it in the tap; Linux: linux/dictation
 │   ignores Start). Nothing leaks to the app in front. With Labs › Dictate
