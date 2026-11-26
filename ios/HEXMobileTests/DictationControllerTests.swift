@@ -1949,6 +1949,15 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertFalse(shows(hold: .otherEngine))
         XCTAssertFalse(shows(hold: .keyboardTooSmall))
         XCTAssertFalse(shows(dismissed: true))
+        // What the keyboard said: hidden only where the model can never run in it (1.0.5
+        // quality review: the card stayed for good and couldn't be dismissed).
+        func shows(_ reason: KeyboardParakeetSettings.UnavailableReason) -> Bool {
+            SpeechModelHomeCard.shows(enabled: true, fits: true, hold: nil, dismissed: false, unavailable: reason)
+        }
+        XCTAssertFalse(shows(.noNeuralEngine), "never runs in this keyboard")
+        XCTAssertTrue(shows(.shortOfMemory), "it tries again the next time it opens")
+        XCTAssertTrue(shows(.loadFailed), "with Try again")
+        XCTAssertTrue(shows(.notOnNeuralEngine), "with Try again")
         let suite = "speech-model-card-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -3297,14 +3306,22 @@ final class SpeechLanguagePickerTests: XCTestCase {
         XCTAssertEqual(picked?.identifier, "en-US")
     }
 
+    /// Settings names languages as the keyboard does (1.0.5 quality review: "English (United
+    /// Stat…" was cut off, and one language had up to four spellings across screens).
     func testShortNamesDropTheRegionOnlyWhenItIsTheOnlyOne() {
         let english = Locale(identifier: "en-US")
         let names = SpeechLanguagePicker.shortNames(for: ["nb-NO", "en-US", "en-GB", "he-IL"], in: english)
         XCTAssertEqual(names["nb-NO"], "Norwegian Bokmål")
         XCTAssertEqual(names["he-IL"], "Hebrew")
-        XCTAssertEqual(names["en-US"], "English (United States)")
-        XCTAssertEqual(SpeechLanguagePicker.shortName(for: "en-US", in: english), "English (US)")
-        XCTAssertEqual(SpeechLanguagePicker.shortName(for: "es-US", in: english), "Spanish (US)")
+        XCTAssertEqual(names["en-US"], "English (US)")
+        let supported = ["en-US", "en-GB", "es-US", "es-ES", "fr-FR", "fr-CA", "ru-RU"]
+        let short = SpeechLanguagePicker.shortNames(for: ["en-US", "es-US", "fr-FR", "ru-RU"], among: supported, in: english)
+        XCTAssertEqual(short, ["en-US": "English (US)", "es-US": "Spanish (US)", "fr-FR": "French (FR)", "ru-RU": "Russian"])
+        // The keyboard's own names follow the same rule, in each language's own name.
+        let native = DictationLanguageSwitch.nativeNames(for: ["en-US", "es-US", "ru-RU"], supported: supported)
+        XCTAssertEqual(native["en-US"], "English (US)")
+        XCTAssertEqual(native["es-US"], "Español (US)")
+        XCTAssertEqual(native["ru-RU"], "Русский")
     }
 
     func testOnlyEnglishCountsAsEnglish() {

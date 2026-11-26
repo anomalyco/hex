@@ -81,12 +81,20 @@ struct PrivacySettingsPage: View {
             // What Send feedback sends, and when (FeedbackForm; the website's policy says the same).
             if Feedback.isAvailable {
                 SettingsSectionHeader(title: "Feedback")
-                Text("Hex sends nothing unless you tap Send in Send feedback. Then it sends your message and the pictures you kept, your email if you add one, and details about Hex and this iPhone to Anomaly's feedback inbox. With an email, Hex also sends a random install ID so your reports stay together. Your dictations, what you type, and what Hex learned are never included.")
+                Text("Hex sends nothing unless you tap Send in Send feedback. The form lists exactly what goes with it. Your dictations, what you type and what Hex learned are never included.")
                     .font(.system(size: 12))
                     .foregroundStyle(HexTheme.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 16)
             }
+
+            // The one request Hex makes by itself, said as Android's Privacy page says its
+            // update check: the model downloads (Parakeet's files, from Hugging Face).
+            Text("Hex downloads its own speech models from Hugging Face; that request carries nothing about you or what you say, though Hugging Face sees your internet address, as with any website.")
+                .font(.system(size: 12))
+                .foregroundStyle(HexTheme.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 16)
         }
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: learnTyping)
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: typingLogs)

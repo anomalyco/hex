@@ -37,6 +37,7 @@ extension DictationController {
             controller.engine = .appleSpeech
             controller.applyFixturePhase(.failed(UserFacingError.message(for: unavailable, context: .model)))
             controller.languageOffer = "en-US"
+            controller.languageOfferLine = unavailable.lineBesideOffer
 
         case "language-switched":
             // Automatic moved on from Russian to English.

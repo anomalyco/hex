@@ -56,7 +56,7 @@ private enum HexKeySide: CaseIterable {
     }
 }
 
-/// Settings › Keyboard: grouped by task into Layout, Typing, and Feedback so the page scans
+/// Settings › Keyboard: grouped by task into Layout, Typing, Feedback and Emoji so the page scans
 /// cleanly instead of one 11-row card.
 struct KeyboardSettingsPage: View {
     /// `KeyboardSetupMonitor.fullAccessOn`.
@@ -280,7 +280,7 @@ struct KeyboardSettingsPage: View {
                 }
             }
 
-            // Feedback & extras: key pop-ups, haptics, emoji.
+            // Feedback: key pop-ups and haptics. Emoji has its own card below.
             SettingsSectionHeader(title: "Feedback")
 
             SettingsCard {
@@ -320,9 +320,11 @@ struct KeyboardSettingsPage: View {
                     .padding(.horizontal, 16)
                     .frame(minHeight: 50)
                 }
+            }
 
-                SettingsDivider()
+            SettingsSectionHeader(title: "Emoji")
 
+            SettingsCard {
                 SettingsToggleRow(
                     title: String(localized: "Emoji key"),
                     detail: fullKeyboard

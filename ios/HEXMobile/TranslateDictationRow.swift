@@ -68,7 +68,7 @@ struct TranslateDictationRow: View {
 
             if enabled {
                 HStack {
-                    Text("Insert in")
+                    Text("Translate to")
                         .font(.system(size: 13))
                         .foregroundStyle(HexTheme.textMuted)
                     Spacer()
@@ -87,7 +87,7 @@ struct TranslateDictationRow: View {
                     } label: {
                         SettingsMenuValue(value: name(of: Locale.Language(identifier: target)))
                     }
-                    .accessibilityLabel("Insert in")
+                    .accessibilityLabel("Translate to")
                 }
 
                 state
@@ -141,7 +141,7 @@ struct TranslateDictationRow: View {
                     }
                     downloadButton(for: pair, again: false)
                 case .unsupported:
-                    note("Apple can't translate between these languages.")
+                    note("Apple can't translate \(name(of: pair.source)) to \(name(of: pair.target)) on this iPhone. Pick another language.")
                 default:
                     EmptyView()
                 }

@@ -249,7 +249,7 @@ struct DictationSettingsPage: View {
                 SettingsToggleRow(
                     title: String(localized: "Speech model in keyboard"),
                     detail: keyboardParakeetFits
-                        ? String(localized: "The keyboard dictates with the model below. Until it's ready, it uses Apple's speech recognition.")
+                        ? String(localized: "Until it's ready, the keyboard uses Apple's speech recognition")
                         : String(localized: "Needs an iPhone with 6 GB of memory or more"),
                     isOn: $keyboardParakeet
                 )
@@ -287,31 +287,45 @@ struct DictationSettingsPage: View {
                         .padding(.horizontal, 12)
                         .padding(.bottom, 12)
                 }
+            }
+            .id(Self.speechModelRow)
 
+            // Keep mic warm and the microphone itself, apart from the speech model.
+            SettingsSectionHeader(title: "Microphone")
+
+            SettingsCard {
                 // Hidden where the keyboard dictates by itself and it would say Off.
                 if keepsWarmRow || dictation.showsKeepMicWarm {
-                    SettingsDivider()
-
-                    HStack(spacing: 12) {
-                        SettingsRowLabel(title: String(localized: "Keep mic warm"))
-                        Spacer(minLength: 8)
-                        SettingsSegments(
-                            items: WarmSessionDuration.allCases,
-                            selected: dictation.warmDuration,
-                            label: \.shortLabel,
-                            onSelect: { duration in
-                                keepsWarmRow = true
-                                withAnimation(HexMotion.settleAnimation(reduceMotion: reduceMotion)) {
-                                    dictation.selectWarmDuration(duration)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 12) {
+                            SettingsRowLabel(title: String(localized: "Keep mic warm"))
+                            Spacer(minLength: 8)
+                            SettingsSegments(
+                                items: WarmSessionDuration.allCases,
+                                selected: dictation.warmDuration,
+                                label: \.shortLabel,
+                                onSelect: { duration in
+                                    keepsWarmRow = true
+                                    withAnimation(HexMotion.settleAnimation(reduceMotion: reduceMotion)) {
+                                        dictation.selectWarmDuration(duration)
+                                    }
                                 }
-                            }
-                        )
+                            )
+                        }
+                        // A privacy point too: the microphone stays open for the time picked.
+                        // Under the row, full width: beside the four segments it wrapped to three
+                        // lines.
+                        Text("Keeps the mic open after a dictation so the next starts at once")
+                            .font(.system(size: 12))
+                            .foregroundStyle(HexTheme.textMuted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
                     .frame(minHeight: 50)
-                }
 
-                SettingsDivider()
+                    SettingsDivider()
+                }
 
                 // With a car, headset or headphones connected (`MicrophoneRoute`).
                 HStack(spacing: 12) {
@@ -340,7 +354,6 @@ struct DictationSettingsPage: View {
                 .padding(.vertical, 10)
                 .frame(minHeight: 50)
             }
-            .id(Self.speechModelRow)
         }
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: customVocabularyOn)
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: showsStyleFormatting)

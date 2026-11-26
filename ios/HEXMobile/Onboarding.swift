@@ -19,6 +19,11 @@ struct OnboardingModel: Equatable {
     /// Whether Hex downloads a model for it: not for Apple's on-device recognizer before iOS 26,
     /// which only needs Speech Recognition allowed.
     var downloads = true
+    /// Whether the keyboard has its own Apple speech model ready, apart from Hex's: where Hex
+    /// dictates with its own model (Parakeet), the keyboard still dictates with Apple's speech
+    /// recognition if only Hex's download failed. Where Hex dictates with Apple's, the
+    /// keyboard follows it (`.followsApp`), and without that model nothing dictates.
+    var keyboardDictates = false
 
     var isReady: Bool { stage == .ready }
 
@@ -59,6 +64,7 @@ struct OnboardingModel: Equatable {
         }
         stage = Self.combine(app, keys)
         downloads = dictation.engineDownloads
+        keyboardDictates = keyboard.state == .ready
         let id: String
         if dictation.isModelReady {
             id = dictation.transcriptionLanguageID
@@ -111,10 +117,13 @@ struct OnboardingView: View {
         guard let fixture = OnboardingFixture.current else { return nil }
         let english = SpeechModelUnavailable.interfaceName("en-US")
         if fixture == .failed {
-            return OnboardingModel(
+            var model = OnboardingModel(
                 stage: .failed(String(localized: "Hex couldn't download the speech model. Check your connection and try again.")),
                 language: english
             )
+            // `--keyboard-dictates`: only Hex's own model failed, the keyboard has Apple's.
+            model.keyboardDictates = ProcessInfo.processInfo.arguments.contains("--keyboard-dictates")
+            return model
         }
         if let fraction = fixture.modelFraction {
             return OnboardingModel(
@@ -603,12 +612,17 @@ struct OnboardingModelWait: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            OnboardingTitle("Almost ready")
-            Text("Getting the speech model ready.")
-                .font(.system(size: 15))
-                .foregroundStyle(HexTheme.textMuted)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
+            // A failed download says so above its message, rather than that it's getting ready.
+            if model.isFailed {
+                OnboardingTitle(model.downloads ? "Download failed" : "Speech recognition isn't ready")
+            } else {
+                OnboardingTitle("Almost ready")
+                Text("Getting the speech model ready.")
+                    .font(.system(size: 15))
+                    .foregroundStyle(HexTheme.textMuted)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if case .failed(let message) = model.stage {
                 OnboardingFailure(message: message, onRetry: onRetry)
@@ -637,7 +651,9 @@ struct OnboardingModelWait: View {
             if model.isFailed || stalled {
                 VStack(spacing: 6) {
                     OnboardingQuietButton(title: "Continue without a model", action: onWithoutModel)
-                    Text(model.downloads ? "Dictation won't work until the speech model downloads." : "Dictation won't work until speech recognition is ready.")
+                    Text(model.keyboardDictates
+                        ? "The Hex keyboard dictates with Apple's speech recognition until it downloads."
+                        : model.downloads ? "Dictation won't work until the speech model downloads." : "Dictation won't work until speech recognition is ready.")
                         .font(.system(size: 13))
                         .foregroundStyle(HexTheme.textFaint)
                         .multilineTextAlignment(.center)
@@ -933,6 +949,30 @@ private struct OnboardingPracticePage: View {
 
 // MARK: - Hex is ready
 
+/// What's left on page 6, first what matters most.
+enum OnboardingLeft: Equatable {
+    case nothing
+    case model
+    case microphone
+    case keyboard
+    case fullAccess
+
+    static func resolve(modelReady: Bool, microphoneGranted: Bool, keyboardAdded: Bool?, fullAccessOn: Bool) -> Self {
+        if !modelReady { return .model }
+        if !microphoneGranted { return .microphone }
+        if keyboardAdded == false { return .keyboard }
+        if !fullAccessOn { return .fullAccess }
+        return .nothing
+    }
+
+    /// Try again goes back to the practice: worth it once Settings has the microphone or the
+    /// keyboard, or to use the keyboard once for Full Access. Not on "Hex is ready", with
+    /// nothing left, nor while the model gets ready, whose card has its own Try again.
+    var offersTryAgain: Bool {
+        self == .microphone || self == .keyboard || self == .fullAccess
+    }
+}
+
 /// Page 6. "Hex is ready" only once every step is done (the model included); until then it
 /// says what's left. Start using Hex never waits on it (App Review 5.1.1(iv)).
 private struct OnboardingReadyPage: View {
@@ -943,20 +983,13 @@ private struct OnboardingReadyPage: View {
     let onTryAgain: () -> Void
     let onStart: () -> Void
 
-    private enum Left {
-        case nothing
-        case model
-        case microphone
-        case keyboard
-        case fullAccess
-    }
-
-    private var left: Left {
-        if !model.isReady { return .model }
-        if monitor.microphone != .granted { return .microphone }
-        if monitor.keyboardAdded == false { return .keyboard }
-        if !monitor.fullAccessOn { return .fullAccess }
-        return .nothing
+    private var left: OnboardingLeft {
+        OnboardingLeft.resolve(
+            modelReady: model.isReady,
+            microphoneGranted: monitor.microphone == .granted,
+            keyboardAdded: monitor.keyboardAdded,
+            fullAccessOn: monitor.fullAccessOn
+        )
     }
 
     var body: some View {
@@ -988,7 +1021,7 @@ private struct OnboardingReadyPage: View {
             }
             .onboardingStagger(1)
             Spacer(minLength: 24)
-            if left != .model {
+            if left.offersTryAgain {
                 OnboardingQuietButton(title: "Try again", action: onTryAgain)
                     .padding(.bottom, 8)
                     .onboardingStagger(2)

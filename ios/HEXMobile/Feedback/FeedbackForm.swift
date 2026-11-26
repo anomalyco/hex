@@ -301,7 +301,7 @@ struct FeedbackForm: View {
     private var whatIsSent: String {
         draft.anonymous
             ? String(localized: "When you tap Send, Hex sends your message, the pictures above, Hex's version and the language and speech model it dictates with, your iPhone's model, iOS version and language, and the screen you opened this from to Anomaly's feedback inbox. Nothing you dictate or type elsewhere is sent.")
-            : String(localized: "When you tap Send, Hex sends your message, the pictures above, your email, Hex's version and the language and speech model it dictates with, your iPhone's model, iOS version and language, the screen you opened this from, and a random install id that keeps your reports together, to Anomaly's feedback inbox. Nothing you dictate or type elsewhere is sent.")
+            : String(localized: "When you tap Send, Hex sends your message, the pictures above, your email, Hex's version and the language and speech model it dictates with, your iPhone's model, iOS version and language, the screen you opened this from, and a random install ID that keeps your reports together, to Anomaly's feedback inbox. Nothing you dictate or type elsewhere is sent.")
     }
 
     private var shownProblem: String? {
