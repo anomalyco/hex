@@ -53,6 +53,8 @@ pub(super) enum State {
     },
     AutoStarted {
         title: String,
+        app: String,
+        icon: Option<rune::Pixels>,
     },
     Recording {
         recording: Recording,
@@ -97,7 +99,11 @@ impl State {
                 stops,
                 icon: None,
             },
-            Kind::AutoStarted { title } => Self::AutoStarted { title },
+            Kind::AutoStarted { title, app, .. } => Self::AutoStarted {
+                title,
+                app,
+                icon: None,
+            },
             #[cfg(test)]
             Kind::Recording(recording) => Self::Recording {
                 recording,

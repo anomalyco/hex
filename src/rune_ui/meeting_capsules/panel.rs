@@ -8,11 +8,14 @@ use rune::{Cursor, El, Icon, SpringPair, Transition, Tx, col, el, icon, row, tex
 use rune_theme_opencode::icons;
 
 mod finished;
+mod peek;
 
 use finished::discard_confirm;
 pub(super) use finished::ready;
 #[cfg(target_os = "windows")]
 use finished::ready_height;
+#[cfg(test)]
+pub(super) use peek::{LINK_FOOT, PEEK_FOOT, WORDS_FOOT};
 
 /// What a recording says beside its meter, in place of its title.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -185,38 +188,41 @@ fn panel_row(
                 .a11y_hidden(),
         )
         .children(hint);
-    let row_el = if first {
-        row_el.fill(p.k.c.layer_02).hover(p.k.c.hover).mb(ROW_GAP)
-    } else {
-        row_el.hover(p.k.c.hover)
-    };
+    // No row is filled at rest: the lead action leads by its ink and weight,
+    // and every row fills only under the pointer.
+    let row_el = row_el.hover(p.k.c.hover);
+    let row_el = if first { row_el.mb(ROW_GAP) } else { row_el };
     if enabled {
-        row_el
-            .focusable(true)
-            .no_window_drag()
-            // Rune buttons accept a release anywhere inside their rectangle.
-            // Track press travel only: no window move, drag item or grab cursor.
-            .on_drag(|c: &mut Capsule, d, tx| {
-                if d.phase == Phase::Down {
-                    c.live.row_swiped = false;
-                }
-                c.live.row_swiped |= d.dx.hypot(d.dy) > 4.;
-                if d.phase == Phase::Up
-                    && (d.cancelled() || d.x < 0. || d.x >= d.w || d.y < 0. || d.y >= d.h)
-                {
-                    c.live.row_swiped = false;
-                }
-                tx.live_only();
-            })
-            .on_press_tx(move |c: &mut Capsule, tx| {
-                if !std::mem::take(&mut c.live.row_swiped) {
-                    press(c, tx);
-                }
-            })
-            .opacity(presence)
+        pressed(row_el, press).opacity(presence)
     } else {
         row_el.disabled(true).opacity(0.5 * presence)
     }
+}
+
+/// Makes a wide row a button: pressed, unless the press swiped across it.
+fn pressed(row_el: El, press: impl Fn(&mut Capsule, &mut Tx) + 'static) -> El {
+    row_el
+        .focusable(true)
+        .no_window_drag()
+        // Rune buttons accept a release anywhere inside their rectangle.
+        // Track press travel only: no window move, drag item or grab cursor.
+        .on_drag(|c: &mut Capsule, d, tx| {
+            if d.phase == Phase::Down {
+                c.live.row_swiped = false;
+            }
+            c.live.row_swiped |= d.dx.hypot(d.dy) > 4.;
+            if d.phase == Phase::Up
+                && (d.cancelled() || d.x < 0. || d.x >= d.w || d.y < 0. || d.y >= d.h)
+            {
+                c.live.row_swiped = false;
+            }
+            tx.live_only();
+        })
+        .on_press_tx(move |c: &mut Capsule, tx| {
+            if !std::mem::take(&mut c.live.row_swiped) {
+                press(c, tx);
+            }
+        })
 }
 
 /// Copy agent prompt and Copy transcript, for the recording or the ready meeting.
@@ -471,7 +477,7 @@ fn result(
         .key("rows")
         .px(PANEL_PAD)
         .children(copy_rows(p, capsule, false));
-    // The raised copy is as far from the title's row as from the next copy.
+    // The lead copy is as far from the title's row as from the next copy.
     let rows = if top {
         rows.pt(ROW_GAP).pb(PANEL_PAD)
     } else {
@@ -727,9 +733,20 @@ fn rec_dot(p: Paint) -> El {
         .a11y_hidden()
 }
 
-/// The open recording's height: its header, Stop, any notice and the copies.
-pub(super) fn open_height(shown: &Recording) -> f32 {
+/// The open recording's rows: its header, Stop, any notice and the copies.
+fn rows_height(shown: &Recording) -> f32 {
     open_height_without_notice() + notice_height(shown)
+}
+
+/// The open recording's height: its rows and the foot under them.
+pub(super) fn open_height(capsule: &Capsule, shown: &Recording) -> f32 {
+    rows_height(shown) + peek::height(capsule)
+}
+
+/// The room the open recording's foot takes under its copies.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(super) fn foot_height(capsule: &Capsule) -> f32 {
+    peek::height(capsule)
 }
 
 /// The room the recording's notice line takes, when it says anything.
@@ -741,7 +758,7 @@ fn notice_height(shown: &Recording) -> f32 {
     }
 }
 
-/// The open panel a finished meeting grows from.
+/// The open panel a finished meeting grows from: no notice and no foot.
 pub(super) fn open_height_without_notice() -> f32 {
     OPEN_HEADER + ROW_GAP + COPIES_HEIGHT + PANEL_PAD
 }
@@ -777,7 +794,7 @@ pub(super) fn veil(capsule: &Capsule, width: f32, height: f32) -> El {
 }
 
 impl Capsule {
-    /// How much of action row `row` (Stop, then the two copies) shows.
+    /// How much of action row `row` (Stop, the two copies, then the foot) shows.
     /// Whole wherever the surface isn't in motion.
     pub(super) fn action_presence(&self, row: usize) -> stage::Presence {
         let (
@@ -820,7 +837,7 @@ pub(super) fn arriving_header(
     presence: f32,
 ) -> El {
     let (right, top) = (capsule.corner.is_right(), capsule.corner.is_top());
-    let panel_height = open_height(shown);
+    let panel_height = rows_height(shown);
     let meter = meter(p, capsule, shown).opacity(presence);
     let spacer = el().key("space").grow(1.0);
     let meta = row()
@@ -955,21 +972,24 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording, held: Op
         };
         stop_slot().child(row)
     });
-    let panel_height = if asking {
-        CONFIRM_HEIGHT
+    // The rows' own box, laid out as the finished meeting's is; the foot is
+    // a layer past its free edge, so nothing in the box moves for it.
+    let (panel_height, foot_room) = if asking {
+        (CONFIRM_HEIGHT, 0.)
     } else {
-        open_height(shown)
+        (rows_height(shown), peek::height(capsule))
     };
-    let (target_w, target_h, target_r) = if open {
-        (PANEL_WIDTH, panel_height, PANEL_RADIUS)
+    let (target_w, target_h) = if open {
+        (PANEL_WIDTH, panel_height + foot_room)
     } else {
-        (rest_width(shown), REST_HEIGHT, REST_HEIGHT / 2.0)
+        (rest_width(shown), REST_HEIGHT)
     };
     // The stage owns the outline. Before its first step the pill is at rest.
+    // At rest and open it keeps every capsule's corners.
     let (width, height, radius) = capsule
         .stage
         .outline()
-        .map_or((target_w, target_h, target_r), |o| {
+        .map_or((target_w, target_h, PANEL_RADIUS), |o| {
             (stage::grid(o.w), stage::grid(o.h), o.radius)
         });
     let header = meter_band();
@@ -1087,6 +1107,21 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording, held: Op
         // Leaving rows are drawn, not pressed.
         contents = contents.child(if open { rows } else { rows.inert() });
     }
+    // The foot is on the panel's free edge, a gap past the copies, so Stop
+    // stays a row from the pill and the copies keep their place as it grows.
+    let foot = (actions && !asking).then(|| {
+        let foot = peek::foot(p, capsule, shown)
+            .absolute(
+                PANEL_PAD + if right { width - PANEL_WIDTH } else { 0. },
+                if top {
+                    panel_height - PANEL_PAD + ROW_GAP
+                } else {
+                    height - panel_height + PANEL_PAD - foot_room
+                },
+            )
+            .w(PANEL_WIDTH - 2. * PANEL_PAD);
+        if open { foot } else { foot.inert() }
+    });
     let mut body = col()
         .key("pill")
         .role("status")
@@ -1095,7 +1130,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording, held: Op
         .fill(p.k.c.bg_base)
         .border(p.hair, p.k.c.border_base)
         .size(width, height)
-        .child(veil(capsule, width, height).child(contents))
+        .child(veil(capsule, width, height).child(contents).children(foot))
         .clip_rounded(radius)
         // The stage steps every frame; nothing here eases a second time.
         .motion(Spring::NONE)
@@ -1260,14 +1295,13 @@ pub(super) fn agent_prompt(hex: &str, id: &str, title: &str, recording: Option<u
 
 /// The recording capsule's window. On Windows it is the size of what it
 /// draws: the resting pill (as wide as the open panel while it says
-/// `noticed`), then the open panel. Elsewhere it stays at its largest, and
-/// only the `.hit()` pill takes the pointer.
-pub(super) fn recording_window_size(open: bool, shown: Option<&Recording>) -> (f32, f32) {
+/// `noticed`), then the open panel with its foot `open` tall. Elsewhere it
+/// stays at its largest, and only the `.hit()` pill takes the pointer.
+pub(super) fn recording_window_size(open: Option<f32>, shown: Option<&Recording>) -> (f32, f32) {
     if cfg!(target_os = "windows") {
-        if open {
-            open_window(shown)
-        } else {
-            rest_window(shown)
+        match open {
+            Some(foot) => open_window(shown, foot),
+            None => rest_window(shown),
         }
     } else {
         RECORDING_WINDOW
@@ -1282,12 +1316,12 @@ fn rest_window(shown: Option<&Recording>) -> (f32, f32) {
     )
 }
 
-/// The window an open recording draws: the open panel, its inset, and room
-/// for the notice when it says anything.
-fn open_window(shown: Option<&Recording>) -> (f32, f32) {
+/// The window an open recording draws: the open panel, its inset, its foot,
+/// and room for the notice when it says anything.
+fn open_window(shown: Option<&Recording>, foot: f32) -> (f32, f32) {
     (
         RECORDING_WINDOW.0,
-        open_height_without_notice() + 2. * CAPSULE_INSET + shown.map_or(0., notice_height),
+        open_height_without_notice() + foot + 2. * CAPSULE_INSET + shown.map_or(0., notice_height),
     )
 }
 
@@ -1411,7 +1445,10 @@ impl Capsule {
                 hovered,
                 stopping,
                 ..
-            } => Some(recording_window_size(*hovered || *stopping, Some(shown))),
+            } => Some(recording_window_size(
+                (*hovered || *stopping).then(|| foot_height(self)),
+                Some(shown),
+            )),
             State::Finalizing { .. } => Some(finalizing_window_size()),
             State::Ready { manifest, .. } => Some(ready_window_size(manifest)),
             _ => None,
@@ -1427,8 +1464,9 @@ mod tests {
         rest_window(None)
     }
 
+    /// Open before the call has words: the plain link is its foot.
     fn open() -> (f32, f32) {
-        open_window(None)
+        open_window(None, peek::LINK_FOOT)
     }
 
     fn noticed() -> Recording {
@@ -1445,14 +1483,16 @@ mod tests {
     fn the_resting_window_is_the_pill_and_the_open_one_the_panel() {
         // The 168 pt pill (its field, the red dot, and the time) and its inset.
         assert_eq!(rest(), (176., 44.));
-        assert_eq!(open(), (260., 186.));
+        assert_eq!(open(), (260., 224.));
+        // With words, the foot is their last lines.
+        assert_eq!(open_window(None, peek::PEEK_FOOT), (260., 252.));
         // The discard question fits inside the open window.
         assert!(CONFIRM_HEIGHT + 2. * CAPSULE_INSET <= open().1);
         // A notice widens the resting pill to the panel, and adds its line
         // to the open one.
         let noticed = noticed();
         assert_eq!(rest_window(Some(&noticed)), (260., 44.));
-        assert_eq!(open_window(Some(&noticed)), (260., 206.));
+        assert_eq!(open_window(Some(&noticed), peek::LINK_FOOT), (260., 244.));
     }
 
     #[test]
@@ -1488,7 +1528,7 @@ mod tests {
     fn a_window_that_grows_one_axis_and_shrinks_the_other_waits_for_rest() {
         let mut fit = WindowFit::default();
         let noticed = noticed();
-        let open_noticed = open_window(Some(&noticed));
+        let open_noticed = open_window(Some(&noticed), peek::LINK_FOOT);
         fit.next(open_noticed, false);
         // The notice line goes: narrower in height, the same width.
         assert_eq!(fit.next(open(), false), None);

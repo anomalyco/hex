@@ -37,13 +37,14 @@ const RING_GAP: f32 = 3.0;
 /// Stroke width of the draining rounded-rectangle ring.
 const RING_STROKE: f32 = 2.0;
 /// Outer bounding box of the ring: icon + gap on both sides + stroke on both sides.
-const RING_SIZE: f32 = ICON_SIZE + 2.0 * RING_GAP + 2.0 * RING_STROKE;
+/// Every capsule's icon slot is this size, ring or none.
+pub(super) const RING_SIZE: f32 = ICON_SIZE + 2.0 * RING_GAP + 2.0 * RING_STROKE;
 /// Distance from the ring canvas edge to the stroke's centreline.
 const STROKE_INSET: f32 = RING_STROKE * 0.5;
 /// Centreline corner radius, concentric with the icon across `RING_GAP`.
 const STROKE_RADIUS: f32 = ICON_RADIUS + RING_GAP + STROKE_INSET;
 /// Left padding inside the 56 pt body: matches top/bottom `(56 - 36) / 2 = 10`.
-const BODY_PL: f32 = CAPSULE.row_px;
+pub(super) const BODY_PL: f32 = CAPSULE.row_px;
 /// Points sampled along each 90° rounded corner.
 const CORNER_STEPS: usize = 20;
 
@@ -186,7 +187,7 @@ pub(super) fn view(
         .child(presence::anchored(capsule, body))
 }
 
-fn app_icon(p: Paint, app: &str, icon: Option<&rune::Pixels>) -> El {
+pub(super) fn app_icon(p: Paint, app: &str, icon: Option<&rune::Pixels>) -> El {
     match icon {
         Some(pixels) => el()
             .key("icon")

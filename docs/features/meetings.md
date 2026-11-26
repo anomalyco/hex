@@ -645,7 +645,12 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
      │       name (not a browser on an unknown page); those are offered
      │   └── recording capsule says "Started automatically" for 10 s; with the
      │       indicator off, a "Recording automatically" capsule with Stop
-     │       and ✕ (✕ only hides it; the recording goes on, in the menu bar)
+     │       and ✕ (✕ only hides it; the recording goes on, in the menu bar).
+     │       Its icon slot is the call-ended capsule's: the call app's icon
+     │       (the provider's mark for a web call), with the red recording dot
+     │       on its bottom-right corner where call ended draws its ring
+     │       (RecordingStarted carries app and application;
+     │       auto_started.rs; icon loading not observed on a real call)
      └── Ask -> Capsule below the menu bar, focus-free  // meetings.offer
          ├── Title: the app named first, "Google Meet call detected", "meet.jit.si call detected",
          │   "Brave Browser call detected" (site unknown), or the meeting's name
@@ -1239,6 +1244,12 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
       the same window)
   -> Floating recording indicator (when Show recording indicator is on) // meetings.indicator
      ├── Rune interactive overlay: a non-activating panel that never becomes key
+     ├── Left out of screen shares and screen recordings, like the panel
+     │   capsules: both capsule windows set OverlayOptions::exclude_from_capture,
+     │   since they show the call's words (the open pill's transcript lines,
+     │   the finished meeting's summary). Rune applies it while a capsule
+     │   shows; it is the OS's best effort, not a security boundary (not
+     │   observed in a real screen share)
      ├── Only the drawn pill takes the pointer (OverlayInput::Regions, the
      │   pill `.hit()`); the window is as wide as the open pill, and clicks
      │   in its transparent rest reach the app beneath (#1305; not observed
@@ -1276,6 +1287,8 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   │   and fades its light without squeezing the rows. Checks:
      │   │   `a_pause_gathers_the_light_before_extinguishing_it`,
      │   │   `either_track_can_interrupt_the_release_in_place` (synthetic levels)
+     │   ├── Its corners are the capsules' 14 pt at rest and open, so opening
+     │   │   changes its size and never its silhouette
      │   ├── The pill is 165 × 36 pt: its field 78 pt wide (31 columns), then
      │   │   an 8 pt red dot 6 pt before the time, with the rows' 14 pt inset on
      │   │   both sides (`the_header_keeps_the_rows_inset_at_rest_open_and_finished`)
@@ -1285,7 +1298,15 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      ├── Hover -> the pill reveals three full-width actions beside the header:
      │   Stop nearest the meter, Copy agent prompt, Copy transcript; pointer
      │   leaving -> eases back to rest (a held press keeps it open). A bottom
-     │   corner opens upward, its header nearest the screen edge
+     │   corner opens upward, its header nearest the screen edge. No row is
+     │   filled at rest; each fills under the pointer
+     │   ├── A foot link under the copies, on the panel's free edge -> opens
+     │   │   this recording in Meetings (the live transcript there). Until the
+     │   │   call has words it reads "Open in Hex ↗" (36 pt); then it shows
+     │   │   the transcript's last 3 lines, anchored to the newest with the
+     │   │   oldest fading out, and the panel grows 28 pt for them
+     │   │   (panel/peek.rs; `the_open_recordings_foot_opens_the_live_meeting`;
+     │   │   not observed on a real call)
      │   ├── A quiet 28 pt ✕ (Discard recording) on the rows' icon spine, on
      │   │   the field's free side -> "Discard recording?" / "Deletes its
      │   │   audio and transcript" over Keep and Discard (Danger), equal
@@ -1415,7 +1436,7 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   // without_the_display_lab_a_release_keeps_the_primary_display
      │   // (meeting_capsules.rs); NOT verified on real multi-monitor hardware
      │   // on either OS (see Labs)
-     ├── Copy agent prompt (first, filled) -> a prompt telling a coding agent
+     ├── Copy agent prompt (first, in the lead action's ink) -> a prompt telling a coding agent
      │   to read this meeting with `hex meetings show <id> --md`, catch up with
      │   `--from <mm:ss>` from the last turn copied into it, and search with
      │   `hex meetings search --meeting <id>` (agent_prompt; the hex path is this executable)
@@ -2316,7 +2337,8 @@ Final publication                                   // meetings.output
 Finished meeting panel (15 s, kept open while the pointer is over it; it
     closes when the pointer leaves after that; never shown for a recording
     with no speech, which is trashed instead) -> a title band (title, its
-    length 2 pt under it, ↗ on hover) that opens the meeting in Hex, the
+    length 2 pt under it, a quiet ↗ beside the title, whole on hover) that
+    opens the meeting in Hex, the
     summary while notes are on (or "Writing a title and summary with Apple
     Intelligence…" when it writes, "…with OpenCode…" otherwise, or
     "Markdown not saved: …"), then the recording's copies
@@ -2326,7 +2348,7 @@ Finished meeting panel (15 s, kept open while the pointer is over it; it
     │   while the pointer is inside and runs on from there when it leaves.
     │   × hides at once, even under the pointer. Late notes do not reopen it;
     │   the saved meeting and transcript remain in Meetings
-    ├── Copy transcript (filled) -> Markdown, or speaker turns as a fallback
+    ├── Copy transcript -> Markdown, or speaker turns as a fallback
     └── Copy agent prompt -> `hex meetings show <id> --md` and search
     (the_ready_panel_copies_the_finished_meeting,
     a_ready_panels_stay_holds_under_the_pointer_and_runs_out_after_it_leaves)

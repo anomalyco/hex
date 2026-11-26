@@ -60,6 +60,7 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Deletes its audio and transcript", ["Usuwa dźwięk i transkrypcję", "将删除其音频和转写", "音声と文字起こしを削除します", "Löscht Audio und Transkript", "Elimina el audio y la transcripción", "Видаляє аудіо та розшифровку"]),
     ("Discard recording", ["Odrzuć nagranie", "放弃录音", "録音を破棄", "Aufnahme verwerfen", "Descartar grabación", "Відкинути запис"]),
     ("Open {} in Hex", ["Otwórz {} w Hex", "在 Hex 中打开{}", "{} を Hex で開く", "{} in Hex öffnen", "Abrir {} en Hex", "Відкрити {} у Hex"]),
+    ("Open in Hex", ["Otwórz w Hex", "在 Hex 中打开", "Hex で開く", "In Hex öffnen", "Abrir en Hex", "Відкрити у Hex"]),
     ("Record your calls", ["Nagrywaj swoje rozmowy", "录制你的通话", "通話を録音", "Nimm deine Anrufe auf", "Graba tus llamadas", "Записуйте свої дзвінки"]),
     ("Local transcripts and notes for your calls.", ["Lokalne transkrypcje i notatki z Twoich rozmów.", "在本机生成通话的转写和笔记。", "通話の文字起こしとノートをこの Mac で作成します。", "Lokale Transkripte und Notizen für deine Anrufe.", "Transcripciones y notas locales de tus llamadas.", "Локальні розшифровки та нотатки ваших дзвінків."]),
     ("Turn on Meetings", ["Włącz Spotkania", "打开会议", "会議をオンにする", "Besprechungen aktivieren", "Activar Reuniones", "Увімкнути Зустрічі"]),
