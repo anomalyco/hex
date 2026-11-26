@@ -100,6 +100,7 @@ values and inside kit controls. Two rails per side govern the window: card edge
 | `CAPSULE.row_px` / `text_rail()` | 10 / 16 | Text rail matches `METRICS.row_px` (icon spine 24, label rail 40) |
 | `CAPSULE.{header_h, row_h, row_gap}` | 36 / 44 / 2 | Recording and ready panel vertical rhythm |
 | `CAPSULE.{island_h, banner_h, close, panel_w}` | 40 / 44 / 28 / 252 | Island, banner, ✕ hit box, and panel width |
+| `overlay_dock::GAP` | 8 | Between floating surfaces sharing a screen edge (meeting capsules, Annotate, the HUD; [capture.md](features/capture.md#overlay-dock)) |
 
 ## Concentric radius system
 

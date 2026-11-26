@@ -95,7 +95,6 @@ impl Feature {
             Self::HudHeight => "HUD height",
             Self::IndicatorFollowsMouse => "Indicator follows mouse",
             Self::VoiceIsolation => "Voice isolation",
-            Self::DictateWhileAnnotating => "Dictate while annotating",
             Self::StopAnyCallRecording => "Stop every call recording when the call ends",
             Self::ClipboardPhrase => "Clipboard phrase",
             Self::MeetingMicrophoneMute => "Mute the microphone while recording",
@@ -358,9 +357,6 @@ impl Feature {
             }
             Self::VoiceIsolation => {
                 "Record dictation through Apple's voice processing so Mic Mode can turn on Voice Isolation and cut background noise."
-            }
-            Self::DictateWhileAnnotating => {
-                "Dictate while a capture records: the text pastes as usual, and the capture keeps going"
             }
             Self::StopAnyCallRecording if !cfg!(target_os = "macos") => {
                 "Also stop an offered or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off"

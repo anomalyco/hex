@@ -1820,10 +1820,6 @@ pub enum Tapped {
 /// The capture is recording and its engine took input: the tap reports.
 static TAP_RECORDING: AtomicBool = AtomicBool::new(false);
 
-/// Whether this process records a capture now, on every OS: set when the
-/// host takes its bundle and cleared when it stops or cancels. The
-/// dictation HUD reads it to keep clear of the capture capsule.
-static RECORDING: AtomicBool = AtomicBool::new(false);
 static TAP_INPUT: OnceLock<SyncSender<(CaptureInstant, Tapped)>> = OnceLock::new();
 static DROPPED_INPUT: AtomicUsize = AtomicUsize::new(0);
 
@@ -1839,13 +1835,6 @@ pub fn tapped_while(f: impl FnOnce()) -> Vec<Tapped> {
     TEST_TAP.set(Some(Vec::new()));
     f();
     TEST_TAP.take().unwrap_or_default()
-}
-
-/// Whether a capture records now, on every OS. The dictation HUD reads it
-/// while a dictation shows, so a dictation during a capture sits at the
-/// bottom edge, clear of the capture capsule at the screen's top.
-pub fn recording() -> bool {
-    RECORDING.load(Ordering::Acquire)
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -2001,7 +1990,6 @@ impl LiveInput {
         };
         set_ink(None);
         TAP_RECORDING.store(false, Ordering::Release);
-        RECORDING.store(bundle.is_some(), Ordering::Release);
         drawing::reset();
         let dropped = DROPPED_INPUT.swap(0, Ordering::Relaxed);
         if dropped > 0 {

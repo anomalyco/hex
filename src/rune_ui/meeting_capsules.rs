@@ -56,6 +56,7 @@ use crate::meeting::{self, MeetingManifest, TranscriptEntry};
 
 mod auto_started;
 mod call_ended;
+mod dock;
 mod handoff;
 mod offer;
 #[path = "meeting_capsules/offer/surface.rs"]
@@ -362,6 +363,8 @@ struct Capsule {
     /// with no display.
     displays: DisplaysFn,
     save_anchor: SaveAnchor,
+    /// Its claim in the overlay dock; `None` in tests, which claim nothing.
+    dock: Option<dock::Docking>,
 }
 
 type Choose = Arc<dyn Fn(MeetingProviderChoice) + Send + Sync>;
@@ -802,6 +805,7 @@ impl MeetingCapsules {
                     screen: primary_screen_size,
                     displays: screen::displays,
                     save_anchor: save_anchor.clone(),
+                    dock: Some(dock::Docking::new(recording)),
                 },
             );
             // Only the drawn capsule (its `.hit()` body) takes clicks; the
@@ -1205,6 +1209,7 @@ fn poll(capsule: &mut Capsule, now: f64, tx: &mut Tx) -> bool {
     // The surface first: the field is drawn once a frame, at the width the
     // wall has just reached.
     let staged = capsule.step_stage(now, tx);
+    capsule.dock();
     let mut changed = staged;
     changed |= waveform::poll(capsule, now, tx);
     // Windows: once the surface has landed, a window kept large for a
@@ -1619,6 +1624,7 @@ mod tests {
             screen: |_| None,
             displays: |_| None,
             save_anchor: Arc::new(|_, _| {}),
+            dock: None,
         };
         let env = Env {
             system_dark: dark,

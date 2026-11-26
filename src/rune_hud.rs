@@ -11,6 +11,8 @@
 //!
 //! The Sounds sheet draws its preview of the HUD with the same [`Painter`].
 
+/// Where the HUD sits beside the meeting capsules and Annotate's surfaces.
+mod dock;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod dot_scope;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -62,17 +64,6 @@ pub(crate) const BOTTOM_OFFSET: f32 = 24.0;
 pub(crate) const WINDOW: (f32, f32) = (320.0, 128.0);
 #[cfg(not(target_os = "macos"))]
 pub(crate) const WINDOW: (f32, f32) = (304.0, 80.0);
-/// The position a HUD shows at: a dictation during an Annotate capture
-/// takes the bottom edge, clear of the capture capsule at the screen's top
-/// (Labs › Dictate while annotating). Hidden stays hidden.
-fn place_during_capture(position: IndicatorPosition, capture: bool) -> IndicatorPosition {
-    if capture && position != IndicatorPosition::Hidden {
-        IndicatorPosition::Bottom
-    } else {
-        position
-    }
-}
-
 /// The notch's own bottom corner radius, which the island starts from.
 const NOTCH_RADIUS: f32 = 8.0;
 /// The open island's bottom corner radius.
@@ -289,10 +280,11 @@ pub(super) enum HudPresence {
     Shown {
         #[cfg(target_os = "macos")]
         placed: Option<crate::rune_hud::hud_placement::Placed>,
-        /// The position the overlay was last placed for, while it stays on that
-        /// display; a capture's start or a hide picks the display again.
+        /// The position and margin the overlay was last placed for, while it
+        /// stays on that display; a capture's start or a hide picks the
+        /// display again.
         #[cfg(not(target_os = "macos"))]
-        edge_placed: Option<IndicatorPosition>,
+        edge_placed: Option<(IndicatorPosition, f32)>,
     },
 }
 
@@ -428,6 +420,8 @@ impl Hud {
         if let Some(overlay) = &self.this {
             overlay.refollow_pointer();
         }
+        // The dock's surfaces may have moved, shown, or hidden since.
+        self.sync_placement();
         crate::rune_ui::live_text::refollow_pointer();
     }
 
@@ -530,10 +524,9 @@ impl Hud {
         {
             self.position = crate::app_settings::indicator_position();
         }
-        // A capture records with its capsule at the screen's top, so a
-        // dictation during one shows at the bottom, clear of it (Labs ›
-        // Dictate while annotating).
-        let position = place_during_capture(self.position, crate::capture_host::recording());
+        // Its edge is the person's; the overlay dock moves it along that edge
+        // past the meeting capsules and Annotate's surfaces (`dock`).
+        let position = self.position;
         if position == IndicatorPosition::Hidden {
             #[cfg(target_os = "macos")]
             self.place_live_text_without_hud();
@@ -559,18 +552,15 @@ impl Hud {
         }
         #[cfg(not(target_os = "macos"))]
         {
-            let (edge, margin) = match position {
-                IndicatorPosition::Bottom => (ScreenEdge::Bottom, BOTTOM_OFFSET),
-                _ => (ScreenEdge::Top, TOP_OFFSET),
-            };
+            let (edge, margin) = dock::edge_margin(position);
             // Placing picks the display again (`display`); while shown, the
             // HUD follows the pointer to another display at its own pace
-            // (`follow_pointer`).
+            // (`follow_pointer`), and the dock's surfaces as they move.
             if let HudPresence::Shown { edge_placed } = &mut self.presence
-                && *edge_placed != Some(position)
+                && *edge_placed != Some((position, margin))
             {
                 overlay.place(edge, margin);
-                *edge_placed = Some(position);
+                *edge_placed = Some((position, margin));
             }
             // The plate sits in the middle of the window.
             let past_plate = margin + (WINDOW.1 + PLATE_HEIGHT) / 2.0 + LIVE_TEXT_GAP;
@@ -650,6 +640,7 @@ impl Hud {
         }
         let was_shown = self.is_shown();
         self.set_presence(HudPresence::Hidden);
+        dock::release();
         if was_shown {
             if let Some(overlay) = &self.this {
                 #[cfg(target_os = "windows")]

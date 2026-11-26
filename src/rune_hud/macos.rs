@@ -423,15 +423,25 @@ impl Hud {
             let pointer = NSEvent::mouseLocation();
             hud_placement::near_pointer(&metrics, content, (pointer.x, pointer.y))
         });
-        let placed = follow.or(ears).unwrap_or_else(|| {
-            hud_placement::place(
-                tuning.placement,
+        let bottom = self.position == IndicatorPosition::Bottom;
+        let gap = crate::labs::hud_bottom_gap();
+        // Beside the pointer it isn't on an edge; on one, the overlay dock
+        // moves it past the meeting capsules and Annotate's surfaces there.
+        let placed = match follow {
+            Some(placed) => {
+                super::dock::release();
+                placed
+            }
+            None => super::dock::clear(
+                ears.unwrap_or_else(|| {
+                    hud_placement::place(tuning.placement, &metrics, content, bottom, gap)
+                }),
                 &metrics,
                 content,
-                self.position == IndicatorPosition::Bottom,
-                crate::labs::hud_bottom_gap(),
-            )
-        });
+                display,
+                || hud_placement::place(Default::default(), &metrics, content, bottom, gap),
+            ),
+        };
         set_live_text(live_text_beside(&placed, &metrics, content, primary_top));
         // `placed` carries the display's absolute coordinates, so moving the
         // pointer to another display changes it (a mirrored set is one

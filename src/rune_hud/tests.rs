@@ -4,20 +4,6 @@ use super::watch::{FIRST_FRAME, FirstFrame, HUD_BACKOFF, HUD_BACKOFF_MAX};
 use super::*;
 use crate::rune_hud::dot_scope::Tuning;
 
-/// A capture's capsule sits at the screen's top, so a dictation during one
-/// shows at the bottom; Hidden still hides it (Labs › Dictate while
-/// annotating).
-#[test]
-fn a_dictation_during_a_capture_shows_at_the_bottom_clear_of_the_capsule() {
-    use IndicatorPosition::{Bottom, Hidden, Top};
-    assert_eq!(place_during_capture(Top, true), Bottom);
-    assert_eq!(place_during_capture(Bottom, true), Bottom);
-    assert_eq!(place_during_capture(Hidden, true), Hidden);
-    assert_eq!(place_during_capture(Top, false), Top);
-    assert_eq!(place_during_capture(Bottom, false), Bottom);
-    assert_eq!(place_during_capture(Hidden, false), Hidden);
-}
-
 #[test]
 fn dot_uniform_layout_matches_wgsl() {
     assert_eq!(std::mem::offset_of!(DotUniforms, dark), 60);
@@ -990,7 +976,7 @@ fn a_start_clears_placement_on_every_os() {
     #[cfg(not(target_os = "macos"))]
     {
         if let HudPresence::Shown { edge_placed } = &mut hud.presence {
-            *edge_placed = Some(IndicatorPosition::Top);
+            *edge_placed = Some((IndicatorPosition::Top, TOP_OFFSET));
         }
     }
     hud.handle(HudEvent::Started);

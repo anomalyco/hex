@@ -965,7 +965,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
         rows.push(row(Feature::CopyCaptureZip, Some(&FOLDER)));
         rows.push(row(Feature::AnnotateAgentTools, Some(&TERMINAL)));
         rows.push(row(Feature::AnnotateAgentInstall, Some(&TERMINAL)));
-        rows.push(row(Feature::DictateWhileAnnotating, Some(&KEYBOARD)));
         let locked = crate::policy::Policy::current().locks(crate::policy::Lock::Annotate);
         rows.push(Row {
             lab: Lab::Annotate,
@@ -1107,7 +1106,6 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::CopyCaptureZip => "lab-copy-capture-zip",
         Feature::AnnotateAgentTools => "lab-annotate-agent-tools",
         Feature::AnnotateAgentInstall => "lab-annotate-agent-install",
-        Feature::DictateWhileAnnotating => "lab-dictate-while-annotating",
         Feature::MeetingImport => "lab-meeting-import",
         Feature::TranscriptEdits => "lab-transcript-edits",
         Feature::OpenCodeInWsl => "lab-opencode-in-wsl",

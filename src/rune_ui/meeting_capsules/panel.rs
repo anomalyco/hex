@@ -12,7 +12,6 @@ mod peek;
 
 use finished::discard_confirm;
 pub(super) use finished::ready;
-#[cfg(target_os = "windows")]
 use finished::ready_height;
 #[cfg(test)]
 pub(super) use peek::{LINK_FOOT, PEEK_FOOT, WORDS_FOOT};
@@ -1309,7 +1308,7 @@ pub(super) fn recording_window_size(open: Option<f32>, shown: Option<&Recording>
 }
 
 /// The window a resting recording draws: the pill and the inset around it.
-fn rest_window(shown: Option<&Recording>) -> (f32, f32) {
+pub(super) fn rest_window(shown: Option<&Recording>) -> (f32, f32) {
     (
         shown.map_or(REST_WIDTH, rest_width) + 2. * CAPSULE_INSET,
         REST_HEIGHT + 2. * CAPSULE_INSET,
@@ -1318,7 +1317,7 @@ fn rest_window(shown: Option<&Recording>) -> (f32, f32) {
 
 /// The window an open recording draws: the open panel, its inset, its foot,
 /// and room for the notice when it says anything.
-fn open_window(shown: Option<&Recording>, foot: f32) -> (f32, f32) {
+pub(super) fn open_window(shown: Option<&Recording>, foot: f32) -> (f32, f32) {
     (
         RECORDING_WINDOW.0,
         open_height_without_notice() + foot + 2. * CAPSULE_INSET + shown.map_or(0., notice_height),
@@ -1353,6 +1352,12 @@ pub(super) fn ready_window_size(_: &MeetingManifest) -> (f32, f32) {
 /// is being written, and the two copies.
 #[cfg(target_os = "windows")]
 pub(super) fn ready_window_size(manifest: &MeetingManifest) -> (f32, f32) {
+    ready_body(manifest)
+}
+
+/// What the ready panel draws, on every OS: its header, a summary while there
+/// is one or one is being written, and the two copies, with the inset.
+pub(super) fn ready_body(manifest: &MeetingManifest) -> (f32, f32) {
     (
         PANEL_WIDTH + 2.0 * CAPSULE_INSET,
         ready_height(manifest).max(open_height_without_notice()) + 2.0 * CAPSULE_INSET,

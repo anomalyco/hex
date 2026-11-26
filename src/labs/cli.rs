@@ -137,7 +137,7 @@ fn live_typing_note() -> Option<&'static str> {
 
 /// The feature `name` names, if this OS has it and `reaches` admits it.
 /// Features that left Labs: `hex labs` still knows their names.
-const GRADUATED: [(&str, &str); 24] = [
+const GRADUATED: [(&str, &str); 25] = [
     (
         "custom-models",
         "custom-models graduated: adding a model file and models found on this computer are always on now",
@@ -233,6 +233,10 @@ const GRADUATED: [(&str, &str); 24] = [
     (
         "api-browser-access",
         "api-browser-access was removed: the local API no longer allows cross-origin browser requests",
+    ),
+    (
+        "dictate-while-annotating",
+        "dictate-while-annotating graduated: the dictation shortcut always dictates while an Annotate capture records now",
     ),
 ];
 

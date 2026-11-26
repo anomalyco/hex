@@ -79,7 +79,8 @@ than a few points (panning, autoscroll) never counts, and every middle click,
 long or short, still reaches the app in front. A mouse-started capture is the dictation
 shortcut's, so its next press finishes it too; a long press finishes a capture
 the shortcut (or Caps Lock) locked, keeping that capture's output settings. A
-held press, a pending double tap, or an Annotate recording is left alone. While
+held press or a pending double tap is left alone; an Annotate recording never
+holds one back (it records on beside the dictation). While
 the lab is on, Escape cancels any hands-free dictation in every shortcut mode
 and is kept from the app in front, a terminal included; off, the usual cancel
 rules apply. Not verified on hardware; details and checks in
@@ -2851,6 +2852,9 @@ The X11 grab and the hooks' suppression have no automated end-to-end check.
 ```ts
 Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedback
   HUD + tones distinguish capture from pending work          // never take focus
+  HUD on its edge -> past any meeting capsule or Annotate surface there, 8 pt clear
+     (overlay dock, ranks last; in the bar or notch it comes out under the bar
+      first; beside the pointer it is on no edge) // capture.md#overlay-dock
   Pending processing/paste -> Still unfinished, not recording
   Shortcut press -> Start tone ~50 ms later                  // dictate.start-tone
      -> Chord within 40 ms (e.g. Option-Command-I) -> Silent
