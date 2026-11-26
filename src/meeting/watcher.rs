@@ -22,7 +22,7 @@ use crate::meeting::recovery::PendingFinals;
 use crate::meeting::{self, MeetingCalendar, MeetingRequest, MeetingStart, TrackWarning};
 use crate::microphone_activity::{ActiveMicrophoneApplication, active_microphone_applications};
 
-use call_end::{CallEndStop, CallWatch, stops_when_call_ends};
+use call_end::{CallEndStop, CallWatch, icon_application, stops_when_call_ends};
 use call_switch::{
     disarm_call_stop_unless_watching, watching_call_switch, withdraw_call_switch_stop,
 };
@@ -92,11 +92,14 @@ pub(crate) enum ControllerEvent {
     },
     /// The accepted offer, or None for a start that did not come from one.
     Starting(Option<OfferId>),
-    /// `automatic` when the provider is set to Always record.
+    /// `automatic` when the provider is set to Always record; `app` and
+    /// `application` name the call app and its icon, as [`Self::CallEnded`]'s.
     RecordingStarted {
         id: String,
         title: String,
         automatic: bool,
+        app: String,
+        application: Option<String>,
     },
     Retitled {
         title: String,
@@ -941,6 +944,8 @@ fn poll_recording(
                             id,
                             title,
                             automatic: active.automatic,
+                            app: active.app_label.clone(),
+                            application: icon_application(active.application.as_deref()),
                         });
                     }
                 }
@@ -1070,7 +1075,7 @@ fn poll_recording(
             let stops_at = auto_stop.then(|| active.auto_stop.arm());
             let _ = events.send(ControllerEvent::CallEnded {
                 app: active.app_label.clone(),
-                application: call_ended_icon_application(active.application.as_deref()),
+                application: icon_application(active.application.as_deref()),
                 stops_at,
             });
         }
@@ -1121,7 +1126,7 @@ fn poll_recording(
                     let stops_at = active.call_stop.arm();
                     let _ = events.send(ControllerEvent::CallEnded {
                         app: active.app_label.clone(),
-                        application: call_ended_icon_application(active.application.as_deref()),
+                        application: icon_application(active.application.as_deref()),
                         stops_at: Some(stops_at),
                     });
                 }
@@ -1151,14 +1156,6 @@ fn poll_recording(
     let stop_on_end = crate::app_settings::meeting_stop_when_call_ends();
     disarm_call_stop_unless_watching(recording, stop_on_end, detector, events);
     Ok(())
-}
-
-/// The native call app's ID for the call-ended capsule's icon; browsers
-/// return `None` so web calls show their service mark instead of the browser's.
-fn call_ended_icon_application(application: Option<&str>) -> Option<String> {
-    application
-        .filter(|id| !crate::microphone_activity::is_browser_id(Some(id)))
-        .map(str::to_owned)
 }
 
 /// Drops an armed stop whose call came back or whose setting went off (both share one notice).

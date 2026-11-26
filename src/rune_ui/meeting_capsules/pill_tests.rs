@@ -122,21 +122,25 @@ fn rows_that_can_both_be_filled_are_one_gap_apart() {
         let mut rt = recording_in(corner);
         open_recording(&mut rt);
         let [_, y, _, h] = laid_out(&rt, "pill");
-        assert_eq!(h, panel::open_height_without_notice());
+        // The call has words, so the panel ends in their last lines.
+        assert_eq!(h, panel::open_height_without_notice() + panel::WORDS_FOOT);
         let [_, sy, _, sh] = laid_out(&rt, "stop");
         let [_, py, _, ph] = laid_out(&rt, "copy-prompt");
         let [_, ay, _, ah] = laid_out(&rt, "copy-all");
+        let [_, fy, _, fh] = laid_out(&rt, "open-live");
         assert_eq!([sh, ph, ah], [ROW_HEIGHT; 3]);
-        // Copy agent prompt is always filled; Stop and Copy all fill under
-        // the pointer.
+        // Every row fills under the pointer, and none at rest.
         assert_eq!(ay - (py + ph), ROW_GAP, "{corner:?}: the prompt to Copy all");
         if corner.is_top() {
             assert_eq!(py - (sy + sh), ROW_GAP, "{corner:?}: Stop to the prompt");
-            assert_eq!(y + h - (ay + ah), PANEL_PAD);
+            assert_eq!(fy - (ay + ah), ROW_GAP, "{corner:?}: the copies to the foot");
+            assert_eq!(y + h - (fy + fh), PANEL_PAD);
         } else {
-            // A bottom corner keeps the copies' order and puts Stop under them.
+            // A bottom corner keeps the copies' order, puts Stop under them
+            // and the foot over them, on the panel's free edge.
             assert_eq!(sy - (ay + ah), ROW_GAP, "{corner:?}: the copies to Stop");
-            assert_eq!(py - y, PANEL_PAD);
+            assert_eq!(py - (fy + fh), ROW_GAP, "{corner:?}: the foot to the copies");
+            assert_eq!(fy - y, PANEL_PAD);
         }
     }
 }
@@ -412,6 +416,8 @@ fn a_discarded_recording_dismisses_the_pill_and_shows_no_finished_panel() {
             id: "discarded".into(),
             title: "Design sync".into(),
             automatic: false,
+            app: "Zoom".into(),
+            application: None,
         },
         now,
     );
@@ -433,4 +439,69 @@ fn a_discarded_recording_dismisses_the_pill_and_shows_no_finished_panel() {
     rt.frame(1.0 / 60.0);
     assert!(rt.find("transcript-block").is_none());
     assert!(rt.find("summary").is_none());
+}
+
+/// The open recording had no way into Hex: its words were only in the
+/// Meetings pane, a menu away.
+#[test]
+fn the_open_recordings_foot_opens_the_live_meeting() {
+    let (mut rt, commands, _) = runtime(live_recording("live-open"), false, true, RECORDING);
+    let opened: Arc<Mutex<Vec<String>>> = Arc::default();
+    let record = opened.clone();
+    rt.state.open_meeting = Some(Arc::new(move |id| record.lock().unwrap().push(id)));
+    open_recording(&mut rt);
+    // Before the call has words the foot is the plain link.
+    assert!(texts(&rt).contains(&"Open in Hex".to_string()), "{:?}", texts(&rt));
+    assert!(rt.find("peek").is_none());
+    let [_, y, _, h] = laid_out(&rt, "pill");
+    assert_eq!(h, panel::open_height_without_notice() + panel::LINK_FOOT);
+    // It is under the copies, the panel's inset from its free edge.
+    let [_, fy, _, fh] = laid_out(&rt, "open-live");
+    let [_, ay, _, ah] = laid_out(&rt, "copy-all");
+    assert_eq!((fy - (ay + ah), y + h - (fy + fh)), (ROW_GAP, PANEL_PAD));
+    tap(&mut rt, "open-live");
+    assert_eq!(*opened.lock().unwrap(), ["live-open"]);
+    // Opening the window leaves the recording as it was.
+    assert!(commands.try_recv().is_err());
+    assert!(matches!(rt.state.state, State::Recording { .. }));
+
+    // With words the foot shows the last of them, and grows for them (or
+    // stays the plain link, where the transcript's lines are off).
+    rt.update(|c, _| c.live.entries = call());
+    landed(&mut rt);
+    let lines = panel::WORDS_FOOT == panel::PEEK_FOOT;
+    assert_eq!(rt.find("peek").is_some(), lines);
+    assert_eq!(texts(&rt).contains(&"Open in Hex".to_string()), !lines);
+    assert_eq!(
+        texts(&rt).iter().any(|text| text.ends_with("Then let's ship it.")),
+        lines
+    );
+    let [_, _, _, h] = laid_out(&rt, "pill");
+    assert_eq!(h, panel::open_height_without_notice() + panel::WORDS_FOOT);
+    tap(&mut rt, "open-live");
+    assert_eq!(opened.lock().unwrap().len(), 2);
+}
+
+/// The automatic recording's capsule had a bare status dot and a larger ✕
+/// than every other capsule's.
+#[test]
+fn an_automatic_recording_wears_its_apps_icon_the_live_dot_and_the_capsules_close() {
+    let (mut rt, _, _) = runtime(auto_started(), false, true, PANEL);
+    landed(&mut rt);
+    let [px, py, pw, ph] = laid_out(&rt, "pill");
+    let [ix, iy, iw, ih] = laid_out(&rt, "icon");
+    assert_eq!((iw, ih), (call_ended::ICON_SIZE, call_ended::ICON_SIZE));
+    // The icon is centred in its 36 pt slot, as far from the left edge as
+    // from the top and bottom.
+    assert_eq!((ix - px, iy - py), (15., 15.));
+    assert_eq!(py + ph - (iy + ih), 15.);
+    // The dot's centre is 2 pt in from the icon's bottom-right corner.
+    let [dx, dy, dw, dh] = laid_out(&rt, "rec-dot");
+    assert_eq!((dw, dh), (REC_DOT, REC_DOT));
+    assert_eq!((dx + dw / 2., dy + dh / 2.), (ix + iw - 2., iy + ih - 2.));
+    // The ✕ is every capsule's: 28 pt, centred on the icon spine.
+    let [cx, _, cw, ch] = laid_out(&rt, "close-box");
+    assert_eq!((cw, ch), (CAPSULE.close, CAPSULE.close));
+    assert_eq!(px + pw - (cx + cw / 2.), panel::SPINE);
+    assert!(texts(&rt).contains(&"Recording automatically".to_string()));
 }

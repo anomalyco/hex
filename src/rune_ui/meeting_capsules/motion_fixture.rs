@@ -643,7 +643,7 @@ fn capture_end_and_publication_retarget_one_anchored_surface() {
 /// a transient but perfectly anchored 18 pt dip used to pass the anchor test.
 /// The finished meeting is its own layout (a title link over the copies), so
 /// the clock and rows hold until it is published, and from the summary on
-/// the panel only grows.
+/// the panel only grows. Only the recording's foot leaves when capture ends.
 #[test]
 fn notes_grow_past_the_copies_without_a_height_dip_or_a_clock_hop() {
     use MeetingIndicatorCorner::*;
@@ -667,6 +667,7 @@ fn notes_grow_past_the_copies_without_a_height_dip_or_a_clock_hop() {
             let rows = ["copy-prompt", "copy-all"];
             let at = rows.map(|k| rect(&rt, k));
             let mut height = rect(&rt, "pill")[3];
+            let mut retracted = false;
             let mut title_width = None;
             rt.update(|c, _| c.mark_stopping());
             for frame in 0..delay + 100 {
@@ -693,9 +694,15 @@ fn notes_grow_past_the_copies_without_a_height_dip_or_a_clock_hop() {
                 let published = frame > delay;
                 let summarized = frame > 4 + delay;
                 let now = rect(&rt, "pill")[3];
+                // Capture ending takes the recording's foot with it, once: until
+                // the panel has been down to the one the finished meeting grows
+                // from it may fall that far, no further. From there it never dips.
+                let base = panel::open_height_without_notice();
+                retracted |= now <= base + 0.02;
+                let floor = if retracted { height } else { height.min(base) };
                 if !published || summarized {
                     assert!(
-                        now >= height - 0.02,
+                        now >= floor - 0.02,
                         "{corner:?} f{frame}: {height} → {now}"
                     );
                 }
@@ -709,7 +716,9 @@ fn notes_grow_past_the_copies_without_a_height_dip_or_a_clock_hop() {
                     assert!((t[0] - clock[0]).abs() < 0.02, "timer moved at {frame}");
                 }
                 if frame > delay {
-                    let w = rect(&rt, "title")[2];
+                    // The title hugs its words; the link it is cut to fit
+                    // is the width that must hold still.
+                    let w = rect(&rt, "open-meeting")[2];
                     assert!(
                         (w - *title_width.get_or_insert(w)).abs() < 0.02,
                         "title wrapped at a moving width"

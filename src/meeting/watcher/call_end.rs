@@ -180,6 +180,15 @@ fn only_call_app(applications: &[ActiveMicrophoneApplication]) -> Option<(String
     found
 }
 
+/// The native call app's ID for a capsule's icon (call ended, recording
+/// automatically); browsers return `None` so web calls show their service
+/// mark instead of the browser's.
+pub(super) fn icon_application(application: Option<&str>) -> Option<String> {
+    application
+        .filter(|id| !crate::microphone_activity::is_browser_id(Some(id)))
+        .map(str::to_owned)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

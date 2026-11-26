@@ -140,11 +140,12 @@ pub(super) enum Layer {
     Pending,
     /// The listening field and timer.
     Meter,
-    /// Stop and the two copies, in order of importance.
+    /// Stop, the two copies, and the open recording's foot, in order of
+    /// importance.
     Action(usize),
 }
 
-pub(super) const ACTIONS: usize = 3;
+pub(super) const ACTIONS: usize = 4;
 const LAYERS: usize = 3 + ACTIONS;
 
 impl Layer {
@@ -444,10 +445,12 @@ impl Capsule {
     /// Where the surface is heading for what the capsule shows now, and
     /// whether its outline only follows the offer's own pages.
     pub(super) fn stage_target(&mut self, now: f64) -> Option<(Target, bool)> {
+        // The resting pill keeps every capsule's corners: nothing about
+        // its silhouette changes as it opens but its size.
         let pill = |w: f32| Outline {
             w,
             h: REST_HEIGHT,
-            radius: REST_HEIGHT / 2.0,
+            radius: PANEL_RADIUS,
             dark: 1.0,
         };
         let panel = |h: f32| Outline {
@@ -492,7 +495,7 @@ impl Capsule {
                     panel(if *confirming {
                         panel::CONFIRM_HEIGHT
                     } else {
-                        panel::open_height(shown)
+                        panel::open_height(self, shown)
                     })
                 } else {
                     pill(panel::rest_width(shown))

@@ -114,11 +114,11 @@ the inner shape is free and takes its component's own token.
 | Push button, select, text field, list row fill, error panel | 6 | `radius.md` | |
 | Card, detail card, window content panel, empty-state badge | 8 | `radius.lg` | Sits 16 inside the panel: free |
 | Modal, picker | 10 | `radius.xl` | Cards sit 16 inside: free, stay 8 |
-| Capsule shell (island, banner, panel, list, popover, toolbar) | 14 | `CAPSULE.radius` | |
+| Capsule shell (island, banner, panel, list, popover, toolbar, the recording pill at rest and open) | 14 | `CAPSULE.radius` | One silhouette: a capsule that opens changes its size, never its corners |
 | Capsule chip, inset 4 | 10 | `radius.xl` | `14 - 4` (compile-time assert) |
 | Capsule row, inset 6 | 8 | `radius.lg` | `14 - 6` (compile-time assert) |
 | Capsule push button, inset 8 | 6 | `radius.md` | `14 - 8` (compile-time assert) |
-| Dot, knob, switch, timer pill | `h / 2` | pill | |
+| Dot, knob, switch | `h / 2` | pill | |
 
 ## Typography by role
 
@@ -150,10 +150,12 @@ stacks in a column; reserve `ty.mono` for code, paths, and commands only.
 | Island (one line) | 40 high; 32 pt chips at inset 4, radius 10; `p.strong()` labels |
 | Banner (offer, reminder, call ended) | 44 high (56 for two lines); 28 pt push buttons at inset 8, gap 8; Primary last |
 | Panel | 252 wide; header 36; 44 pt rows, radius 8, at inset 6, 2 apart; text rail 16 |
-| Row | 16 pt icon, 8 gap; `p.strong()` in `text_base` on `layer_02` for the lead action, `p.row_title()` in `text_muted` for the rest |
-| Title band | `p.strong()` title, `p.tabular(p.meta())` meta 2 below; link hover keeps 8 pt clear below |
+| Row | 16 pt icon, 8 gap; lead action = `p.strong()` in `text_base`, no rest fill; `p.row_title()` in `text_muted` for the rest; every row fills with `hover` only under the pointer |
+| Title band | `p.strong()` title, `p.tabular(p.meta())` meta 2 below; a 14 pt ↗ trails the title at 0.6, whole on hover; link hover keeps 8 pt clear below |
+| Foot link (open recording) | Under the rows, 2 apart, radius 8: "Open in Hex" in `p.row_title()` `text_muted` on the 16 pt rail with the same ↗, 36 high; once the call has words, their last 3 lines in `p.description()` `text_muted`, anchored to the newest, the oldest fading out (`panel/peek.rs`) |
+| Icon slot (call ended, recording automatically) | 36 pt slot at inset 10 holding the 26 pt app icon (radius 6); the slot carries the state: an 8 pt `danger` dot ringed 2 pt in `bg_base` on the icon's bottom-right corner = recording live, a ring round the icon = ending |
 | Timer | `p.clock()`, 8 pt `status_dot` 6 before it |
-| ✕ | 28 pt ghost icon button, `CLOSE_SMALL`, centred on the icon spine (24); destroys only after confirmation |
+| ✕ | 28 pt box, `CLOSE_SMALL` in a `GhostMuted` icon button, centred on the icon spine (24) in panels and banners alike; destroys only after confirmation |
 | Confirmation | `capsule_confirm`: no icon, title + description on the 16 pt rail, equal-width Keep (neutral) and Danger buttons at inset 8, hugs content |
 | Countdown | Ring round the control that will act (✕, Undo, app icon); no drain bars |
 | Hint | `p.meta()` in `success` with a 12 pt check ("Copied") |
