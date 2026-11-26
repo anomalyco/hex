@@ -1967,6 +1967,18 @@ mod tests {
         assert!(hotkeys.middle_mouse_press().is_some());
         assert!(!hotkeys.takes_escape(at(500)));
         assert!(hotkeys.process(escape, at(500)).is_empty());
+        assert!(
+            hotkeys
+                .process(
+                    InputEvent::Key {
+                        code: 53,
+                        down: false,
+                        flags: 0,
+                    },
+                    at(550),
+                )
+                .is_empty()
+        );
         assert!(hotkeys.dictation.is_locked());
 
         hotkeys.dictation.set_escape_cancels_lock(true);
