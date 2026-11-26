@@ -17,6 +17,9 @@ export const CHANGELOG_PATH = `${BASE_PATH}/changelog`
 // `${FILES_PATH}/dev-notes.json` and renders at `DEV_NOTES_PATH`, so neither
 // the app nor the changelog waits for a site deploy.
 export const DEV_NOTES_URL = "https://raw.githubusercontent.com/anomalyco/hex/dev-notes/dev-notes.json"
+// The Meetings showcase, a standalone page in public/meetings/ (scripts/meetings.ts).
+// The Worker redirects this to its trailing-slash address.
+export const MEETINGS_PATH = withBase("/meetings")
 // Redirects to the current release's file for a target (worker.ts).
 export const DOWNLOAD_PATH = `${BASE_PATH}/download`
 // Short link to Hex for iPhone on the App Store (worker.ts).
