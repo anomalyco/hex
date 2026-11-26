@@ -615,7 +615,7 @@ button { font: inherit; color: inherit; }
 @media (hover: hover) { .bar__btn:hover { color: #f2f2ef; background: rgba(255, 255, 255, 0.09); } }
 /* A finger needs 44 px. */
 @media (pointer: coarse) {
-  .page:not([data-phase="idle"]) .bar { opacity: 0.8; }
+  .page[data-phase="show"] .bar { opacity: 0.8; }
   .bar { gap: 0; padding: 0.125rem; }
   .bar__btn { width: 2.75rem; height: 2.75rem; }
 }
@@ -757,7 +757,19 @@ button { font: inherit; color: inherit; }
 .page[data-narrow] .notes__rows > div { grid-template-columns: 5.5rem 1fr; gap: 0.6rem; padding: 0.5rem 0; }
 .page[data-narrow] .notes__bean { width: 5rem; margin-bottom: 0.75rem; }
 .page[data-narrow] .notes__card { padding: 1.1rem 1.15rem 1.15rem; }
-.page[data-narrow] .notes__actions { flex-wrap: nowrap; gap: 0.5rem; margin-top: 1rem; }
+.page[data-narrow] .notes__actions { flex-wrap: wrap; gap: 0.5rem; margin-top: 0.8rem; }
+/* A phone: the bean, the card and its two buttons all fit one screen, under the status bar. */
+.page[data-narrow] .notes { justify-content: flex-start; padding: calc(var(--top) + 2.25rem) var(--edge) 0.9rem; }
+.page[data-narrow] .notes__bean { width: 4.5rem; margin-bottom: 0.5rem; }
+.page[data-narrow] .notes__card { padding: 0.95rem 1.05rem 1rem; }
+.page[data-narrow] .notes__card h2 { margin-top: 0.7rem; font-size: 1.25rem; }
+.page[data-narrow] .notes__rows { margin-top: 0.7rem; }
+.page[data-narrow] .notes__rows > div { padding: 0.42rem 0; }
+.page[data-narrow] .notes__rows dd { font-size: 0.875rem; line-height: 1.38; }
+.page[data-narrow] .notes__rows dd i + i { margin-top: 0.25rem; }
+.page[data-narrow] .download, .page[data-narrow] .replay { height: 2.5rem; padding: 0 0.95rem; font-size: 0.875rem; }
+/* On a phone the show is one screen: a stray drag must not slide its top off under the status bar. */
+@media (pointer: coarse) and (min-height: 34rem) { html:has(.page[data-phase="show"]) { overflow: hidden; overscroll-behavior: none; } }
 .page[data-narrow] .download, .page[data-narrow] .replay { height: 2.5rem; padding: 0 0.85rem; gap: 0.45rem; font-size: 0.875rem; white-space: nowrap; }
 
 /* The newspaper in a narrow window. */
