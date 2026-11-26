@@ -93,8 +93,8 @@ android {
         applicationId = "ly.anoma.hex"
         minSdk = 31
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.2.2"
+        versionCode = 6
+        versionName = "0.2.3"
         buildConfigField("String", "FEEDBACK_KEY", "\"$feedbackKey\"")
         // Labs › Diagnostics: Hex Preview and debug builds (below), never the Play release.
         buildConfigField("boolean", "DIAGNOSTICS", "false")
