@@ -445,12 +445,22 @@ for (const v of cue.tabs) for (const a of v.acts) {
 // The marks a page comes to rest on with the thing in the middle of the window, not at its top.
 const CENTRE = new Set(['2q', '2u', '3b', '3c'])
 const tileOf = (i) => stage.geo.tiles[i] ?? stage.geo.tiles[stage.geo.tiles.length - 1]
+// The phone's top safe area in px (0 anywhere without one), read off a probe the height of it.
+let safeProbe
+function safeTop() {
+  if (!safeProbe) {
+    safeProbe = document.createElement('i')
+    safeProbe.style.cssText = 'position:absolute;top:0;left:0;width:0;height:env(safe-area-inset-top,0px);visibility:hidden;pointer-events:none'
+    el.page.append(safeProbe)
+  }
+  return safeProbe.offsetHeight || 0
+}
 function measure() {
   const r = el.page.getBoundingClientRect()
   live.W = r.width
   live.H = r.height
   const b = el.bean.getBoundingClientRect()
-  const geo = stage.layout(live.W, live.H, { x: b.left - r.left + b.width / 2, y: b.top - r.top + b.height * 0.52, R: b.width * 0.47 })
+  const geo = stage.layout(live.W, live.H, { x: b.left - r.left + b.width / 2, y: b.top - r.top + b.height * 0.52, R: b.width * 0.47 }, safeTop())
   const nb = el.notesBean.getBoundingClientRect()
   geo.notes = { x: nb.left - r.left + nb.width / 2, y: nb.top - r.top + nb.height * 0.52, R: nb.width * 0.47 }
   el.page.toggleAttribute('data-narrow', geo.narrow)
@@ -999,6 +1009,7 @@ function seek(t, play = true) {
   setPhase(state.T >= cue.end ? 'notes' : 'show')
 }
 function start() {
+  if (scrollY > 0) scrollTo(0, 0)
   audio.init()
   seek(0)
 }

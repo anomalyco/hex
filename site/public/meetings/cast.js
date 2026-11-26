@@ -229,10 +229,11 @@ export class Stage {
   }
 
   // Where everything sits on a page of W × H. box is the hero's frame.
-  layout(W, H, box) {
+  layout(W, H, box, safe = 0) {
     const narrow = W < 820 || W / H < 0.95
     const edge = narrow ? 8 : clamp(W * 0.022, 14, 36)
-    const top = narrow ? 58 : clamp(H * 0.082, 62, 86)
+    // (safe: what the phone keeps for its status bar; everything starts under it.)
+    const top = (narrow ? 58 : clamp(H * 0.082, 62, 86)) + safe
     // (Under the windows: the three buttons, in their pill.)
     const bottom = narrow ? 66 : clamp(H * 0.066, 58, 66)
     const gap = narrow ? 8 : 14
@@ -270,9 +271,9 @@ export class Stage {
     const browser = narrow ? { x: oc.x + 4, y: oc.y + oc.h - bh + 4, w: oc.w - 8, h: bh } : { x: oc.x - 20, y: oc.y + oc.h - bh + 10, w: oc.w + 30, h: bh }
     this.geo = {
       W, H, narrow, call, oc, solo, off, bar, pad, gut, tiles, grid, gap, top, browser, hero: { x: box.x, y: box.y, R: box.R },
-      pill: { x: W / 2, y: narrow ? 30 : Math.round(top / 2) + 2 },
+      pill: { x: W / 2, y: safe + (narrow ? 30 : Math.round((top - safe) / 2) + 2) },
       // The calendar's notification: top right, as macOS puts it (its right edge, its top, its width).
-      notif: { right: W - (narrow ? 8 : edge), y: narrow ? 10 : 18, w: Math.min(348, W - 16) },
+      notif: { right: W - (narrow ? 8 : edge), y: safe + (narrow ? 10 : 18), w: Math.min(348, W - 16) },
       notes: { x: W / 2, y: Math.max(top + 30, H * 0.2), R: Math.min(72, H * 0.085) },
     }
     return this.geo
