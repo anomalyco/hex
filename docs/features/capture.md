@@ -151,9 +151,22 @@ On Linux                                 // capture.linux
 │   hardware
 ├── Frames -> the portal's PipeWire stream, libpipewire-0.3 loaded at run
 │   time (`maxFramerate` 60/1); 32-bit RGB as a linear DMA-BUF (niri, GNOME,
-│   KDE) or shared memory. A stream that ends or fails before its first frame
-│   ends the capture with that reason, keeping no voice; a stream with no frame
-│   yet when the person stops is saved with its voice and marks, the summary
+│   KDE) or shared memory, preferred in that order. A desktop with neither
+│   (#2899: niri 26.04 on NVIDIA offers only tiled DMA-BUFs) fails the
+│   stream with `no more input formats`; only then, once per capture, is
+│   EGL loaded (libEGL/libGLESv2 at run time) and every DRM EGL device (then
+│   Mesa's surfaceless platform) asked for the tiled layouts it imports
+│   (`eglQueryDmaBufModifiersEXT` minus external-only ones, merged across
+│   devices), each display terminated right after, and the stream reconnects
+│   offering those too (`Stream::offer_tiled`; several modifiers carry
+│   DONT_FIXATE so the producer picks one it can allocate; a format whose
+│   modifier is still unfixated isn't taken, Hex waits for the producer's
+│   settled one). Desktops that take linear or shared memory never touch EGL.
+│   A later renegotiation that changes only the modifier is followed on the
+│   CPU path; on the GPU encoder, or for a new size, it is only logged. No
+│   EGL or no device listing a tiled layout -> the original error. A stream
+│   that ends or fails before its first frame ends the capture with that
+│   reason, keeping no voice; a stream with no frame yet when the person stops is saved with its voice and marks, the summary
 │   saying the stream sent no frames
 ├── Encoding -> VA-API (libva loaded at run time): each DMA-BUF imported, scaled
 │   to a 2560 px long edge (1920 for a window, exact even sides padded to 16 px
@@ -170,14 +183,32 @@ On Linux                                 // capture.linux
 │   VA-API refusing the first frame's buffer (#1179: Intel Arc on the xe
 │   driver) -> the same CPU path instead of failing. The negotiated DRM
 │   modifier goes to the import and the log; the CPU never reads a tiled
-│   buffer as rows. A first frame neither path can read (a DMA-BUF the CPU
-│   can't map, or tiled) fails the capture with why, never a capture without
+│   buffer as rows: on the CPU path EGL imports it as a GL texture and
+│   `glReadPixels` copies it out as rows in the stream's byte order
+│   (`linux::egl::Reader`; one plane only). The reader opens nothing until
+│   the first tiled frame, then tries each device that lists the agreed
+│   layout and keeps the first that reads it (on two GPUs, whichever the
+│   compositor's buffer imports on); its context and display are destroyed
+│   and terminated when the recording ends, so no GPU stays awake for Hex
+│   between captures. A first frame neither path can
+│   read (a DMA-BUF the CPU can't map, a tiled one EGL can't import, or a
+│   multi-plane one) fails the capture with why, never a capture without
 │   a picture or a crash. Buffers PipeWire removes mid-stream (a
 │   renegotiation) are never queued again, and Hex maps buffers itself and
 │   unmaps a removed one only after the recorder's copy, so a renegotiation
 │   can't crash Hex. Check: vaapi render_nodes_in_order,
 │   level_and_sps_crop_match_resolution_and_60fps, pipewire
-│   offered_formats_parse_back, a_negotiated_tiled_modifier_is_read,
+│   offered_formats_parse_back, a_negotiated_tiled_modifier_is_read, egl
+│   only_renderable_tiled_layouts_are_offered, red_and_blue_trade_places,
+│   pipewire a_modifier_the_producer_has_yet_to_fixate_is_not_settled,
+│   capture::platform only_a_new_buffer_layout_is_followed_on_the_cpu,
+│   only_a_format_refusal_offers_tiled_buffers; locally (not committed): EGL
+│   readback of a linear 4x3 buffer kept bytes and row order on Mesa llvmpipe
+│   (surfaceless), and a display terminated and reopened read again; against
+│   PipeWire 1.4.2 a videotestsrc node (RGB/UYVY) refused the stream with
+│   `no more input formats` and `offer_tiled` renegotiated on the same node
+│   (refused again, as expected). Tiled readback on NVIDIA + niri, and the
+│   DONT_FIXATE handshake with niri, not observed,
 │   capture::platform output_sizes_stay_exact_even_dimensions… and
 │   cpu_x264_uses_superfast…; PipeWire 1920x1080 SHM -> x264 recorded 60/1 fps
 │   (598 frames in 9.97 s, 594 delivered) on hex-linux-nvidia; VA-API 60 fps
