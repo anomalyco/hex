@@ -17,6 +17,7 @@ hex meetings chapters latest --json
 hex meetings show 1790003000000-1005 --chapter 2
 hex meetings show latest --srt > call.srt
 hex meetings search 'release schedule'
+hex meetings search --meeting latest 'release schedule'
 ```
 
 ## History filters apply before the limit
@@ -124,9 +125,11 @@ are skipped, and blank lines and `-->` are removed from the text so a cue
 can't break.
 
 `meetings search QUERY` uses the MCP query's stemmed, fuzzy BM25 ranking over
-transcripts and stored notes. Quoted phrases constrain the search. `--since`,
-`--until`, and `--limit` (default 10, maximum 50) are supported; output is text.
-Search for a timestamp, then read around it with `show --from/--to`.
+transcripts and stored notes. Quoted phrases constrain the search. `--meeting ID`
+(exact ID, unique prefix, or `latest`) limits the search to one meeting.
+`--since`, `--until`, and `--limit` (default 10, maximum 50) are supported;
+output is text. Search for a timestamp, then read around it with
+`show --from/--to`.
 
 Exact stems clearly outrank fuzzy matches. Passages matching every unquoted
 term exactly come first, whatever their scores. Within each tier a prefix

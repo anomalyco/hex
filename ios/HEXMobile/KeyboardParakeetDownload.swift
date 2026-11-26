@@ -454,7 +454,9 @@ struct KeyboardParakeetStatus: View {
         case .idle:
             break
         }
-        guard isDownloaded, hold != .notEnglish else { return line(for: hold) }
+        // A limit under 131 MB never loads, downloaded or not (a download turned on by hand
+        // skips the hold): it says so, not what the keyboard last said.
+        guard isDownloaded, hold != .notEnglish, hold != .keyboardTooSmall else { return line(for: hold) }
         return keyboardLine(keyboardState, reason: reason, now: now)
     }
 
@@ -471,9 +473,11 @@ struct KeyboardParakeetStatus: View {
             return String(localized: "Getting ready in the keyboard. After a download or an update, this takes a little longer.")
         case (.ready, _)?:
             return String(localized: "Ready in the keyboard")
-        case (.unavailable, _)?:
+        case (.unavailable, _)? where reason != nil:
             return unavailableLine(reason)
         default:
+            // Nothing from the keyboard yet, or an older keyboard's `.unavailable` without a
+            // reason (forgotten at launch: `forgetUnavailableWithoutReason`).
             return String(localized: "Downloaded. The keyboard gets it ready the next time it opens.")
         }
     }
@@ -488,8 +492,7 @@ struct KeyboardParakeetStatus: View {
         case .notOnNeuralEngine?, .loadFailed?:
             String(localized: "The keyboard couldn't load it, so it uses Apple's speech recognition.")
         case nil:
-            // Said by an older keyboard, which didn't say why.
-            String(localized: "The keyboard couldn't use it when it last opened, so it used Apple's speech recognition. It tries again the next time it opens.")
+            String(localized: "Downloaded. The keyboard gets it ready the next time it opens.")
         }
     }
 
@@ -532,8 +535,17 @@ struct SpeechModelHomeCard: View {
         defaults?.set(true, forKey: dismissedKey)
     }
 
-    static func shows(enabled: Bool, fits: Bool, hold: KeyboardParakeetDownload.Hold?, dismissed: Bool) -> Bool {
-        guard enabled, fits, !dismissed else { return false }
+    /// Not where the model can never run in this keyboard (a limit under 131 MB, or no Neural
+    /// Engine), where the card couldn't be dismissed either; still where trying again can help
+    /// (short of memory, a load that failed, with Try again).
+    static func shows(
+        enabled: Bool,
+        fits: Bool,
+        hold: KeyboardParakeetDownload.Hold?,
+        dismissed: Bool,
+        unavailable: KeyboardParakeetSettings.UnavailableReason? = nil
+    ) -> Bool {
+        guard enabled, fits, !dismissed, unavailable != .noNeuralEngine else { return false }
         switch hold {
         case .otherEngine?, .notEnglish?, .keyboardTooSmall?:
             return false
@@ -545,7 +557,13 @@ struct SpeechModelHomeCard: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 2)) { _ in
             let settings = KeyboardParakeetSettings()
-            if Self.shows(enabled: settings.isEnabled, fits: KeyboardParakeetSettings.fits(), hold: download.hold, dismissed: dismissed) {
+            if Self.shows(
+                enabled: settings.isEnabled,
+                fits: KeyboardParakeetSettings.fits(),
+                hold: download.hold,
+                dismissed: dismissed,
+                unavailable: settings.unavailableReason
+            ) {
                 card(ready: download.isDownloaded && settings.keyboardState?.state == .ready)
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }

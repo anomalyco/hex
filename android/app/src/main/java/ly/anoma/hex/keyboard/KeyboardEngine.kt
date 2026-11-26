@@ -684,11 +684,18 @@ internal class KeyboardEngine(
         word?.takeIf { canEndWord() }?.textReplacement(before())?.let { replace(it.original, smartWord(it.replacement)) }
         resetTyping(); clearSpaces(); surface?.suggestions(emptyList())
         val info = editor
-        if (info?.actionLabel != null && (info.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION) == 0 &&
-            target.performEditorAction(info.actionId)) { tracker.sent(); return }
-        if (target.defaultEditorAction()) { tracker.sent(); return }
-        if (keyEventEditor) target.sendKey(KeyEvent.KEYCODE_ENTER)
-        else type("\n")
+        // Before any action or key press: a Return that ends a word teaches adaptive touch as a typed one does.
+        val b = if (keyEventEditor) "" else before()
+        // Only a multi-line field takes "\n" as text; a one-line field without an action gets the Enter key (#2864).
+        when (EnterPress.run(target, info?.inputType ?: (InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE),
+            info?.imeOptions ?: 0, info?.actionLabel, info?.actionId ?: 0)) {
+            EnterPress.Action -> tracker.sent()
+            EnterPress.LineBreak -> type("\n")
+            // The key press, with the bookkeeping type("\n") does: the word ends, next words follow.
+            EnterPress.Key -> if (!keyEventEditor) {
+                teachEnd(b); showPredictions(if (word != null) before() else null); inputDone()
+            }
+        }
     }
 
     /** A space-bar slide starts moving the cursor: the word in progress stays as typed. A field whose text

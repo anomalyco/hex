@@ -542,8 +542,12 @@ final class DictationSSOTTests: XCTestCase {
         XCTAssertNil(unpicked(.english, english: (false, false)), "a download that failed leaves the multilingual one")
         XCTAssertNil(unpicked(.english, hex: .parakeetUltra))
 
-        let names = SpeechModelChoice.multilingualLanguages
-        XCTAssertTrue(names.contains("Dutch") && names.contains("Ukrainian") && names.contains("English"), names)
+        // Settings says "25 European languages": the multilingual model's 25, all European.
+        let european: Set<String> = [
+            "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "hr", "hu", "it",
+            "lt", "lv", "mt", "nl", "pl", "pt", "ro", "ru", "sk", "sl", "sv", "uk",
+        ]
+        XCTAssertEqual(MultilingualParakeetSettings.languages, european)
     }
 
     /// Settings › Dictation's speech model line once the keyboard couldn't use the model: it used
@@ -567,6 +571,17 @@ final class DictationSSOTTests: XCTestCase {
         settings.setKeyboardState(.unavailable)
         XCTAssertNil(settings.unavailableReason, "an older keyboard's word, without a reason")
 
+        // An older keyboard's `.unavailable` without a reason says nothing true: Hex forgets it
+        // at launch (TestFlight build 153, an iPhone 14: the page showed it with no reason).
+        XCTAssertTrue(settings.forgetUnavailableWithoutReason())
+        XCTAssertNil(settings.keyboardState)
+        settings.setKeyboardState(.unavailable, reason: .loadFailed)
+        XCTAssertFalse(settings.forgetUnavailableWithoutReason(), "one with a reason stays")
+        XCTAssertEqual(settings.unavailableReason, .loadFailed)
+        settings.setKeyboardState(.ready)
+        XCTAssertFalse(settings.forgetUnavailableWithoutReason())
+        XCTAssertEqual(settings.keyboardState?.state, .ready)
+
         func line(
             _ reason: KeyboardParakeetSettings.UnavailableReason?,
             state: KeyboardParakeetSettings.KeyboardState = .unavailable
@@ -587,13 +602,22 @@ final class DictationSSOTTests: XCTestCase {
         XCTAssertEqual(line(.notOnNeuralEngine), line(.loadFailed))
         XCTAssertEqual(
             line(nil),
-            "The keyboard couldn't use it when it last opened, so it used Apple's speech recognition. It tries again the next time it opens."
+            "Downloaded. The keyboard gets it ready the next time it opens.",
+            "no reason only ever means the keyboard hasn't said anything since"
         )
         XCTAssertEqual(line(.loadFailed, state: .ready), "Ready in the keyboard", "a reason only counts with .unavailable")
         XCTAssertEqual(
             KeyboardParakeetStatus.line(state: .idle, isDownloaded: false, hold: .keyboardTooSmall, keyboardState: nil, now: now),
             "This iPhone's keyboard doesn't have the memory for it, so it uses Apple's speech recognition.",
             "a limit under 131 MB never changes, so it doesn't say right now"
+        )
+        XCTAssertEqual(
+            KeyboardParakeetStatus.line(
+                state: .idle, isDownloaded: true, hold: .keyboardTooSmall,
+                keyboardState: (.unavailable, now), reason: nil, now: now
+            ),
+            "This iPhone's keyboard doesn't have the memory for it, so it uses Apple's speech recognition.",
+            "downloaded anyway (turned on by hand), it still never loads, whatever the keyboard last said"
         )
         XCTAssertEqual(
             KeyboardParakeetStatus.multilingualLine(

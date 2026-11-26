@@ -566,6 +566,21 @@ final class KeyboardBridgeTests: XCTestCase {
         XCTAssertFalse(KeyboardBridge(defaults: defaults).isKeyboardShown(now: now))
     }
 
+    /// "Hex is ready" showed a Try again with nothing to retry (1.0.5 quality review).
+    func testOnboardingsLastPageOffersTryAgainOnlyWithSomethingLeft() {
+        func left(model: Bool = true, mic: Bool = true, keyboard: Bool? = true, fullAccess: Bool = true) -> OnboardingLeft {
+            OnboardingLeft.resolve(modelReady: model, microphoneGranted: mic, keyboardAdded: keyboard, fullAccessOn: fullAccess)
+        }
+        XCTAssertEqual(left(), .nothing)
+        XCTAssertFalse(left().offersTryAgain, "Hex is ready: nothing to try again")
+        XCTAssertEqual(left(model: false, mic: false), .model)
+        XCTAssertFalse(left(model: false).offersTryAgain, "the model's card has its own Try again")
+        XCTAssertTrue(left(mic: false).offersTryAgain)
+        XCTAssertTrue(left(keyboard: false).offersTryAgain)
+        XCTAssertTrue(left(keyboard: nil, fullAccess: false).offersTryAgain, "use the keyboard once in the practice")
+        XCTAssertEqual(left(keyboard: nil), .nothing, "a keyboard not known to be missing isn't left")
+    }
+
     func testOnboardingPracticeCountsADictationOrAFewTypedWords() {
         XCTAssertFalse(OnboardingPractice.isDone(text: "S", dictated: false, typedWithHex: 1, fullAccessOn: true), "one letter")
         XCTAssertFalse(OnboardingPractice.isDone(text: "See you", dictated: false, typedWithHex: 2, fullAccessOn: true))

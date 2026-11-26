@@ -143,7 +143,11 @@ impl Capsule {
 
     /// Wakes the frame hook when a running stay will be over.
     pub(super) fn wake_for_stay(&self, tx: &mut Tx) {
-        if let State::Ready { stay, .. } = &self.state
+        if let State::Ready {
+            hover: ReadyHover::Idle,
+            stay,
+            ..
+        } = &self.state
             && stay.running()
         {
             tx.wake_after(stay.left());

@@ -1127,7 +1127,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   pastes, even on failure or timeout; no speech exits 4. History records it as
   Printed and Paste Last skips it.
 - Option-Shift-V pastes the last completed dictation. Meetings have no paste
-  shortcut: the recording capsule's Copy agent prompt and Copy all are the
+  shortcut: the recording capsule's Copy agent prompt and Copy transcript are the
   in-call copies.
 - Do not persist captured audio by default. Explicit foreground meeting
   recording must remain visibly active. Diagnostic dictation retention is an
@@ -1218,7 +1218,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   launch with Meetings on runs the final pass on the dictation engine's model
   (or its own after 30 s without an engine).
 - Every in-call meeting view and copy (the Meetings pane, the capsule's
-  Copy all, provisional titles, `hex meetings`, and MCP) reads the
+  Copy transcript, provisional titles, `hex meetings`, and MCP) reads the
   rolling Parakeet transcript, which publishes only entries no later chunk
   can replace; after Stop they read the final transcript.
 - Meeting system audio uses a Core Audio process tap on macOS (System Audio

@@ -95,11 +95,21 @@ internal class TypingPreferences(context: Context) {
     var hexKeyLeft: Boolean
         get() = prefs.getBoolean(HEX_KEY_LEFT, false)
         set(value) { prefs.edit().putBoolean(HEX_KEY_LEFT, value).apply() }
+    /** Labs › Keyboard › Volume in the Hex menu: a Volume row that opens Android's own volume panel (#2868).
+     * Off by default. */
+    var volumeInMenu: Boolean
+        get() = prefs.getBoolean(VOLUME_IN_MENU, false)
+        set(value) { prefs.edit().putBoolean(VOLUME_IN_MENU, value).apply() }
     /** Labs › Keyboard › Voice-only mode: a "voice" subtype other keyboards switch to for dictation
      * alone, off by default. */
     var voiceOnly: Boolean
         get() = prefs.getBoolean(VOICE_ONLY, false)
         set(value) { prefs.edit().putBoolean(VOICE_ONLY, value).apply() }
+    /** Labs › Keyboard › Voice bar from the Hex menu: the Hex menu's Voice only collapses the keys into a dictation
+     * bar in the same field, and its Show keyboard brings them back (#2869). Off by default. */
+    var voiceBarFromMenu: Boolean
+        get() = prefs.getBoolean(VOICE_BAR_FROM_MENU, false)
+        set(value) { prefs.edit().putBoolean(VOICE_BAR_FROM_MENU, value).apply() }
     /** Settings › Keyboard › Height: Normal until another step is chosen. */
     var height: KeyboardHeight
         get() = KeyboardHeight.of(prefs.getString(HEIGHT, null))
@@ -151,8 +161,10 @@ internal class TypingPreferences(context: Context) {
         const val PASSWORD_MANAGER_SUGGESTIONS = "passwordManagerSuggestions"
         const val CLIPBOARD_HISTORY = "clipboardHistory"
         const val VOICE_ONLY = "voiceOnly"
+        const val VOICE_BAR_FROM_MENU = "voiceBarFromMenu"
         const val HEIGHT = "keyboardHeight"
         const val HEX_KEY_LEFT = "hexKeyLeft"
+        const val VOLUME_IN_MENU = "volumeInMenu"
         const val KEY_COLORS = "keyColors"
         const val KEY_COLOR = "keyColor"
         const val TEST_KEYBOARD_ON_HOME = "testKeyboardOnHome"

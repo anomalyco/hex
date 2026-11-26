@@ -7,6 +7,9 @@
     <string name="voice_only_listening">正在聆听…</string>
     <string name="voice_only_unavailable">此处无法开始听写</string>
     <string name="voice_only_back">返回你的键盘</string>
+    <string name="voice_bar_hint">点按 Hex 开始说话</string>
+    <string name="voice_bar_show_keyboard">显示键盘</string>
+    <string name="voice_bar_kept">有一段听写待插入，显示键盘即可插入</string>
     <string name="keyboard_note_microphone">麦克风不可用，请再试一次。</string>
     <string name="keyboard_note_transcribe">无法转录，请再试一次。</string>
     <string name="keyboard_note_no_speech">没有听到说话</string>
@@ -71,6 +74,7 @@
     <string name="keyboard_menu_feedback">打字反馈</string>
     <string name="keyboard_menu_accents">更多字符</string>
     <string name="keyboard_menu_clipboard">剪贴板</string>
+    <string name="keyboard_menu_volume">音量</string>
     <string name="keyboard_clipboard_empty">你复制的文字会在这里显示一小时</string>
     <string name="keyboard_clipboard_hint">点按即可粘贴，长按可固定或删除</string>
     <plurals name="keyboard_clipboard_clear_confirm">

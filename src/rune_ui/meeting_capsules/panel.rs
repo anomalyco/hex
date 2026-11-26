@@ -219,7 +219,7 @@ fn panel_row(
     }
 }
 
-/// Copy agent prompt and Copy all, for the recording or the ready meeting.
+/// Copy agent prompt and Copy transcript, for the recording or the ready meeting.
 fn copy_rows(p: Paint, capsule: &Capsule, recording: bool) -> Vec<El> {
     let live = &capsule.live;
     let presence = |row| capsule.action_presence(row).opacity;
@@ -240,7 +240,7 @@ fn copy_rows(p: Paint, capsule: &Capsule, recording: bool) -> Vec<El> {
             p,
             "copy-all",
             &icons::OUTLINE_COPY,
-            tr("Copy all"),
+            tr("Copy transcript"),
             copied(LiveCopy::All),
             false,
             !recording || !live.entries.is_empty(),
@@ -1199,11 +1199,39 @@ pub(super) fn shell_word(path: &str) -> String {
     }
 }
 
+/// Formats an executable path for invoking `hex` with arguments in a shell:
+/// POSIX single-quoting on Unix, and PowerShell's call operator `& '...'` on
+/// Windows when the path needs quoting (paths with only ASCII alphanumerics
+/// and `\ / . _ - : + @ %` run unquoted in both PowerShell and cmd.exe).
+pub(super) fn command_for_path(path: &str, windows: bool) -> String {
+    if !windows {
+        return shell_word(path);
+    }
+    let plain = !path.is_empty()
+        && path
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || r"\/._-:+@%".contains(c));
+    if plain {
+        path.to_owned()
+    } else {
+        format!("& '{}'", path.replace('\'', "''"))
+    }
+}
+
 /// This Hex's executable, to run its `hex meetings` commands.
 pub(super) fn hex_command() -> String {
     std::env::current_exe()
-        .map(|path| shell_word(&path.to_string_lossy()))
+        .map(|path| command_for_path(&path.to_string_lossy(), cfg!(target_os = "windows")))
         .unwrap_or_else(|_| "hex".to_owned())
+}
+
+/// Tells a coding agent how to read meeting `id` with this Hex executable.
+pub(in crate::rune_ui) fn meeting_agent_prompt(
+    id: &str,
+    title: &str,
+    recording: Option<u64>,
+) -> String {
+    agent_prompt(&hex_command(), id, title, recording)
 }
 
 /// Tells a coding agent how to read meeting `id` with `hex meetings`.
@@ -1212,7 +1240,7 @@ pub(super) fn agent_prompt(hex: &str, id: &str, title: &str, recording: Option<u
     let id = shell_word(id);
     let search = format!(
         "Find a topic, then read around the time it came up:\n  \
-         {hex} meetings search \"<words>\"\n  \
+         {hex} meetings search --meeting {id} \"<words>\"\n  \
          {hex} meetings show {id} --from <mm:ss> --to <mm:ss> --md\n"
     );
     match recording {

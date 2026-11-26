@@ -522,31 +522,25 @@ nonisolated enum SpeechLanguagePicker {
             ?? identifier
     }
 
-    /// "English (US)", "Spanish (US)": one language's name with its region code, short enough
-    /// for Settings' line naming each keyboard language's dictation language.
-    static func shortName(for identifier: String, in display: Locale = .current) -> String {
-        let name = shortNames(for: [identifier], in: display)[identifier]
-            ?? displayName(for: identifier, in: display)
-        guard let region = Locale(identifier: identifier).region?.identifier else { return name }
-        return "\(name) (\(region))"
-    }
-
-    /// Short names for a list of locales: the language alone where it has one region in the
-    /// list ("Norwegian Bokmål"), the full name where it has several ("English (Canada)").
-    static func shortNames(for identifiers: [String], in display: Locale = .current) -> [String: String] {
-        var regionsPerLanguage: [String: Int] = [:]
-        for identifier in identifiers {
-            let code = Locale(identifier: identifier).language.languageCode?.identifier ?? identifier
-            regionsPerLanguage[code, default: 0] += 1
-        }
+    /// Short names in the app's language, as the keyboard names languages in their own
+    /// (`DictationLanguageSwitch.named`): the language alone where `supported` (Apple
+    /// Speech's list here; else `identifiers`) has one region of it ("Norwegian Bokmål"), with
+    /// its region code where it has several ("English (US)", "French (FR)").
+    static func shortNames(
+        for identifiers: [String],
+        among supported: [String] = [],
+        in display: Locale = .current
+    ) -> [String: String] {
+        let variants = supported.isEmpty ? identifiers : supported
         var names: [String: String] = [:]
         for identifier in identifiers {
             let code = Locale(identifier: identifier).language.languageCode?.identifier ?? identifier
-            if regionsPerLanguage[code] == 1, let language = display.localizedString(forLanguageCode: code) {
-                names[identifier] = language.prefix(1).uppercased() + language.dropFirst()
-            } else {
+            guard let language = display.localizedString(forLanguageCode: code) else {
                 names[identifier] = displayName(for: identifier, in: display)
+                continue
             }
+            let name = language.prefix(1).uppercased() + language.dropFirst()
+            names[identifier] = DictationLanguageSwitch.named(name, for: identifier, among: variants)
         }
         return names
     }

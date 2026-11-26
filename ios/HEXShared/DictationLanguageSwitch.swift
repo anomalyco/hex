@@ -234,8 +234,17 @@ nonisolated enum DictationLanguageSwitch {
         hinglish: HinglishSettings,
         greeklish: GreeklishSettings
     ) -> String {
-        let name = nativeLanguageName(for: identifier, hinglish: hinglish, greeklish: greeklish)
-        guard showsRegion(for: identifier, among: variants),
+        named(nativeLanguageName(for: identifier, hinglish: hinglish, greeklish: greeklish), for: identifier, among: variants)
+    }
+
+    /// The one rule for naming a dictation language with its region, wherever Hex names one:
+    /// the keyboard's chips and Hex key menu (the language's own name) and Settings ›
+    /// Dictation's row, its menus and its "Follows keyboard" line
+    /// (`SpeechLanguagePicker.shortNames`, the app's language). The region code follows only
+    /// where Apple Speech has more than one region of the language here: "English (US)",
+    /// "Español (US)", "French (FR)", "Norsk".
+    static func named(_ name: String, for identifier: String, among supported: [String]) -> String {
+        guard showsRegion(for: identifier, among: supported),
               let region = Locale(identifier: identifier).region?.identifier else { return name }
         return "\(name) (\(region))"
     }

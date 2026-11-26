@@ -9,6 +9,10 @@
     <string name="voice_only_listening">Listening…</string>
     <string name="voice_only_unavailable">Dictation can’t start here</string>
     <string name="voice_only_back">Back to your keyboard</string>
+    <!-- Labs › Keyboard › Voice bar from the Hex menu's bar. -->
+    <string name="voice_bar_hint">Tap Hex to talk</string>
+    <string name="voice_bar_show_keyboard">Show keyboard</string>
+    <string name="voice_bar_kept">Dictation waiting. Show keyboard to insert it</string>
     <!-- Dictation's notes, the same sentences MicCapture sends (HexKeyboard.speechNote). -->
     <string name="keyboard_note_microphone">Microphone unavailable. Try again.</string>
     <string name="keyboard_note_transcribe">Couldn’t transcribe. Try again.</string>
@@ -90,6 +94,7 @@
     <string name="keyboard_menu_feedback">Typing feedback</string>
     <string name="keyboard_menu_accents">More characters</string>
     <string name="keyboard_menu_clipboard">Clipboard</string>
+    <string name="keyboard_menu_volume">Volume</string>
     <string name="keyboard_clipboard_empty">Text you copy shows here for an hour</string>
     <string name="keyboard_clipboard_hint">Tap to paste, hold to pin or delete</string>
     <plurals name="keyboard_clipboard_clear_confirm">

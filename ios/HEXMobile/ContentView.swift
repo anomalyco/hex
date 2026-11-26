@@ -264,7 +264,11 @@ struct ContentView: View {
                 }
 
                 if case .failed(let message) = dictation.phase {
-                    errorBanner(message, offer: dictation.languageOffer)
+                    // Beside Use English, without "Try English.", which the button says.
+                    errorBanner(
+                        dictation.languageOffer == nil ? message : dictation.languageOfferLine ?? message,
+                        offer: dictation.languageOffer
+                    )
                         .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 } else if let notice = dictation.languageNotice {
                     noticeBanner(notice)

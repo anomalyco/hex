@@ -31,6 +31,18 @@ class VoiceOnlyTest {
         assertFalse(VoiceOnly.shows(lab = true, subtypeMode = "Voice"))
     }
 
+    // Labs › Keyboard › Voice bar from the Hex menu (#2869).
+    @Test fun theKeysCollapseOnlyWithTheLabOnAndVoiceOnlyChosen() {
+        assertTrue(VoiceOnly.collapses(lab = true, collapsed = true, secure = false))
+        assertFalse(VoiceOnly.collapses(lab = true, collapsed = false, secure = false))
+        // Off, the keyboard is unchanged even if the menu collapsed it before the lab went off.
+        assertFalse(VoiceOnly.collapses(lab = false, collapsed = true, secure = false))
+    }
+
+    @Test fun aPasswordFieldAlwaysGetsItsKeys() {
+        assertFalse(VoiceOnly.collapses(lab = true, collapsed = true, secure = true))
+    }
+
     // Labs › Dictate from Quick Settings, the other way to dictate without Hex as the keyboard.
     @Test fun theQuickSettingsSheetClosesOnceItsTextIsCopied() {
         // Android 13 and later show their own copied preview: the sheet closes at once.

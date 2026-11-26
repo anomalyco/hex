@@ -105,6 +105,7 @@ extension DictationController {
                     return
                 }
                 self.languageOffer = unavailable.flatMap { $0.automatic ? nil : $0.fallback }
+                self.languageOfferLine = self.languageOffer == nil ? nil : unavailable?.lineBesideOffer
                 self.preparationFailedInBackground = self.isInBackground && Self.isDownloadInterruption(error)
                 // This only differs from Parakeet's cache in one case: a re-preparation that
                 // fails after an earlier success, where the engine that prepared before is still

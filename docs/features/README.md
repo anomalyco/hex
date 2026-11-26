@@ -3009,7 +3009,7 @@ macOS `hex app` -> one menu-bar process, Rune window // dev.rune-ui-macos
 ├── While the window shows, its poll re-checks timed state every 250 ms (Rune Tx::wake_after); close hides it (Dock policy restored)
 ├── ⌘Q / menu-bar Quit / Ctrl-C quit and join
 ├── Meeting capsules: Rune interactive overlays (offer, call ended, ready, recording
-│   with Copy agent prompt / Copy all of the in-call transcript; compact until hovered,
+│   with Copy agent prompt / Copy transcript of the in-call transcript; compact until hovered,
 │   dragged to any corner)
 └── Modes app icons: Finder's icon (NSWorkspace) in the picker, chips, and mode rows
 Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
@@ -3320,6 +3320,12 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   slide work as on the right, the well grows rightwards out of ✓, and the idle row keeps its order.
 │   Off, the strip is laid out exactly as before. Checks: none automated; it was not compiled here (no
 │   Android SDK) and nothing was tried on a device or emulator. The repo has no Android CI.
+├── Labs › Keyboard › Volume in the Hex menu (off, #2868) -> the Hex menu's Home page gets a Volume
+│   row that closes the menu and shows Android's own volume panel over the same field
+│   (`SpeechMenu.showVolumePanel`: `adjustSuggestedStreamVolume(ADJUST_SAME, USE_DEFAULT_STREAM_TYPE,
+│   FLAG_SHOW_UI)`, `TypingPreferences.volumeInMenu`); Android picks the stream as a volume key does,
+│   and the row changes no volume. Off, the menu is unchanged. Checks: none automated; it was not
+│   compiled here (no Android SDK) and nothing was tried on a device or emulator.
 ├── Symbol pages -> Gboard's ?123 and =< pages (Pixel 8 emulator, API 36), the same on every
 │   layout: ?123 draws 1–0, then @ # $ _ & - + ( ) /, then * " ' : ; ! ? between the page switch
 │   and delete, and =< draws ~ ` | • √ π ÷ × § Δ, then £ ¢ € ¥ ^ ° = { } \, then % © ® ™ ✓ [ ]
@@ -3402,6 +3408,14 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   Checks: `editorsThatKeepTheirOwnTextTakeKeyEvents` in `FieldTypingTest`
 │   (android/app/src/test) covers the field's classification; the key presses are read from
 │   `KeyboardEngine` and were not tried on a device.
+├── Enter -> the editor's labelled action, else the field's standard one (Search, Go, Send, Done).
+│   With no action, a multi-line field (Android marks each one IME_FLAG_NO_ENTER_ACTION) gets its
+│   line break as text, as before; a field that holds one line, or a TYPE_NULL one, gets a
+│   KEYCODE_ENTER key press instead, so a one-line search box that waits for that key (a
+│   launcher's, #2864) runs its search rather than taking "\n". A key press still ends the word
+│   for adaptive touch and brings next words back, as the typed line break does.
+│   Checks: `EnterPressTest` (android/app/src/test) covers the three outcomes with a fake editor;
+│   not compiled or run here (no JDK), and no launcher's field was inspected or tried on a device.
 ├── Labs > Keyboard > Symbols on letter keys (off) -> hold a letter from any of QWERTY's three
 │   rows for its symbol first, with the letter's accents after it; the marks are
 │   Gboard's own (the ?123 page draws the same ones): a s d f g h j k l for
@@ -3630,6 +3644,24 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
     build-tools 36.0.0, NDK 27.2.12479018); `VoiceOnlyTest` covers the bar-or-keyboard and restart
     decisions, `python3 scripts/code-shape.py --check` and `git diff --check` pass, and the repo has
     no Android CI; nothing was tried on a device or emulator.
+├── Labs > Keyboard > Voice bar from the Hex menu (off, #2869) -> the Hex menu gets a "Voice only"
+    row (never in a password field) that folds the full keyboard into the voice-only mode's compact bar in
+    the same field: no subtype switch, no input restart, so the text, cursor and focus stay. The bar
+    waits idle ("Tap Hex to talk") with the Hex mark where ✓ goes; a tap records, ✓ finishes, and the
+    text goes in at the cursor through the keyboard's own insertion (commitSpeech), after which the bar
+    stays for the next dictation instead of switching keyboards. Its first key is "Show keyboard" (a
+    keyboard icon, not ✕): it finishes a recording as ✓ does, so what was said still goes in, and puts
+    the keys back. A dictation still transcribing carries over either way. The bar stays across fields
+    while the keyboard stays up; a password field shows its keys; the keyboard being dismissed, or the
+    lab turning off, brings the keys back. While collapsed, no inline autofill chips are asked for.
+    A dictation whose field went away (Insert dictation) is not offered in the bar, which has no strip:
+    while one waits for this field the bar's line says "Dictation waiting. Show keyboard to insert it",
+    and Show keyboard puts the strip's offer up. Show keyboard keeps a word half-typed before Voice only
+    (its suggestions come back). Switching to the Voice only subtype clears the collapse, so coming back
+    to Hex's keyboard subtype shows the keys.
+    Off, the menu has no such row and the keyboard is exactly as before. Checks: `VoiceOnlyTest` covers
+    the collapse decision (lab, menu choice, password field). Not compiled or run here (no JDK or
+    Android SDK was available), and nothing was tried on a device or emulator.
 ├── Labs > Keyboard > Test keyboard on Home (off, #2801) -> Keyboard's Test keyboard… field moves to
     Home, below the Dictate bar and its result, so tapping it brings up the Hex keyboard there with
     the current settings; the Keyboard page no longer shows it while the lab is on. Both places share

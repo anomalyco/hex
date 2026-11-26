@@ -18,21 +18,16 @@ enum SpeechModelChoice: String, CaseIterable, Hashable {
         }
     }
 
-    /// What the choice means, before anything downloads: its languages and its download.
+    /// What the choice means, before anything downloads: its download, and Multilingual's
+    /// languages (all 25 of `MultilingualParakeetSettings.languages` are European).
     @MainActor
     var detail: String {
         switch self {
         case .english:
-            String(localized: "For English. A \(KeyboardParakeetDownload.format(KeyboardParakeetDownload.bytes)) download on Wi-Fi.")
+            String(localized: "A \(KeyboardParakeetDownload.format(KeyboardParakeetDownload.bytes)) download on Wi-Fi")
         case .multilingual:
-            String(localized: "25 languages, even mixed in one sentence: \(Self.multilingualLanguages). A \(ParakeetUltraTranscriber.downloadSize) download on Wi-Fi. Hex dictates them with it too.")
+            String(localized: "25 European languages, even mixed in one sentence. A \(ParakeetUltraTranscriber.downloadSize) download on Wi-Fi.")
         }
-    }
-
-    /// The multilingual model's 25 languages by name, in the iPhone's language.
-    static var multilingualLanguages: String {
-        let names = MultilingualParakeetSettings.languages.compactMap { Locale.current.localizedString(forLanguageCode: $0) }
-        return ListFormatter.localizedString(byJoining: names.sorted { $0.localizedStandardCompare($1) == .orderedAscending })
     }
 
     /// Picked in Settings: Multilingual downloads beside the engine Hex dictates with, on Wi-Fi
@@ -97,7 +92,7 @@ struct SpeechModelChoiceRow: View {
                 .foregroundStyle(HexTheme.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("speech-model-choice-detail")
-            Text("Other languages use Apple's speech recognition. Only the picked model stays on this iPhone: switching downloads the new one, and the old one goes once the new one is ready.")
+            Text("Other languages use Apple's speech recognition. Switching models downloads the new one and removes the old.")
                 .font(.system(size: 12))
                 .foregroundStyle(HexTheme.textFaint)
                 .fixedSize(horizontal: false, vertical: true)

@@ -19,9 +19,11 @@ import kotlin.math.roundToInt
 
 /** Labs › Keyboard › Voice-only mode: the whole keyboard while its voice subtype is current. The well,
  * waveform and round keys are the strip's, so dictating from another keyboard's voice key looks the same:
- * the status and level while it records, ✓ to finish (or to start again), ✕ to go back without it. */
-internal class VoiceBarView(context: Context, private val tap: () -> Unit, private val cancel: () -> Unit) :
-    LinearLayout(context) {
+ * the status and level while it records, ✓ to finish (or to start again), ✕ to go back without it.
+ * [collapsed]: Labs › Keyboard › Voice bar from the Hex menu's bar in the full keyboard's place instead. It waits
+ * idle with the Hex mark to start, and its first key is Show keyboard, which brings the keys back in the same field. */
+internal class VoiceBarView(context: Context, private val tap: () -> Unit, private val cancel: () -> Unit,
+                            val collapsed: Boolean = false) : LinearLayout(context) {
     private val density = resources.displayMetrics.density
     private fun dp(value: Int) = (value * density).roundToInt()
     private fun px(value: Float) = (value * density).roundToInt()
@@ -32,10 +34,12 @@ internal class VoiceBarView(context: Context, private val tap: () -> Unit, priva
     private val check = ImageView(context)
     private val spinner = ProgressBar(context, null, 0, android.R.style.Widget_Material_ProgressBar_Small)
     private val cancelKey = FrameLayout(context).apply {
-        contentDescription = context.getString(R.string.voice_only_back); isFocusable = true
+        contentDescription = context.getString(if (collapsed) R.string.voice_bar_show_keyboard else R.string.voice_only_back)
+        isFocusable = true
         addView(View(context).apply { isDuplicateParentStateEnabled = true; background = pressable(R.color.modifier) },
             FrameLayout.LayoutParams(pill, pill, Gravity.CENTER))
-        addView(icon(R.drawable.ic_cancel), FrameLayout.LayoutParams(dp(19), dp(19), Gravity.CENTER))
+        addView(icon(if (collapsed) R.drawable.ic_keyboard else R.drawable.ic_cancel),
+            FrameLayout.LayoutParams(dp(19), dp(19), Gravity.CENTER))
         setOnClickListener { cancel() }
     }
     private val doneKey = FrameLayout(context).apply {
@@ -82,7 +86,7 @@ internal class VoiceBarView(context: Context, private val tap: () -> Unit, priva
         addView(cancelKey, LayoutParams(dp(40), pill))
         addView(well, LayoutParams(0, pill, 1f).apply { marginStart = dp(8); marginEnd = dp(8) })
         addView(doneKey, LayoutParams(dp(40), pill))
-        status(SpeechPhase.Idle, context.getString(R.string.voice_only_hint))
+        status(SpeechPhase.Idle, context.getString(if (collapsed) R.string.voice_bar_hint else R.string.voice_only_hint))
     }
 
     /** [message] in the well, with the level while [phase] records and a spinner while it transcribes.
@@ -94,6 +98,8 @@ internal class VoiceBarView(context: Context, private val tap: () -> Unit, priva
         scope.visibility = if (recording) VISIBLE else GONE
         if (!recording) scope.clear()
         check.visibility = if (phase == SpeechPhase.Transcribing) GONE else VISIBLE
+        // The collapsed bar starts nothing by itself: idle, its key is the Hex key that starts a dictation.
+        check.setImageResource(if (collapsed && phase == SpeechPhase.Idle) R.drawable.hex_mark else R.drawable.ic_check)
         doneKey.contentDescription = context.getString(when {
             recording -> R.string.keyboard_finish_dictation
             phase == SpeechPhase.Transcribing -> R.string.keyboard_transcribing

@@ -89,6 +89,15 @@ class HexKeyboard : InputMethodService() {
     /** The bar's mode, asked only while the lab is on: with it off the system query never runs. */
     private fun voiceOnly(subtype: InputMethodSubtype? = null) =
         feedback.voiceOnly && VoiceOnly.shows(true, subtype?.mode ?: subtypeMode())
+    /** Labs › Keyboard › Voice bar from the Hex menu: the menu's Voice only collapsed the keys for this showing. */
+    private var collapsed = false
+    /** What the input view should be: null for the keys, false for the voice subtype's bar, true for the collapsed bar.
+     * The voice subtype's bar wins, and a password field always gets its keys. */
+    private fun barKind(subtype: InputMethodSubtype? = null): Boolean? = when {
+        voiceOnly(subtype) -> false
+        VoiceOnly.collapses(feedback.voiceBarFromMenu, collapsed, engine.secure) -> true
+        else -> null
+    }
     private lateinit var capture: MicCapture
     /** The field dictations are spoken in, so a text only ever goes back into its own. */
     private val field = DictationField()
@@ -126,6 +135,7 @@ class HexKeyboard : InputMethodService() {
         if (key == TypingPreferences.EMOJI_SUGGESTIONS) engine.emojiSuggestionsChanged()
         if (key == TypingPreferences.KEYBOARD_TOOLS) { engine.keyboardToolsChanged(); watchClipboard() }
         if (key == TypingPreferences.VOICE_ONLY) modeChanged()
+        if (key == TypingPreferences.VOICE_BAR_FROM_MENU) { collapsed = false; modeChanged(keepDictation = true) }
         if (key == TypingPreferences.PASSWORD_MANAGER_SUGGESTIONS) clearInline()
         if (key == TypingPreferences.HEIGHT) resize()
         if (key == TypingPreferences.ADAPTIVE_TOUCH) engine.adaptiveTouchChanged()
@@ -206,12 +216,13 @@ class HexKeyboard : InputMethodService() {
     override fun onEvaluateFullscreenMode() = false
     override fun onCreateInputView(): View = inputView()
 
-    /** The bar for the voice subtype with the lab on, else the full keyboard. */
+    /** The bar for the voice subtype with the lab on, or the collapsed bar, else the full keyboard. */
     private fun inputView(): View {
         bar?.removeCallbacks(pendingLeave)
-        if (voiceOnly()) {
+        val kind = barKind()
+        if (kind != null) {
             view = null; engine.surface = null
-            return VoiceBarView(this, ::tapVoice, ::cancelVoiceOnly).also { bar = it; left = false }
+            return VoiceBarView(this, ::tapVoice, ::cancelVoiceOnly, collapsed = kind).also { bar = it; left = false }
         }
         bar = null
         return KeyboardView(this, this).also {
@@ -223,20 +234,32 @@ class HexKeyboard : InputMethodService() {
         }
     }
 
-    /** The voice subtype, or its lab, changed under a shown or remembered view: swap it and start dictation. */
-    private fun modeChanged(subtype: InputMethodSubtype? = null) {
-        if (voiceOnly(subtype) == (bar != null)) return
+    /** The voice subtype, or its lab, changed under a shown or remembered view: swap it and start dictation.
+     * [keepDictation]: collapsing or expanding the keys in the same field, so a dictation going on carries over. */
+    private fun modeChanged(subtype: InputMethodSubtype? = null, keepDictation: Boolean = false) {
+        // The voice subtype's bar takes over: coming back to Hex's keyboard subtype shows the keys, not the collapsed bar.
+        if (voiceOnly(subtype)) collapsed = false
+        if (barKind(subtype) == bar?.collapsed) return
         if (view == null && bar == null) return // Nothing shown yet: onCreateInputView picks the mode.
-        capture.cancel() // Neither mode inherits a dictation started in the other.
+        // Neither mode inherits a dictation started in the other, except the keys and their collapsed bar.
+        if (!keepDictation) capture.cancel() else { view?.cancelGestures(); view?.reset() }
         setInputView(inputView())
         if (!isInputViewShown) return
-        if (bar != null) beginVoice() else {
-            // The swapped-in keyboard is shown for the first time: give it what onStartInputView would.
-            engine.configureTyping()
+        val voice = bar
+        if (voice != null) {
+            if (voice.collapsed) { voice.status(capture.phase, barText(capture.phase)); viewing = true; watchClipboard() }
+            else beginVoice()
+        } else {
+            // The swapped-in keyboard is shown for the first time: give it what onStartInputView would. Back from the
+            // collapsed bar in the same field, a word half-typed before Voice only keeps its suggestions.
+            engine.configureTyping(keepWord = keepDictation)
             view?.status(capture.phase, idleHint())
             Updates.keyboardShown(this, engine.secure) { view?.notice(it) }
             viewing = true
             watchClipboard()
+            // Only Show keyboard (or the lab going off) offers a dictation waiting from the collapsed bar; the voice
+            // subtype coming back to the keys stays as it was.
+            if (keepDictation) offerKept()
         }
     }
     override fun onCurrentInputMethodSubtypeChanged(newSubtype: InputMethodSubtype) {
@@ -275,8 +298,15 @@ class HexKeyboard : InputMethodService() {
         super.onStartInputView(info, restarting)
         expireClips()
         // A subtype or lab change may have arrived while no view existed: it shows the right one.
-        val voice = voiceOnly()
-        if (voice != (bar != null) || (!voice && view == null)) setInputView(inputView())
+        if (voiceOnly()) collapsed = false
+        val kind = barKind()
+        if (kind != bar?.collapsed || (kind == null && view == null)) setInputView(inputView())
+        bar?.takeIf { it.collapsed }?.let {
+            // The collapsed bar stays idle in a new field until its Hex key is tapped.
+            it.status(capture.phase, barText(capture.phase))
+            viewing = true; watchClipboard()
+            return
+        }
         if (bar != null) {
             // A restart after the bar asked to leave (text inserted, or Android's picker standing in for a
             // switch) keeps it idle instead of recording the same field again.
@@ -320,7 +350,7 @@ class HexKeyboard : InputMethodService() {
     override fun onCreateInlineSuggestionsRequest(uiExtras: Bundle): InlineSuggestionsRequest? {
         // The voice-only bar has no strip to show chips in: asking would put Android in inline mode
         // where nothing shows them, so the system's own autofill UI would never appear either.
-        if (!feedback.passwordManagerSuggestions || voiceOnly()) return null
+        if (!feedback.passwordManagerSuggestions || barKind() != null) return null
         val density = resources.displayMetrics.density
         val strip = (if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
             KeyboardMetrics.STRIP_LANDSCAPE else KeyboardMetrics.STRIP) * density
@@ -344,7 +374,7 @@ class HexKeyboard : InputMethodService() {
     /** The service's answer. A tap lets Android fill the field; Hex never reads a login, a code or
      * a card. The unpinned chips fill the scrolling row and the pinned ones sit at its edge. */
     override fun onInlineSuggestionsResponse(response: InlineSuggestionsResponse): Boolean {
-        if (!feedback.passwordManagerSuggestions || voiceOnly()) return false
+        if (!feedback.passwordManagerSuggestions || barKind() != null) return false
         val strip = view ?: return false
         val suggestions = response.inlineSuggestions
         val split = InlineAutofill.split(suggestions.map { it.info.isPinned })
@@ -451,8 +481,24 @@ class HexKeyboard : InputMethodService() {
             SpeechPhase.Transcribing -> Unit
         }
     }
-    /** The bar's ✕: always leaves, even when an automatic leave only opened Android's picker. */
+    /** Labs › Keyboard › Voice bar from the Hex menu: the menu's Voice only collapses the keys into the bar in this
+     * field; the text, the cursor and the field stay, as does a dictation still transcribing. */
+    internal fun collapseKeys() {
+        if (!feedback.voiceBarFromMenu || engine.secure) return
+        collapsed = true
+        modeChanged(keepDictation = true)
+    }
+    /** The collapsed bar's Show keyboard: the keys again in the same field. A recording finishes as with ✓, so what
+     * was said still goes in. */
+    private fun expandKeys() {
+        finishSpeech()
+        collapsed = false
+        modeChanged(keepDictation = true)
+    }
+    /** The bar's ✕: always leaves, even when an automatic leave only opened Android's picker. The collapsed bar's
+     * first key is Show keyboard instead. */
     private fun cancelVoiceOnly() {
+        if (bar?.collapsed == true) { expandKeys(); return }
         cancelSpeech()
         left = false
         leaveVoiceOnly()
@@ -460,7 +506,8 @@ class HexKeyboard : InputMethodService() {
     /** The bar is done: back to the keyboard that opened it, or Android's picker when there is none. A picker
      * is not a leave (Hex is still up), so only ✕ asks again; its note never does. */
     private fun leaveVoiceOnly() {
-        if (left || bar == null || !isInputViewShown) return
+        // The collapsed bar is the full keyboard's own: it stays, idle, for the next dictation.
+        if (left || bar == null || bar?.collapsed == true || !isInputViewShown) return
         left = true
         bar?.removeCallbacks(pendingLeave)
         if (!switchToPreviousInputMethod()) getSystemService(InputMethodManager::class.java).showInputMethodPicker()
@@ -471,11 +518,8 @@ class HexKeyboard : InputMethodService() {
         val spoken = speechNote(note)
         val voice = bar
         if (voice != null) {
-            voice.status(phase, spoken ?: getString(when (phase) {
-                SpeechPhase.Opening, SpeechPhase.Listening -> R.string.voice_only_listening
-                SpeechPhase.Transcribing -> R.string.keyboard_transcribing
-                SpeechPhase.Idle -> R.string.voice_only_hint
-            }))
+            voice.status(phase, spoken ?: barText(phase))
+            if (voice.collapsed) return
             // A failed dictation says so for a moment before the keyboard comes back, unless its text
             // already went back: the 1-minute stop inserts and then adds that note.
             if (spoken != null && phase == SpeechPhase.Idle && !left) {
@@ -486,6 +530,16 @@ class HexKeyboard : InputMethodService() {
         }
         view?.status(phase, spoken ?: idleHint(), note != null)
     }
+    /** The bar's line for [phase] when there is no note. */
+    private fun barText(phase: SpeechPhase) = getString(when (phase) {
+        SpeechPhase.Opening, SpeechPhase.Listening -> R.string.voice_only_listening
+        SpeechPhase.Transcribing -> R.string.keyboard_transcribing
+        SpeechPhase.Idle -> when {
+            bar?.collapsed != true -> R.string.voice_only_hint
+            kept?.let(::offerable) == true -> R.string.voice_bar_kept
+            else -> R.string.voice_bar_hint
+        }
+    })
     private fun showLevel(level: Float) {
         bar?.setLevel(level); view?.setLevel(level)
     }
@@ -522,11 +576,15 @@ class HexKeyboard : InputMethodService() {
         main.postDelayed(forgetKept, KEPT_MS)
         offerKept()
     }
+    private fun offerable(waiting: Kept) = !waiting.offered && isInputViewShown && currentInputConnection != null &&
+        DictationField.offersKept(waiting.app, currentInputEditorInfo?.packageName, engine.secure)
     private fun offerKept() {
         val waiting = kept ?: return
+        if (!offerable(waiting)) return
+        // The collapsed bar has no strip: its line says a dictation waits, and Show keyboard offers it there.
+        val voice = bar
+        if (voice?.collapsed == true) { if (capture.phase == SpeechPhase.Idle) voice.status(SpeechPhase.Idle, barText(SpeechPhase.Idle)); return }
         val strip = view ?: return
-        if (waiting.offered || !isInputViewShown || currentInputConnection == null ||
-            !DictationField.offersKept(waiting.app, currentInputEditorInfo?.packageName, engine.secure)) return
         waiting.offered = true
         strip.notice(StripNotice(getString(R.string.keyboard_kept), getString(R.string.keyboard_kept_discard),
             tap = { insertKept(waiting) }, dismiss = { dropKept() }))
@@ -537,7 +595,13 @@ class HexKeyboard : InputMethodService() {
         if (currentInputConnection != null && DictationField.offersKept(waiting.app, currentInputEditorInfo?.packageName, engine.secure))
             insertSpoken(waiting.text, waiting.heard, waiting.options)
     }
-    private fun dropKept() { kept = null; main.removeCallbacks(forgetKept) }
+    private fun dropKept() {
+        val had = kept != null
+        kept = null; main.removeCallbacks(forgetKept)
+        // The collapsed bar's "dictation waiting" line goes with it.
+        val voice = bar
+        if (had && voice?.collapsed == true && capture.phase == SpeechPhase.Idle) voice.status(SpeechPhase.Idle, barText(SpeechPhase.Idle))
+    }
     /** The keyboard goes away. Hidden with its field still there (an app hiding it, Back), a recording stops as with ✓
      * and its text still goes into that field; with the field gone ([fieldGone]), it stops the same way and its text is
      * kept to offer, never typed into another field. Either way the microphone closes now. A kept dictation the strip
@@ -551,7 +615,8 @@ class HexKeyboard : InputMethodService() {
     }
     override fun onFinishInputView(finishingInput: Boolean) { leaveEditor(finishingInput); super.onFinishInputView(finishingInput) }
     override fun onFinishInput() { field.finished(); leaveEditor(fieldGone = true); inField = false; super.onFinishInput() }
-    override fun onWindowHidden() { leaveEditor(fieldGone = false); super.onWindowHidden() }
+    // The keyboard dismissed: the next showing has its keys again (Labs › Keyboard › Voice bar from the Hex menu).
+    override fun onWindowHidden() { leaveEditor(fieldGone = false); collapsed = false; super.onWindowHidden() }
     // The speech model is a few hundred MB while loaded; give it back when Android runs short. Not on
     // TRIM_MEMORY_UI_HIDDEN, which only says the keyboard hid (every app switch), not that memory is low.
     override fun onTrimMemory(level: Int) {

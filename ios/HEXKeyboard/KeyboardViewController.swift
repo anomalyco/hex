@@ -203,7 +203,8 @@ final class KeyboardViewController: UIInputViewController {
         let autoStart = DispatchWorkItem { [weak self] in
             self?.autoStartDictationIfPending()
             // Settings › Dictation › Speech model in keyboard: last, and it loads off the main thread.
-            if let self, self.isShown, self.hasFullAccess, !self.memoryWarned { KeyboardParakeet.shared.warmUp() }
+            // After a memory warning it loads nothing, and says so.
+            if let self, self.isShown, self.hasFullAccess { KeyboardParakeet.shared.warmUp(memoryWarned: self.memoryWarned) }
         }
         launchWork = [lexicon, optional, autoStart]
         DispatchQueue.main.asyncAfter(deadline: .now() + KeyboardLaunchWork.afterFirstFrame, execute: lexicon)
