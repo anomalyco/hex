@@ -594,11 +594,13 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   opacity tweens, so nothing ticks: the capsule wakes only when the window
 │   │   ends. Reduce Motion steps it a second at a time. It is the Undo chip's
 │   │   own outline, draining clockwise from the top
-│   ├── The pointer on the capsule -> holds the countdown, one that starts
-│   │   under it too: the ring stands still (Reduce Motion too), Undo never
+│   ├── The pointer moving on the capsule -> holds the countdown: the ring
+│   │   stands still (Reduce Motion too), Undo never
 │   │   runs out, and a rule's send waits (`CaptureCommand::Hold`). Leaving
 │   │   goes on with the time it had left, at least 1 s. A pick already went,
-│   │   so only its Undo waits (`Flow::hold_countdown`)
+│   │   so only its Undo waits (`Flow::hold_countdown`). A countdown that
+│   │   starts under a resting pointer (the one that clicked ■) runs until the
+│   │   pointer moves (`Flow::touched`)
 │   ├── A capture of Ghostty -> the focused pane's folder and title
 │   │   (Ghostty's AppleScript), and what runs in front in it, read from the
 │   │   process tree under Ghostty (libproc: the shell's tty and foreground

@@ -863,6 +863,17 @@ impl Sent {
     }
 }
 
+/// What the pointer moving on the capsule changed.
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct Moved {
+    /// The keys the capsule takes from Hex's tap.
+    pub(crate) keys: bool,
+    /// A countdown started or stopped holding: the ring stands still.
+    pub(crate) held: bool,
+    /// What the host should do ([`Action::Hold`] for a rule's send).
+    pub(crate) actions: Vec<Action>,
+}
+
 /// An Undo countdown the pointer holds: since when, and the window's end
 /// as it stood.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -918,6 +929,12 @@ pub(crate) struct Flow {
     /// a list that opens or grows under a resting pointer is hovered too,
     /// while Kit may still be typing in the app in front.
     aimed: bool,
+    /// The pointer moved on the capsule since it came on, or since the
+    /// capture's newest stage or answer: only then does it hold a
+    /// countdown. A capsule that turns into a countdown under a resting
+    /// pointer (the one that just clicked ■ to stop) is hovered too, but
+    /// nobody is reading it, so its countdown runs.
+    touched: bool,
     /// The pointer holds the Undo countdown: nothing sends or expires
     /// until it leaves.
     pause: Option<Pause>,
@@ -962,6 +979,7 @@ impl Flow {
             written: None,
             hovered: false,
             aimed: false,
+            touched: false,
             pause: None,
             hold_floor: 0.0,
             phone: false,
@@ -1024,12 +1042,13 @@ impl Flow {
         self.cues.extend(cue);
     }
 
-    /// The pointer came onto the capsule or left it. On it, an Undo
+    /// The pointer came onto the capsule or left it. Moving on it, an Undo
     /// countdown holds (and the router holds a rule's send with it).
     pub(crate) fn hover(&mut self, on: bool, now: f64) -> Vec<Action> {
         self.hovered = on;
         if !on {
             self.aimed = false;
+            self.touched = false;
             self.hold_floor = self.hold_floor.max(now + CHIPS_LINGER_S);
         }
         if let (
@@ -1063,14 +1082,15 @@ impl Flow {
         }
     }
 
-    /// Holds the Undo countdown while the pointer is on the capsule, one
-    /// that starts under it too, and lets it go on with what it had left
+    /// Holds the Undo countdown while the pointer is on the capsule and
+    /// has moved there (one that starts under a resting pointer runs until
+    /// it moves), and lets it go on with what it had left
     /// (at least [`RESUME_LEFT_S`]) once the pointer leaves. The router
     /// holds a rule's send alongside ([`Action::Hold`]); a pick went
     /// already, so only its Undo waits.
     fn hold_countdown(&mut self, now: f64) -> Vec<Action> {
         let end = self.countdown(now);
-        match (self.hovered, end, self.pause) {
+        match (self.hovered && self.touched, end, self.pause) {
             (true, Some(end), Some(pause)) if pause.end == end => Vec::new(),
             (true, Some(end), old) => {
                 let router = matches!(self.phase, Phase::Routed(_));
@@ -1110,12 +1130,18 @@ impl Flow {
         }
     }
 
-    /// The pointer moved on the capsule. True when that changes the keys
-    /// it takes.
-    pub(crate) fn pointer_moved(&mut self) -> bool {
-        let before = self.keys();
+    /// The pointer moved on the capsule: it may change the keys the
+    /// capsule takes, and it holds a countdown under it.
+    pub(crate) fn pointer_moved(&mut self, now: f64) -> Moved {
+        let (keys, pause) = (self.keys(), self.pause);
         self.aimed = self.hovered;
-        self.keys() != before
+        self.touched = self.hovered;
+        let actions = self.hold_countdown(now);
+        Moved {
+            keys: self.keys() != keys,
+            held: self.pause != pause,
+            actions,
+        }
     }
 
     /// The pointer moved on the open list's `row` (`on`), or left it. The
@@ -1165,6 +1191,11 @@ impl Flow {
             Input::Stage(_) | Input::Routed(_) | Input::Refined(_) | Input::Undone(_)
         ) {
             self.aimed = false;
+        }
+        // A new stage or answer is a new countdown under a resting pointer:
+        // it holds only once the pointer moves.
+        if matches!(input, Input::Stage(_) | Input::Routed(_)) {
+            self.touched = false;
         }
         let before = self.phase.clone();
         let pointed = self.pointed();
@@ -1967,13 +1998,15 @@ mod tests {
         assert!(done(&flow, 1.1).undo);
     }
 
-    /// The pointer on the capsule holds Undo's countdown (the router holds
-    /// a rule's send with it); leaving lets it go on with what it had left.
+    /// The pointer moving onto the capsule holds Undo's countdown (the
+    /// router holds a rule's send with it); leaving lets it go on with what
+    /// it had left.
     #[test]
     fn hover_holds_the_undo_countdown_and_leaving_resumes_it() {
         let mut flow = Flow::new();
         flow.input(Input::Routed(rule()), 10.0);
-        assert_eq!(flow.hover(true, 11.5), [Action::Hold(true)]);
+        assert!(flow.hover(true, 11.5).is_empty(), "not until it moves");
+        assert_eq!(flow.pointer_moved(11.5).actions, [Action::Hold(true)]);
         for t in [12.0, 15.0, 30.0] {
             let held = done(&flow, t);
             assert!(held.undo, "Undo never runs out under the pointer");
@@ -1999,24 +2032,64 @@ mod tests {
         flow.input(Input::OpenList, 0.5);
         flow.input(Input::SendRow(0), 1.0);
         assert!(flow.hover(true, 1.0 + undo_s() - 0.5).is_empty(), "it went");
+        let moved = flow.pointer_moved(1.0 + undo_s() - 0.5);
+        assert!(moved.held && moved.actions.is_empty(), "{moved:?}");
         assert!(done(&flow, 20.0).undo);
         assert!(flow.hover(false, 20.0).is_empty());
         assert_eq!(done(&flow, 20.0).countdown, Some(20.0 + RESUME_LEFT_S));
         assert!(done(&flow, 20.0 + RESUME_LEFT_S - 0.01).undo);
         assert!(!done(&flow, 20.0 + RESUME_LEFT_S).undo);
 
-        // One that starts under the pointer holds from the start, and an
-        // Undo while it's held still counts and lets the router go.
+        // An Undo while it's held still counts and lets the router go.
         let mut flow = Flow::new();
-        flow.hover(true, 0.0);
-        assert!(
-            flow.input(Input::Routed(rule()), 1.0)
-                .contains(&Action::Hold(true))
-        );
+        flow.input(Input::Routed(rule()), 1.0);
+        flow.hover(true, 1.0);
+        assert_eq!(flow.pointer_moved(1.0).actions, [Action::Hold(true)]);
         assert_eq!(done(&flow, 9.0).held, Some(send_hold_s()));
         let actions = flow.input(Input::Undo, 9.0);
         assert_eq!(actions.first(), Some(&Action::Undo { to: "SEER".into() }));
         assert!(actions.contains(&Action::Hold(false)), "{actions:?}");
+    }
+
+    /// The pointer that clicked ■ rests on the capsule while it finishes:
+    /// the rule's countdown it turns into still runs and sends on time
+    /// rather than standing still until the pointer leaves. Moving on it is
+    /// what holds the countdown.
+    #[test]
+    fn a_rules_countdown_under_the_pointer_that_stopped_it_runs() {
+        use super::super::surface::Id;
+        let mut flow = Flow::new();
+        flow.input(Input::Stage(Stage::Recording), 0.0);
+        flow.hover(true, 280.0);
+        flow.pointer_moved(280.0);
+        assert_eq!(flow.click(Id::Finish, 281.5), [Action::Finish]);
+        flow.input(Input::Stage(Stage::Stopping), 281.5);
+        flow.input(Input::Stage(Stage::Transcribing), 281.5);
+        flow.input(
+            Input::Written {
+                bundle: "long.scrawl".into(),
+                routing: true,
+            },
+            283.8,
+        );
+        let actions = flow.input(Input::Routed(rule()), 283.8);
+        assert!(!actions.contains(&Action::Hold(true)), "{actions:?}");
+        let end = 283.8 + send_hold_s();
+        let counting = done(&flow, 285.0);
+        assert!(counting.undo);
+        assert_eq!(counting.countdown, Some(end));
+        assert_eq!(counting.held, None, "the ring drains");
+        assert_eq!(flow.next_due(285.0), Some(end));
+
+        // Moving on it holds the rest, and the router's send with it.
+        let moved = flow.pointer_moved(285.0);
+        assert_eq!(moved.actions, [Action::Hold(true)]);
+        assert!(moved.held);
+        assert_eq!(done(&flow, 290.0).held, Some(end - 285.0));
+        assert!(
+            flow.pointer_moved(286.0) == Moved::default(),
+            "already held"
+        );
     }
 
     /// The pointer on a finished capsule holds it; leaving gives it a moment.
@@ -2904,7 +2977,10 @@ mod tests {
         flow.input(Input::Routed(rule_of_three()), 0.0);
         flow.input(Input::Undo, 0.2);
         flow.hover(true, 0.5);
-        assert!(flow.pointer_moved(), "the pointer on them changes the keys");
+        assert!(
+            flow.pointer_moved(0.5).keys,
+            "the pointer on them changes the keys"
+        );
         assert_eq!(
             flow.keys(),
             Some(CapsuleKeys::Suggest {
@@ -2949,21 +3025,21 @@ mod tests {
         flow.input(Input::Undo, 0.2);
         assert_eq!(flow.keys(), quiet, "the pointer elsewhere");
         assert!(
-            !flow.pointer_moved(),
+            flow.pointer_moved(0.2) == Moved::default(),
             "a move off the capsule changes nothing"
         );
         flow.hover(true, 0.5);
         assert_eq!(flow.keys(), quiet, "opened under a resting pointer");
-        flow.pointer_moved();
+        flow.pointer_moved(0.5);
         assert_ne!(flow.keys(), quiet);
         flow.hover(false, 1.0);
         assert_eq!(flow.keys(), quiet, "the pointer left");
         flow.hover(true, 1.5);
-        flow.pointer_moved();
+        flow.pointer_moved(1.5);
         flow.input(Input::Routed(rule_of_three()), 2.0);
         flow.input(Input::Undo, 2.2);
         assert_eq!(flow.keys(), quiet, "a new answer under a resting pointer");
-        flow.pointer_moved();
+        flow.pointer_moved(2.2);
         assert_ne!(flow.keys(), quiet);
     }
 

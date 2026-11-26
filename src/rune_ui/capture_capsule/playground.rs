@@ -525,6 +525,10 @@ fn poll(s: &mut CapsuleState, wall: f64, tx: &mut Tx) -> bool {
             Step::Hover(on) => {
                 s.now = now;
                 s.hover(super::Part::Pill, on, tx);
+                // A pointer that comes onto the capsule moves on it.
+                if on {
+                    s.pointer_moved(tx);
+                }
             }
             Step::Again => {
                 if let Some(pg) = s.playground.as_mut() {
