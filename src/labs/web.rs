@@ -19,7 +19,6 @@ impl Feature {
                     | Self::CopyCaptureZip
                     | Self::AnnotateAgentTools
                     | Self::AnnotateAgentInstall
-                    | Self::DictateWhileAnnotating
             )
     }
 

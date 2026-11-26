@@ -259,10 +259,9 @@ On Linux                                 // capture.linux
 │   edge states that return to Selecting (Window starts the portal's picker,
 │   Area isn't offered), and takes the same opt-in whenever it does. Check:
 │   labs gnome_annotate_is_its_own_bit_*; not run on a GNOME session
-├── While it records, dictation starts nothing (the portal
-│   or grab already took their keys, so nothing reaches the app), unless Labs ›
-│   Dictate while annotating is on: then the shortcut dictates as usual and the
-│   capture keeps recording, hearing the words too
+├── While it records, the dictation shortcut dictates as usual and the
+│   capture keeps recording, hearing the words too (the portal or grab already
+│   took the keys, so nothing reaches the app)
 ├── Pane -> no Screen Recording row, no transcriber choice, no "Show in screen
 │   recordings" (the portal asks; Wayland can't keep overlays out)
 ├── Sending -> OpenCode's sessions and prompts over HTTP to the running
@@ -290,8 +289,8 @@ On Windows                               // capture.windows
 │   records every pointer move, click, wheel turn, and modifier change
 │   (capture_host::report_input, as the macOS tap): Shift alone inks, the
 │   laser follows the pointer, clicks are logged. Injected events are skipped
-├── While it records, dictation starts nothing, unless Labs › Dictate while
-│   annotating is on
+├── While it records, the dictation shortcut dictates as usual and the capture
+│   keeps recording
 ├── While dictating -> General's setting through windows/audio_control, one
 │   suppressor per capture, restored when it ends
 ├── Copy and paste -> the engine's own clipboard and Ctrl+V (handoff): the
@@ -472,8 +471,15 @@ First launch with Annotate on            // capture.import
 ├── Esc while a capture records -> nothing: it reaches the app being recorded,
 │   and Hex's tap lets it through; a dictation under it goes on too (#786)
 ├── The binding is swallowed, never chord evidence for dictation
-├── Hold the dictation shortcut mid-capture -> dictation pastes as usual
-│   (only with Labs › Dictate while annotating on; without it, nothing starts)
+├── Hold the dictation shortcut mid-capture -> dictation pastes as usual into
+│   the app in front, History and Paste Last keep it, and the capture goes on
+│   recording with the same words in its own narration (both read one
+│   microphone timeline; dictation keeps priority over the capture's word
+│   chunks). Caps Lock and middle-mouse dictation start there too. The HUD
+│   stays on its edge and moves past the capsule (overlay dock, below)
+│   // checks: holding_option_dictates_while_a_capture_records and
+│   // escape_during_a_capture_ends_nothing (suppression); not observed on a
+│   // real Mac, Linux session, or Windows PC
 └── Another app holds Secure Event Input -> ⌥⇧S still starts and stops (a
     Carbon hotkey while it lasts; Esc doesn't arrive). See dictation.md's
     Shortcuts Under Secure Input
@@ -1608,6 +1614,44 @@ from a folder name. They remain available through their existing actions.
 The [Mac picker](dictation.md#paste-last-picker-labs-macos) (Labs › Paste Last
 picker) reads the mark; failure to write it does not fail the capture or affect
 its send.
+
+## Overlay dock
+
+Meeting capsules, Annotate's capsule and recording toolbar, and the dictation
+HUD share one coordinator, `desktop::overlay_dock`. Each claims the body it
+draws on its screen edge (display, edge, alignment, size, distance from the
+edge); a surface asks how far past its natural place it must sit to clear every
+surface that outranks it on that edge of that display, 8 pt apart
+(`overlay_dock::GAP`, the spatial scale's step).
+
+```ts
+Rank  Surface                          Moves?
+0     meeting pill / panel (corners)   never: stays where it was thrown
+1     Annotate capsule (under the bar) drops below a meeting it would meet
+      Annotate capsule (notch)         never: the notch doesn't move
+      recording toolbar (bottom)       claims only
+2     dictation HUD                    clears all of them on its own edge
+      ├── under the bar / above the Dock -> moves along its edge, past each
+      ├── in the menu bar or the notch   -> meets one: comes out under the bar, then clears
+      └── beside the pointer (lab)       -> on no edge: claims nothing
+```
+
+- Displays are told apart by `NSScreenNumber` on macOS and the monitor's device
+  name on Windows; a surface on another display never moves anything. Linux
+  names no displays, so its claims are the primary display's.
+- A centred surface and a cornered one meet only when their spans do on that
+  display's width, so on a laptop the default top-right meeting pill and the
+  centred capsule leave each other alone; a narrow display, the finished
+  meeting panel, or a capsule list wide enough to reach the corner moves the
+  capsule down.
+- Reflow: the HUD asks every frame on macOS and every 250 ms on Linux and
+  Windows; the capsule as it polls (at least once a second while recording);
+  a meeting capsule re-claims as it shows, opens, moves, or hides. A surface
+  that hides lets the others fall back to their natural places.
+- Checks: `overlay_dock` (meeting + Annotate, meeting + dictation, all three,
+  bottom edge, notch and flat, different displays, hiding and showing again,
+  unmeasured displays), `capture_capsule::dock`, `rune_hud::dock`. Not
+  observed on a real display with all three up.
 
 ## Repeated recording resources (`capture.encoder-memory`)
 

@@ -111,16 +111,6 @@ pub fn copy_capture_zip() -> bool {
     feature_on(Feature::CopyCaptureZip)
 }
 
-/// While an Annotate capture records, the dictation shortcut dictates as it
-/// always does: hold, toggle, or double-tap lock it, and the text pastes
-/// into the app in front, History, and Paste Last. The capture keeps
-/// recording, and its narration hears the words too. Read at each press the
-/// capture would otherwise swallow, on every OS.
-#[cfg_attr(not(hex_capture), allow(dead_code))]
-pub fn dictate_while_annotating() -> bool {
-    feature_on(Feature::DictateWhileAnnotating)
-}
-
 /// A kept dictation recording may be copied from History and the menu bar or
 /// tray as a file on the clipboard (read as each Copy audio runs and each
 /// menu or tray opens). It needs Labs › Keep recordings, which owns every

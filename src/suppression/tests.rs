@@ -4713,6 +4713,39 @@ fn escape_during_a_capture_ends_nothing() {
     assert!(hotkey.is_recording());
 }
 
+/// Holding ⌥ while a screen capture records dictates as usual: the capture
+/// shortcut answers nothing to either edge, so the listener hands both to
+/// dictation, which starts on the press and finishes on the release. The
+/// capture keeps recording (its shortcut neither finished nor drew).
+#[cfg(hex_capture)]
+#[test]
+fn holding_option_dictates_while_a_capture_records() {
+    use crate::capture_host::{CaptureShortcut, ShortcutAction, ShortcutActivity};
+    let now = capture_time();
+    let mut hotkey = test_hotkey(false, now);
+    let mut capture = CaptureShortcut::default();
+    let recording = ShortcutActivity::Recording {
+        elapsed: std::time::Duration::from_secs(5),
+    };
+    let hotkeys = RuntimeHotkeys::default();
+    let press = InputEvent::Flags(OPTION_KEY_MASK);
+    let release = InputEvent::Flags(0);
+    assert_eq!(
+        capture.input(press, hotkeys, recording),
+        ShortcutAction::None
+    );
+    assert_eq!(hotkey.process(press, now), Some(HotkeyAction::Start));
+    assert!(hotkey.is_recording());
+    assert_eq!(
+        capture.input(release, hotkeys, recording),
+        ShortcutAction::None
+    );
+    assert_eq!(
+        hotkey.process(release, now + Duration::from_secs(2)),
+        Some(HotkeyAction::Finish)
+    );
+}
+
 #[test]
 fn escape_is_suppressed_only_while_hex_takes_it() {
     let mut suppression = ShortcutSuppression::default();

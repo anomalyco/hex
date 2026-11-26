@@ -316,7 +316,6 @@ mod tests {
             .filter(|feature| feature.group() == Group::Annotate)
             .collect();
         assert!(annotate_features.contains(&Feature::CopyCaptureZip));
-        assert!(annotate_features.contains(&Feature::DictateWhileAnnotating));
         assert!(annotate_features.contains(&Feature::AnnotateAgentTools));
         assert!(annotate_features.contains(&Feature::AnnotateAgentInstall));
         assert!(annotate_features.contains(&Feature::AnnotateReplay));
