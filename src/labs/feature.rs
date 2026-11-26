@@ -237,6 +237,7 @@ define_features! {
     MeetingAudioSource => labs(meeting_audio_source), "meeting-audio-source", Meetings, Everyone, EVERY, 20261124, extra: ["labs.meeting_audio_source_choice"];
     ConfirmLongCancels => labs(confirm_long_cancels), "confirm-long-cancels", Dictation, Everyone, EVERY, 20261125;
     MiddleMouseDictation => labs(middle_mouse_dictation), "middle-mouse-dictation", Shortcuts, Everyone, MACOS, 20261125;
+    AlwaysListening => labs(always_listening), "always-listening", Dictation, Everyone, LINUX, 20261125, extra: ["labs.always_listening_pause_seconds"];
 }
 
 impl Feature {

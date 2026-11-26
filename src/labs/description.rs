@@ -219,6 +219,9 @@ impl Feature {
             Self::StopPhrase => {
                 "Say a phrase at the end of a hands-free dictation to finish it; the phrase never reaches the pasted text"
             }
+            Self::AlwaysListening => {
+                "The open microphone starts a dictation when it hears you speak and finishes it after a pause (labs.always_listening_pause_seconds), as releasing the shortcut would, then listens again. Pressing the dictation shortcut while nothing records pauses or resumes listening. Any sound loud enough counts as speech, so it suits a quiet room"
+            }
             Self::ConfirmLongCancels => {
                 "Once a dictation has recorded for 10 seconds, the first press of its cancel shortcut keeps recording and asks, beside the HUD, for a second press; a second press within 3 seconds throws the dictation away. A shorter dictation still cancels at once"
             }

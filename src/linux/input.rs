@@ -272,6 +272,9 @@ pub(crate) enum HotkeyEvent {
     Capture,
     /// It came up: a tap stops the recording, a hold stops drawing.
     CaptureUp,
+    /// Labs › Always listening: the dictation shortcut, pressed while nothing
+    /// records, pauses listening or resumes it.
+    Listening,
 }
 
 /// What a `hex` command asks of the running listener. Each one is
@@ -627,6 +630,8 @@ struct ShortcutState {
     cancel_confirm: crate::dictation::cancel_confirm::CancelConfirm,
     /// Its lab, read at each cancel press; tests turn it on.
     confirm_long_cancels: fn() -> bool,
+    /// Labs › Always listening, read at each idle press; tests turn it on.
+    always_listening: fn() -> bool,
 }
 
 impl ShortcutState {
@@ -643,6 +648,7 @@ impl ShortcutState {
             flavour: DictationFlavour::Normal,
             cancel_confirm: Default::default(),
             confirm_long_cancels: crate::labs::confirm_long_cancels,
+            always_listening: || crate::labs::always_listening().is_some(),
         }
     }
 
@@ -814,6 +820,7 @@ impl ShortcutState {
                         self.last_release = None;
                         Some(HotkeyEvent::Finish)
                     }
+                    Capture::Idle if (self.always_listening)() => Some(HotkeyEvent::Listening),
                     Capture::Idle => {
                         let second_tap = self.toggle
                             || self.last_release.take().is_some_and(|released| {
@@ -977,6 +984,12 @@ impl CommandQueue {
     /// shortcut's finishing press would, if it still records hands-free.
     pub(crate) fn finish_hands_free(&self, phrase: String) {
         let _ = self.self_sender.send(ListenerCommand::FinishPhrase(phrase));
+    }
+
+    /// Labs › Always listening: the listener's own start or stop, handled as
+    /// a `hex dictation` command.
+    pub(crate) fn own(&self, command: ShortcutCommand) {
+        let _ = self.self_sender.send(command.into());
     }
 }
 
@@ -2574,6 +2587,23 @@ mod tests {
         test.tap();
         test.tap();
         assert_eq!(test.events, [START, Cancel, START, Cancel, START, Finish]);
+    }
+
+    /// Labs › Always listening: an idle press pauses or resumes listening and
+    /// starts nothing, while a press during a voice-started dictation, which
+    /// is a command's hands-free capture, still finishes it.
+    #[test]
+    fn always_listening_turns_an_idle_press_into_a_pause() {
+        let mut test = Test::new(false);
+        test.state.always_listening = || true;
+        test.tap();
+        assert_eq!(test.events, [HotkeyEvent::Listening]);
+        assert_eq!(test.state.capture, Capture::Idle);
+
+        test.command(ShortcutCommand::DictationStart);
+        test.tap();
+        assert_eq!(test.events, [HotkeyEvent::Listening, COMMAND_START, Finish]);
+        assert_eq!(test.state.capture, Capture::Idle);
     }
 
     /// Labs › Confirm long cancels: past ten seconds, the first cancel press

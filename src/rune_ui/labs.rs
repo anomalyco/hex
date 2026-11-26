@@ -6,6 +6,7 @@
 //! Voice Filter, Playground, Modes editor) joins the main sidebar while on
 //! and is hidden while off.
 
+mod always_listening;
 mod clipboard_phrase;
 mod group;
 #[cfg(target_os = "macos")]
@@ -682,6 +683,9 @@ fn rows(ui: &Ui) -> Vec<Row> {
     rows.push(row(Feature::FasterLiveText, None));
     rows.push(row(Feature::FailureNotices, None));
     rows.push(row(Feature::StopPhrase, None));
+    if caps.os == super::platform::Os::Linux {
+        rows.push(row(Feature::AlwaysListening, None));
+    }
     rows.push(row(Feature::ConfirmLongCancels, None));
     if caps.os == super::platform::Os::Linux && ui.platform.wayland {
         let live_typing = row(Feature::LiveTyping, Some(&KEYBOARD));
@@ -1136,6 +1140,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::MeetingIndicatorDisplay => "lab-meeting-indicator-display",
         Feature::MeetingAudioSource => "lab-meeting-audio-source",
         Feature::MiddleMouseDictation => "lab-middle-mouse-dictation",
+        Feature::AlwaysListening => "lab-always-listening",
     }
 }
 
@@ -1245,6 +1250,7 @@ fn extras(ui: &Ui, p: Paint, entry: &Row, layer: &mut Vec<El>) -> Option<El> {
                 .child(keep_microphone_open_for(ui, p, layer)),
         ),
         Lab::Feature(Feature::YoloMode) => Some(yolo_mode::body(ui, p, layer)),
+        Lab::Feature(Feature::AlwaysListening) => Some(always_listening::body(ui, p, layer)),
         Lab::Feature(Feature::CapsLockDictation) => Some(
             row()
                 .key("caps-lock-light-row")

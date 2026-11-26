@@ -67,6 +67,10 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        saying the phrase at the end of a hands-free dictation finishes it, as if the
 │                                        shortcut were pressed again, and the phrase never reaches the pasted text;
 │                                        needs a speech model that streams on a GPU, as Live text does
+├── Always listening no   labs.always_listening + labs.always_listening_pause_seconds (1/2/3/5/10, default 2; Linux)
+│                                        the open microphone starts a dictation when it hears speech and finishes it
+│                                        after that long a pause, as releasing the shortcut would, then listens again;
+│                                        an idle press of a dictation shortcut pauses and resumes listening
 ├── Confirm long cancels no labs.confirm_long_cancels        (every OS) once a dictation has recorded 10 s, its cancel shortcut's first press
 │                                        keeps recording and shows "Press again to discard this dictation" beside the HUD
 │                                        for 3 s; a second press inside that window cancels as before (#2837)
@@ -1321,6 +1325,68 @@ in [control/settings.rs](../../src/control/settings.rs);
 [tests/panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
 dictation with the lab on, and the Mac and Windows builds, which the Linux host
 cannot compile.
+
+Always listening (`always-listening`, Linux): dictation without a shortcut,
+for a quiet room where the only one speaking is speaking to Hex. While on, the
+listener watches the open microphone (`linux/dictation/listening.rs`). Speech
+starts a dictation, a pause of `labs.always_listening_pause_seconds` (1, 2, 3,
+5, or 10; 2 by default; the card's "Finish after a pause of") finishes and
+pastes it as letting go of the shortcut would, and Hex listens again. Nothing
+records between dictations: the listener only measures the audio it already
+receives for the warm microphone, so the HUD, idle-sleep prevention, and
+"While dictating" apply only while a dictation runs.
+
+```ts
+Say "send the notes to the team", then stay quiet   // labs.always_listening
+├── Speech heard -> an ordinary hands-free dictation starts (start tone, HUD),
+│   keeping the audio from 700 ms before it was heard
+├── Quiet for the chosen pause -> it finishes and pastes; History and Paste Last keep it
+├── Dictation shortcut pressed while it records -> finishes it at once, as a locked capture's press does
+├── Dictation shortcut pressed while nothing records -> pauses listening (cancel tone);
+│   pressed again -> resumes (start tone). Paused, the shortcut starts no dictation
+├── `hex dictation cancel` -> discards it
+├── A capture already records, finishes, or waits; a /dictations client; Annotate recording -> speech starts nothing
+└── Lab off -> the shortcut dictates as before; a paused state is forgotten
+```
+
+Speech is judged by level alone, with the meeting pause detector's frames
+(`pause_segmenter::SpeechFrames`: a 20 ms frame well above the adapting noise
+floor): eight speech frames within the newest twenty (400 ms) mean someone is
+speaking, which starts a dictation and restarts the pause timer. It is not the
+Silero detector and does not know a voice from any other sound, so a video, a
+call, or another person is dictated too; a capture with no words in it is
+discarded as any silent dictation is. `hex labs` says so, and the shortcut's
+pause is the way to stop it.
+
+A dictation that speech starts is a `hex dictation start` capture to the rest
+of Hex: the listener sends `ShortcutCommand::DictationStart` and, after the
+pause, `DictationStop` into its own command queue (`CommandQueue::own`), so
+the shortcut state machine, modes, output, and History treat it as any
+hands-free dictation. Its only difference is the pre-roll, which reaches back
+to 700 ms before the speech was heard instead of the hotkey's 450 ms before a
+press. The clip includes the pause that ended it. An idle press reaches the
+listener as `HotkeyEvent::Listening` instead of a start. For as long as one of
+Hex's own tones can reach the microphone from the speakers (the stop tone
+after a dictation, the start tone after a resume, each plus 300 ms) the
+detector hears nothing, so a tone never starts a dictation.
+
+While the lab is on the microphone stays open: "Release microphone while idle"
+is kept in Settings but does not apply, since a released microphone hears
+nothing. There is no indicator for the paused state beyond its tones and a
+`always listening toggled` log line.
+
+Checks: `linux::dictation::listening`'s tests (speech starts and a pause
+finishes, a pause holds until resumed, a deafened detector ignores a tone, the
+microphone stays open) and `linux_input`'s
+`always_listening_turns_an_idle_press_into_a_pause`. Observed on 2026-11-25 on
+Arch, in an isolated copy on an Xvfb X11 display with `HEX_AUDIO_FIXTURE`
+looping a spoken clip and 8 s of silence, Parakeet Unified English on Vulkan,
+and a GTK text field in front: each pass of the clip was pasted with no key
+pressed, an idle shortcut press held it paused through a pass and a second
+press resumed it, turning the lab off stopped it, it kept working with
+"Release microphone while idle" on, and a pause changed from 2 s to 5 s applied
+to the next dictation. Not observed: a real microphone with speakers (so the
+tone handling is untested by ear), Wayland, and a physical key.
 
 Signature (`signature`, every OS): while on, every normal dictation is pasted
 with `labs.signature_text` on its own line at the end. The line is added once,

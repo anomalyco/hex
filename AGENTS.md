@@ -50,8 +50,8 @@ language (#216), Model switch shortcut, Mouse shortcuts (#209, macOS), Also paus
 macOS), Share dictation shortcut (#176, Windows), Free memory when idle
 (#442), Smaller model files (macOS), Terminal paste (Windows), Terminal
 paste shortcut (Windows, Linux), Stop phrase, Signature, Clipboard phrase, Hold through other keys
-(macOS and Windows), Microphone key alone (#181, macOS), and Dictate while
-annotating.
+(macOS and Windows), Microphone key alone (#181, macOS), Dictate while
+annotating, and Always listening (Linux).
 Externally contributed features land there too.
 Every `Everyone` lab also gets a page on Hex's website,
 `anoma.ly/hex/labs/<id>` (index at `/hex/labs`), built from

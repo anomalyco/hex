@@ -427,6 +427,16 @@ pub(super) const KEYS: &[Key] = &[
         "Minutes unused before Labs › Free memory when idle unloads the model",
     ),
     key(
+        "labs.always_listening",
+        Kind::Bool,
+        "Labs: start a dictation when the microphone hears speech and finish it after a pause, with no shortcut (Linux)",
+    ),
+    key(
+        "labs.always_listening_pause_seconds",
+        Kind::NumberChoice(&["1", "2", "3", "5", "10"]),
+        "Seconds of quiet before Labs › Always listening finishes a dictation",
+    ),
+    key(
         "labs.keep_microphone_open",
         Kind::Bool,
         "Labs: with Release microphone while idle on, keep the microphone open for a while after each dictation so the next one starts at once",

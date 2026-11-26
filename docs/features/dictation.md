@@ -1646,6 +1646,13 @@ and finishes it through this same state machine when they end with its phrase,
 as that shortcut's next press would. A held Hold capture is untouched, and
 details are in [labs.md](labs.md).
 
+On Linux, Labs › Always listening starts and ends captures with no shortcut
+at all: speech on the open microphone starts a hands-free capture through
+this state machine as `hex dictation start` would, a pause of the chosen
+length finishes it, and a dictation shortcut pressed while nothing records
+pauses or resumes that listening instead of starting a capture. Details are
+in [labs.md](labs.md).
+
 ```ts
 General > Shortcut mode                               // dictate.shortcut-explainer
   -> Modal: the four choices, each its name and one line beside the

@@ -130,6 +130,11 @@ pub struct LabsSettings {
     /// The engine unloads the speech model after `unload_idle_minutes` (5, 15 default, 30, 60) unused (issue 442).
     pub unload_idle: bool,
     pub unload_idle_minutes: u32,
+    /// The open microphone starts a dictation when it hears speech and
+    /// finishes it after `always_listening_pause_seconds` (1, 2 default, 3,
+    /// 5, 10) of quiet (Linux).
+    pub always_listening: bool,
+    pub always_listening_pause_seconds: u32,
     /// With Release microphone while idle on, the microphone stays open for
     /// `keep_microphone_open_seconds` after a capture, so the next one starts
     /// at once.
@@ -414,6 +419,9 @@ pub struct LabsSettings {
 /// The idle times Labs › Free memory when idle offers, in minutes.
 pub const UNLOAD_IDLE_MINUTES: [u32; 4] = [5, 15, 30, 60];
 
+/// The pauses Labs › Always listening offers, in seconds.
+pub const ALWAYS_LISTENING_PAUSE_SECONDS: [u32; 5] = [1, 2, 3, 5, 10];
+
 /// The gap above the Dock or the screen's bottom edge the dictation HUD
 /// keeps while Labs › HUD height is off, in points.
 pub const HUD_BOTTOM_GAP_DEFAULT: u16 = 24;
@@ -524,6 +532,8 @@ impl Default for LabsSettings {
             mouse_shortcuts: false,
             unload_idle: false,
             unload_idle_minutes: 15,
+            always_listening: false,
+            always_listening_pause_seconds: 2,
             keep_microphone_open: false,
             keep_microphone_open_seconds: Self::DEFAULT_KEEP_MICROPHONE_OPEN_SECONDS,
             keep_on_clipboard: false,

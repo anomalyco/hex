@@ -31,6 +31,7 @@ use crate::transcription::local_transcriber::LocalTranscriber;
 const UPDATE_INTERVAL: Duration = Duration::from_millis(20);
 
 mod gap;
+mod listening;
 mod output;
 mod shortcuts;
 mod silence;
@@ -140,7 +141,7 @@ pub(crate) enum ListenerUpdate {
 /// default, or keeps it released until a dictation starts.
 fn microphone_input(settings: &AppSettings, device: Option<&str>) -> RecoveringAudioInput {
     let microphone = settings.microphone.as_deref();
-    if settings.release_microphone_while_idle {
+    if listening::release_while_idle(settings) {
         RecoveringAudioInput::closed(device, 0, microphone)
     } else {
         RecoveringAudioInput::open(device, 0, microphone)
@@ -227,7 +228,7 @@ pub(crate) fn run(
     // A missing microphone falls back to the default one. A released
     // microphone opens only while a dictation records.
     let mut input = microphone_input(&settings, device);
-    let mut release_while_idle = settings.release_microphone_while_idle;
+    let mut release_while_idle = listening::release_while_idle(&settings);
     // Labs › Keep mic open after dictating: a finished capture's
     // microphone stays open for its window before release.
     let mut linger = MicrophoneLinger::default();
@@ -470,6 +471,7 @@ pub(crate) fn run(
     let mut recording_by_shortcut = false;
     // Labs › Stop phrase: this capture's detector, fresh for every capture.
     let mut stop_phrase = crate::dictation::stop_phrase::Detector::new();
+    let mut listening = listening::Listening::default();
     let mut pending = 0_usize;
     // A local API client's dictation, and its transcripts as they finish.
     let mut service = ServiceDictations::default();
@@ -491,18 +493,18 @@ pub(crate) fn run(
     // Labs › Keep mic open after dictating: the one release check the pass and
     // its event sites share, so a press handled in the same pass still sees a
     // closed microphone at once when the lab is off.
+    macro_rules! busy {
+        () => {
+            capture.is_recording()
+                || start_pending
+                || finishing.is_some()
+                || service.is_active()
+                || timeline.wants_audio()
+        };
+    }
     macro_rules! release_microphone {
         () => {
-            if release_while_idle
-                && input.is_active()
-                && linger.may_close(
-                    Instant::now(),
-                    capture.is_recording()
-                        || start_pending
-                        || finishing.is_some()
-                        || service.is_active()
-                        || timeline.wants_audio(),
-                )
+            if release_while_idle && input.is_active() && linger.may_close(Instant::now(), busy!())
             {
                 input.close();
                 last_captured_through = None;
@@ -553,13 +555,13 @@ pub(crate) fn run(
                     );
                 }
                 if device.is_none() && next.microphone != settings.microphone
-                    || next.release_microphone_while_idle != release_while_idle
+                    || listening::release_while_idle(&next) != release_while_idle
                 {
                     drop(input);
                     clock.reset();
                     last_captured_through = None;
                     input = microphone_input(&next, device);
-                    release_while_idle = next.release_microphone_while_idle;
+                    release_while_idle = listening::release_while_idle(&next);
                     audio_ready = input.is_open();
                     if audio_ready {
                         capture = DictationCapture::new(input.sample_rate());
@@ -820,8 +822,9 @@ pub(crate) fn run(
                         .at(Instant::now())
                         .filter(|_| audio_ready && !input.is_recovering() && !input.is_stalled());
                     if let Some(pressed_at) = pressed_at {
-                        let pre_roll =
-                            crate::dictation::hotkey_pre_roll(settings.recording_audio_behavior);
+                        let pre_roll = listening.started().unwrap_or_else(|| {
+                            crate::dictation::hotkey_pre_roll(settings.recording_audio_behavior)
+                        });
                         start_capture(&mut capture, pressed_at, pre_roll, || {
                             feedback::play_provisional_start();
                         });
@@ -846,6 +849,7 @@ pub(crate) fn run(
                     events.dictation(DictationPhase::Started, "")?;
                     emit_state(&mut events, VoiceState::Dictating, &device_label)?;
                 }
+                HotkeyEvent::Listening => listening.toggle(),
                 HotkeyEvent::Finish | HotkeyEvent::Cancel if start_pending => {
                     // Released before the opening microphone produced audio:
                     // nothing was captured.
@@ -1145,6 +1149,9 @@ pub(crate) fn run(
                 // it gets the real chunk rather than the padded one.
                 timeline.feed(&samples, sample_rate, captured_through);
                 capture.ingest(captured, captured_through);
+                if let Some(command) = listening.chunk(captured, sample_rate, busy!()) {
+                    commands.own(command);
+                }
                 last_captured_through = Some(captured_through);
                 if capture.is_recording() {
                     indicator.meter(captured);
