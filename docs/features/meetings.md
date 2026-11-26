@@ -2386,6 +2386,8 @@ Rename -> inline field; Enter or Save          // meetings.rename
   -> empty title refused
 Delete… (overflow menu) -> "Trash recording & Markdown" (or "Trash recording")
   / Cancel, under the title in place of the icons until answered
+  -> Cancel takes keyboard focus; Escape or Cancel returns it to More
+  // checks: deleting_a_meeting_takes_the_menu_then_a_confirmation
   -> exported Markdown, then its tracked notes file, then
      Application Support/meetings/<id>, to the Trash
   -> refused while recording, transcribing, writing notes, or waiting
