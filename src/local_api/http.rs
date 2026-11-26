@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
+use super::origin::CorsOrigin;
 use super::{HEADER_DEADLINE, MAX_HEADER_BYTES, MAX_HEADERS, MAX_PATH_BYTES};
 
 pub(super) struct HttpRequest {
@@ -21,6 +22,10 @@ pub(super) struct HttpRequest {
     pub(super) record_token: Option<String>,
     pub(super) content_type: Option<String>,
     pub(super) content_length: Option<usize>,
+    /// The browser page that made the request, when it sent one.
+    pub(super) origin: Option<String>,
+    /// `Access-Control-Request-Private-Network: true` on a preflight.
+    pub(super) private_network: bool,
     pub(super) body_prefix: Vec<u8>,
 }
 
@@ -29,6 +34,8 @@ pub(super) struct HttpResponse {
     pub(super) reason: &'static str,
     pub(super) content_type: Option<&'static str>,
     pub(super) body: Vec<u8>,
+    /// Lines a preflight adds; every other response has none.
+    pub(super) headers: Vec<(&'static str, &'static str)>,
 }
 
 pub(super) fn body_read_response(error: BodyReadError) -> HttpResponse {
@@ -131,21 +138,34 @@ impl HttpResponse {
             reason: reason(status),
             content_type: None,
             body: Vec::new(),
+            headers: Vec::new(),
         }
     }
 
     /// Labs › Connected apps' preflight, for its consent, pairing, record,
     /// and connect-grant routes: only their own headers, never
     /// `Authorization`, so a page can't send the bearer token through it.
+    /// The allow-origin and `Vary` lines come from the response writer, so a
+    /// refused origin never gets them.
     pub(super) fn consent_preflight(private_network: bool) -> Self {
-        let mut response = Self::preflight(private_network);
-        for header in &mut response.headers {
-            if header.0 == "Access-Control-Allow-Headers" {
-                header.1 =
-                    "Content-Type, X-Hex-Connect-Token, X-Hex-Record-Grant, X-Hex-Record-Token";
-            }
+        let mut headers = vec![
+            ("Access-Control-Allow-Methods", "GET, POST"),
+            (
+                "Access-Control-Allow-Headers",
+                "Content-Type, X-Hex-Connect-Token, X-Hex-Record-Grant, X-Hex-Record-Token",
+            ),
+            ("Access-Control-Max-Age", "600"),
+        ];
+        if private_network {
+            headers.push(("Access-Control-Allow-Private-Network", "true"));
         }
-        response
+        Self {
+            status: 204,
+            reason: reason(204),
+            content_type: None,
+            body: Vec::new(),
+            headers,
+        }
     }
 
     pub(super) fn json<T: Serialize>(status: u16, value: &T) -> Self {
@@ -155,6 +175,7 @@ impl HttpResponse {
                 reason: reason(status),
                 content_type: Some("application/json"),
                 body,
+                headers: Vec::new(),
             },
             Err(error) => {
                 tracing::error!(%error, "could not serialize local API response");
@@ -281,6 +302,9 @@ pub(super) fn read_request_until(
     let mut record_token = None;
     let mut content_type = None;
     let mut content_length = None;
+    let mut origin = None;
+    let mut origin_ambiguous = false;
+    let mut private_network = false;
     for (index, line) in lines.enumerate() {
         if index >= MAX_HEADERS {
             return Err(RequestReadError::TooLarge);
@@ -313,6 +337,17 @@ pub(super) fn read_request_until(
                 return Err(RequestReadError::Invalid);
             }
             record_token = Some(value.trim().to_owned());
+        } else if name.eq_ignore_ascii_case("origin") {
+            // Two Origin headers name no one origin, so the request earns no
+            // CORS permission; it is still routed as any other request.
+            if origin_ambiguous || origin.is_some() {
+                origin = None;
+                origin_ambiguous = true;
+            } else {
+                origin = Some(value.trim().to_owned());
+            }
+        } else if name.eq_ignore_ascii_case("access-control-request-private-network") {
+            private_network |= value.trim().eq_ignore_ascii_case("true");
         } else if name.eq_ignore_ascii_case("content-type") {
             content_type = Some(value.trim().to_owned());
         } else if name.eq_ignore_ascii_case("content-length") {
@@ -344,6 +379,8 @@ pub(super) fn read_request_until(
         record_token,
         content_type,
         content_length,
+        origin,
+        private_network,
         body_prefix,
     })
 }
@@ -351,6 +388,17 @@ pub(super) fn read_request_until(
 pub(super) fn write_response(
     stream: &mut impl Write,
     response: HttpResponse,
+) -> std::io::Result<()> {
+    write_response_for(stream, response, None)
+}
+
+/// [`write_response`] for a request Labs › Connected apps answers CORS for:
+/// a preflight's lines, then that origin, never `*`, and `Vary: Origin` so a
+/// cache keeps them apart.
+pub(super) fn write_response_for(
+    stream: &mut impl Write,
+    response: HttpResponse,
+    cors: Option<&CorsOrigin>,
 ) -> std::io::Result<()> {
     write!(
         stream,
@@ -361,6 +409,16 @@ pub(super) fn write_response(
     )?;
     if let Some(content_type) = response.content_type {
         write!(stream, "Content-Type: {content_type}\r\n")?;
+    }
+    for (name, value) in &response.headers {
+        write!(stream, "{name}: {value}\r\n")?;
+    }
+    if let Some(cors) = cors {
+        write!(
+            stream,
+            "Access-Control-Allow-Origin: {}\r\nVary: Origin\r\n",
+            cors.origin
+        )?;
     }
     stream.write_all(b"\r\n")?;
     stream.write_all(&response.body)?;

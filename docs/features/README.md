@@ -2873,9 +2873,8 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 │   ├── ?process=global -> Global mode's output processing (Labs › Process API transcripts)
 │   └── ?timestamps=segment|word -> The model's own segment or word times
 │       └── 422 unsupported-timestamps when it has no such level (Labs › Timestamps in API transcripts)
-├── A web page's fetch -> Never allowed: no CORS, OPTIONS is 401
-│   └── Any other origin, or the lab off -> OPTIONS 401, no CORS headers
-├── An app or web page asks -> Labs › Connected apps (Browser access plays no part)
+├── A web page's fetch -> Never allowed: no CORS, OPTIONS is 401 (except Connected apps' own routes, below)
+├── An app or web page asks -> Labs › Connected apps
 │   ├── Lab off -> the routes answer as before; a pending dialog withdrawn, a live recording cancelled
 │   ├── Website, Allow websites to use Hex off -> 403 origin-not-allowed, no CORS, nothing listed
 │   ├── Unknown website -> 403 website-not-allowed + CORS, listed once under Asking to connect (Allow / Block)

@@ -174,7 +174,6 @@ static CONNECTED_APPS_WEBSITES: AtomicBool = AtomicBool::new(false);
 /// recording the switches no longer allow end at once (`local_api`).
 static CONNECTED_APPS_WATCHERS: Mutex<Vec<Box<dyn Fn() + Send>>> = Mutex::new(Vec::new());
 
-
 /// Labs › HUD height's gap in points above the Dock, paired with
 /// `Feature::HudHeight` in [`BANK`].
 static HUD_BOTTOM_GAP: AtomicU64 = AtomicU64::new(HUD_BOTTOM_GAP_DEFAULT as u64);

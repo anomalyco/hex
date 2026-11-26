@@ -615,9 +615,7 @@ fn load(path: &Path) -> (Vec<Entry>, Websites, u64) {
 /// The saved website lists, keeping only exact origins, each in one list,
 /// and at most [`TRIED_LIMIT`] tries.
 fn websites_from(saved: Websites) -> Websites {
-    let exact = |origin: &String| {
-        crate::app_settings::normalize_browser_origin(origin).as_deref() == Some(origin.as_str())
-    };
+    let exact = |origin: &String| super::origin::canonical(origin);
     let mut seen = HashSet::new();
     let mut websites = Websites::default();
     for origin in saved.blocked.into_iter().filter(exact) {

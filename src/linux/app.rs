@@ -189,31 +189,6 @@ pub(crate) struct HostSnapshot {
     pub(crate) editing: bool,
 }
 
-/// What the window asks of the host. Settings edits go through
-/// [`HostHandle::save_settings`].
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum HostRequest {
-    Desktop(DesktopAction),
-    ReloadSettings,
-    /// Stops listening while the window records a shortcut.
-    CaptureShortcutFor(ShortcutTarget),
-    CancelShortcut,
-    /// The chord the window recorded, for the host to register and save.
-    SetShortcut {
-        target: ShortcutTarget,
-        shortcut: DesktopShortcut,
-    },
-    ChooseModel {
-        model: crate::transcription::models::TranscriptionModelId,
-        language: String,
-    },
-    CancelModel,
-    /// Labs › Model switch shortcut: swaps the dictation model with the saved
-    /// other one, through the same installed-only preparation as a picker
-    /// choice.
-    SwapModel,
-}
-
 struct Shared {
     host: Mutex<LinuxDesktopHost>,
     waker: Mutex<Option<Waker>>,

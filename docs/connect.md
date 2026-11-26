@@ -17,10 +17,8 @@ and a code plus PKCE produces a token scoped to the caller's verified identity:
 
 This is a narrow consent contract, not a general local API.
 `connected-apps` (the Lab, Labs › Connected apps)
-stays off by default, and so does its Allow websites to use Hex. Labs ›
-Browser access to the local API is a separate developer feature (CORS for
-the full bearer-token API from the origins it lists) and plays no part in
-any of this.
+stays off by default, and so does its Allow websites to use Hex. No other
+route answers a browser: the bearer-token API never sends CORS.
 
 **Any website can now ask to be let in.** With the lab and its websites
 switch on, Hex answers these routes' CORS for every `http(s)` origin, so any
@@ -92,8 +90,7 @@ A page's fetch -> POST /connect/authorize            // no bearer token
   `Content-Type`, `X-Hex-Connect-Token`, `X-Hex-Record-Grant`, and
   `X-Hex-Record-Token`, so a page can't send the bearer token through it. No
   other route (`/control`, `/dictations`, `/streams`, `/health`, …) answers
-  CORS for Connected apps; Labs › Browser access keeps its own list for
-  those. The connect POSTs are JSON, so a browser sends a preflight: a page
+  CORS. The connect POSTs are JSON, so a browser sends a preflight: a page
   cannot trigger a dialog with a cross-site form or `no-cors` fetch.
 
 ## `POST /connect/authorize`
@@ -541,8 +538,7 @@ desktop file id precedence.
 Labs › Connected apps is covered by `local_api::tests::connected_apps` (each
 switch off on every consent route, CORS on only its own routes and never with
 `Authorization`, an unknown website refused and listed once, Allow and Block,
-an allowed website still needing an answer, Browser access having no effect,
-the revoke list covering apps and websites, and a pending ask and live
+an allowed website still needing an answer, the revoke list covering apps and websites, and a pending ask and live
 recording ending when the lab goes off) and the website lists' bounds and
 reload by `local_api::permissions` tests. The live card and the Labs ›
 Connected apps section are rendered by `hex app -- --snap` scenes

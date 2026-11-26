@@ -34,7 +34,7 @@ pub(crate) enum HostRequest {
         id: u64,
         stop: bool,
     },
-    /// The window withdrew a saved permission (Labs › Browser access).
+    /// The window withdrew a saved permission (Labs › Connected apps).
     RevokePermission {
         id: u64,
     },

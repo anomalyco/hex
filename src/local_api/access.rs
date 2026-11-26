@@ -15,15 +15,14 @@
 //!
 //! With websites on, the consent, pairing, record, and connect-grant routes
 //! answer CORS for any `http(s)` origin, so an unlisted page can read why it
-//! was refused. No other route does (the bearer-token API keeps Labs ›
-//! Browser access's own list), `*` is never sent, and neither are
-//! credentials. Labs › Browser access to the local API plays no part here.
+//! was refused. No other route answers a browser, `*` is never sent, and
+//! neither are credentials.
 
 use std::sync::Arc;
 
 use super::consent::{ConsentGate, Recipient};
-use super::cors::CorsOrigin;
 use super::http::HttpResponse;
+use super::origin::{CorsOrigin, canonical};
 use super::permissions::{Permissions, WebsiteStatus};
 
 /// The lab's two switches, read on every request so turning either off acts
@@ -142,11 +141,6 @@ impl Access {
             private_network: request.private_network,
         })
     }
-}
-
-/// An exact `scheme://host[:port]` origin as a browser sends it.
-fn canonical(origin: &str) -> bool {
-    crate::app_settings::normalize_browser_origin(origin).as_deref() == Some(origin)
 }
 
 /// The Linux and Windows apps' two asks, browser connect and consented

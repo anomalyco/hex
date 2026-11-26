@@ -250,7 +250,7 @@ fn turn_away(stream: &mut (impl Read + Write)) -> bool {
         }
     }
     let busy = HttpResponse::code(503, "native-busy");
-    write_response(stream, busy, None).is_ok()
+    write_response(stream, busy).is_ok()
 }
 
 /// Serves one connection: no identity work unless the lab is still on,
@@ -267,7 +267,7 @@ fn client<S: Read + Write>(
         .is_some_and(|record| record.access().lab())
     {
         let unavailable = HttpResponse::code(403, "record-unavailable");
-        let _ = write_response(&mut stream, unavailable, None);
+        let _ = write_response(&mut stream, unavailable);
         return;
     }
     let identity = identify(&stream);
@@ -410,12 +410,12 @@ fn handle(
         Err(super::http::RequestReadError::Shutdown) => return,
         Err(error) => {
             tracing::debug!(?error, "native record client sent no valid request");
-            let _ = write_response(&mut stream, HttpResponse::empty(400), None);
+            let _ = write_response(&mut stream, HttpResponse::empty(400));
             return;
         }
     };
     let response = route(request, identity, context).respond(context, &mut stream, stop);
-    if let Err(error) = write_response(&mut stream, response, None) {
+    if let Err(error) = write_response(&mut stream, response) {
         tracing::debug!(%error, "native record client disconnected");
     }
 }

@@ -195,8 +195,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        and Allowed and Blocked websites folded behind disclosures (Remove,
 │                                        Unblock; blocked ones answer 403 website-blocked). Off, the routes
 │                                        answer as before, a pending dialog is withdrawn, a live consented recording is
-│                                        cancelled, and grants and lists are kept unused. Labs › Browser access plays
-│                                        no part; any website may ask to be let in while both switches are on
+│                                        cancelled, and grants and lists are kept unused. Any website may ask to
+│                                        be let in while both switches are on
 │                                        // checks: local_api::tests::connected_apps, local_api::permissions website-list
 │                                        // tests, local_api::tests::requester_icons, rune_ui::connected_apps tests
 │                                        // (pane states, every OS); not observed from a real browser page

@@ -26,6 +26,7 @@ pub(crate) mod icon;
 mod mac_app;
 mod meeting_events;
 mod native;
+mod origin;
 pub(crate) mod permissions;
 pub(crate) mod processing;
 mod record;
@@ -56,6 +57,7 @@ pub(crate) use discovery::{Discovered, Endpoint, discover, error_code};
 pub use discovery::{ExitWatch, watch_running};
 pub use discovery::{call_control, running_pid};
 use http::*;
+use origin::CorsOrigin;
 pub use processing::Processing;
 pub use timestamps::Timestamps;
 use transcriptions::transcribe_audio;
@@ -194,7 +196,7 @@ pub struct LocalApiOptions {
     /// Where `/streams` finds its engine; the running app's shared engine
     /// when unset.
     pub(crate) stream_engine: Option<crate::transcription::stream::EngineSource>,
-    /// Browser connect (Labs › Browser access to the local API): the window's
+    /// Browser connect (Labs › Connected apps): the window's
     /// consent gate and one-use grants. `None` leaves the routes answering
     /// `403 connect-unavailable`.
     pub(crate) connect: Option<Connect>,
@@ -640,20 +642,28 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
             tracing::debug!(%error, "could not set local API write timeout");
             continue;
         }
-        let action = match read_request(&mut stream, &context.shutdown) {
+        let (action, cors) = match read_request(&mut stream, &context.shutdown) {
             Ok(request) => handle_request(request, &context),
-            Err(RequestReadError::TooLarge) => RequestAction::Respond(HttpResponse::empty(431)),
-            Err(RequestReadError::Invalid) => RequestAction::Respond(HttpResponse::empty(400)),
-            Err(RequestReadError::Deadline) => RequestAction::Respond(HttpResponse::empty(408)),
+            Err(RequestReadError::TooLarge) => {
+                (RequestAction::Respond(HttpResponse::empty(431)), None)
+            }
+            Err(RequestReadError::Invalid) => {
+                (RequestAction::Respond(HttpResponse::empty(400)), None)
+            }
+            Err(RequestReadError::Deadline) => {
+                (RequestAction::Respond(HttpResponse::empty(408)), None)
+            }
             Err(RequestReadError::Shutdown) => return,
             Err(RequestReadError::Io(error)) => {
                 tracing::debug!(%error, "local API client disconnected while sending a request");
                 continue;
             }
         };
+        // Only Labs › Connected apps' routes ever name an origin.
+        let cors = cors.as_ref();
         match action {
             RequestAction::Respond(response) => {
-                if let Err(error) = write_response(&mut stream, response) {
+                if let Err(error) = write_response_for(&mut stream, response, cors) {
                     tracing::debug!(%error, "local API client disconnected");
                 }
             }
@@ -688,7 +698,7 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                     &context,
                 );
                 if let Some(response) = response
-                    && let Err(error) = write_response(&mut stream, response)
+                    && let Err(error) = write_response_for(&mut stream, response, cors)
                 {
                     tracing::debug!(%error, "transcription client disconnected");
                 }
@@ -748,13 +758,13 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                     Some(connect) => connect.respond(call, &mut stream, &context.shutdown),
                     None => HttpResponse::code(403, "connect-unavailable"),
                 };
-                if let Err(error) = write_response(&mut stream, response, cors) {
+                if let Err(error) = write_response_for(&mut stream, response, cors) {
                     tracing::debug!(%error, "connect client disconnected");
                 }
             }
             RequestAction::Record(request) => {
                 let response = request.respond(&context, &mut stream, &context.shutdown);
-                if let Err(error) = write_response(&mut stream, response, cors) {
+                if let Err(error) = write_response_for(&mut stream, response, cors) {
                     tracing::debug!(%error, "record client disconnected");
                 }
             }
@@ -762,6 +772,9 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
     }
 }
 
+/// Routes one request, and answers a consent route's CORS preflight before
+/// authentication: a browser's preflight carries no
+/// credentials, so it cannot hold the bearer token.
 fn handle_request(
     request: HttpRequest,
     context: &HttpContext,
@@ -892,6 +905,7 @@ fn route(request: HttpRequest, context: &HttpContext) -> RequestAction {
                 reason: reason(200),
                 content_type: Some("application/json"),
                 body: snapshot.to_json().into_bytes(),
+                headers: Vec::new(),
             },
             None => HttpResponse::code(503, "vitals-unavailable"),
         },
@@ -2126,6 +2140,8 @@ mod tests {
                 record_token: None,
                 content_type: Some("audio/webm".into()),
                 content_length: Some(10),
+                origin: None,
+                private_network: false,
                 body_prefix: Vec::new(),
             },
             &transcription,
@@ -2150,6 +2166,8 @@ mod tests {
                 record_token: None,
                 content_type: Some("audio/wav".into()),
                 content_length: Some(MAX_AUDIO_BYTES + 1),
+                origin: None,
+                private_network: false,
                 body_prefix: Vec::new(),
             },
             &transcription,
@@ -2191,7 +2209,7 @@ mod tests {
             connect: None,
             record: None,
         };
-        let action = handle_request(
+        let (action, _) = handle_request(
             HttpRequest {
                 method: "POST".into(),
                 path: "/models/parakeet_v2/prepare".into(),
@@ -2203,6 +2221,8 @@ mod tests {
                 record_token: None,
                 content_type: None,
                 content_length: None,
+                origin: None,
+                private_network: false,
                 body_prefix: Vec::new(),
             },
             &context,
@@ -2363,6 +2383,8 @@ mod tests {
         store
     }
 
+    fn app_origin() -> Vec<String> {
+        vec!["https://app.example".to_owned()]
     }
 
     fn two_origins() -> Vec<String> {
@@ -2409,8 +2431,7 @@ mod tests {
     ) -> LocalApi {
         let directory = temp_directory();
         let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
-        // Labs › Connected apps on, with `origins` allowed to ask; Labs ›
-        // Browser access lists nothing.
+        // Labs › Connected apps on, with `origins` allowed to ask.
         let store = allowing(
             Permissions::new(Some(directory.join("permissions.json"))),
             &origins(),
@@ -2430,7 +2451,6 @@ mod tests {
         start_unpublished(
             events,
             LocalApiOptions {
-                cors: Cors::gated(Vec::new),
                 connect: Some(connect),
                 stream_engine: Some(crate::transcription::stream::tests::fake_source()),
                 ..LocalApiOptions::default()
@@ -2614,7 +2634,6 @@ mod tests {
             let api = start_unpublished(
                 events,
                 LocalApiOptions {
-                    cors: Cors::gated(Vec::new),
                     connect: Some(Connect::new(connected(), Some(gate.clone()), store)),
                     record: Some(sessions.clone()),
                     stream_engine: Some(crate::transcription::stream::tests::fake_source()),
@@ -2853,6 +2872,8 @@ mod tests {
         );
         assert!(response.starts_with("HTTP/1.1 403"), "{response}");
         assert_eq!(body_code(&response), "consent-timeout");
+    }
+
     fn test_health() -> HealthResponse {
         HealthResponse {
             version: "test",
@@ -3069,7 +3090,6 @@ mod tests {
         let api = start_unpublished(
             events,
             LocalApiOptions {
-                cors: Cors::gated(Vec::new),
                 record: Some(sessions.clone()),
                 stream_engine: Some(crate::transcription::stream::tests::fake_source()),
                 ..LocalApiOptions::default()
@@ -3235,7 +3255,6 @@ mod tests {
             let api = start_unpublished(
                 EventLog::create(&temp_directory().join("events.ndjson")).unwrap(),
                 LocalApiOptions {
-                    cors: Cors::gated(Vec::new),
                     connect: Some(Connect::new(connected(), Some(gate.clone()), store)),
                     record: Some(sessions.clone()),
                     ..LocalApiOptions::default()
@@ -4269,7 +4288,6 @@ mod tests {
         let mut api = start_unpublished(
             events,
             LocalApiOptions {
-                cors: Cors::gated(Vec::new),
                 record: Some(sessions),
                 native_socket: Some(socket.clone()),
                 stream_engine: Some(crate::transcription::stream::tests::fake_source()),

@@ -1,15 +1,13 @@
 //! Labs › Connected apps over the routes: its two switches, the website
-//! lists, its CORS, and Labs › Browser access playing no part in any of it.
+//! lists, and its CORS.
 
 use std::sync::atomic::AtomicBool;
 
 use super::*;
 
-/// The API with `access` in front of both consent asks, `gate` answering,
-/// and Labs › Browser access listing `browser`.
+/// The API with `access` in front of both consent asks, `gate` answering.
 fn start(
     access: Access,
-    browser: fn() -> Vec<String>,
     gate: Arc<dyn ConsentGate>,
     allowed: &[String],
 ) -> (LocalApi, Arc<record::Sessions>, Arc<Permissions>) {
@@ -28,7 +26,6 @@ fn start(
     let api = start_unpublished(
         EventLog::create(&directory.join("events.ndjson")).unwrap(),
         LocalApiOptions {
-            cors: Cors::gated(browser),
             connect: Some(Connect::new(access, Some(gate), store.clone())),
             record: Some(sessions.clone()),
             stream_engine: Some(crate::transcription::stream::tests::fake_source()),
@@ -115,12 +112,7 @@ const UNLISTED: &str = "https://unlisted.example";
 #[test]
 fn off_every_consent_route_answers_as_it_did_without_the_lab() {
     let gate = ScriptedGate::new(Answer::Always);
-    let (api, sessions, store) = start(
-        Access::gated(off, on),
-        Vec::new,
-        gate.clone(),
-        &app_origin(),
-    );
+    let (api, sessions, store) = start(Access::gated(off, on), gate.clone(), &app_origin());
     let port = api.document.port;
     for origin in [ASKING, UNLISTED] {
         for (path, response) in every_route(port, origin) {
@@ -162,7 +154,7 @@ fn turning_the_lab_off_keeps_grants_but_lets_none_be_used() {
         LAB.load(Ordering::SeqCst)
     }
     let gate = ScriptedGate::new(Answer::Always);
-    let (api, sessions, _) = start(Access::gated(lab, on), Vec::new, gate, &app_origin());
+    let (api, sessions, _) = start(Access::gated(lab, on), gate, &app_origin());
     let port = api.document.port;
     let code = record_pair(port, ASKING);
     let (grant, _) = record_grant(port, ASKING, &code);
@@ -206,12 +198,7 @@ fn turning_the_lab_off_keeps_grants_but_lets_none_be_used() {
 #[test]
 fn websites_off_no_website_asks_is_listed_or_gets_cors() {
     let gate = ScriptedGate::new(Answer::Always);
-    let (api, sessions, store) = start(
-        Access::gated(on, off),
-        Vec::new,
-        gate.clone(),
-        &app_origin(),
-    );
+    let (api, sessions, store) = start(Access::gated(on, off), gate.clone(), &app_origin());
     let port = api.document.port;
     for origin in [ASKING, UNLISTED] {
         for (path, response) in every_route(port, origin) {
@@ -239,7 +226,7 @@ fn websites_off_no_website_asks_is_listed_or_gets_cors() {
 #[test]
 fn an_unlisted_website_is_listed_once_and_never_asked() {
     let gate = ScriptedGate::new(Answer::Always);
-    let (api, _, store) = start(connected(), Vec::new, gate.clone(), &app_origin());
+    let (api, _, store) = start(connected(), gate.clone(), &app_origin());
     let port = api.document.port;
     for path in [
         connect::AUTHORIZE_PATH,
@@ -269,7 +256,7 @@ fn an_unlisted_website_is_listed_once_and_never_asked() {
 #[test]
 fn an_allowed_website_asks_on_its_next_request_and_still_needs_an_answer() {
     let gate = ScriptedGate::new(Answer::Deny);
-    let (api, sessions, store) = start(connected(), Vec::new, gate.clone(), &[]);
+    let (api, sessions, store) = start(connected(), gate.clone(), &[]);
     let port = api.document.port;
     let first = connect_post(port, UNLISTED, connect::AUTHORIZE_PATH, &ask_body());
     assert_eq!(body_code(&first), "website-not-allowed");
@@ -292,7 +279,7 @@ fn an_allowed_website_asks_on_its_next_request_and_still_needs_an_answer() {
 #[test]
 fn a_blocked_website_is_refused_and_never_listed_until_unblocked() {
     let gate = ScriptedGate::new(Answer::Always);
-    let (api, sessions, store) = start(connected(), Vec::new, gate.clone(), &[]);
+    let (api, sessions, store) = start(connected(), gate.clone(), &[]);
     let port = api.document.port;
     connect_post(port, UNLISTED, record::PAIR_PATH, &ask_body());
     assert!(sessions.website(UNLISTED, WebsiteAction::Block));
@@ -317,40 +304,9 @@ fn a_blocked_website_is_refused_and_never_listed_until_unblocked() {
 }
 
 #[test]
-fn browser_access_plays_no_part_in_any_consent() {
-    for browser in [Vec::new as fn() -> Vec<String>, two_origins] {
-        // Off: Browser access listing the page lets it ask nothing.
-        let gate = ScriptedGate::new(Answer::Always);
-        let (api, _, store) = start(Access::gated(off, on), browser, gate.clone(), &[]);
-        let port = api.document.port;
-        let response = connect_post(port, ASKING, connect::AUTHORIZE_PATH, &ask_body());
-        assert_eq!(body_code(&response), "origin-not-allowed");
-        assert_eq!(gate.asks(), 0);
-        assert!(store.websites().tried.is_empty());
-
-        // On: being on Browser access's list is not being allowed to ask.
-        let gate = ScriptedGate::new(Answer::Once);
-        let (api, _, store) = start(connected(), browser, gate.clone(), &[]);
-        let port = api.document.port;
-        let response = connect_post(port, ASKING, connect::AUTHORIZE_PATH, &ask_body());
-        assert_eq!(body_code(&response), "website-not-allowed");
-        assert_eq!(store.websites().tried.len(), 1);
-        assert!(sessions_never_asked(&gate));
-        // Allowed in Connected apps, it asks whatever Browser access lists.
-        store.website_action(ASKING, WebsiteAction::Allow);
-        authorize(port, ASKING);
-        assert_eq!(gate.asks(), 1);
-    }
-}
-
-fn sessions_never_asked(gate: &ScriptedGate) -> bool {
-    gate.asks() == 0
-}
-
-#[test]
 fn consent_cors_answers_only_its_own_routes() {
     let gate = ScriptedGate::new(Answer::Always);
-    let (api, _, _) = start(connected(), Vec::new, gate, &[]);
+    let (api, _, _) = start(connected(), gate, &[]);
     let port = api.document.port;
     for path in [
         connect::AUTHORIZE_PATH,
@@ -401,7 +357,7 @@ fn consent_cors_answers_only_its_own_routes() {
 #[test]
 fn the_revoke_list_covers_websites_and_native_apps() {
     let gate = ScriptedGate::new(Answer::Always);
-    let (_api, sessions, _) = start(connected(), Vec::new, gate, &app_origin());
+    let (_api, sessions, _) = start(connected(), gate, &app_origin());
     let native = record::Channel::Native {
         peer: record::PeerId([3; 8]),
         identity: record::Identity {
