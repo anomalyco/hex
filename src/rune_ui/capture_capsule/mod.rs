@@ -15,6 +15,7 @@
 //! colours are the OpenCode theme's, so it follows the system appearance.
 
 mod always_view;
+mod dock;
 pub(crate) mod feed;
 pub(crate) mod flow;
 pub(crate) mod ink;
@@ -471,6 +472,8 @@ pub(crate) struct CapsuleState {
     /// The notch the capsule hangs from on the pointer's display, when it
     /// could be measured.
     notch: Option<notch::Measured>,
+    /// Its place beside the meeting capsules (`desktop::overlay_dock`).
+    dock: dock::Docked,
     /// The keys Hex's tap hands the capsule ([`Flow::keys`]): the overlay
     /// never takes focus.
     keys: Option<(
@@ -509,6 +512,7 @@ impl CapsuleState {
             overlay: None,
             presence: Presence::Down,
             notch: None,
+            dock: dock::Docked::default(),
             keys: None,
             hovering: [false; 2],
             picker: None,
@@ -812,7 +816,8 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
     if step.places(remeasured)
         && let Some(overlay) = &s.overlay
     {
-        place(overlay, s.surface.anchor, s.notch);
+        s.dock.measure(s.notch);
+        place(overlay, s.surface.anchor, s.notch, s.dock.margin());
     }
 
     let earliest = |wake: Option<f64>, at: Option<f64>| match (wake, at) {
@@ -860,6 +865,14 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
         }
     }
     crate::capture_host::set_capsule_pill(shown.then_some(s.surface.shell));
+    // Under the menu bar it clears the meeting capsules, and moves again as
+    // they move, show, or go.
+    if s.dock
+        .sync(shown, s.surface.anchor, s.notch, s.surface.shell)
+        && let Some(overlay) = &s.overlay
+    {
+        place(overlay, s.surface.anchor, s.notch, s.dock.margin());
+    }
     // The picker follows the pointer between displays.
     if prev.follow() != next.follow()
         && let Some(overlay) = &s.overlay
@@ -888,9 +901,10 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
     changed
 }
 
-/// Moves the overlay to where the capsule rests: under the menu bar, at
-/// the screen's top edge (the notch), or at the pointer (the cursor's
-/// card, whose rect is global, so on the primary display's origin).
+/// Moves the overlay to where the capsule rests: under the menu bar
+/// `margin` points from the top, at the screen's top edge (the notch), or
+/// at the pointer (the cursor's card, whose rect is global, so on the
+/// primary display's origin).
 /// `notch` is the notch measured on the pointer's screen; the panel is
 /// pinned to that screen and its left edge put `panel_x` points from the
 /// screen's, so it can't land on another display than the one measured.
@@ -899,6 +913,7 @@ fn place(
     overlay: &OverlayHandle<CapsuleState>,
     anchor: surface::Anchor,
     notch: Option<notch::Measured>,
+    margin: f32,
 ) {
     use rune::{Align, DisplayTarget, NativeDisplayId, OverlayPlacement, ScreenEdge};
     let edge = |margin| OverlayPlacement::Edge {
@@ -910,7 +925,7 @@ fn place(
     match anchor {
         surface::Anchor::Top => {
             overlay.set_display(DisplayTarget::UnderPointer);
-            overlay.set_placement(Some(edge(PANEL_MARGIN)));
+            overlay.set_placement(Some(edge(margin)));
         }
         surface::Anchor::Notch => {
             // The measured screen's, so the panel and its notch agree even

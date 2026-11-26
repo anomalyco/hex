@@ -1271,6 +1271,11 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      ├── In the saved recording_indicator_corner, on the primary display, or
      │   on the display it was dragged to with Labs › Indicator on any
      │   display (macOS and Windows; `screen::target` pins the window there)
+     ├── Ranks first in the overlay dock: it never moves for another surface,
+     │   and Annotate's capsule and the dictation HUD sitting on its edge of
+     │   its display move past what it draws (the pill, the open panel, the
+     │   finished panel, an offer), 8 pt clear (capture.md#overlay-dock;
+     │   meeting_capsules/dock.rs)
      ├── Follows the setting mid-recording: turning it off hides the pill and
      │   on shows it, keeping the recording's start time, within a second
      │   (the_recording_capsule_follows_the_indicator_setting_mid_recording;

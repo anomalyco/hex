@@ -98,6 +98,7 @@ pub(super) fn open() -> bool {
                         id,
                     )));
                 }
+                dock(true, on);
                 handle.show();
                 tx.animated();
                 super::toolbar_level::start(handle.clone(), metered);
@@ -109,9 +110,27 @@ pub(super) fn open() -> bool {
     spawned.is_ok()
 }
 
+/// Claims the toolbar's bar at the bottom of the display `on` names (the
+/// primary when none) in the overlay dock while it shows, so a dictation HUD
+/// at the bottom clears it; nothing once it closes.
+fn dock(shown: bool, on: Option<u32>) {
+    use crate::desktop::overlay_dock::{self, Align, Claim, Display, Edge, Surface};
+    let claim = shown.then(|| Claim {
+        display: on.map_or(Display::Primary, |id| Display::Id(id.to_string())),
+        display_width: None,
+        edge: Edge::Bottom,
+        align: Align::Center,
+        inset: 0.0,
+        margin: toolbar::MARGIN,
+        size: toolbar::SIZE,
+    });
+    overlay_dock::claim(Surface::AnnotateToolbar, claim);
+}
+
 /// Closes the toolbar (or cancels an in-flight open). Safe from any thread.
 pub(super) fn close() {
     super::toolbar_level::stop();
+    dock(false, None);
     if super::front().close_toolbar() == ToolbarClose::ClosedShown
         && let Some(overlay) = OVERLAY.get()
     {
@@ -145,6 +164,7 @@ fn act(toolbar: &Toolbar, action: ToolbarAction) {
                 overlay.set_display(rune::DisplayTarget::Native(rune::NativeDisplayId::MacOS(
                     display.id,
                 )));
+                dock(true, Some(display.id));
             }
         }
         ToolbarAction::Microphone(name) => {

@@ -189,7 +189,6 @@ pub(in crate::rune_ui::meeting_capsules) fn ready(
 
 /// The ready panel's height for `manifest`: the title band, the summary
 /// while there is one, and the two copies.
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub(super) fn ready_height(manifest: &MeetingManifest) -> f32 {
     let band = 2.0 * TITLE_PY + 20.0 + 2.0 + 12.0;
     let summary = if ready_summary(manifest).is_some() {
