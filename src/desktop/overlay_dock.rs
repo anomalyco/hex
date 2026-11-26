@@ -44,7 +44,9 @@ pub(crate) enum Surface {
     MeetingPanel,
     /// Annotate's capture capsule under the menu bar or in the notch.
     AnnotateCapsule,
-    /// The screen recording toolbar (Labs › Screenshots).
+    /// The screen recording toolbar (Labs › Screenshots), which Annotate
+    /// offers on macOS only, so nothing else constructs it.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     AnnotateToolbar,
     /// The dictation HUD.
     Dictation,
