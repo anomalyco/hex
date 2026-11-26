@@ -7,6 +7,7 @@
 //! and is hidden while off.
 
 mod clipboard_phrase;
+pub(super) mod connected_apps;
 mod group;
 #[cfg(target_os = "macos")]
 mod hud_height;
@@ -927,21 +928,10 @@ fn rows(ui: &Ui) -> Vec<Row> {
     });
     rows.push(row(Feature::ApiProcessing, None));
     rows.push(row(Feature::ApiTimestamps, None));
-    let connected_apps = row(Feature::ConnectedApps, Some(super::connected_apps::ICON));
-    // As Live typing: where the permission window can't show, an unlocked
-    // card can't turn on and says why; on already, it can still turn off.
-    rows.push(
-        if connected_apps.locked || !ui.platform.consent_window_unsupported {
-            connected_apps
-        } else {
-            let on = connected_apps.on;
-            Row {
-                locked: !on,
-                note: Some(tr("This desktop can't show Hex's permission window (GNOME on Wayland can't), so apps and websites can't ask").to_owned()),
-                ..connected_apps
-            }
-        },
-    );
+    rows.push(connected_apps::lab_card(
+        ui,
+        row(Feature::ConnectedApps, Some(connected_apps::ICON)),
+    ));
     rows.push(row(Feature::SpeakersOnly, None));
     rows.push(row(Feature::KeepMicrophoneOpen, Some(&TIMER)));
     // macOS opens dictation's microphone through Apple's voice processing, so

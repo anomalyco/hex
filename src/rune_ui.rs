@@ -13,9 +13,6 @@ mod activity;
 mod calls;
 #[cfg(hex_capture)]
 pub(crate) mod capture_capsule;
-mod connected_apps;
-pub(crate) use connected_apps::requester_icon;
-pub(crate) mod consent_window;
 mod controls;
 #[cfg(target_os = "macos")]
 pub(crate) mod deep_link;
@@ -65,7 +62,6 @@ mod platform;
 mod platform_settings;
 pub(crate) mod playground;
 mod practice;
-mod record_panel;
 mod scenes;
 #[cfg(hex_capture)]
 mod scrawl;
@@ -100,6 +96,8 @@ use crate::desktop::i18n::{tr, tr_fill};
 use crate::transcription::models::TranscriptionModelId;
 use controls::{METRICS, Paint};
 use host::{Backend, Request, ShortcutTarget};
+pub(crate) use labs::connected_apps::consent_window;
+use labs::connected_apps::{self, record_panel};
 use onboarding_kit::live::Page;
 use scenes::{SCENES, Scene, fixture, mac_fixture, portal_fixture};
 use settings::Capture;

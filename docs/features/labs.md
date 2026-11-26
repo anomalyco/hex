@@ -198,7 +198,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        cancelled, and grants and lists are kept unused. Any website may ask to
 │                                        be let in while both switches are on
 │                                        // checks: local_api::tests::connected_apps, local_api::permissions website-list
-│                                        // tests, local_api::tests::requester_icons, rune_ui::connected_apps tests
+│                                        // tests, local_api::tests::requester_icons, rune_ui::labs::connected_apps tests
 │                                        // (pane states, every OS); not observed from a real browser page
 ├── Use model files where they are no labs.model_in_place the picker adds a model file without copying it, so accounts can share one (#941)
 ├── Smaller model files no labs.k_quant_models         (macOS) adding a model file also accepts Q6_K, Q5_K, and Q4_K weights, smaller than Q8_0 and unverified

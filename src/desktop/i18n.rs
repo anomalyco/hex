@@ -17,6 +17,7 @@ mod calls;
 mod clipboard_phrase;
 mod clock;
 mod confirm_cancel;
+mod connected_apps;
 mod failures;
 mod french;
 mod history;
@@ -422,6 +423,7 @@ pub(super) fn all_translations() -> impl Iterator<Item = &'static (&'static str,
         .chain(history::TRANSLATIONS)
         .chain(screenshots::TRANSLATIONS)
         .chain(routing::TRANSLATIONS)
+        .chain(connected_apps::TRANSLATIONS)
 }
 
 #[cfg(test)]
@@ -629,10 +631,10 @@ mod tests {
         include_str!("../rune_ui/activity.rs"),
         include_str!("../rune_ui/drop_transcribe.rs"),
         include_str!("../rune_ui/explainer.rs"),
-        include_str!("../rune_ui/connected_apps.rs"),
-        include_str!("../rune_ui/connected_apps/requester_icon.rs"),
-        include_str!("../rune_ui/consent_window.rs"),
-        include_str!("../rune_ui/record_panel.rs"),
+        include_str!("../rune_ui/labs/connected_apps.rs"),
+        include_str!("../rune_ui/labs/connected_apps/consent_window.rs"),
+        include_str!("../rune_ui/labs/connected_apps/record_panel.rs"),
+        include_str!("../rune_ui/labs/connected_apps/requester_icon.rs"),
         include_str!("../rune_ui/fun.rs"),
         include_str!("../rune_ui/general.rs"),
         include_str!("../rune_ui/general/extra_shortcuts.rs"),

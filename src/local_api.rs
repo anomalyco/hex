@@ -17,6 +17,7 @@ use crate::desktop::events::{EventLog, VoiceEvent, now_ms};
 mod access;
 mod connect;
 mod consent;
+mod consent_routes;
 mod control;
 mod dictation;
 mod discovery;
@@ -772,49 +773,24 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
     }
 }
 
-/// Routes one request, and answers a consent route's CORS preflight before
-/// authentication: a browser's preflight carries no
-/// credentials, so it cannot hold the bearer token.
+/// Routes one request. Labs › Connected apps' routes come first, before the
+/// bearer token (`consent_routes`); only they ever name an origin.
 fn handle_request(
     request: HttpRequest,
     context: &HttpContext,
 ) -> (RequestAction, Option<CorsOrigin>) {
-    // Labs › Connected apps answers any website on its own routes only; no
-    // other route answers a browser.
-    let connected = context.connected.and_then(|access| access.cors(&request));
-    if request.method == "OPTIONS"
-        && let Some(cors) = connected
-    {
-        return (
-            RequestAction::Respond(HttpResponse::consent_preflight(cors.private_network)),
-            Some(cors),
-        );
+    let cors = consent_routes::cors(&request, context);
+    if let Some(preflight) = consent_routes::preflight(&request, cors.as_ref()) {
+        return (preflight, cors);
     }
-    (route(request, context), connected)
+    let request = match consent_routes::intercept(request, context) {
+        consent_routes::Intercepted::Action(action) => return (action, cors),
+        consent_routes::Intercepted::Pass(request) => request,
+    };
+    (route(request, context), cors)
 }
 
 fn route(request: HttpRequest, context: &HttpContext) -> RequestAction {
-    // Browser connect comes before the bearer token (`connect::intercept`).
-    let request = match connect::intercept(request, context.connect.as_ref()) {
-        connect::Intercept::Refuse(response) => return RequestAction::Respond(response),
-        connect::Intercept::Connect(call) => return RequestAction::Connect(call),
-        connect::Intercept::Audio(request) => {
-            return transcription_action(
-                request,
-                &context.transcription,
-                &context.processing,
-                &context.timestamps,
-                true,
-            );
-        }
-        connect::Intercept::Pass(request) => request,
-    };
-    // One consented recording: an allowed page asks without the bearer token,
-    // and its session token reaches only the record action it names.
-    let request = match record::route(request, context) {
-        record::Routed::Record(request) => return RequestAction::Record(request),
-        record::Routed::Pass(request) => request,
-    };
     let path = request.path.split('?').next().unwrap_or("/");
     if request.authorization.as_deref() != Some(&format!("Bearer {}", context.token)) {
         context

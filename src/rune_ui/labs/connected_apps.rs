@@ -10,42 +10,45 @@
 use rune::{El, Icon, col, row, text};
 use rune_theme_opencode::icons::LINK;
 
-use super::controls::{DESCRIPTION, METRICS, Paint, card, page, toggle_row};
-use super::lists::{Tone, small_button, tone_tag};
-use super::{Request, Ui};
+use super::super::controls::{DESCRIPTION, METRICS, Paint, card, page, toggle_row};
+use super::super::lists::{Tone, small_button, tone_tag};
+use super::super::{Request, Ui};
 use crate::desktop::i18n::{event_age, tr, tr_fill};
 use crate::local_api::{PermissionCapability, Recipient, WebsiteAction};
 use requester_icon::{Icons, mark};
 
 /// The pane's sidebar icon, and the Labs card's.
-pub(super) static ICON: &Icon = &LINK;
+pub(in crate::rune_ui) static ICON: &Icon = &LINK;
 
 /// A row's icon, in points.
 const MARK: f32 = 32.0;
 
+pub(crate) mod consent_window;
+pub(in crate::rune_ui) mod fixture;
+pub(in crate::rune_ui) mod record_panel;
 pub(crate) mod requester_icon;
 
 /// The window's own Connected apps state: which website disclosures are
 /// open (both start closed), the requester icons, and the recording session
 /// the window last brought itself forward for.
 #[derive(Default)]
-pub(super) struct State {
+pub(in crate::rune_ui) struct State {
     allowed: bool,
     blocked: bool,
-    pub(super) icons: Icons,
-    pub(super) record_seen: Option<u64>,
+    pub(in crate::rune_ui) icons: Icons,
+    pub(in crate::rune_ui) record_seen: Option<u64>,
 }
 
 impl State {
     /// Both lists unfolded, for scenes.
-    pub(super) fn unfold(&mut self) {
+    pub(in crate::rune_ui) fn unfold(&mut self) {
         (self.allowed, self.blocked) = (true, true);
     }
 }
 
 /// Gives the requester icons their decoder (scenes decode at once), and on
 /// Linux notes a compositor that can't show the permission window.
-pub(super) fn setup(ui: &mut Ui, waker: &rune::Waker) {
+pub(in crate::rune_ui) fn setup(ui: &mut Ui, waker: &rune::Waker) {
     if !ui.is_fixture() {
         ui.connected
             .icons
@@ -58,11 +61,11 @@ pub(super) fn setup(ui: &mut Ui, waker: &rune::Waker) {
     }
 }
 
-pub(super) fn pane(ui: &Ui, p: Paint) -> El {
+pub(in crate::rune_ui) fn pane(ui: &Ui, p: Paint) -> El {
     let content = page("content")
         .child(connected(ui, p))
         .children(websites(ui, p));
-    super::scroll_body(p.k, "connected-apps-scroll", content)
+    super::super::scroll_body(p.k, "connected-apps-scroll", content)
 }
 
 /// One grant as the Connected list shows it.
@@ -168,15 +171,29 @@ fn grant_row(p: Paint, icons: &Icons, grant: Grant) -> El {
     )
 }
 
+/// The lab's Labs card. As Live typing: where the permission window can't
+/// show, an unlocked card can't turn on and says why; on already, it can
+/// still turn off.
+pub(super) fn lab_card(ui: &Ui, card: super::Row) -> super::Row {
+    if card.locked || !ui.platform.consent_window_unsupported {
+        return card;
+    }
+    super::Row {
+        locked: !card.on,
+        note: Some(tr("This desktop can't show Hex's permission window (GNOME on Wayland can't), so apps and websites can't ask").to_owned()),
+        ..card
+    }
+}
+
 /// Nothing connected yet: what will show here, and how it gets here.
 fn empty(p: Paint) -> El {
     row()
         .key("connected-empty")
         .px(METRICS.row_px)
-        .py(18.0)
-        .gap(14.0)
+        .py(16.0)
+        .gap(12.0)
         .center_y()
-        .child(super::icons::tile(p, ICON, 36.0))
+        .child(super::super::icons::tile(p, ICON, 36.0))
         .child(
             col()
                 .key("copy")
@@ -279,31 +296,32 @@ fn websites(ui: &Ui, p: Paint) -> Vec<El> {
         ),
     ];
     // The allowed and blocked lists fold away together, under the rest.
-    let mut folded = col().key("website-lists").gap(14.0);
+    let mut folded = col().key("website-lists").gap(12.0);
     let mut any = false;
     for (key, title, origins, open, action) in lists {
         if origins.is_empty() {
             continue;
         }
         let blocked = key == "blocked";
-        let mut group = col()
-            .key(key)
-            .gap(METRICS.label_gap)
-            .child(super::general::disclosure(
-                p,
-                &format!("{key}-toggle"),
-                title,
-                Some(origins.len()),
-                open,
-                move |ui: &mut Ui| {
-                    let open = if blocked {
-                        &mut ui.connected.blocked
-                    } else {
-                        &mut ui.connected.allowed
-                    };
-                    *open = !*open;
-                },
-            ));
+        let mut group =
+            col()
+                .key(key)
+                .gap(METRICS.label_gap)
+                .child(super::super::general::disclosure(
+                    p,
+                    &format!("{key}-toggle"),
+                    title,
+                    Some(origins.len()),
+                    open,
+                    move |ui: &mut Ui| {
+                        let open = if blocked {
+                            &mut ui.connected.blocked
+                        } else {
+                            &mut ui.connected.allowed
+                        };
+                        *open = !*open;
+                    },
+                ));
         if open {
             let rows: Vec<El> = origins
                 .iter()
@@ -433,7 +451,7 @@ fn item(
         .label(said)
         .min_h(METRICS.row_h_described)
         .px(METRICS.row_px)
-        .py(10.0)
+        .py(8.0)
         .gap(12.0)
         .center_y()
         .child(icon)
@@ -485,7 +503,7 @@ fn footnote(key: &str, words: &str, p: Paint) -> El {
 mod tests {
     use rune::Runtime;
 
-    use super::super::{Request, Service, Ui, offscreen, poll, view};
+    use crate::rune_ui::{Request, Service, Ui, offscreen, poll, view};
 
     /// `name`'s scene, rendered tall enough to show the whole pane.
     fn scene(name: &str, _live: bool, size: (f32, f32)) -> Runtime<Ui> {
@@ -493,7 +511,7 @@ mod tests {
             crate::app_settings::AppSettings::default(),
             Service::Fixture(Vec::new()),
         );
-        let (_, apply) = super::super::SCENES
+        let (_, apply) = crate::rune_ui::SCENES
             .iter()
             .find(|(scene, _)| *scene == name)
             .unwrap_or_else(|| panic!("no scene {name}"));

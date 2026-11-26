@@ -278,8 +278,8 @@ the window's app failed (Linux) -> the same, at once
 
 The permission window's view is rendered offscreen by an ignored test
 (`HEX_CONSENT_SNAPS=<folder> cargo test --bin hex -- --ignored
-rune_ui::consent_window::tests::snapshots`), and its state, guard, keys, and
-answers are tested headless. On Linux the running app was driven under Xvfb
+rune_ui::labs::connected_apps::consent_window::tests::snapshots`), and its
+state, guard, keys, and answers are tested headless. On Linux the running app was driven under Xvfb
 (X11, lavapipe) with `curl` asks from an allowed origin and `xdotool` clicks:
 both asks showed centred with the main window closed, Allow Once during the
 guard did nothing, Deny answered `consent-denied` and hid it, and Allow

@@ -10,9 +10,9 @@ use std::sync::Arc;
 use rune::{El, Icon, el};
 use rune_theme_opencode::icons::MONITOR;
 
-use super::super::controls::Paint;
-use super::super::icons::{GLOBE, tile};
 use crate::local_api::{ConsentIcon, Recipient};
+use crate::rune_ui::controls::Paint;
+use crate::rune_ui::icons::{GLOBE, tile};
 
 /// How many decoded icons are kept before the memo starts over.
 const MAX_ICONS: usize = 64;

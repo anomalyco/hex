@@ -26,20 +26,18 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use rune::{Cx, El, Icon, TextStyle, Tx, col, el, row, spacer, text};
+use rune::{Cx, El, Icon, Tx, col, el, row, spacer, text};
 use rune_theme_opencode::icons::{CIRCLE_CHECK, OUTLINE_TEXT, SHIELD, WARNING};
 
-use super::controls::{ButtonKind, DESCRIPTION, Paint, state_button};
-use super::icons::{CLOCK, MIC, WAVE};
 use super::requester_icon::Icons;
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::local_api::{Answer, Intent, Prompt, Recipient, SandboxKind, Verification};
+use crate::rune_ui::controls::{ButtonKind, DESCRIPTION, MODAL, Paint, state_button};
+use crate::rune_ui::icons::{CLOCK, MIC, WAVE};
 
-/// The dialog's width and padding.
+/// The dialog's width; its edges keep a modal sheet's top clearance.
 const WIDTH: f32 = 440.0;
-const PADDING: f32 = 20.0;
-/// The question: one step above the kit's body type, as a dialog's title.
-const TITLE: TextStyle = TextStyle::new(17.0, 560.0).lh(22.0).tracking(-0.2);
+const EDGE: f32 = MODAL.top;
 /// The window: the dialog with room for its shadow. Only the dialog takes
 /// the pointer; the clear margin passes clicks through.
 pub(crate) const SIZE: (f32, f32) = (520.0, 620.0);
@@ -428,7 +426,7 @@ fn requester(p: Paint, icons: &Icons, recipient: &Recipient) -> El {
     copy = copy.child(
         row()
             .key("proof")
-            .gap(5.0)
+            .gap(4.0)
             .pt(4.0)
             .items_start()
             .child(
@@ -479,13 +477,13 @@ fn requester(p: Paint, icons: &Icons, recipient: &Recipient) -> El {
 }
 
 /// How the OS vouched for a requester, as the identity card's last line.
-pub(super) struct Proof {
-    pub(super) line: String,
-    pub(super) tone: ProofTone,
+pub(in crate::rune_ui) struct Proof {
+    pub(in crate::rune_ui) line: String,
+    pub(in crate::rune_ui) tone: ProofTone,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum ProofTone {
+pub(in crate::rune_ui) enum ProofTone {
     /// The OS verified it: a signature, or a sandbox's app id.
     Verified,
     /// Only the program's path, with no signature behind it.
@@ -496,7 +494,7 @@ pub(super) enum ProofTone {
 
 /// The line for each way the OS can verify a native app. The app id or path
 /// is already the card's title or the line under it, so it isn't repeated.
-pub(super) fn verified(verification: &Verification) -> Proof {
+pub(in crate::rune_ui) fn verified(verification: &Verification) -> Proof {
     let (line, tone) = match verification {
         Verification::MacSignature { team: Some(team) } => (
             tr_fill("Code signature verified · team {}", team),
@@ -538,7 +536,7 @@ fn gets(p: Paint, lines: Vec<(&'static Icon, String)>) -> El {
                 .key(format!("get{index}"))
                 .role("listitem")
                 .label(line.clone())
-                .gap(10.0)
+                .gap(8.0)
                 .center_y()
                 .child(
                     rune::icon(glyph, 16.0)
@@ -566,7 +564,7 @@ fn capability(p: Paint, ask: &Ask) -> El {
     let c = &p.k.c;
     row()
         .key("capability")
-        .gap(10.0)
+        .gap(8.0)
         .center_y()
         .child(
             el().key("capability-mark")
@@ -605,10 +603,9 @@ fn capability(p: Paint, ask: &Ask) -> El {
 fn footer(p: Paint, armed: bool) -> El {
     col()
         .key("footer-area")
-        .px(PADDING)
-        .pt(14.0)
-        .pb(14.0)
-        .gap(10.0)
+        .px(EDGE)
+        .py(12.0)
+        .gap(8.0)
         .fill(p.k.c.layer_01)
         .child(
             row()
@@ -687,7 +684,7 @@ fn dialog(p: Paint, icons: &Icons, prompt: &Prompt, armed: bool) -> El {
                 .key("title")
                 .role("heading")
                 .level(1)
-                .font(TITLE)
+                .font(p.display())
                 .color(p.text())
                 .wrap(),
         )
@@ -700,9 +697,9 @@ fn dialog(p: Paint, icons: &Icons, prompt: &Prompt, armed: bool) -> El {
         );
     let content = col()
         .key("content")
-        .pt(PADDING)
-        .px(PADDING)
-        .pb(18.0)
+        .pt(EDGE)
+        .px(EDGE)
+        .pb(MODAL.bottom)
         .gap(16.0)
         .child(capability(p, &ask))
         .child(question)

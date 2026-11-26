@@ -8,16 +8,16 @@
 
 use rune::{El, col, row, text};
 
-use super::Ui;
-use super::controls::{ButtonKind, Paint, button};
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::local_api::RecordPhase;
+use crate::rune_ui::Ui;
+use crate::rune_ui::controls::{ButtonKind, Paint, button};
 
 const WIDTH: f32 = 380.0;
 
 /// Brings the window forward when a client's recording starts (macOS), so
 /// Stop and Cancel are reachable; returns whether anything changed.
-pub(super) fn poll(ui: &mut Ui) -> bool {
+pub(in crate::rune_ui) fn poll(ui: &mut Ui) -> bool {
     let record = ui
         .view
         .as_ref()
@@ -35,7 +35,7 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
 }
 
 /// The card while a consented recording is live, if one is.
-pub(super) fn panel(ui: &Ui, p: Paint) -> Option<El> {
+pub(in crate::rune_ui) fn panel(ui: &Ui, p: Paint) -> Option<El> {
     let view = ui.view.as_ref()?.record.as_ref()?;
     let recording = match view.phase {
         RecordPhase::Recording => true,
@@ -75,7 +75,7 @@ pub(super) fn panel(ui: &Ui, p: Paint) -> Option<El> {
             |ui: &mut Ui, _| {
                 if let Some(view) = ui.view.as_ref().and_then(|view| view.record.as_ref()) {
                     let id = view.id;
-                    ui.send(super::Request::RecordControl { id, stop: true });
+                    ui.send(crate::rune_ui::Request::RecordControl { id, stop: true });
                 }
             },
         ));
@@ -88,7 +88,7 @@ pub(super) fn panel(ui: &Ui, p: Paint) -> Option<El> {
         |ui: &mut Ui, _| {
             if let Some(view) = ui.view.as_ref().and_then(|view| view.record.as_ref()) {
                 let id = view.id;
-                ui.send(super::Request::RecordControl { id, stop: false });
+                ui.send(crate::rune_ui::Request::RecordControl { id, stop: false });
             }
         },
     ));
@@ -97,7 +97,7 @@ pub(super) fn panel(ui: &Ui, p: Paint) -> Option<El> {
         .role("status")
         .label(title.clone())
         .w(WIDTH)
-        .px(14.0)
+        .px(12.0)
         .py(12.0)
         .gap(8.0)
         .radius(p.k.radius.lg)
@@ -115,7 +115,7 @@ pub(super) fn panel(ui: &Ui, p: Paint) -> Option<El> {
         .child(
             text(note)
                 .key("record-note")
-                .font(super::controls::DESCRIPTION)
+                .font(crate::rune_ui::controls::DESCRIPTION)
                 .color(p.muted())
                 .wrap(),
         )
