@@ -2583,7 +2583,7 @@ mod tests {
         rt.settle_all();
         rt.update(|capsule, tx| {
             if let State::Ready { stay, .. } = &mut capsule.state {
-                *stay = stay::Stay::new(Duration::from_millis(40));
+                *stay = stay::Stay::new(Duration::from_secs(5));
             }
             capsule.wake_for_stay(tx);
         });
@@ -2596,7 +2596,12 @@ mod tests {
             "early wake must re-arm until the stay expires"
         );
         // Once the stay has elapsed, the next frame wake dismisses the panel.
-        std::thread::sleep(Duration::from_millis(55));
+        rt.update(|capsule, _| {
+            if let State::Ready { stay, .. } = &mut capsule.state {
+                *stay = stay::Stay::new(Duration::from_millis(10));
+            }
+        });
+        std::thread::sleep(Duration::from_millis(25));
         rt.frame(1.055);
         assert!(!rt.state.is_shown());
     }
