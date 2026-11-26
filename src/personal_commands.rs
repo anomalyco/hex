@@ -90,8 +90,8 @@ const BUILTIN_TRANSFORMATIONS: &[BuiltinTransformation] = &[
     },
     BuiltinTransformation {
         id: NO_TRAILING_PUNCTUATION_TRANSFORMATION_ID,
-        name: "No trailing punctuation",
-        description: "Remove punctuation at the end of the text",
+        name: "No final period",
+        description: "Remove the final period, keeping ? and !",
         apply: remove_trailing_punctuation,
     },
 ];
@@ -939,16 +939,19 @@ fn spongebob_case(text: &str) -> String {
     output
 }
 
-// Sentence marks only. Closing quotes and brackets stay so a dictated
-// quotation or parenthetical keeps its pairing intact.
+// Full stops and pauses only. A question mark, an exclamation mark, or an
+// ellipsis changes what a message says, so those stay, and so do closing
+// quotes and brackets, keeping a dictated quotation or parenthetical paired.
 const TRAILING_PUNCTUATION: &[char] = &[
-    '.', ',', '!', '?', ';', ':', '\u{2026}', '\u{3002}', '\u{ff01}', '\u{ff1f}', '\u{3001}',
-    '\u{ff0c}', '\u{ff1b}', '\u{ff1a}',
+    '.', ',', ';', ':', '\u{3002}', '\u{3001}', '\u{ff0c}', '\u{ff1b}', '\u{ff1a}',
 ];
 
 fn remove_trailing_punctuation(text: &str) -> String {
     let body = text.trim_end();
     let trailing_whitespace = &text[body.len()..];
+    if body.ends_with("...") {
+        return text.to_string();
+    }
     let mut output = body.trim_end_matches(TRAILING_PUNCTUATION).to_string();
     output.push_str(trailing_whitespace);
     output
@@ -1262,10 +1265,25 @@ mod tests {
             remove_trailing_punctuation("The quick, brown fox jumped over the lazy dog."),
             "The quick, brown fox jumped over the lazy dog"
         );
-        assert_eq!(remove_trailing_punctuation("Wait, what?!…"), "Wait, what");
         assert_eq!(remove_trailing_punctuation("好的。"), "好的");
         assert_eq!(remove_trailing_punctuation("你好："), "你好");
         assert_eq!(remove_trailing_punctuation("你好；"), "你好");
+    }
+
+    #[test]
+    fn no_trailing_punctuation_keeps_questions_exclamations_and_ellipses() {
+        for input in [
+            "Are you coming?",
+            "Ship it!",
+            "Wait, what?!",
+            "你好？",
+            "太好了！",
+            "Well…",
+            "Well...",
+        ] {
+            assert_eq!(remove_trailing_punctuation(input), input);
+        }
+        assert_eq!(remove_trailing_punctuation("Really?."), "Really?");
     }
 
     #[test]
@@ -1280,7 +1298,7 @@ mod tests {
         assert_eq!(remove_trailing_punctuation("Good dog. "), "Good dog ");
         assert_eq!(remove_trailing_punctuation("   "), "   ");
         assert_eq!(remove_trailing_punctuation(""), "");
-        assert_eq!(remove_trailing_punctuation("..."), "");
+        assert_eq!(remove_trailing_punctuation("..."), "...");
     }
 
     #[test]
@@ -1361,7 +1379,7 @@ mod tests {
             ]
         );
         assert_eq!(status.transformations[0].name, "Lowercase");
-        assert_eq!(status.transformations[2].name, "No trailing punctuation");
+        assert_eq!(status.transformations[2].name, "No final period");
     }
 
     #[test]

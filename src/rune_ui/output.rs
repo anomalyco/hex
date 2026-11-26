@@ -175,7 +175,10 @@ fn steps(ui: &Ui, mode: &DictationMode) -> Vec<Step> {
 fn builtin(id: &str) -> Option<(&'static str, &'static str)> {
     match id {
         "lowercase" => Some((tr("Lowercase"), tr("Lowercases everything"))),
-        "no-trailing-punctuation" => Some((tr("No final period"), tr("Drops the last . ! or ?"))),
+        "no-trailing-punctuation" => Some((
+            tr("No final period"),
+            tr("Drops the final period, keeps ? and !"),
+        )),
         "spongebob-case" => Some((tr("SpongeBob case"), tr("aLtErNaTeS every letter"))),
         _ => None,
     }

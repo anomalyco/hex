@@ -500,7 +500,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Lowercase", "Minúsculas"),
     ("Lowercases everything", "Deixa tudo em minúsculas"),
     ("No final period", "Sem ponto final"),
-    ("Drops the last . ! or ?", "Remove o último . ! ou ?"),
+    ("Drops the final period, keeps ? and !", "Remove o ponto final, mantém ? e !"),
     ("SpongeBob case", "Estilo Bob Esponja"),
     ("aLtErNaTeS every letter", "aLtErNa cada letra"),
     ("Copied. Paste it into your agent and say what you want", "Copiado. Cole no seu agente e diga o que você quer"),

@@ -492,7 +492,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Lowercase", "Kisbetűs"),
     ("Lowercases everything", "Minden betűt kisbetűssé alakít"),
     ("No final period", "Nincs záró pont"),
-    ("Drops the last . ! or ?", "Eltávolítja a záró . ! vagy ? jelet"),
+    ("Drops the final period, keeps ? and !", "Eltávolítja a záró pontot, a ? és ! marad"),
     ("SpongeBob case", "SpongeBob-írásmód"),
     ("aLtErNaTeS every letter", "mInDeN bEtŰt VáLtOgAt"),
     ("Copied. Paste it into your agent and say what you want", "Kimásolva. Illessze be az ügynökébe, és mondja el, mit szeretne"),
