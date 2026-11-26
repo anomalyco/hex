@@ -10,7 +10,8 @@ and every `--snap-state` scene the app and the keyboard render.
 Home fits one screen: the
 Hex header, one status line ("Ready" with a check, or "Finish setup · 1 step ›"),
 Dictate, and four rows that each open a short page, then **iOS Settings ↗**
-(Hex's page in iOS Settings) and **Run setup again**, and last **Privacy
+(Hex's page in iOS Settings), **Run setup again** and **What's new** (see
+[What's new](#whats-new)), and last **Privacy
 policy**, **Support**, **Send feedback** (only in a build with a report key; see
 [Send feedback](#send-feedback)) and **Acknowledgements**. Privacy policy (App Review
 5.1.1(i)) and Support open in Safari inside Hex (`HexLinks`, one base URL:
@@ -71,7 +72,7 @@ list starts at the top. The pages, one file each in `HEXMobile/Settings/`
   shortcodes and Learn each language separately. 21 switches, 20 on an iPhone that doesn't fold.
   Last, **Send feedback**, for testers to say how an experiment went (only with a report key).
 
-Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
+Simulator scenes: `--snap-state settings-home` (ready), `settings-whats-new` (Home with What's new open), `setup` (keyboard
 added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
 (before iOS has asked for the microphone), and
 `settings-<dictation|keyboard|privacy|experiments>[-on][-end]`, and
@@ -90,6 +91,48 @@ pressed and held states, the key pop-ups and the labels), the same in light and 
 background stays iOS's glass, matching the band iOS draws above a third-party keyboard and
 the globe row below it, and the strip, emoji panel, menus and dictation bar keep the system
 look.
+
+## What's new (`HEXMobile/WhatsNew/`)
+
+A sheet over Home, at full height with a grab bar: "What's new in Hex", then the release's
+items one under another, each a picture from the real app over a name and one sentence, and
+**Continue** kept at the bottom. Continue or swiping the sheet down closes it. Home's
+**What's new** row (under Run setup again) opens the same sheet any time.
+
+When it shows by itself (`WhatsNew`, `WhatsNewMoment`):
+
+- Each list belongs to the App Store version that brings it (`WhatsNew.releases`, newest
+  first). A build shows the newest list at or below its `CFBundleShortVersionString`, so
+  TestFlight's 9.0.0 shows the newest list too, once. A version without a list of its own
+  shows nothing new: the last list has shown by then.
+- Once: the list is marked seen (`whatsNew.seen` in Hex's own `UserDefaults`, the list's
+  version) as it appears. A lock or a quit part-way doesn't bring it back.
+- Never on a first run: when onboarding opened at launch (a new install, or setup left
+  part-way), the current list is marked seen as Home first shows after it. Someone
+  updating has `onboarding.completed`, so the list is due.
+- Only on a plain open, over Home itself: it waits 1 s after Hex comes to the front, then
+  shows only if no link opened Hex since it was last in the background (the keyboard's
+  hand-off or Open Hex, a Hex words file, setup), no setup sheet, Settings page or other
+  sheet is showing, nothing is recording or transcribing, Hex isn't asking for the
+  microphone and Hex is active. Otherwise it waits for the next open.
+- The keyboard never reads or shows it, and it downloads nothing.
+
+A release with something new adds one `WhatsNewRelease` at the top of `WhatsNew.releases`
+(its version, then each item's picture name, name, sentence and VoiceOver label, with
+Simplified Chinese in `Localizable.xcstrings`) and its pictures in
+`Assets.xcassets/WhatsNew/<name>.imageset`. Pictures are crops of real simulator
+screenshots, never drawn: dark (Hex is always dark), one JPEG at 3× (quality 82, 1206 px
+wide on an iPhone 18 Pro), with a `zh-Hans` variant where the picture shows Hex's own words.
+1.0.5's eight files are 336 KB. The 1.0.5 crops, from iPhone 18 Pro screenshots (1206 × 2622):
+
+| Picture | Scene | Crop (w×h+x+y) |
+| --- | --- | --- |
+| `languages` | `full-keyboard-typing-dark --keyboard-layout sv --dictation-language sv-SE` | 1206x800+0+1766 |
+| `emoji` | `full-keyboard-emoji-word-dark` (debug builds) | 1206x470+0+1766 |
+| `replacements` | Settings › Dictation › Custom vocabulary › Word replacements, three entries added by hand | 1206x530+0+1030 |
+| `kept` (and `zh-Hans`) | `full-keyboard-strip-stopped-dark` (debug builds) | 1206x470+0+1766 |
+| `key-colors` | `full-keyboard-typing-dark --experiment-keyboard-themes --keyboard-theme burgundy` | 1206x800+0+1766 |
+| `feedback` (and `zh-Hans`) | Home › Send feedback with Idea picked (a message typed in English) | 1206x780+0+250 |
 
 ## Send feedback (`HEXMobile/Feedback/`)
 

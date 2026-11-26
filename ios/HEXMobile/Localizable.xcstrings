@@ -6286,6 +6286,176 @@
           }
         }
       }
+    },
+    "What's new in Hex" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 新功能"
+          }
+        }
+      }
+    },
+    "What's new" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新功能"
+          }
+        }
+      }
+    },
+    "Dutch, Swedish and Slovak" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "荷兰语、瑞典语和斯洛伐克语"
+          }
+        }
+      }
+    },
+    "Add one in Keyboard › Languages to type with its own letters, like å, ä and ö." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在“键盘”›“语言”中添加，就能用它自己的字母打字，比如 å、ä 和 ö。"
+          }
+        }
+      }
+    },
+    "Hex's Swedish keyboard, with the keys å, ä and ö." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 的瑞典语键盘，带有 å、ä 和 ö 键。"
+          }
+        }
+      }
+    },
+    "Emoji as you type" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "边打字边出表情符号"
+          }
+        }
+      }
+    },
+    "Type a word like “smile” and tap the 😊 above the keys to put it in its place." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入“smile”这样的词，轻点按键上方的 😊，就能用它替换这个词。"
+          }
+        }
+      }
+    },
+    "The keyboard offering 😊 above the keys while “smile” is typed." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入“smile”时，键盘在按键上方推荐 😊。"
+          }
+        }
+      }
+    },
+    "In Dictation › Custom vocabulary, tell Hex to write “GitHub” when it hears “jet hub”, and share your list as a file." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在“听写”›“自定词汇”中，让 Hex 听到“jet hub”时写成“GitHub”，还能把列表分享为文件。"
+          }
+        }
+      }
+    },
+    "Word replacements, with “jet hub” written as “GitHub”." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "词语替换：“jet hub”写成“GitHub”。"
+          }
+        }
+      }
+    },
+    "Kept when the screen locks" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "锁屏也不会丢"
+          }
+        }
+      }
+    },
+    "If your iPhone locks mid-dictation, what you said is kept: tap Paste in the keyboard to put it in." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "听写中途 iPhone 锁屏时，你说过的话会被保留：在键盘上轻点“粘贴”即可放进去。"
+          }
+        }
+      }
+    },
+    "The keyboard saying the dictation stopped at 0:44, with Paste." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "键盘提示听写在 0:44 处停止，并提供“粘贴”。"
+          }
+        }
+      }
+    },
+    "Turn on Key colors in Labs, which used to be Experiments, and pick a color for the keys." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在“实验室”（原“实验”）中打开“按键颜色”，为按键选一种颜色。"
+          }
+        }
+      }
+    },
+    "Hex's keyboard with burgundy keys." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按键为勃艮第红的 Hex 键盘。"
+          }
+        }
+      }
+    },
+    "Tap Send feedback at the bottom of Home to tell us what to fix or add, with a screenshot if it helps." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在主页底部轻点“发送反馈”，告诉我们哪里要修、想加什么，需要时可附上截图。"
+          }
+        }
+      }
+    },
+    "The Send feedback form." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“发送反馈”表单。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
