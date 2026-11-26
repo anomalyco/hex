@@ -33,6 +33,7 @@ import androidx.autofill.inline.common.ViewStyle
 import androidx.autofill.inline.v1.InlineSuggestionUi
 import androidx.core.content.ContextCompat
 import kotlin.math.roundToInt
+import ly.anoma.hex.BuildConfig
 import ly.anoma.hex.MainActivity
 import ly.anoma.hex.R
 import ly.anoma.hex.diagnostics.Diagnostics
@@ -327,7 +328,7 @@ class HexKeyboard : InputMethodService() {
         view?.status(capture.phase, idleHint())
         // Hex Preview's update line (Play builds have none); never in a password field.
         Updates.keyboardShown(this, engine.secure) { view?.notice(it) }
-        Diagnostics.keyboardShown(this, info.packageName, engine.secure) { view?.notice(it) }
+        if (BuildConfig.DIAGNOSTICS) Diagnostics.keyboardShown(this, info.packageName, engine.secure) { view?.notice(it) }
         viewing = true
         watchClipboard()
         offerKept()
