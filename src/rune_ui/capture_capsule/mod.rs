@@ -620,10 +620,20 @@ impl CapsuleState {
     }
 
     /// The pointer moved on the capsule: typing over its suggestions may
-    /// search now, so the tap's keys change at once.
+    /// search now, so the tap's keys change at once, and a countdown under
+    /// it holds.
     fn pointer_moved(&mut self, tx: &mut Tx) {
-        if self.flow.pointer_moved() {
+        let now = self.now;
+        let moved = self.flow.pointer_moved(now);
+        if moved.keys {
             take_keys(self);
+        }
+        if moved.held {
+            self.dispatch(moved.actions);
+            self.present(now);
+            self.live.sync(&self.surface);
+        }
+        if moved.keys || moved.held {
             tx.wake_after(Duration::ZERO);
         } else {
             tx.live_only();
