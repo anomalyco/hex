@@ -100,15 +100,17 @@ fn view(doc: &Doc, cx: &mut Cx<Doc>) -> El {
             .color(p.text()),
         );
     if !doc.rows.is_empty() {
+        let rows = doc.rows.clone().into();
         page = page.child(view::card(
             &Shown {
-                rows: &doc.rows,
+                rows: &rows,
                 cursor: 0,
                 now: NOW,
                 trigger: &[],
             },
+            doc,
             p,
-            &|_, _| None,
+            |_: &Doc, _: &Path, _| None,
             // Row 1 is not the selection, so its click only selects on the
             // picker; here every click chooses, as the picker's Paste does.
             |doc: &mut Doc, act, _| {

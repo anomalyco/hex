@@ -38,6 +38,8 @@ mod stop_phrase;
 use capture_actions::{control_dictation, handle_hotkey_action, paste_last};
 use context_watch::ContextWatch;
 use events::handle_dictation_event;
+#[cfg(hex_capture)]
+use guards::paste_picker_paused;
 use guards::{
     Release, WarmRelease, caps_lock_can_press, capture_boundary, capture_owns_dictation,
     capture_refusal, paste_last_refusal,
@@ -931,6 +933,11 @@ pub fn listen(
                 crate::labs::dictate_while_annotating(),
             ) {
                 hotkeys.track_key_state(input_event, capture_at);
+                if let Err(error) =
+                    paste_lab.press_over_capture(input_event, capture_at, &dictation_worker)
+                {
+                    events.dictation(DictationPhase::Failed(error.into()), "")?;
+                }
                 continue;
             }
             for (shortcut, action) in hotkeys.process(input_event, capture_at) {
@@ -1014,10 +1021,11 @@ pub fn listen(
         #[cfg(hex_capture)]
         if let Some(picker) = paste_lab.picker()
             && let Err(error) = picker.tick(
-                hotkey_capture_suspended
-                    || programmatic.is_some()
-                    || hotkeys.any_recording()
-                    || capture_was_recording,
+                paste_picker_paused(
+                    hotkey_capture_suspended,
+                    programmatic.is_some(),
+                    hotkeys.any_recording(),
+                ),
                 &dictation_worker,
             )
         {
@@ -2034,6 +2042,19 @@ mod tests {
         assert_eq!(code(Some(FinishResult::Silent)), "discarded");
         assert_eq!(code(None), "discarded");
         assert_eq!(code(Some(FinishResult::Rejected("full".into()))), "failed");
+    }
+
+    /// Paste Last's picker stands down for a suspension, a programmatic
+    /// dictation, or a shortcut dictation, and for nothing else: an Annotate
+    /// capture or a meeting recording isn't even an input, so a tap or a hold
+    /// works over either and leaves it recording.
+    #[cfg(hex_capture)]
+    #[test]
+    fn the_paste_picker_works_over_annotate_and_meetings() {
+        assert!(!paste_picker_paused(false, false, false));
+        assert!(paste_picker_paused(true, false, false));
+        assert!(paste_picker_paused(false, true, false));
+        assert!(paste_picker_paused(false, false, true));
     }
 
     #[test]

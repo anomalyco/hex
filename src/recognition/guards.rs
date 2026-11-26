@@ -54,6 +54,20 @@ pub(super) fn paste_last_refusal(capture_active: bool) -> Option<ControlReply> {
     })
 }
 
+/// Whether Paste Last's picker stands down (closing one that is open):
+/// shortcuts are suspended, a programmatic dictation holds the keys, or a
+/// shortcut dictation records. An Annotate capture or a meeting recording
+/// never does: neither owns the paste target, so a tap or a hold works
+/// over either and neither stops.
+#[cfg(hex_capture)]
+pub(super) fn paste_picker_paused(
+    shortcuts_suspended: bool,
+    programmatic: bool,
+    dictation_recording: bool,
+) -> bool {
+    shortcuts_suspended || programmatic || dictation_recording
+}
+
 /// The instant a shortcut edge applies to. A capture pressed while the
 /// microphone was released has no authoritative timeline yet, so its edge
 /// uses wall-clock time instead.

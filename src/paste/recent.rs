@@ -123,17 +123,28 @@ pub(crate) fn enabled() -> bool {
     crate::labs::paste_last_picker()
 }
 
-pub(crate) fn current_rows(history: &History) -> Vec<Entry> {
+/// The rows the picker opens on: more than its card shows at once, so the
+/// first scroll has somewhere to go while the deep list is read.
+pub(crate) const FIRST: usize = 16;
+/// The rows it scrolls through once the deep list is read: each capture
+/// among them is a manifest read, so this is read after the picker opens.
+pub(crate) const DEEP: usize = 300;
+
+/// The newest `limit` rows with their previews.
+pub(crate) fn current_rows(history: &History, limit: usize) -> Vec<Entry> {
     let settings = crate::app_settings::capture_settings();
     let roots = settings.enabled.then(|| settings.annotation_roots());
     let scope = roots
         .as_deref()
         .map(|r| Scope::in_roots(r, settings.bundle_days));
-    let now = crate::history::now_ms();
-    snapshot(history, scope.as_ref(), 8, now)
+    rows(history, scope.as_ref(), limit, crate::history::now_ms())
+}
+
+fn rows(history: &History, scope: Option<&Scope<'_>>, limit: usize, now: u64) -> Vec<Entry> {
+    snapshot(history, scope, limit, now)
         .into_iter()
         .map(|row| Entry {
-            detail: detail(history, scope.as_ref(), &row, now),
+            detail: detail(history, scope, &row, now),
             row,
         })
         .collect()
@@ -255,6 +266,56 @@ mod tests {
             latest(&history, Some(&scope), 20),
             Some(picker[1].id.clone())
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The picker opens on the first rows and scrolls through the deep list:
+    /// far more than the card's eight, newest first, each with its whole
+    /// text, the first rows the same items in the same order.
+    #[test]
+    fn the_first_rows_open_and_the_deep_list_reaches_far_back() {
+        let root = std::env::temp_dir().join(format!("hex-paste-deep-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir(&root).unwrap();
+        let mut store = HistoryStore::open(root.join("history.json"), HistoryRetention::Week, 0);
+        for i in 0..400u64 {
+            let text = format!("note {i}: {}", "words ".repeat(40));
+            store
+                .record(
+                    HistoryDraft {
+                        kind: HistoryKind::Dictation,
+                        raw_text: text.clone(),
+                        final_text: text,
+                        application: None,
+                        processing: None,
+                        audio_ms: 0,
+                        inference_ms: 0,
+                        total_ms: 0,
+                        recording: None,
+                        model: None,
+                    },
+                    1_000 + i,
+                )
+                .unwrap();
+        }
+        let history = History::new(store);
+        let now = 10_000;
+        let started = std::time::Instant::now();
+        let first = rows(&history, None, FIRST, now);
+        let opened = started.elapsed();
+        let deep = rows(&history, None, DEEP, now);
+        assert_eq!(first.len(), FIRST);
+        assert_eq!(deep.len(), DEEP);
+        const _: () = assert!(FIRST > 8 && DEEP > FIRST);
+        let ids = |rows: &[Entry]| rows.iter().map(|e| e.row.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&deep[..FIRST]), ids(&first));
+        assert!(deep[0].detail.text.starts_with("note 399:"));
+        assert!(deep[DEEP - 1].detail.text.starts_with("note 100:"));
+        assert!(
+            deep.iter()
+                .all(|e| e.detail.text.len() > 100 && e.row.preview.len() <= 100)
+        );
+        eprintln!("first {FIRST} rows of 400 read in {opened:?}");
         fs::remove_dir_all(root).unwrap();
     }
 

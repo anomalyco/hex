@@ -1,12 +1,15 @@
 //! The picker's card: recent rows down a rail, each led by its picture or a
 //! dictation's mark, and the selected row's preview beside them: a capture's
 //! picture over its words, or a dictation's whole text, with Copy and Paste
-//! (and, for a capture, Open in Editor). The card states what it draws; its
+//! (and, for a capture, Open in Editor). The rail scrolls through the whole
+//! list, building only the rows it shows. The card states what it draws; its
 //! owner decides what each [`Act`] does.
 
+use std::borrow::Cow;
 use std::path::Path;
+use std::sync::Arc;
 
-use rune::{Cursor, El, ScrollSpec, SurfaceFit, Tx, col, el, icon, row, text};
+use rune::{Cursor, El, GrowthSpec, ScrollSpec, SurfaceFit, Tx, col, el, icon, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize};
 
 use crate::desktop::i18n::{event_age_at, tr};
@@ -14,15 +17,24 @@ use crate::paste::recent::{Entry, Id};
 use crate::rune_ui::controls::{CAPSULE, METRICS, Paint, PushSize};
 use crate::rune_ui::screenshot_thumbnail::editor::clip::duration_label;
 
+use super::wheel;
+
 static DICTATION_ICON: &rune::Icon = &rune_theme_opencode::icons::WAVEFORM;
 static PICTURE_ICON: &rune::Icon = &rune_theme_opencode::icons::OUTLINE_PHOTO;
 
 pub(super) const CARD_W: f32 = 720.0;
 const RAIL_W: f32 = 300.0;
-/// The rows a picker lists at most: the card is this tall whatever it holds,
-/// so the preview never moves as the selection does.
-const ROWS: f32 = 8.0;
-const BODY_H: f32 = 2.0 * CAPSULE.row_inset + ROWS * METRICS.row_h + (ROWS - 1.0) * CAPSULE.row_gap;
+/// The rows the rail shows at once, the rest scrolling: the card is this
+/// tall whatever it holds, so the preview never moves as the selection does.
+pub(super) const ROWS: usize = 8;
+const BODY_H: f32 =
+    2.0 * CAPSULE.row_inset + ROWS as f32 * METRICS.row_h + (ROWS as f32 - 1.0) * CAPSULE.row_gap;
+/// A row and the gap below it.
+const STEP: f32 = METRICS.row_h + CAPSULE.row_gap;
+/// The rail's scroll.
+pub(super) const RAIL: &str = "paste-rail";
+/// A dictation's whole text, scrolling in the preview.
+const WORDS: &str = "paste-words-scroll";
 /// A row's picture, the shape of a display.
 pub(super) const LEAD: (f32, f32) = (40.0, 28.0);
 /// The preview's text edge to text edge: a 16:10 capture fills it.
@@ -60,9 +72,61 @@ pub(super) enum Act {
     History,
 }
 
+/// Row `i`'s key: its place in this invocation's list, which never changes
+/// while the picker is open.
+pub(super) fn row_name(i: usize) -> String {
+    format!("paste-row-{i}")
+}
+
+fn row_key<S>(_: &S, i: usize) -> Cow<'_, str> {
+    row_name(i).into()
+}
+
+/// How the rail follows the selection: from its top when the picker opens
+/// (the selection is then among the first rows, or revealed), and just far
+/// enough to show a row the keys moved to.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum Reveal {
+    Top,
+    Row(usize),
+    Stay,
+}
+
+pub(super) fn reveal(opened: bool, was: usize, cursor: usize, rows: usize) -> Reveal {
+    let selected = cursor < rows;
+    if opened {
+        if selected && cursor >= ROWS {
+            Reveal::Row(cursor)
+        } else {
+            Reveal::Top
+        }
+    } else if selected && cursor != was {
+        Reveal::Row(cursor)
+    } else {
+        Reveal::Stay
+    }
+}
+
+/// Moves the rail as `reveal` says.
+pub(super) fn follow(tx: &mut Tx, reveal: Reveal) {
+    match reveal {
+        Reveal::Top => tx.scroll_to_y(RAIL, 0.0),
+        Reveal::Row(i) => tx.scroll_into_view_in(RAIL, row_name(i)),
+        Reveal::Stay => {}
+    }
+}
+
+/// A picture source the rail's rows can keep: they're built as they scroll
+/// in, from the window's state.
+pub(super) trait Pixels<S>:
+    Fn(&S, &Path, Size) -> Option<rune::Pixels> + Copy + 'static
+{
+}
+impl<S, F: Fn(&S, &Path, Size) -> Option<rune::Pixels> + Copy + 'static> Pixels<S> for F {}
+
 /// What the card draws.
 pub(super) struct Shown<'a> {
-    pub rows: &'a [Entry],
+    pub rows: &'a Arc<[Entry]>,
     pub cursor: usize,
     pub now: u64,
     /// Paste Last's keycaps.
@@ -73,8 +137,9 @@ pub(super) struct Shown<'a> {
 /// picker when pressed outside it.
 pub(super) fn stage<S: 'static>(
     shown: &Shown,
+    s: &S,
     p: Paint,
-    pixels: &dyn Fn(&Path, Size) -> Option<rune::Pixels>,
+    pixels: impl Pixels<S>,
     act: impl Fn(&mut S, Act, &mut Tx) + Copy + 'static,
 ) -> El {
     col()
@@ -85,16 +150,18 @@ pub(super) fn stage<S: 'static>(
         .center()
         .hit()
         .on_press_tx(move |s: &mut S, tx| act(s, Act::Dismiss, tx))
-        .child(card(shown, p, pixels, act))
+        .child(card(shown, s, p, pixels, act))
 }
 
 pub(super) fn card<S: 'static>(
     shown: &Shown,
+    s: &S,
     p: Paint,
-    pixels: &dyn Fn(&Path, Size) -> Option<rune::Pixels>,
+    pixels: impl Pixels<S>,
     act: impl Fn(&mut S, Act, &mut Tx) + Copy + 'static,
 ) -> El {
     let c = &p.k.c;
+    let look = |path: &Path, size| pixels(s, path, size);
     let body = if shown.rows.is_empty() {
         row().key("paste-body").h(BODY_H).center().child(
             text(tr("Nothing here yet"))
@@ -108,7 +175,7 @@ pub(super) fn card<S: 'static>(
             .h(BODY_H)
             .child(rail(shown, p, pixels, act))
             .child(el().w(p.hair).h_full().fill(c.border_weak))
-            .child(preview(shown, p, pixels, act))
+            .child(preview(shown, p, &look, act))
     };
     let mut panel = col()
         .key("paste-card")
@@ -134,86 +201,120 @@ pub(super) fn card<S: 'static>(
     panel
 }
 
-/// The recent rows.
+/// The recent rows, all of them, scrolling: only the rows in view (and a
+/// little either side) are built, so a deep list opens as fast as a short
+/// one and asks for only the pictures it shows.
 fn rail<S: 'static>(
     shown: &Shown,
+    p: Paint,
+    pixels: impl Pixels<S>,
+    act: impl Fn(&mut S, Act, &mut Tx) + Copy + 'static,
+) -> El {
+    let rows = shown.rows.clone();
+    let (cursor, now, count) = (shown.cursor, shown.now, shown.rows.len());
+    let list = col()
+        .key("paste-rows")
+        .role("list")
+        .w_full()
+        .padding(CAPSULE.row_inset)
+        .growth(GrowthSpec::default())
+        .virtual_rows(count, STEP, row_key::<S>, move |s: &S, i| {
+            let line = line(
+                &rows[i],
+                i == cursor,
+                now,
+                p,
+                &|path, size| pixels(s, path, size),
+                act,
+            );
+            // The gap below each row but the last, inside it, so every row
+            // stands one step below the one before.
+            let gap = if i + 1 < count { CAPSULE.row_gap } else { 0.0 };
+            col().w_full().pb(gap).child(line)
+        });
+    let viewport = col()
+        .key(RAIL)
+        .w(RAIL_W)
+        .h_full()
+        .min_h(0.0)
+        .scroll(ScrollSpec {
+            stick_bottom: false,
+        });
+    wheel::vertical::<S>(viewport, RAIL).child(list)
+}
+
+/// One row: its lead, its first words, and its kind and age. A press
+/// selects it by its frozen identity, never its place.
+fn line<S: 'static>(
+    entry: &Entry,
+    selected: bool,
+    now: u64,
     p: Paint,
     pixels: &dyn Fn(&Path, Size) -> Option<rune::Pixels>,
     act: impl Fn(&mut S, Act, &mut Tx) + Copy + 'static,
 ) -> El {
     let c = &p.k.c;
-    let mut list = col()
-        .key("paste-rows")
-        .role("list")
-        .w(RAIL_W)
-        .padding(CAPSULE.row_inset)
-        .gap(CAPSULE.row_gap);
-    for (i, entry) in shown.rows.iter().enumerate() {
-        let kind = match &entry.row.id {
-            Id::Capture(_) => tr("Annotation"),
-            Id::Dictation(_) if entry.row.cancelled => tr("Cancelled"),
-            Id::Dictation(_) if entry.detail.raw => tr("Raw"),
-            Id::Dictation(_) => tr("Dictation"),
-        };
-        let meta = format!("{kind} · {}", event_age_at(entry.row.ready_at, shown.now));
-        let title = entry.row.preview.split_whitespace().collect::<Vec<_>>();
-        let title = if title.is_empty() {
-            kind.to_owned()
-        } else {
-            title.join(" ")
-        };
-        let mut line = row()
-            .key(format!("paste-row-{i}"))
-            .role("listitem")
-            .label(title.clone())
-            .description(meta.clone())
-            .h(METRICS.row_h)
-            .px(CAPSULE.row_px)
-            .gap(12.0)
-            .center_y()
-            .radius(p.k.radius.lg)
-            .child(lead(p, entry, pixels))
-            .child(
-                col()
-                    .key("words")
-                    .gap(2.0)
-                    .grow(1.0)
-                    .shrink()
-                    .min_w(0.0)
-                    .child(
-                        text(title)
-                            .key("title")
-                            .font(p.strong())
-                            .color(p.text())
-                            .truncate()
-                            .a11y_hidden(),
-                    )
-                    .child(
-                        text(meta)
-                            .key("meta")
-                            .font(p.tabular(p.meta()))
-                            .color(if entry.row.cancelled {
-                                p.faint()
-                            } else {
-                                p.muted()
-                            })
-                            .truncate()
-                            .a11y_hidden(),
-                    ),
-            );
-        if i == shown.cursor {
-            line = line.fill(c.layer_02);
-        }
-        let id = entry.row.id.clone();
-        list = list.child(
-            line.hover(c.hover)
-                .press(c.pressed)
-                .hit()
-                .focusable(false)
-                .on_press_tx(move |s: &mut S, tx| act(s, Act::Select(id.clone()), tx)),
+    let kind = match &entry.row.id {
+        Id::Capture(_) => tr("Annotation"),
+        Id::Dictation(_) if entry.row.cancelled => tr("Cancelled"),
+        Id::Dictation(_) if entry.detail.raw => tr("Raw"),
+        Id::Dictation(_) => tr("Dictation"),
+    };
+    let meta = format!("{kind} · {}", event_age_at(entry.row.ready_at, now));
+    let title = entry.row.preview.split_whitespace().collect::<Vec<_>>();
+    let title = if title.is_empty() {
+        kind.to_owned()
+    } else {
+        title.join(" ")
+    };
+    let mut line = row()
+        .key("paste-line")
+        .role("listitem")
+        .label(title.clone())
+        .description(meta.clone())
+        .h(METRICS.row_h)
+        .px(CAPSULE.row_px)
+        .gap(12.0)
+        .center_y()
+        .radius(p.k.radius.lg)
+        .child(lead(p, entry, pixels))
+        .child(
+            col()
+                .key("words")
+                .gap(2.0)
+                .grow(1.0)
+                .shrink()
+                .min_w(0.0)
+                .child(
+                    text(title)
+                        .key("title")
+                        .font(p.strong())
+                        .color(p.text())
+                        .truncate()
+                        .a11y_hidden(),
+                )
+                .child(
+                    text(meta)
+                        .key("meta")
+                        .font(p.tabular(p.meta()))
+                        .color(if entry.row.cancelled {
+                            p.faint()
+                        } else {
+                            p.muted()
+                        })
+                        .truncate()
+                        .a11y_hidden(),
+                ),
         );
+    if selected {
+        line = line.fill(c.layer_02);
     }
-    list
+    let id = entry.row.id.clone();
+    line.hover(c.hover)
+        .press(c.pressed)
+        .hit()
+        .focusable(false)
+        .on_press_tx(move |s: &mut S, tx| act(s, Act::Select(id.clone()), tx))
 }
 
 /// What leads a row: a capture's picture, or a dictation's mark on a tile
@@ -294,22 +395,25 @@ fn preview<S: 'static>(
         // The whole text; one longer than the pane scrolls.
         Id::Dictation(_) => pane
             .child(
-                col()
-                    .key("paste-words-scroll")
-                    .w_full()
-                    .grow(1.0)
-                    .shrink()
-                    .min_h(0.0)
-                    .scroll(ScrollSpec {
-                        stick_bottom: false,
-                    })
-                    .child(
-                        text(entry.detail.text.clone())
-                            .key("paste-words")
-                            .font(p.k.ty.body)
-                            .color(p.text())
-                            .wrap(),
-                    ),
+                wheel::vertical::<S>(
+                    col()
+                        .key(WORDS)
+                        .w_full()
+                        .grow(1.0)
+                        .shrink()
+                        .min_h(0.0)
+                        .scroll(ScrollSpec {
+                            stick_bottom: false,
+                        }),
+                    WORDS,
+                )
+                .child(
+                    text(entry.detail.text.clone())
+                        .key("paste-words")
+                        .font(p.k.ty.body)
+                        .color(p.text())
+                        .wrap(),
+                ),
             )
             .child(actions(shown, p, entry, act)),
     }
