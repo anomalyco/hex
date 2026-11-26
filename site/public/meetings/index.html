@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hex Meetings · Put your agent on the call</title>
+<meta name="description" content="Hex sees the call and offers to record it. It writes the transcript on your Mac while you talk, and Copy agent prompt hands it to your coding agent, which keeps reading as the call goes on.">
+<meta name="color-scheme" content="dark">
+<link rel="preload" href="inter.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="img/duck-bakery.webp" as="image" type="image/webp">
+<link rel="preload" href="img/greg-fart.webp" as="image" type="image/webp">
+<link rel="preload" href="img/spaceman-hero.webp" as="image" type="image/webp">
+<link rel="preload" href="img/avatar-kit.webp" as="image" type="image/webp">
+<link rel="preload" href="img/avatar-dax.webp" as="image" type="image/webp">
+<link rel="preload" href="img/avatar-jay.webp" as="image" type="image/webp">
+<link rel="preload" href="img/avatar-aiden.webp" as="image" type="image/webp">
+<link rel="preload" href="img/avatar-greg.webp" as="image" type="image/webp">
+<link rel="preload" href="img/avatar-priya.webp" as="image" type="image/webp">
+<link rel="preload" href="img/emoji-knife.webp" as="image" type="image/webp">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="tabs.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36' fill='none' stroke='%23f2f2ef' stroke-linejoin='round'%3E%3Cpath stroke-width='2.4' d='M18 3.1 30.9 10.55v14.9L18 32.9 5.1 25.45v-14.9Z'/%3E%3Cpath stroke-width='2' d='M18 9.1 25.71 13.55v8.9L18 26.9l-7.71-4.45v-8.9Z'/%3E%3Cpath fill='%23f2f2ef' stroke='none' d='m18 13.3 4.07 2.35v4.7L18 22.7l-4.07-2.35v-4.7Z'/%3E%3C/svg%3E">
+</head>
+<body>
+<main class="page" id="page" data-phase="idle">
+  <div class="stage" id="stage" aria-hidden="true"></div>
+
+  <header class="header">
+    <a class="wordmark" href="https://anoma.ly/hex" aria-label="Hex home">
+      <svg aria-hidden="true" viewBox="0 0 36 36" class="hexmark wordmark__icon"><path class="hexmark__o" d="M18 3.1 30.9 10.55v14.9L18 32.9 5.1 25.45v-14.9Z"/><path class="hexmark__i" d="M18 9.1 25.71 13.55v8.9L18 26.9l-7.71-4.45v-8.9Z"/><path class="hexmark__c" d="m18 13.3 4.07 2.35v4.7L18 22.7l-4.07-2.35v-4.7Z"/></svg>
+      <span>Hex</span>
+      <span class="badge">Meetings</span>
+    </a>
+    <div class="header__tools">
+      <a class="header__github" href="https://github.com/anomalyco/hex" aria-label="GitHub">
+        <svg aria-hidden="true" viewBox="0 0 16 16" class="header__github-icon"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.290 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.640-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+    </div>
+  </header>
+
+  <section class="hero" id="hero">
+    <div class="hero__bean" id="bean" aria-hidden="true"></div>
+    <h1>Put your agent on the call.</h1>
+    <p class="hero__sub">Click <span class="hchip"><i class="hchip__dot" aria-hidden="true"></i><span>Record</span></span> in <span class="nowrap"><a class="hchip hchip--link hchip--punct" href="https://anoma.ly/hex" target="_blank" rel="noopener noreferrer"><svg aria-hidden="true" viewBox="0 0 36 36" class="hexmark hchip__hex"><path class="hexmark__o" d="M18 3.1 30.9 10.55v14.9L18 32.9 5.1 25.45v-14.9Z"/><path class="hexmark__i" d="M18 9.1 25.71 13.55v8.9L18 26.9l-7.71-4.45v-8.9Z"/><path class="hexmark__c" d="m18 13.3 4.07 2.35v4.7L18 22.7l-4.07-2.35v-4.7Z"/></svg><span>Hex</span></a>,</span> transcribe on your Mac,<br class="hero__br"> and hand it straight to <span class="nowrap"><a class="hchip hchip--link hchip--punct" href="https://opencode.ai" target="_blank" rel="noopener noreferrer"><svg aria-hidden="true" viewBox="0 0 512 512" class="hchip__oc"><path d="M320 224V352H192V224H320Z" fill="#7c7a7a"/><path fill-rule="evenodd" clip-rule="evenodd" d="M384 416H128V96H384V416ZM320 160H192V352H320V160Z" fill="#f2f2ef"/></svg><span>OpenCode</span></a>.</span></p>
+    <button type="button" class="join" id="join">
+      <span class="join__dot" aria-hidden="true"></span>
+      <span>Start call</span>
+    </button>
+  </section>
+
+  <div class="call" id="call" aria-hidden="true">
+    <div class="win win--call" id="win-call">
+      <div class="win__bar">
+        <i class="win__lights"><b></b><b></b><b></b></i>
+        <span class="win__title">Q4 sync<em class="win__rec" id="win-rec"><i></i>REC</em></span>
+        <span class="win__meta"><svg viewBox="0 0 16 16"><circle cx="8" cy="5.4" r="2.6"/><path d="M2.9 13.4c.6-2.5 2.6-3.9 5.1-3.9s4.500 1.400 5.100 3.900"/></svg><span id="people">5</span></span>
+      </div>
+    </div>
+    <div class="win win--oc" id="win-oc">
+      <aside class="oc-rail">
+        <div class="oc-rail__top"><i class="win__lights"><b></b><b></b><b></b></i><svg viewBox="0 0 16 16"><rect x="2.25" y="3.25" width="11.5" height="9.5" rx="1.75"/><path d="M6.25 3.25v9.5"/></svg></div>
+        <ul class="oc-nav">
+          <li><svg viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><path d="M11.25 9v4.5M9 11.25h4.5"/></svg><span>Home</span><kbd>⌘B</kbd></li>
+          <li><svg viewBox="0 0 16 16"><circle cx="7.25" cy="7.25" r="4.25"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></li>
+          <li><svg viewBox="0 0 16 16"><path d="M7.5 3H4a1.5 1.5 0 0 0-1.5 1.5V12A1.5 1.5 0 0 0 4 13.5h7.5A1.5 1.5 0 0 0 13 12V8.5"/><path d="m11.5 2.5 2 2-5 5-2.5.5.5-2.5Z"/></svg><span>New session</span><kbd>⌘N</kbd></li>
+        </ul>
+        <ul class="oc-sessions">
+          <li data-on><i class="oc-tile oc-tile--icon"><svg viewBox="0 0 36 36" aria-hidden="true"><rect width="36" height="36" rx="8" fill="#0d0e0f"/><g fill="none" stroke="#f2f2ef" stroke-linejoin="round"><path stroke-width="2.6" d="M18 6.2 28.2 12.1v11.8L18 29.800 7.800 23.900V12.100Z"/><path stroke-width="2.100" d="M18 11.300 23.800 14.650v6.700L18 24.700l-5.800-3.350v-6.700Z"/></g><path fill="#f2f2ef" d="m18 14.700 2.850 1.650v3.300L18 21.300l-2.850-1.650v-3.300Z"/></svg></i><p><b id="rail-title">New session</b><span>hex</span></p></li>
+          <li><i class="oc-tile oc-tile--icon"><svg viewBox="0 0 512 512" aria-hidden="true"><rect width="512" height="512" rx="112" fill="#131010"/><path d="M320 224V352H192V224H320Z" fill="#5A5858"/><path fill-rule="evenodd" clip-rule="evenodd" d="M384 416H128V96H384V416ZM320 160H192V352H320V160Z" fill="#fff"/></svg></i><p><b>Less code</b><span>opencode</span></p><em></em></li>
+          <li><i class="oc-tile oc-tile--icon oc-tile--spaceman"></i><p><b>Workspaces</b><span>spaceman</span></p></li>
+          <li><i class="oc-tile oc-tile--icon oc-tile--knife"></i><p><b>Fuzzy find</b><span>knife</span></p></li>
+        </ul>
+      </aside>
+      <div class="oc-main">
+        <div class="oc-head"><i class="win__lights"><b></b><b></b><b></b></i><i class="oc-tile oc-tile--icon"><svg viewBox="0 0 36 36" aria-hidden="true"><rect width="36" height="36" rx="8" fill="#0d0e0f"/><g fill="none" stroke="#f2f2ef" stroke-linejoin="round"><path stroke-width="2.6" d="M18 6.2 28.2 12.1v11.8L18 29.800 7.800 23.900V12.100Z"/><path stroke-width="2.100" d="M18 11.300 23.800 14.650v6.700L18 24.700l-5.800-3.350v-6.700Z"/></g><path fill="#f2f2ef" d="m18 14.700 2.850 1.650v3.300L18 21.300l-2.850-1.650v-3.300Z"/></svg></i><span class="oc-head__proj">hex</span><i class="oc-head__sl">/</i><b class="oc-head__title" id="oc-title">New session</b><span class="oc-head__more"><i></i><i></i><i></i></span><svg class="oc-head__split" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M8 5.5v2.5M6.75 6.75h2.5M6.75 10.5h2.5"/></svg></div>
+        <div class="oc-stream" id="stream"></div>
+        <div class="oc-composer" id="composer">
+          <div class="oc-input" id="input">
+            <span class="oc-chip" id="chip"><svg viewBox="0 0 16 16"><path d="M9.25 2.25h-5a1 1 0 0 0-1 1v9.500a1 1 0 0 0 1 1h7.500a1 1 0 0 0 1-1v-7Z"/><path d="M9.25 2.25v3.500h3.500M5.750 8.750h4.500M5.750 11h3"/></svg>Hex meeting prompt · q4-sync</span>
+            <span class="oc-typed" id="typed"></span>
+            <span class="oc-ph" id="ph">Ask anything, / for commands, @ for context...</span>
+          </div>
+          <div class="oc-bar">
+            <span class="oc-bar__plus"><svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg></span>
+            <span class="oc-bar__pick"><b>Build</b><svg viewBox="0 0 16 16"><path d="m4.5 6.5 3.5 3.5 3.5-3.5"/></svg></span>
+            <span class="oc-bar__pick oc-bar__model"><i>Anthropic /</i><b>Claude Opus</b><svg viewBox="0 0 16 16"><path d="m4.5 6.5 3.5 3.5 3.5-3.5"/></svg></span>
+            <span class="oc-auto" id="auto"><i class="oc-auto__sw" id="auto-sw"></i><span>Auto-approve</span></span>
+            <span class="oc-send" id="send"><svg viewBox="0 0 16 16"><path d="M8 12.500v-9M4.250 7 8 3.250 11.750 7"/></svg></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="browser" id="browser">
+      <div class="browser__top">
+        <i class="win__lights browser__lights"><b id="browser-close"></b><b></b><b></b></i>
+        <div class="tabstrip">
+          <span class="tab" data-tab="0" data-on><i class="fav fav--slack"></i><em>Slack</em><svg viewBox="0 0 16 16"><path d="m5 5 6 6m0-6-6 6"/></svg></span>
+          <span class="tab" data-tab="1"><i class="fav fav--space"></i><em>Spaceman</em><svg viewBox="0 0 16 16"><path d="m5 5 6 6m0-6-6 6"/></svg></span>
+          <span class="tab" data-tab="2"><i class="fav fav--duck"></i><em>Local Duck Refuses…</em><svg viewBox="0 0 16 16"><path d="m5 5 6 6m0-6-6 6"/></svg></span>
+          <span class="tab" data-tab="3"><i class="fav fav--x"></i><em>Home / X</em><svg viewBox="0 0 16 16"><path d="m5 5 6 6m0-6-6 6"/></svg></span>
+        </div>
+        <svg class="browser__plus" viewBox="0 0 16 16"><path d="M8 3.500v9M3.500 8h9"/></svg>
+      </div>
+      <div class="browser__nav">
+        <svg viewBox="0 0 16 16"><path d="M9.750 3.500 5.250 8l4.500 4.500"/></svg>
+        <svg viewBox="0 0 16 16" class="dim"><path d="M6.250 3.500 10.750 8l-4.500 4.500"/></svg>
+        <svg viewBox="0 0 16 16"><path d="M12.750 8a4.750 4.750 0 1 1-1.500-3.460M12.750 2.750v2.500h-2.500"/></svg>
+        <div class="browser__url"><svg viewBox="0 0 16 16"><rect x="4" y="7.250" width="8" height="5.500" rx="1.250"/><path d="M5.750 7.250V5.500a2.250 2.250 0 0 1 4.500 0v1.750"/></svg><span id="url">app.slack.com/client/anomaly/general</span></div>
+        <svg viewBox="0 0 16 16"><path d="M8 10V2.750M5.250 5.250 8 2.500l2.750 2.750M3.750 8.500v4h8.500v-4"/></svg>
+      </div>
+      <div class="browser__view" id="view">
+        <article class="pg pg--slack" data-tab="0"><div class="pg__in">
+  <div class="sl-app">
+    <aside class="sl-side">
+      <div class="sl-ws"><b>Anomaly</b><svg class="ic" viewBox="0 0 16 16"><path d="m4.75 6.5 3.25 3.25 3.25-3.25"/></svg><svg class="ic" viewBox="0 0 16 16"><path d="M7.5 3H4a1.5 1.5 0 0 0-1.5 1.5V12A1.5 1.5 0 0 0 4 13.5h7.5A1.5 1.5 0 0 0 13 12V8.5"/><path d="m11.5 2.5 2 2-5 5-2.5.5.5-2.5Z"/></svg></div>
+      <ul class="sl-list">
+        <li><svg class="ic" viewBox="0 0 16 16"><path d="M2.5 4.5A1.5 1.5 0 0 1 4 3h8a1.5 1.5 0 0 1 1.5 1.5v5A1.5 1.5 0 0 1 12 11H7l-3 2.5V11a1.5 1.5 0 0 1-1.5-1.5Z"/></svg><span>Threads</span></li>
+        <li><svg class="ic" viewBox="0 0 16 16"><path d="M3 10.5V8a5 5 0 0 1 10 0v2.5"/><rect x="2.5" y="9.5" width="2.5" height="4" rx="1"/><rect x="11" y="9.500" width="2.5" height="4" rx="1"/></svg><span>Huddles</span></li>
+        <li><svg class="ic" viewBox="0 0 16 16"><path d="m2.5 8 11-5-4 11-2-4.500Z"/></svg><span>Drafts and sent</span></li>
+      </ul>
+      <p class="sl-sec">Channels</p>
+      <ul class="sl-list">
+        <li class="sl-on"><i>#</i><span>general</span></li>
+        <li><i>#</i><span>abattoir</span></li>
+        <li class="sl-new"><i>#</i><span>opencode</span><b>3</b></li>
+        <li class="sl-new"><i>#</i><span>hex</span></li>
+        <li><i>#</i><span>spaceman</span></li>
+        <li><i>#</i><span>knife</span></li>
+        <li class="sl-add"><i>+</i><span>Add channels</span></li>
+      </ul>
+      <p class="sl-sec">Direct messages</p>
+      <ul class="sl-list">
+        <li><i class="sl-dm pic pic--dax" data-on></i><span>dax</span></li>
+        <li><i class="sl-dm pic pic--jay" data-on></i><span>jay</span></li>
+        <li><i class="sl-dm pic pic--kit" data-on></i><span>kit</span></li>
+        <li><i class="sl-dm pic pic--aiden"></i><span>aiden</span></li>
+        <li><i class="sl-dm pic pic--greg" data-on></i><span>greg fart</span></li>
+        <li class="sl-add"><i>+</i><span>Invite people</span></li>
+      </ul>
+      <p class="sl-sec">Apps</p>
+      <ul class="sl-list">
+        <li><i class="sl-dot sl-dot--on"></i><span>GitHub</span></li>
+        <li class="sl-add"><i>+</i><span>Add apps</span></li>
+      </ul>
+    </aside>
+    <section class="sl-main">
+      <header class="sl-head" data-mark="a"><b class="sl-head__t"><i>#</i>general</b><svg class="ic" viewBox="0 0 16 16"><path d="m8 2.5 1.6 3.4 3.7.5-2.7 2.6.7 3.7L8 10.900l-3.300 1.800.7-3.700-2.700-2.600 3.700-.5Z"/></svg><span class="sl-head__topic">Shipping, banter, and meetings that could have been a message</span><span class="sl-head__m"><i class="pic pic--dax"></i><i class="pic pic--jay"></i><i class="pic pic--kit"></i><b>24</b></span></header>
+      <p class="sl-day"><b>Today</b></p>
+      <div class="sl-msg"><i class="sl-av pic pic--kit"></i><div class="sl-b"><p class="sl-meta"><b>kit</b><span>4:02 PM</span></p><p class="sl-t">hex meetings is live. please stop asking me to take notes</p><p class="sl-rxs"><span class="sl-rx sl-go" data-act="react">🚀 <b><i>12</i><i>13</i></b></span><span class="sl-rx">🫡 <b>3</b></span><span class="sl-rx sl-rx--add"><svg class="ic" viewBox="0 0 16 16"><circle cx="7" cy="9" r="4.5"/><path d="M5.4 10.1a2.1 2.1 0 0 0 3.2 0M5.6 7.8h.01M8.4 7.8h.01M12.5 1.75v3M11 3.25h3"/></svg></span></p></div></div>
+      <div class="sl-msg"><i class="sl-av pic pic--jay"></i><div class="sl-b"><p class="sl-meta"><b>jay</b><span>4:03 PM</span></p><p class="sl-t">if anyone books a 30 min sync that could have been a slack message i am punching them in the stomach</p><p class="sl-rxs"><span class="sl-rx">👊 <b>11</b></span><span class="sl-rx">😬 <b>4</b></span><span class="sl-rx sl-rx--add"><svg class="ic" viewBox="0 0 16 16"><circle cx="7" cy="9" r="4.5"/><path d="M5.4 10.1a2.1 2.1 0 0 0 3.2 0M5.6 7.8h.01M8.4 7.8h.01M12.5 1.75v3M11 3.25h3"/></svg></span></p></div></div>
+      <div class="sl-msg"><i class="sl-av pic pic--jay"></i><div class="sl-b"><p class="sl-meta"><b>jay</b><span>4:04 PM</span></p><p class="sl-t">also has anyone actually seen greg since tuesday? he's merged 47 prs today</p><p class="sl-rxs"><span class="sl-rx">👀 <b>8</b></span><span class="sl-rx sl-rx--add"><svg class="ic" viewBox="0 0 16 16"><circle cx="7" cy="9" r="4.5"/><path d="M5.4 10.1a2.1 2.1 0 0 0 3.2 0M5.6 7.8h.01M8.4 7.8h.01M12.5 1.75v3M11 3.25h3"/></svg></span></p></div></div>
+      <div class="sl-msg"><i class="sl-av pic pic--greg"></i><div class="sl-b"><p class="sl-meta"><b>greg fart</b><span>4:04 PM</span></p><p class="sl-t">deep in a refactor right now, skipping standup, pr incoming</p><p class="sl-rxs"><span class="sl-rx">🫡 <b>14</b></span><span class="sl-rx">🔥 <b>6</b></span><span class="sl-rx sl-rx--add"><svg class="ic" viewBox="0 0 16 16"><circle cx="7" cy="9" r="4.5"/><path d="M5.4 10.1a2.1 2.1 0 0 0 3.2 0M5.6 7.8h.01M8.4 7.8h.01M12.5 1.75v3M11 3.25h3"/></svg></span></p></div></div>
+      <div class="sl-msg" data-mark="b"><i class="sl-av pic pic--dax"></i><div class="sl-b"><p class="sl-meta"><b>dax</b><span>4:05 PM</span></p><p class="sl-t">greg is carrying the whole org rn everyone else is slacking</p><p class="sl-rxs"><span class="sl-rx">💀 <b>9</b></span><span class="sl-rx sl-rx--add"><svg class="ic" viewBox="0 0 16 16"><circle cx="7" cy="9" r="4.5"/><path d="M5.4 10.1a2.1 2.1 0 0 0 3.2 0M5.6 7.8h.01M8.4 7.8h.01M12.5 1.75v3M11 3.25h3"/></svg></span></p></div></div>
+      <div class="sl-msg"><i class="sl-av sl-av--gh"><svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.290 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.640-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg></i><div class="sl-b"><p class="sl-meta"><b>GitHub</b><em class="sl-tag">App</em><span>4:06 PM</span></p><p class="sl-t"><b class="sl-link">anomalyco/opencode</b> · dax merged <b class="sl-link">delete code</b> into <code>dev</code> <span class="sl-diff"><i>+12</i><u>−14,203</u></span></p><p class="sl-rxs"><span class="sl-rx">✅ <b>4</b></span><span class="sl-rx">👀 <b>6</b></span><span class="sl-rx sl-rx--add"><svg class="ic" viewBox="0 0 16 16"><circle cx="7" cy="9" r="4.5"/><path d="M5.4 10.1a2.1 2.1 0 0 0 3.2 0M5.6 7.8h.01M8.4 7.8h.01M12.5 1.75v3M11 3.25h3"/></svg></span></p><p class="sl-thr"><i class="sl-mini pic pic--jay"></i><i class="sl-mini pic pic--aiden"></i><b>2 replies</b><span>Last reply today at 4:06 PM</span></p></div></div>
+      <div class="sl-msg"><i class="sl-av pic pic--aiden"></i><div class="sl-b"><p class="sl-meta"><b>aiden</b><span>4:07 PM</span></p><p class="sl-t">pushed the hex menu bar fix, the timer no longer looks like braille</p><p class="sl-rxs"><span class="sl-rx">🙏 <b>8</b></span><span class="sl-rx">🫡 <b>5</b></span><span class="sl-rx sl-rx--add"><svg class="ic" viewBox="0 0 16 16"><circle cx="7" cy="9" r="4.5"/><path d="M5.4 10.1a2.1 2.1 0 0 0 3.2 0M5.6 7.8h.01M8.4 7.8h.01M12.5 1.75v3M11 3.25h3"/></svg></span></p></div></div>
+      <div class="sl-msg"><i class="sl-av pic pic--dax"></i><div class="sl-b"><p class="sl-meta"><b>dax</b><span>4:07 PM</span></p><p class="sl-t">i liked the braille</p><p class="sl-rxs"><span class="sl-rx">🫠 <b>7</b></span><span class="sl-rx sl-rx--add"><svg class="ic" viewBox="0 0 16 16"><circle cx="7" cy="9" r="4.5"/><path d="M5.4 10.1a2.1 2.1 0 0 0 3.2 0M5.6 7.8h.01M8.4 7.8h.01M12.5 1.75v3M11 3.25h3"/></svg></span></p></div></div>
+      <div class="sl-msg" data-mark="c"><i class="sl-av pic pic--kit"></i><div class="sl-b"><p class="sl-meta"><b>kit</b><span>4:09 PM</span></p><p class="sl-t">dictated this with hex lying face down on the carpet. not getting up</p><p class="sl-rxs"><span class="sl-rx">🎙️ <b>8</b></span><span class="sl-rx">🛌 <b>4</b></span><span class="sl-rx sl-rx--add"><svg class="ic" viewBox="0 0 16 16"><circle cx="7" cy="9" r="4.5"/><path d="M5.4 10.1a2.1 2.1 0 0 0 3.2 0M5.6 7.8h.01M8.4 7.8h.01M12.5 1.75v3M11 3.25h3"/></svg></span></p></div></div>
+      <div class="sl-msg"><i class="sl-av pic pic--aiden"></i><div class="sl-b"><p class="sl-meta"><b>aiden</b><span>4:10 PM</span></p><p class="sl-t">knife now opens before i have finished deciding to open it</p><p class="sl-rxs"><span class="sl-rx"><img class="sl-ce" src="img/emoji-knife.webp" alt=""><b>6</b></span><span class="sl-rx sl-rx--add"><svg class="ic" viewBox="0 0 16 16"><circle cx="7" cy="9" r="4.5"/><path d="M5.4 10.1a2.1 2.1 0 0 0 3.2 0M5.6 7.8h.01M8.4 7.8h.01M12.5 1.75v3M11 3.25h3"/></svg></span></p></div></div>
+      <div class="sl-comp">
+        <p class="sl-comp__fmt"><b>B</b><i>I</i><s>S</s><svg class="ic" viewBox="0 0 16 16"><path d="M6.750 9.250a2.5 2.5 0 0 0 3.5 0l2-2a2.5 2.5 0 0 0-3.5-3.5l-.750.750M9.250 6.750a2.5 2.5 0 0 0-3.5 0l-2 2a2.5 2.5 0 0 0 3.5 3.5l.750-.750"/></svg><svg class="ic" viewBox="0 0 16 16"><path d="M6 4.5h7M6 8h7M6 11.5h7M3 4.5h.01M3 8h.01M3 11.5h.01"/></svg><svg class="ic" viewBox="0 0 16 16"><path d="m5.5 5-3 3 3 3M10.500 5l3 3-3 3"/></svg></p>
+        <p class="sl-comp__in">Message #general</p>
+        <p class="sl-comp__act"><svg class="ic" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 5.5v5M5.5 8h5"/></svg><b>Aa</b><svg class="ic" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M6 9.500a2.500 2.500 0 0 0 4 0M6.200 6.800h.01M9.800 6.800h.01"/></svg><b>@</b><span class="sl-send"><svg class="ic" viewBox="0 0 16 16"><path d="m2.5 8 11-5-4 11-2-4.500Z"/></svg></span></p>
+      </div>
+      <p class="sl-typing"><b>dax</b> is typing…</p>
+    </section>
+  </div>
+</div>
+  <!-- What is left of it once OpenCode has run rm -rf jira slack linear (app.js: data-dead). -->
+  <div class="sl-dead">
+    <svg class="sl-dead__logo" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="5" width="6.5" height="3" rx="1.5"/><rect x="8" y="1.5" width="3" height="6.5" rx="1.5"/><rect x="8" y="8" width="6.5" height="3" rx="1.5"/><rect x="5" y="8" width="3" height="6.5" rx="1.5"/></svg>
+    <h3>Workspace deleted</h3>
+    <p class="sl-dead__why">“Anomaly” was permanently removed (<span id="slack-ago">0 seconds ago</span>).</p>
+    <p class="sl-dead__acts"><span>Create a new workspace</span><span>Find your workspaces</span></p>
+    <p class="sl-dead__code">error: workspace_deleted</p>
+  </div>
+</article>
+        <article class="pg pg--space" data-tab="1"><div class="pg__in">
+  <section class="sm-hero" data-mark="a">
+    <img class="sm-hero__img" src="img/spaceman-hero.webp" width="1600" height="1000" alt="A dark study at night: a desk with a monitor, a lamp and a chair by a window with blinds" decoding="sync">
+    <header class="sm-top">
+      <b class="sm-brand"><svg class="sm-icon" viewBox="0 0 1024 1024" aria-hidden="true"><rect width="1024" height="1024" rx="224" fill="#181a1f"/><g fill="#f4f6ff"><rect x="190" y="270" width="374" height="484" rx="76"/><rect x="590" y="270" width="244" height="229" rx="62"/><rect x="590" y="525" width="244" height="229" rx="62"/></g></svg>Spaceman</b>
+      <nav class="sm-nav"><span>Features</span><span>Shortcuts</span><span class="sm-gh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .5a12 12 0 0 0-3.79 23.39c.6.11.82-.26.82-.58v-2.03c-3.34.73-4.04-1.61-4.04-1.61a3.18 3.18 0 0 0-1.33-1.76c-1.09-.74.08-.73.08-.73a2.52 2.52 0 0 1 1.84 1.24 2.56 2.56 0 0 0 3.5 1 2.56 2.56 0 0 1 .76-1.6c-2.67-.3-5.47-1.33-5.47-5.93a4.64 4.64 0 0 1 1.24-3.22 4.3 4.3 0 0 1 .12-3.18s1.01-.32 3.3 1.23a11.38 11.38 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23a4.3 4.3 0 0 1 .12 3.18 4.64 4.64 0 0 1 1.24 3.22c0 4.61-2.81 5.63-5.48 5.92a2.86 2.86 0 0 1 .82 2.22v3.29c0 .32.21.7.82.58A12 12 0 0 0 12 .5Z"/></svg><em>GitHub</em></span><span class="sm-dl">Download</span></nav>
+    </header>
+    <i class="sm-scrim"></i>
+    <div class="sm-copy">
+      <div class="sm-title">
+        <h3>For your windows.</h3>
+        <p>Spaceman is a tiling window manager for macOS. Every window side by side, nothing on top of anything else.</p>
+      </div>
+      <div class="sm-ways">
+        <p class="sm-cta"><span class="sm-btn"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1.75v7.5M3.75 6.25 7 9.5l3.25-3.25M2.25 12.25h9.5"/></svg>Download for macOS</span><span class="sm-watch"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 1.4v9.2c0 .5.5.8.9.5l7.2-4.6a.6.6 0 0 0 0-1L3.4.9c-.4-.3-.9 0-.9.5Z"/></svg>Watch the demo<i>2 min</i></span></p>
+        <p class="sm-note">Version 0.3.3 · macOS 14 or later · Apple silicon</p>
+      </div>
+    </div>
+  </section>
+  <section class="sm-product">
+    <div class="sm-lead" data-mark="b">
+      <h4>Every window has a place.</h4>
+      <p>Windows open side by side and make room for each other. Ten numbered workspaces sit under your fingers, and rules send each app where it belongs.</p>
+    </div>
+    <div class="sm-grid">
+      <div class="sm-feat">
+        <div class="sm-demo sm-desk"><span class="sm-wins"><span class="mw" style="left:1.20%;top:1.92%;width:47.60%;height:96.16%;--c:#e9b93f"><u></u><i></i><i></i><i></i></span><span class="mw" style="left:51.20%;top:1.92%;width:47.60%;height:46.16%;--c:#4f8ad6"><u></u><i></i><i></i><i></i></span><span class="mw" style="left:51.20%;top:51.92%;width:47.60%;height:46.16%;--c:#4fb3a7"><u></u><i></i><i></i><i></i></span></span></div>
+        <b>Windows tile as they open</b>
+        <p>Each new window takes a share of the screen and the others make room. Drag a window onto another to swap them, or drag an edge to resize the split.</p>
+      </div>
+      <div class="sm-feat">
+        <div class="sm-demo sm-desk sm-spaces"><span class="sm-wins sm-wins--bar sm-set1"><span class="mw" style="left:1.20%;top:1.92%;width:47.60%;height:96.16%;--c:#e9b93f"><u></u><i></i><i></i><i></i></span><span class="mw" style="left:51.20%;top:1.92%;width:47.60%;height:46.16%;--c:#4f8ad6"><u></u><i></i><i></i><i></i></span><span class="mw" style="left:51.20%;top:51.92%;width:47.60%;height:46.16%;--c:#4fb3a7"><u></u><i></i><i></i><i></i></span></span><span class="sm-wins sm-wins--bar sm-set2"><span class="mw" style="left:1.20%;top:1.92%;width:47.60%;height:96.16%;--c:#8a74d1"><u></u><i></i><i></i><i></i></span><span class="mw" style="left:51.20%;top:1.92%;width:47.60%;height:96.16%;--c:#d9803a"><u></u><i></i><i></i><i></i></span></span><span class="sm-bar" data-markn="b"><i class="sm-mark"></i><span class="sm-ws sm-ws--1"><b>1</b><i style="--c:#e9b93f"></i><i style="--c:#4f8ad6"></i><i style="--c:#4fb3a7"></i></span><span class="sm-ws sm-ws--2 sm-go" data-act="space"><b>2</b><i style="--c:#8a74d1"></i><i style="--c:#d9803a"></i></span><span class="sm-ws sm-ws--3"><b>3</b><i style="--c:#5cb86e"></i></span></span></div>
+        <b>Ten workspaces on the keyboard</b>
+        <p><kbd>⌥1</kbd> to <kbd>⌥0</kbd> switch workspaces. Add <kbd>⇧</kbd> to send the focused window to one without following it. A small bar shows each workspace’s number and apps as you go.</p>
+      </div>
+      <div class="sm-feat" data-mark="c">
+        <div class="sm-demo sm-rules" data-markn="c"><p class="sm-rules__h"><span>App</span><span>Window title</span><span>Action</span><span>Workspace</span></p><p class="sm-rule"><span><i style="--c:#4f8ad6"></i>Chat</span><span>“Standup”</span><span>Ignore</span><span>—</span></p><p class="sm-rule"><span><i style="--c:#4f8ad6"></i>Chat</span><span class="dim">Any</span><span>Route</span><span>2</span></p><p class="sm-rule"><span><i style="--c:#4fb3a7"></i>Mail</span><span class="dim">Any</span><span>Route</span><span>2</span></p><p class="sm-rule"><span><i style="--c:#8a74d1"></i>Browser</span><span class="dim">Any</span><span>Route</span><span>3</span></p></div>
+        <b>Rules for where apps go</b>
+        <p>Send an app to a workspace when it opens, or leave a window alone by its title. Rules are checked in order and the first match wins.</p>
+      </div>
+      <div class="sm-feat">
+        <div class="sm-demo sm-desk"><span class="sm-wins"><span class="sm-term" style="left:1.2%;top:1.9%;width:47.6%;height:96.2%"><span class="sm-term__tabs"><i data-on style="--c:#4fb3a7"></i><i style="--c:#e9b93f"></i><i style="--c:#5cb86e"></i></span><span class="sm-term__body" style="--c:#4fb3a7"><i style="width:72%"></i><i style="width:44%"></i><i style="width:65%"></i><i style="width:40%"></i><i style="width:56%"></i></span></span><span class="mw" style="left:51.20%;top:1.92%;width:47.60%;height:46.16%;--c:#4f8ad6"><u></u><i></i><i></i><i></i></span><span class="mw" style="left:51.20%;top:51.92%;width:47.60%;height:46.16%;--c:#8a74d1"><u></u><i></i><i></i><i></i></span></span></div>
+        <b>Tabs keep their tile</b>
+        <p>Switch native tabs, in Ghostty for one, and the window keeps its tile, its size and its place in the layout.</p>
+      </div>
+      <div class="sm-feat">
+        <div class="sm-demo sm-desk sm-restore"><p class="sm-menu"><b>1</b><span>Pause Tiling</span></p><span class="sm-wins sm-wins--menu"><span class="mw" style="left:1.20%;top:1.92%;width:47.60%;height:96.16%;--c:#4fb3a7"><u></u><i></i><i></i><i></i></span><span class="mw" style="left:51.20%;top:1.92%;width:47.60%;height:96.16%;--c:#8a74d1"><u></u><i></i><i></i><i></i></span></span></div>
+        <b>Your windows come back</b>
+        <p>Pausing, quitting or updating Spaceman brings every hidden window back where it was. It remembers where each one goes before it moves it.</p>
+      </div>
+      <div class="sm-feat">
+        <div class="sm-demo sm-access"><p class="sm-access__h"><svg viewBox="0 0 20 20" aria-hidden="true"><rect width="20" height="20" rx="5" fill="#3478f6"/><circle cx="10" cy="5.6" r="1.6" fill="#fff"/><path d="M5.2 8.2 10 9l4.8-.8M10 9v3.4m0 0-2.2 4m2.2-4 2.2 4" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>Accessibility</p><ul><li data-on><svg class="sm-icon" viewBox="0 0 1024 1024" aria-hidden="true"><rect width="1024" height="1024" rx="224" fill="#181a1f"/><g fill="#f4f6ff"><rect x="190" y="270" width="374" height="484" rx="76"/><rect x="590" y="270" width="244" height="229" rx="62"/><rect x="590" y="525" width="244" height="229" rx="62"/></g></svg><span>Spaceman</span><i></i></li><li><u style="--c:#2a2c31"></u><span>Terminal</span><i></i></li><li><u style="--c:#c9ccd2"></u><span>Script Editor</span><i></i></li></ul></div>
+        <b>Accessibility, and nothing else</b>
+        <p>System Integrity Protection stays on. Window titles stay in memory: Spaceman never saves, logs or sends them, and nothing reports home.</p>
+      </div>
+    </div>
+  </section>
+  <p class="sm-foot"><svg class="sm-icon" viewBox="0 0 1024 1024" aria-hidden="true"><rect width="1024" height="1024" rx="224" fill="#181a1f"/><g fill="#f4f6ff"><rect x="190" y="270" width="374" height="484" rx="76"/><rect x="590" y="270" width="244" height="229" rx="62"/><rect x="590" y="525" width="244" height="229" rx="62"/></g></svg><span>Spaceman 0.3.3</span><i>·</i><span>Built with OpenCode</span><em>©2026 Anomaly. All rights reserved.</em></p>
+</div></article>
+        <article class="pg pg--duck" data-tab="2"><div class="pg__in">
+          <div class="mc-util bleed"><span>Thursday, November 26, 2026</span><span class="mc-util__wx"><i></i>Millbrook 54° · Overcast</span><span class="mc-util__r">E-Edition<i></i>Newsletters<i></i>Sign in</span></div>
+          <header class="mc-mast"><span class="mc-mast__l"><svg class="ic" viewBox="0 0 16 16"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></svg><svg class="ic" viewBox="0 0 16 16"><circle cx="7.25" cy="7.25" r="4.25"/><path d="m10.5 10.5 3 3"/></svg></span><b class="mc-name">The Millbrook Courier</b><span class="mc-sub">Subscribe</span></header>
+          <nav class="mc-nav"><b>Local</b><span>Metro</span><span>Food</span><span>Weather</span><span>Sports</span><span>Opinion</span><span>Obituaries</span></nav>
+          <p class="mc-kick" data-mark="f"><b>Local</b><span>Downtown Millbrook</span></p>
+          <h3>Local Duck Refuses to Leave Bakery</h3>
+          <p class="mc-dek">Regulars have started calling him Gerald.</p>
+          <div class="mc-by"><i class="av"></i><p><b>By Tom Averill</b><span>Staff writer · Updated 4:10 p.m.</span></p><span class="acts acts--ring"><svg class="ic" viewBox="0 0 16 16"><path d="M6.75 9.25a2.5 2.5 0 0 0 3.5 0l2-2a2.5 2.5 0 0 0-3.5-3.5l-.75.75M9.25 6.75a2.5 2.5 0 0 0-3.5 0l-2 2a2.5 2.5 0 0 0 3.5 3.5l.75-.75"/></svg><svg class="ic" viewBox="0 0 16 16"><rect x="2.25" y="3.75" width="11.5" height="8.5" rx="1.5"/><path d="m2.75 4.75 5.250 4 5.250-4"/></svg><svg class="ic" viewBox="0 0 16 16"><path d="M4.250 2.750h7.500v10.500L8 10.500l-3.750 2.750Z"/></svg></span></div>
+          <figure class="mc-fig"><img src="img/duck-bakery.webp" width="840" height="630" alt="A mallard duck standing on the tile floor of a bakery, in front of a glass case of sourdough loaves and croissants" decoding="sync"><figcaption>Gerald holds his ground in front of the sourdough at Hartwell’s Bakery on Thursday. <span>Dana Okafor / The Millbrook Courier</span></figcaption></figure>
+          <p class="mc-p" data-mark="b"><b>MILLBROOK</b> — A mallard that walked into Hartwell’s Bakery on Tuesday morning has, as of press time, declined to leave.</p>
+          <p class="mc-p">“We’ve tried opening the door,” said owner June Hartwell, who has run the Main Street shop for 22 years. “He just looks at it.”</p>
+          <blockquote class="mc-q" data-mark="q">“He is not technically doing anything wrong.”<cite>— Animal Control</cite></blockquote>
+          <p class="mc-p">Croissant sales are up 30 percent since Tuesday, Hartwell said. She has not ruled out putting him on the sign.</p>
+          <p class="mc-p mc-update" data-mark="u"><b>UPDATE, 4:10 P.M.</b> The duck is still there.</p>
+          <section class="mc-more"><h5>More in Local</h5><ul><li><b>Council delays vote on Main Street parking, again</b><span>2 hours ago</span></li><li><b>Tallis Valley High marching band heads to state</b><span>5 hours ago</span></li><li><b>Library extends Sunday hours through winter</b><span>Yesterday</span></li><li><b>Pond across from Main Street reports no ducks</b><span>Yesterday</span></li></ul></section>
+        </div></article>
+        <article class="pg pg--x" data-tab="3"><div class="pg__in">
+  <div class="x-app">
+    <aside class="x-rail">
+      <i class="x-logo"><svg viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></i>
+      <svg class="ic" data-on viewBox="0 0 16 16"><path d="M2.750 7 8 2.500 13.250 7v6.250h-3.500v-3.500h-3.500v3.500h-3.500Z"/></svg>
+      <svg class="ic" viewBox="0 0 16 16"><circle cx="7.250" cy="7.250" r="4.250"/><path d="m10.500 10.500 3 3"/></svg>
+      <svg class="ic" viewBox="0 0 16 16"><path d="M4 11.250V7a4 4 0 0 1 8 0v4.250l1 1.250H3ZM6.750 13.500a1.300 1.300 0 0 0 2.500 0"/></svg>
+      <svg class="ic" viewBox="0 0 16 16"><rect x="2.250" y="3.750" width="11.500" height="8.500" rx="1.500"/><path d="m2.750 4.750 5.250 4 5.250-4"/></svg>
+      <svg class="ic" viewBox="0 0 16 16"><circle cx="8" cy="5.500" r="2.500"/><path d="M3 13.250c.6-2.400 2.600-3.750 5-3.750s4.400 1.350 5 3.750"/></svg>
+      <i class="x-post"><svg class="ic" viewBox="0 0 16 16"><path d="M12.500 2.500c-5 0-8 3.500-8.500 9.500M4.500 9.500h4.500M6 6.500h5"/></svg></i>
+    </aside>
+    <section class="x-main">
+      <header class="x-tabs" data-mark="a"><b data-on>For you</b><b>Following</b></header>
+      <div class="x-comp"><i class="x-av pic pic--kit"></i><span>What’s happening?</span><b>Post</b></div>
+      <div class="x-post1 x-tw"><i class="x-av pic pic--dax"></i><div class="x-b"><p class="x-who"><b>dax</b><svg class="x-ok" viewBox="0 0 16 16"><path d="M8 .8l1.700 1.300 2.100-.2.700 2 1.900.9-.5 2.100.9 1.900-1.700 1.300-.2 2.100-2.100.3-1.300 1.700L8 13.300l-1.900.9-1.300-1.700-2.100-.3-.2-2.100L.8 8.800l.9-1.900-.5-2.100 1.900-.9.7-2 2.100.2Z"/><path d="m5.400 8 1.800 1.800 3.400-3.600" fill="none" stroke="#000" stroke-width="1.500" stroke-linecap="round" stroke-linejoin="round"/></svg><span>@thdxr · 2h</span><i class="x-more"></i></p><p class="x-t">stop having meetings just paste the transcript into opencode</p><p class="x-acts"><span><svg class="ic" viewBox="0 0 16 16"><path d="M8 2.5c3.200 0 5.500 2.100 5.500 4.900 0 2.900-2.400 5-5.500 5h-.6L4.500 14.300v-2.600C3.200 10.800 2.500 9.300 2.500 7.400c0-2.800 2.300-4.900 5.500-4.900Z"/></svg><b>212</b></span><span><svg class="ic" viewBox="0 0 16 16"><path d="M4.250 12V5M2 7l2.250-2.250L6.500 7M4.250 12h4.500M11.750 4v7M14 9l-2.250 2.250L9.500 9M11.750 4h-4.500"/></svg><b>1.4K</b></span><span><svg class="ic x-heart" viewBox="0 0 16 16"><path d="M8 13.600S2.500 10.300 2.500 6.400A2.900 2.900 0 0 1 8 5.100a2.900 2.900 0 0 1 5.500 1.300c0 3.900-5.500 7.200-5.500 7.200Z"/></svg><b>18K</b></span><span><svg class="ic" viewBox="0 0 16 16"><path d="M3.500 13V9M8 13V3M12.500 13V6.500"/></svg><b>1.2M</b></span><span class="x-acts__r"><svg class="ic" viewBox="0 0 16 16"><path d="M4.250 2.750h7.500v10.500L8 10.500l-3.750 2.750Z"/></svg><svg class="ic" viewBox="0 0 16 16"><path d="M8 10V2.750M5.250 5.250 8 2.500l2.750 2.750M3.750 8.500v4h8.500v-4"/></svg></span></p></div></div>
+      <div class="x-tw x-tw--thread"><i class="x-av pic pic--jay"></i><div class="x-b"><p class="x-who"><b>jay</b><span>@jayair · 1h</span><i class="x-more"></i></p><p class="x-t">what if you turn auto-approve on</p><p class="x-acts"><span><svg class="ic" viewBox="0 0 16 16"><path d="M8 2.5c3.200 0 5.500 2.100 5.500 4.900 0 2.900-2.400 5-5.500 5h-.6L4.500 14.300v-2.600C3.200 10.800 2.500 9.300 2.500 7.400c0-2.800 2.300-4.900 5.500-4.900Z"/></svg><b>38</b></span><span><svg class="ic" viewBox="0 0 16 16"><path d="M4.250 12V5M2 7l2.250-2.250L6.500 7M4.250 12h4.500M11.750 4v7M14 9l-2.250 2.250L9.500 9M11.750 4h-4.500"/></svg><b>96</b></span><span><svg class="ic x-heart" viewBox="0 0 16 16"><path d="M8 13.600S2.500 10.300 2.500 6.400A2.900 2.900 0 0 1 8 5.100a2.900 2.900 0 0 1 5.500 1.300c0 3.900-5.500 7.200-5.500 7.200Z"/></svg><b>2.1K</b></span><span><svg class="ic" viewBox="0 0 16 16"><path d="M3.500 13V9M8 13V3M12.500 13V6.500"/></svg><b>204K</b></span><span class="x-acts__r"><svg class="ic" viewBox="0 0 16 16"><path d="M4.250 2.750h7.500v10.500L8 10.500l-3.750 2.750Z"/></svg><svg class="ic" viewBox="0 0 16 16"><path d="M8 10V2.750M5.250 5.250 8 2.500l2.750 2.750M3.750 8.500v4h8.500v-4"/></svg></span></p></div></div>
+      <div class="x-tw" data-mark="b"><i class="x-av pic pic--dax"></i><div class="x-b"><p class="x-who"><b>dax</b><svg class="x-ok" viewBox="0 0 16 16"><path d="M8 .8l1.700 1.300 2.100-.2.700 2 1.900.9-.5 2.100.9 1.900-1.700 1.300-.2 2.100-2.100.3-1.300 1.700L8 13.300l-1.900.9-1.300-1.700-2.100-.3-.2-2.100L.8 8.800l.9-1.900-.5-2.100 1.900-.9.7-2 2.100.2Z"/><path d="m5.400 8 1.800 1.800 3.400-3.600" fill="none" stroke="#000" stroke-width="1.500" stroke-linecap="round" stroke-linejoin="round"/></svg><span>@thdxr · 1h</span><i class="x-more"></i></p><p class="x-t">do not turn auto-approve on</p><p class="x-acts"><span><svg class="ic" viewBox="0 0 16 16"><path d="M8 2.5c3.200 0 5.500 2.100 5.500 4.900 0 2.900-2.400 5-5.500 5h-.6L4.500 14.300v-2.600C3.200 10.800 2.500 9.300 2.500 7.400c0-2.800 2.300-4.900 5.500-4.900Z"/></svg><b>541</b></span><span><svg class="ic" viewBox="0 0 16 16"><path d="M4.250 12V5M2 7l2.250-2.250L6.500 7M4.250 12h4.500M11.750 4v7M14 9l-2.250 2.250L9.500 9M11.750 4h-4.500"/></svg><b>3.2K</b></span><span class="x-like" data-act="like"><svg class="ic x-heart" viewBox="0 0 16 16"><path d="M8 13.600S2.500 10.300 2.500 6.400A2.900 2.900 0 0 1 8 5.100a2.900 2.900 0 0 1 5.500 1.300c0 3.900-5.500 7.200-5.500 7.200Z"/></svg><b class="x-count" data-act="count"><i>9,412</i><i>9,413</i></b></span><span><svg class="ic" viewBox="0 0 16 16"><path d="M3.500 13V9M8 13V3M12.500 13V6.500"/></svg><b>2.8M</b></span><span class="x-acts__r"><svg class="ic" viewBox="0 0 16 16"><path d="M4.250 2.750h7.500v10.500L8 10.500l-3.750 2.750Z"/></svg><svg class="ic" viewBox="0 0 16 16"><path d="M8 10V2.750M5.250 5.250 8 2.500l2.750 2.750M3.750 8.500v4h8.500v-4"/></svg></span></p></div></div>
+      <div class="x-tw" data-mark="c"><i class="x-av x-av--bd">B</i><div class="x-b"><p class="x-who"><b>Bay Area Dispatch</b><svg class="x-ok" viewBox="0 0 16 16"><path d="M8 .8l1.700 1.300 2.100-.2.700 2 1.900.9-.5 2.100.9 1.900-1.700 1.300-.2 2.100-2.100.3-1.300 1.700L8 13.300l-1.900.9-1.300-1.700-2.100-.3-.2-2.100L.8 8.800l.9-1.900-.5-2.100 1.900-.9.7-2 2.100.2Z"/><path d="m5.400 8 1.800 1.800 3.400-3.600" fill="none" stroke="#000" stroke-width="1.500" stroke-linecap="round" stroke-linejoin="round"/></svg><span>@bayareadispatch · 3h</span><i class="x-more"></i></p><p class="x-t">BREAKING: Star engineer Greg Fart found dead at desk, somehow shipped 412 PRs and made VP last week</p>
+        <img class="x-photo" src="img/greg-fart.webp" width="840" height="525" alt="A clay figure of a man in a dark turtleneck, waving from behind his desk; a large speaker hangs from the cracked wall above his head" decoding="sync">
+        <p class="x-acts"><span><svg class="ic" viewBox="0 0 16 16"><path d="M8 2.5c3.200 0 5.500 2.100 5.500 4.900 0 2.900-2.400 5-5.500 5h-.6L4.500 14.300v-2.600C3.200 10.800 2.500 9.300 2.500 7.400c0-2.800 2.300-4.900 5.500-4.900Z"/></svg><b>2.6K</b></span><span><svg class="ic" viewBox="0 0 16 16"><path d="M4.250 12V5M2 7l2.250-2.250L6.500 7M4.250 12h4.500M11.750 4v7M14 9l-2.250 2.250L9.500 9M11.750 4h-4.500"/></svg><b>31K</b></span><span><svg class="ic x-heart" viewBox="0 0 16 16"><path d="M8 13.600S2.500 10.300 2.500 6.400A2.900 2.900 0 0 1 8 5.100a2.900 2.900 0 0 1 5.500 1.300c0 3.900-5.500 7.200-5.500 7.200Z"/></svg><b>214K</b></span><span><svg class="ic" viewBox="0 0 16 16"><path d="M3.500 13V9M8 13V3M12.500 13V6.500"/></svg><b>14M</b></span><span class="x-acts__r"><svg class="ic" viewBox="0 0 16 16"><path d="M4.250 2.750h7.500v10.500L8 10.500l-3.750 2.750Z"/></svg><svg class="ic" viewBox="0 0 16 16"><path d="M8 10V2.750M5.250 5.250 8 2.500l2.750 2.750M3.750 8.500v4h8.500v-4"/></svg></span></p></div></div>
+      <div class="x-tw"><i class="x-av x-av--d">g</i><div class="x-b"><p class="x-who"><b>gerald watch</b><span>@geraldwatch · 47m</span><i class="x-more"></i></p><p class="x-t">local mallard still holding bakery hostage, day 3</p>
+        <div class="x-quote"><p class="x-who"><i class="x-av x-av--mc">M</i><b>The Millbrook Courier</b><svg class="x-ok" viewBox="0 0 16 16"><path d="M8 .8l1.700 1.300 2.100-.2.700 2 1.900.9-.5 2.100.9 1.900-1.700 1.300-.2 2.100-2.100.3-1.300 1.700L8 13.300l-1.900.9-1.300-1.700-2.100-.3-.2-2.100L.8 8.800l.9-1.900-.5-2.100 1.900-.9.7-2 2.100.2Z"/><path d="m5.400 8 1.800 1.800 3.400-3.600" fill="none" stroke="#000" stroke-width="1.500" stroke-linecap="round" stroke-linejoin="round"/></svg><span>@millbrookcourier · Nov 24</span></p><p class="x-t">Local Duck Refuses to Leave Bakery. Regulars have started calling him Gerald.</p><img src="img/duck-bakery.webp" width="840" height="630" alt="A mallard duck standing on the tile floor of a bakery" decoding="sync"></div>
+        <p class="x-acts"><span><svg class="ic" viewBox="0 0 16 16"><path d="M8 2.5c3.200 0 5.500 2.100 5.500 4.900 0 2.900-2.400 5-5.500 5h-.6L4.500 14.300v-2.600C3.200 10.800 2.500 9.300 2.500 7.400c0-2.800 2.300-4.900 5.500-4.900Z"/></svg><b>1.9K</b></span><span><svg class="ic" viewBox="0 0 16 16"><path d="M4.250 12V5M2 7l2.250-2.250L6.500 7M4.250 12h4.500M11.750 4v7M14 9l-2.250 2.250L9.500 9M11.750 4h-4.500"/></svg><b>22K</b></span><span><svg class="ic x-heart" viewBox="0 0 16 16"><path d="M8 13.600S2.500 10.300 2.500 6.400A2.900 2.900 0 0 1 8 5.100a2.900 2.900 0 0 1 5.500 1.300c0 3.900-5.500 7.200-5.500 7.200Z"/></svg><b>148K</b></span><span><svg class="ic" viewBox="0 0 16 16"><path d="M3.500 13V9M8 13V3M12.500 13V6.500"/></svg><b>9.6M</b></span><span class="x-acts__r"><svg class="ic" viewBox="0 0 16 16"><path d="M4.250 2.750h7.500v10.500L8 10.500l-3.750 2.750Z"/></svg><svg class="ic" viewBox="0 0 16 16"><path d="M8 10V2.750M5.250 5.250 8 2.500l2.750 2.750M3.750 8.500v4h8.500v-4"/></svg></span></p></div></div>
+      <div class="x-tw" data-mark="d"><i class="x-av x-av--oc"><svg viewBox="0 0 512 512"><path d="M320 224V352H192V224H320Z" fill="#5A5858"/><path fill-rule="evenodd" clip-rule="evenodd" d="M384 416H128V96H384V416ZM320 160H192V352H320V160Z" fill="#fff"/></svg></i><div class="x-b"><p class="x-who"><b>OpenCode</b><svg class="x-ok" viewBox="0 0 16 16"><path d="M8 .8l1.700 1.300 2.100-.2.700 2 1.900.9-.5 2.100.9 1.900-1.700 1.300-.2 2.100-2.100.3-1.300 1.700L8 13.300l-1.900.9-1.300-1.700-2.100-.3-.2-2.100L.8 8.800l.9-1.900-.5-2.100 1.900-.9.7-2 2.100.2Z"/><path d="m5.400 8 1.800 1.800 3.400-3.600" fill="none" stroke="#000" stroke-width="1.500" stroke-linecap="round" stroke-linejoin="round"/></svg><span>@opencode · 3h</span><i class="x-more"></i></p><p class="x-t">we deleted 14k lines and it got faster. that is the changelog</p><p class="x-acts"><span><svg class="ic" viewBox="0 0 16 16"><path d="M8 2.5c3.200 0 5.500 2.100 5.500 4.900 0 2.900-2.400 5-5.500 5h-.6L4.500 14.300v-2.600C3.200 10.800 2.500 9.300 2.500 7.400c0-2.800 2.300-4.900 5.500-4.900Z"/></svg><b>87</b></span><span><svg class="ic" viewBox="0 0 16 16"><path d="M4.250 12V5M2 7l2.250-2.250L6.500 7M4.250 12h4.500M11.750 4v7M14 9l-2.250 2.250L9.500 9M11.750 4h-4.500"/></svg><b>412</b></span><span><svg class="ic x-heart" viewBox="0 0 16 16"><path d="M8 13.600S2.500 10.300 2.500 6.400A2.900 2.900 0 0 1 8 5.100a2.900 2.900 0 0 1 5.500 1.300c0 3.900-5.500 7.200-5.500 7.200Z"/></svg><b>6.1K</b></span><span><svg class="ic" viewBox="0 0 16 16"><path d="M3.500 13V9M8 13V3M12.500 13V6.500"/></svg><b>388K</b></span><span class="x-acts__r"><svg class="ic" viewBox="0 0 16 16"><path d="M4.250 2.750h7.500v10.500L8 10.500l-3.750 2.750Z"/></svg><svg class="ic" viewBox="0 0 16 16"><path d="M8 10V2.750M5.250 5.250 8 2.500l2.750 2.750M3.750 8.500v4h8.500v-4"/></svg></span></p></div></div>
+      <div class="x-tw"><i class="x-av pic pic--kit"></i><div class="x-b"><p class="x-who"><b>kit</b><span>@kitlangton · 4h</span><i class="x-more"></i></p><p class="x-t">accidentally built a tiling window manager instead of answering my emails</p><p class="x-acts"><span><svg class="ic" viewBox="0 0 16 16"><path d="M8 2.5c3.200 0 5.500 2.100 5.500 4.900 0 2.900-2.400 5-5.500 5h-.6L4.500 14.300v-2.600C3.200 10.800 2.500 9.300 2.500 7.400c0-2.800 2.300-4.900 5.500-4.900Z"/></svg><b>64</b></span><span><svg class="ic" viewBox="0 0 16 16"><path d="M4.250 12V5M2 7l2.250-2.250L6.500 7M4.250 12h4.500M11.750 4v7M14 9l-2.250 2.250L9.500 9M11.750 4h-4.500"/></svg><b>1.1K</b></span><span><svg class="ic x-heart" viewBox="0 0 16 16"><path d="M8 13.600S2.500 10.300 2.500 6.400A2.900 2.900 0 0 1 8 5.100a2.900 2.900 0 0 1 5.500 1.300c0 3.900-5.500 7.200-5.500 7.200Z"/></svg><b>12K</b></span><span><svg class="ic" viewBox="0 0 16 16"><path d="M3.500 13V9M8 13V3M12.500 13V6.500"/></svg><b>710K</b></span><span class="x-acts__r"><svg class="ic" viewBox="0 0 16 16"><path d="M4.250 2.750h7.500v10.500L8 10.500l-3.750 2.750Z"/></svg><svg class="ic" viewBox="0 0 16 16"><path d="M8 10V2.750M5.250 5.250 8 2.500l2.750 2.750M3.750 8.500v4h8.500v-4"/></svg></span></p></div></div>
+      <div class="x-tw"><i class="x-av pic pic--priya"></i><div class="x-b"><p class="x-who"><b>priya</b><span>@priyainthecar · 12s</span><i class="x-more"></i></p><p class="x-t">sorry was on mute. why am i inside marcus. cant reach the levae button</p><p class="x-acts"><span><svg class="ic" viewBox="0 0 16 16"><path d="M8 2.5c3.200 0 5.500 2.100 5.500 4.900 0 2.900-2.400 5-5.500 5h-.6L4.500 14.300v-2.600C3.200 10.800 2.500 9.300 2.500 7.400c0-2.800 2.300-4.900 5.500-4.900Z"/></svg><b>12</b></span><span><svg class="ic" viewBox="0 0 16 16"><path d="M4.250 12V5M2 7l2.250-2.250L6.500 7M4.250 12h4.500M11.750 4v7M14 9l-2.250 2.250L9.500 9M11.750 4h-4.500"/></svg><b>203</b></span><span><svg class="ic x-heart" viewBox="0 0 16 16"><path d="M8 13.600S2.500 10.300 2.500 6.400A2.900 2.900 0 0 1 8 5.100a2.900 2.900 0 0 1 5.500 1.300c0 3.900-5.500 7.200-5.500 7.200Z"/></svg><b>4.4K</b></span><span><svg class="ic" viewBox="0 0 16 16"><path d="M3.500 13V9M8 13V3M12.500 13V6.500"/></svg><b>96K</b></span><span class="x-acts__r"><svg class="ic" viewBox="0 0 16 16"><path d="M4.250 2.750h7.500v10.500L8 10.500l-3.750 2.750Z"/></svg><svg class="ic" viewBox="0 0 16 16"><path d="M8 10V2.750M5.250 5.250 8 2.500l2.750 2.750M3.750 8.500v4h8.500v-4"/></svg></span></p></div></div>
+    </section>
+  </div>
+</div></article>
+      </div>
+    </div>
+
+    <div class="player" id="player">
+      <i class="player__art"><svg viewBox="0 0 36 36" aria-hidden="true"><rect width="36" height="36" fill="#101113"/><g fill="none" stroke="#e8e4da" stroke-width="0.7"><circle cx="18" cy="16.5" r="3.1"/><circle cx="18" cy="16.5" r="5.9" opacity="0.78"/><circle cx="18" cy="16.5" r="8.7" opacity="0.56"/><circle cx="18" cy="16.5" r="11.5" opacity="0.36"/></g><circle cx="18" cy="16.5" r="1" fill="#e8e4da"/><path d="M4 32h8.500" stroke="#e8e4da" stroke-width="0.9"/><path d="M14.500 32h2" stroke="#e8e4da" stroke-width="0.9" opacity="0.45"/><rect x="29.700" y="30.800" width="2.300" height="2.300" fill="#e8e4da"/></svg></i>
+      <div class="player__meta"><b id="player-title">CORPUS_01.WAV</b><span id="player-sub">Unus (Club Edit)</span></div>
+      <span class="player__wave" id="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+      <span class="player__btn" id="player-btn"><svg class="i-play" viewBox="0 0 16 16"><path d="M5.25 3.3v9.400L12.750 8z"/></svg><svg class="i-pause" viewBox="0 0 16 16"><path d="M4.500 3.250h2.500v9.500h-2.500zM9 3.250h2.500v9.500H9z"/></svg></span>
+      <div class="player__foot">
+        <span class="player__time" id="player-time">0:00</span>
+        <i class="player__bar" id="player-fill"><b></b></i>
+        <svg class="player__spk" viewBox="0 0 16 16"><path d="M2.500 6.250h2.250L8 3.500v9L4.750 9.750H2.500z"/><path d="M10.500 6a2.900 2.900 0 0 1 0 4M12.300 4.200a5.400 5.400 0 0 1 0 7.600" fill="none"/></svg>
+        <i class="player__bar player__vol"><b></b></i>
+      </div>
+    </div>
+
+    <div class="plate" data-who="lead"><b>Marcus</b><span>Lead</span></div>
+    <div class="plate" data-who="eng"><b>Maya</b><span>Staff Eng</span></div>
+    <div class="plate" data-who="ops"><b>Priya</b><span>Ops</span></div>
+    <div class="plate" data-who="dev"><b>David</b><span>Design</span></div>
+    <div class="plate" data-who="me"><b>Alex</b><span>you</span></div>
+    <div class="plate plate--host" id="plate-host"><b>Them</b></div>
+
+
+    <!-- Beat 0: the calendar's notification, top right, as macOS shows one. He is alone on the
+         desktop with it; its Join button is what opens the call. -->
+    <div class="notif" id="notif">
+      <i class="notif__icon" aria-hidden="true"><b>THU</b><span>26</span></i>
+      <p class="notif__b"><b>Q4 sync</b><span>Starting now</span></p>
+      <span class="notif__join" id="notif-join">Join</span>
+    </div>
+
+    <!-- Hex: the offer it makes when it sees a call, and the recording pill that offer closes
+         down into. One capsule; its Record button becomes the red dot. -->
+    <div class="hex" id="pill">
+      <div class="hex__offer" id="offer-in">
+        <svg aria-hidden="true" viewBox="0 0 36 36" class="hexmark hex__mark"><path class="hexmark__o" d="M18 3.1 30.9 10.55v14.9L18 32.9 5.1 25.45v-14.9Z"/><path class="hexmark__i" d="M18 9.1 25.71 13.55v8.9L18 26.9l-7.71-4.45v-8.9Z"/><path class="hexmark__c" d="m18 13.3 4.07 2.35v4.7L18 22.7l-4.07-2.35v-4.7Z"/></svg>
+        <span class="hex__t">Q4 sync detected</span>
+        <span class="hex__acts"><span class="hex__more"><i></i><i></i><i></i></span><span class="hex__btn hex__no">Not now</span><span class="hex__btn hex__slot" id="offer-slot">Record</span></span>
+      </div>
+      <div class="pill__head" id="pill-head">
+        <svg class="pill__x" id="pill-x" viewBox="0 0 16 16"><path d="m4.25 4.25 7.5 7.5m0-7.5-7.5 7.5"/></svg>
+        <span class="pill__wave"><canvas class="pill__scope" id="scope" width="266" height="52"></canvas></span>
+        <span class="pill__dot" id="dot-slot"></span><span class="pill__clock" id="clock">00:00</span>
+      </div>
+      <span class="hex__rec" id="offer-rec"><span id="rec-word">Record</span></span>
+      <div class="pill__body" id="pill-body">
+        <div class="pill__row" id="row-stop"><svg viewBox="0 0 16 16"><rect class="fill" x="3" y="3" width="10" height="10" rx="0.75"/></svg><span>Stop</span></div>
+        <div class="pill__row pill__row--main" id="row-prompt"><svg viewBox="0 0 16 16"><rect x="1.75" y="2.25" width="12.5" height="11.5" rx="1.25"/><path d="M4.5 6 6.5 8l-2 2M8 10.25h3"/></svg><span class="pill__lab"><span>Copy agent prompt</span><span>Copied</span></span></div>
+        <div class="pill__row" id="row-all"><svg viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8.25" height="8.25" rx="1"/><path d="M10.5 5.5V3.25a1 1 0 0 0-1-1H3.25a1 1 0 0 0-1 1V9.500a1 1 0 0 0 1 1H5.500"/></svg><span>Copy transcript</span></div>
+      </div>
+    </div>
+
+    <span class="oc-chip oc-chip--carry" id="carry"><svg viewBox="0 0 16 16"><path d="M9.250 2.250h-5a1 1 0 0 0-1 1v9.500a1 1 0 0 0 1 1h7.500a1 1 0 0 0 1-1v-7Z"/><path d="M9.250 2.250v3.500h3.500M5.750 8.750h4.500M5.750 11h3"/></svg>Hex meeting prompt · q4-sync</span>
+    <i class="ripple" id="ripple"></i>
+    <svg class="cursor" id="cursor" viewBox="0 0 24 24"><path d="M5 2.500v17.200l4.300-4.100 2.900 6.600 2.900-1.300-2.900-6.500h6.100z"/></svg>
+  </div>
+
+  <canvas class="ambient" id="ambient" aria-hidden="true"></canvas>
+  <section class="notes" id="notes" aria-hidden="true">
+    <div class="notes__bean" id="notes-bean" aria-hidden="true"></div>
+    <article class="notes__card" id="notes-card">
+      <header>
+        <svg aria-hidden="true" viewBox="0 0 36 36" class="hexmark wordmark__icon"><path class="hexmark__o" d="M18 3.1 30.9 10.55v14.9L18 32.9 5.1 25.45v-14.9Z"/><path class="hexmark__i" d="M18 9.1 25.71 13.55v8.9L18 26.9l-7.71-4.45v-8.9Z"/><path class="hexmark__c" d="m18 13.3 4.07 2.35v4.7L18 22.7l-4.07-2.35v-4.7Z"/></svg>
+        <span>Meeting notes</span>
+        <span class="notes__ready"><i></i>Ready</span>
+      </header>
+      <h2 id="notes-title">Q4 sync</h2>
+      <dl class="notes__rows" id="notes-rows">
+        <div><dt>Attendees</dt><dd>You, Them <span>(2 attendees)</span></dd></div>
+        <div><dt>Summary</dt><dd><i>CI reduced from 4.5 days to 0.4 s (tests removed).</i><i>Jira, Slack and Linear retired. Priya joined from the car.</i><i>Product and engineering consolidated (no beginning, no end).</i></dd></div>
+        <div><dt>Action items</dt><dd><i class="todo">David: quick question (carried over, owner unclear)</i><i class="todo">Kill me (owner: Alex)</i></dd></div>
+      </dl>
+      <div class="notes__actions">
+        <a class="download" href="https://anoma.ly/hex">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.370 12.600c-.02-2.200 1.800-3.260 1.880-3.310-1.030-1.500-2.620-1.700-3.180-1.730-1.350-.14-2.640.8-3.330.8-.69 0-1.740-.78-2.870-.76-1.470.02-2.830.86-3.590 2.180-1.530 2.660-.39 6.600 1.100 8.750.73 1.050 1.600 2.240 2.730 2.200 1.100-.05 1.510-.71 2.840-.71 1.320 0 1.700.71 2.860.69 1.180-.02 1.930-1.070 2.650-2.130.84-1.220 1.180-2.400 1.200-2.470-.03-.01-2.300-.88-2.330-3.500zM14.200 6.130c.6-.73 1.010-1.750.9-2.760-.87.04-1.920.58-2.540 1.310-.56.64-1.050 1.670-.92 2.660.97.08 1.960-.49 2.560-1.210z"/></svg>
+          <span>Download for Mac</span>
+        </a>
+        <button type="button" class="replay" id="replay"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.750 8a5.250 5.250 0 1 0 1.700-3.870M2.500 2.250v2.500H5"/></svg>Replay</button>
+      </div>
+    </article>
+  </section>
+
+  <nav class="bar" id="bar" aria-label="Playback">
+    <button type="button" class="bar__btn" id="play" aria-label="Pause"></button>
+    <button type="button" class="bar__btn" id="restart" aria-label="Restart"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.750 8a5.250 5.250 0 1 0 1.700-3.870M2.500 2.250v2.500H5"/></svg></button>
+    <button type="button" class="bar__btn" id="sound" aria-label="Mute"></button>
+  </nav>
+  <a class="egg" id="egg" href="https://anoma.ly/spaceman/" target="_blank" rel="noopener noreferrer" tabindex="-1"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.500 10.500 10.500 5.500M6.250 5.500h4.250v4.250"/></svg>anoma.ly/spaceman</a>
+  <i class="flash" id="flash" aria-hidden="true"></i>
+  <output class="perf" id="perf" hidden></output>
+</main>
+
+<section class="features" aria-label="What Hex Meetings does">
+  <article>
+    <h2>A transcript while you talk</h2>
+    <p>A speech model on your Mac writes down the call as it happens. Nothing joins the meeting and the audio never leaves your Mac.</p>
+  </article>
+  <article>
+    <h2>Copy agent prompt</h2>
+    <p>One click puts the meeting so far on your clipboard, with the command your coding agent runs to keep reading as the call goes on.</p>
+  </article>
+  <article>
+    <h2>hex meetings show --from</h2>
+    <p>Agents read any meeting from the command line or over MCP: everything so far, or only what was said since a time you give it.</p>
+  </article>
+  <article>
+    <h2>Notes when it ends</h2>
+    <p>A title and a short summary, written on your Mac, saved as Markdown in the folder you choose.</p>
+  </article>
+</section>
+<footer class="site-footer"><div class="copyright"><img src="img/footer-signature.svg" alt="" aria-hidden="true" width="163" height="64"><p>©2026 <a href="https://anoma.ly">Anomaly</a>. All rights reserved.</p></div></footer>
+<script type="module" src="app.js"></script>
+</body>
+</html>

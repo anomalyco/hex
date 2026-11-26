@@ -8,7 +8,7 @@
 // Hex for iPhone on the App Store. Other hosts and
 // plain HTTP redirect to the canonical host. `cf dev` with ANY_HOST set turns
 // the redirect off for local testing.
-import { ANDROID_DOWNLOAD_PATH, ANDROID_PREVIEW_URL, BASE_PATH, DEV_DOWNLOAD_PATH, DEV_NOTES_PATH, DEV_NOTES_URL, DOWNLOAD_PATH, FILES_PATH, IOS_PATH, RELEASE_SERVICE, stripBase, withBase } from "./src/base"
+import { ANDROID_DOWNLOAD_PATH, ANDROID_PREVIEW_URL, BASE_PATH, DEV_DOWNLOAD_PATH, DEV_NOTES_PATH, DEV_NOTES_URL, DOWNLOAD_PATH, FILES_PATH, IOS_PATH, MEETINGS_PATH, RELEASE_SERVICE, stripBase, withBase } from "./src/base"
 import { parseDevNotes, renderDevNotes } from "./src/dev-notes"
 
 type Env = {
@@ -27,8 +27,10 @@ export default {
       url.port = ""
       return Response.redirect(url.toString(), 301)
     }
-    if (url.pathname === BASE_PATH) {
-      url.pathname = `${BASE_PATH}/`
+    // The home page and the Meetings showcase load files relative to their
+    // folder, so they live at their trailing-slash address.
+    if (url.pathname === BASE_PATH || url.pathname === MEETINGS_PATH) {
+      url.pathname = `${url.pathname}/`
       return Response.redirect(url.toString(), 301)
     }
     if (url.pathname === IOS_PATH || url.pathname === `${IOS_PATH}/`) return Response.redirect(APP_STORE_URL, 302)

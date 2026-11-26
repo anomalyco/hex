@@ -1,0 +1,363 @@
+/* Three more pages for the browser (the duck newspaper is tab 2, in style.css).
+
+   Tab 0  Slack      title: general (Channel) - Anomaly - Slack
+                     url:   app.slack.com/client/anomaly/general
+                     marks: a = channel header (top of page), b = 'pushed the hex menu bar fix', c = 'dictated this with hex'
+                     acts:  react = the rocket chip on the first message (12 -> 13, turns blue)
+                     Nothing in the channel knows what is coming. When OpenCode runs rm -rf jira slack linear
+                     the page tears for 120 ms (data-glitch="1".."3", one a frame) and is then dead (data-dead):
+                     "Workspace deleted", and a dead favicon on its tab (.tab[data-dead]).
+   Tab 1  Spaceman   title: Spaceman — a tiling window manager for macOS
+                     url:   anoma.ly/spaceman
+                     The real page (anoma.ly/spaceman), laid out at its desktop width and scaled to the
+                     window: --u is one of its CSS pixels. A click on it pauses the show and opens the real one.
+                     marks: a = the hero, b = 'Every window has a place.' with the first two demos under it,
+                            c = the second row of features
+                     acts:  space = workspace 2 in the bar under the second demo (the marker crosses to it and
+                            its two windows take the screen; app.js sets --ws, 0 to 1)
+   Tab 3  X          title: Home / X
+                     url:   x.com/home
+                     marks: a = top of the feed, b = 'do not turn auto-approve on', c = the duck, d = further down
+                     acts:  like = the heart under 'do not turn auto-approve on' (turns pink), count = its number
+
+   States the app sets: data-hot (pointer over), data-down (pressed), data-on (done). Nothing here moves
+   by itself: no keyframes, and state changes ease opacity, transform, colours and shadows in 140 ms or less. */
+
+.fav--slack { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1.5' y='5' width='6.5' height='3' rx='1.5' fill='%2336c5f0'/%3E%3Crect x='8' y='1.5' width='3' height='6.5' rx='1.5' fill='%232eb67d'/%3E%3Crect x='8' y='8' width='6.5' height='3' rx='1.5' fill='%23ecb22e'/%3E%3Crect x='5' y='8' width='3' height='6.5' rx='1.5' fill='%23e01e5a'/%3E%3C/svg%3E"); }
+.fav--space { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1024 1024'%3E%3Crect width='1024' height='1024' rx='224' fill='%23181a1f'/%3E%3Cg fill='%23f4f6ff'%3E%3Crect x='190' y='270' width='374' height='484' rx='76'/%3E%3Crect x='590' y='270' width='244' height='229' rx='62'/%3E%3Crect x='590' y='525' width='244' height='229' rx='62'/%3E%3C/g%3E%3C/svg%3E"); }
+.fav--x { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%23000'/%3E%3Cpath transform='translate(4.2 4.2) scale(.65)' fill='%23fff' d='M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z'/%3E%3C/svg%3E"); }
+
+/* ——— Slack: #general, dark. The sidebar's colour is painted on the page itself, so it runs the full
+   height however far the column has scrolled. ——— */
+.pg--slack { --sl-w: clamp(124px, 27cqw, 172px); --sl-line: rgba(209, 210, 211, 0.13); color: #d1d2d3; background: linear-gradient(90deg, #1b171e calc(var(--sl-w) - 1px), #2b282f 0 var(--sl-w), #1a1d21 0); font-size: 13px; line-height: 1.46; }
+.pg--slack .sl-app { display: grid; grid-template-columns: var(--sl-w) minmax(0, 1fr); margin: 0 calc(-1 * var(--px)) -48px; }
+.pg--slack .sl-side { min-width: 0; padding-bottom: 20px; color: #b5b6b9; }
+.pg--slack .sl-ws { display: flex; align-items: center; gap: 2px; height: 44px; padding: 0 12px 0 16px; box-shadow: inset 0 -1px 0 var(--sl-line); color: #fff; font-size: 15px; font-weight: 800; letter-spacing: -0.01em; white-space: nowrap; }
+.pg--slack .sl-ws b { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pg--slack .sl-ws .ic { width: 13px; height: 13px; opacity: 0.8; }
+.pg--slack .sl-ws .ic:last-child { width: 15px; height: 15px; margin-left: auto; opacity: 1; }
+.pg--slack .sl-list { padding-top: 8px; }
+.pg--slack .sl-sec + .sl-list { padding-top: 0; }
+.pg--slack .sl-list li { display: flex; align-items: center; gap: 8px; height: 26px; margin: 0 8px; padding: 0 8px; border-radius: 6px; white-space: nowrap; }
+.pg--slack .sl-list li > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pg--slack .sl-list li > i { flex: none; width: 15px; text-align: center; opacity: 0.75; }
+.pg--slack .sl-list .ic { opacity: 0.8; }
+.pg--slack .sl-list .sl-on { color: #fff; background: #1164a3; }
+.pg--slack .sl-list .sl-new { color: #fff; font-weight: 700; }
+.pg--slack .sl-list li > b { flex: none; min-width: 16px; height: 16px; margin-left: auto; padding: 0 5px; border-radius: 8px; color: #fff; background: #cd2553; font-size: 10.500px; font-weight: 700; line-height: 16px; text-align: center; }
+.pg--slack .sl-list li > em { flex: none; color: #8b8c8f; font-size: 11.500px; }
+.pg--slack .sl-list .sl-add { color: #8b8c8f; }
+.pg--slack .sl-list .sl-add > i { height: 15px; border-radius: 4px; background: rgba(255, 255, 255, 0.08); font-size: 12px; line-height: 14px; opacity: 1; }
+/* A direct message: their face, and a dot on its corner if they are around. */
+.pg--slack .sl-list .sl-dm { position: relative; width: 18px; height: 18px; margin: 0 -1px 0 -2px; border-radius: 4px; opacity: 1; }
+.pg--slack .sl-list .sl-dm::after { content: ""; position: absolute; right: -3px; bottom: -3px; width: 7px; height: 7px; border-radius: 50%; background: #1b171e; box-shadow: inset 0 0 0 1.500px #8b8c8f, 0 0 0 2px #1b171e; }
+.pg--slack .sl-list .sl-dm[data-on]::after { background: #2bac76; box-shadow: 0 0 0 2px #1b171e; }
+.pg--slack .sl-list .sl-dot { width: 9px; height: 9px; margin: 0 3px; border-radius: 50%; box-shadow: inset 0 0 0 1.500px #8b8c8f; opacity: 1; }
+.pg--slack .sl-list .sl-dot--on { background: #2bac76; box-shadow: none; }
+.pg--slack .sl-sec { display: flex; align-items: center; height: 26px; margin-top: 12px; padding: 0 16px; color: #9a9b9e; white-space: nowrap; }
+.pg--slack .sl-sec::before { content: ""; margin: 2px 9px 0 3px; border: 4px solid transparent; border-bottom-width: 0; border-top-color: currentColor; }
+.pg--slack .sl-main { min-width: 0; }
+.pg--slack .sl-head { display: flex; align-items: center; gap: 6px; height: 44px; padding: 0 12px 0 16px; box-shadow: inset 0 -1px 0 var(--sl-line); white-space: nowrap; }
+.pg--slack .sl-head__t { flex: none; color: #fff; font-size: 15px; font-weight: 800; letter-spacing: -0.01em; }
+.pg--slack .sl-head__t i { margin-right: 3px; color: #b5b6b9; font-weight: 500; }
+.pg--slack .sl-head .ic { width: 13px; height: 13px; color: #8b8c8f; }
+.pg--slack .sl-head__topic { flex: 1; min-width: 0; overflow: hidden; margin-left: 6px; padding-left: 10px; box-shadow: inset 1px 0 0 var(--sl-line); color: #9a9b9e; font-size: 12px; text-overflow: ellipsis; }
+.pg--slack .sl-head__m { display: flex; flex: none; align-items: center; height: 26px; margin-left: auto; padding: 0 8px 0 3px; border-radius: 6px; box-shadow: inset 0 0 0 1px rgba(209, 210, 211, 0.22); font-size: 12px; font-weight: 600; }
+.pg--slack .sl-head__m i { width: 20px; height: 20px; margin-right: -6px; border-radius: 5px; box-shadow: 0 0 0 2px #1a1d21; }
+.pg--slack .sl-head__m b { margin-left: 13px; }
+.pg--slack .sl-day { display: flex; align-items: center; height: 36px; }
+.pg--slack .sl-day::before, .pg--slack .sl-day::after { content: ""; flex: 1; height: 1px; background: var(--sl-line); }
+.pg--slack .sl-day b { flex: none; height: 24px; padding: 0 12px; border-radius: 12px; box-shadow: inset 0 0 0 1px rgba(209, 210, 211, 0.22); font-size: 12px; font-weight: 700; line-height: 24px; }
+.pg--slack .sl-msg { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 0 8px; padding: 6px 16px; }
+.pg--slack .sl-b { min-width: 0; }
+.pg--slack .sl-av { display: grid; place-items: center; width: 36px; height: 36px; margin-top: 3px; border-radius: 7px; color: #fff; font-size: 16px; font-weight: 800; line-height: 1; }
+.pg--slack .sl-av--bot { background: #2c2d30; box-shadow: inset 0 0 0 1px rgba(209, 210, 211, 0.16); }
+.pg--slack .sl-av--bot svg { width: 22px; height: 22px; fill: none; stroke: #ecb22e; stroke-width: 1.500; stroke-linecap: round; stroke-linejoin: round; }
+.pg--slack .sl-meta { display: flex; align-items: baseline; gap: 6px; line-height: 1.35; white-space: nowrap; }
+.pg--slack .sl-meta b { color: #fff; font-size: 14px; font-weight: 800; }
+.pg--slack .sl-meta span { color: #9a9b9e; font-size: 11px; }
+.pg--slack .sl-tag { align-self: center; padding: 0 3px; border-radius: 2px; color: #b5b6b9; background: rgba(209, 210, 211, 0.14); font-size: 9px; font-weight: 700; line-height: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+.pg--slack .sl-t { font-size: 13.500px; line-height: 1.42; text-wrap: pretty; }
+.pg--slack .sl-rxs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.pg--slack .sl-rx { display: inline-flex; align-items: center; gap: 4px; height: 23px; padding: 0 8px 0 6px; border-radius: 12px; background-color: rgba(232, 232, 232, 0.07); box-shadow: inset 0 0 0 1px transparent; font-size: 13px; line-height: 1; white-space: nowrap; transition: background-color 120ms, box-shadow 120ms, transform 120ms; }
+.pg--slack .sl-rx b { display: inline-grid; font-size: 11.500px; font-weight: 600; font-variant-numeric: tabular-nums; transition: color 120ms; }
+.pg--slack .sl-rx b i { grid-area: 1 / 1; transition: opacity 120ms; }
+.pg--slack .sl-rx b i + i { opacity: 0; }
+.pg--slack .sl-rx--add { padding: 0 7px; color: #9a9b9e; }
+.pg--slack .sl-rx--add .ic { width: 14px; height: 14px; }
+.pg--slack .sl-go[data-hot] { background-color: rgba(232, 232, 232, 0.14); box-shadow: inset 0 0 0 1px rgba(232, 232, 232, 0.5); }
+.pg--slack .sl-go[data-down] { transform: scale(0.93); }
+.pg--slack .sl-go[data-on] { background-color: rgba(29, 155, 209, 0.26); box-shadow: inset 0 0 0 1px #1d9bd1; }
+.pg--slack .sl-go[data-on] b { color: #7fd1f5; }
+.pg--slack .sl-go[data-on] b i { opacity: 0; }
+.pg--slack .sl-go[data-on] b i + i { opacity: 1; }
+.pg--slack .sl-thr { display: flex; align-items: center; gap: 6px; margin-top: 6px; color: #9a9b9e; font-size: 12px; white-space: nowrap; }
+.pg--slack .sl-mini { flex: none; width: 20px; height: 20px; border-radius: 5px; }
+.pg--slack .sl-mini + .sl-mini { margin-left: -2px; }
+.pg--slack .sl-thr b { flex: none; color: #1d9bd1; font-weight: 700; }
+.pg--slack .sl-thr span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pg--slack .sl-comp { margin: 10px 16px 0; border-radius: 8px; background: #222529; box-shadow: inset 0 0 0 1px rgba(209, 210, 211, 0.28); }
+.pg--slack .sl-comp__fmt { display: flex; align-items: center; gap: 14px; height: 30px; padding: 0 12px; border-radius: 8px 8px 0 0; color: #6f7175; background: rgba(255, 255, 255, 0.03); font-size: 13px; }
+.pg--slack .sl-comp__fmt b { font-weight: 800; }
+.pg--slack .sl-comp__fmt i { font-family: Georgia, serif; font-style: italic; }
+.pg--slack .sl-comp__fmt .ic { width: 14px; height: 14px; }
+.pg--slack .sl-comp__in { padding: 8px 12px 6px; color: #7d7f83; font-size: 13.500px; }
+.pg--slack .sl-comp__act { display: flex; align-items: center; gap: 12px; height: 34px; padding: 0 6px 4px 10px; color: #9a9b9e; font-size: 12.500px; }
+.pg--slack .sl-comp__act b { font-weight: 600; }
+.pg--slack .sl-send { display: grid; place-items: center; width: 28px; height: 26px; margin-left: auto; color: #6f7175; }
+.pg--slack .sl-typing { height: 24px; padding: 0 18px; color: #9a9b9e; font-size: 11px; line-height: 22px; white-space: nowrap; }
+.pg--slack .sl-typing b { font-weight: 700; }
+.pg--slack .sl-av--gh { background: #24292f; }
+.pg--slack .sl-av--gh svg { width: 22px; height: 22px; fill: #fff; }
+.pg--slack .sl-link { color: #1d9bd1; }
+.pg--slack .sl-t code { padding: 1px 4px; border-radius: 3px; color: #e8912d; background: rgba(232, 232, 232, 0.07); box-shadow: inset 0 0 0 1px rgba(232, 232, 232, 0.13); font: 12px var(--mono); }
+.pg--slack .sl-diff { margin-left: 4px; font: 600 11.500px var(--mono); white-space: nowrap; }
+.pg--slack .sl-diff i { color: #2eb67d; }
+.pg--slack .sl-diff u { margin-left: 5px; color: #e0607e; text-decoration: none; }
+@container (max-width: 27rem) {
+  .pg--slack { background: #1a1d21; }
+  .pg--slack .sl-app { grid-template-columns: minmax(0, 1fr); }
+  .pg--slack .sl-side, .pg--slack .sl-head__topic { display: none; }
+  .pg--slack .sl-head { height: 40px; padding: 0 10px 0 12px; }
+  .pg--slack .sl-day { height: 28px; }
+  .pg--slack .sl-msg { padding: 5px 12px; }
+  .pg--slack .sl-comp { margin-inline: 12px; }
+  .pg--slack .sl-typing { padding: 0 14px; }
+}
+
+/* ——— Spaceman: anoma.ly/spaceman as it is. Every length is one of the real page's CSS pixels (--u), so
+   the window shows the desktop layout whole: the still filling the first screen under the header, the
+   line and the two buttons over its foot, and under it the features, two to a row. ——— */
+.pg--space { --u: calc(100cqw / 800); color: #f5f5f7; background: #0a0b0d; font-size: calc(15 * var(--u)); line-height: 1.5; font-feature-settings: "cv02", "cv03", "cv04", "cv11"; }
+.pg--space .pg__in { padding: 0; }
+.pg--space svg { flex: none; }
+.sm-hero { position: relative; display: flex; flex-direction: column; justify-content: space-between; height: var(--vh, calc(520 * var(--u))); min-height: calc(250 * var(--u)); overflow: hidden; }
+.sm-hero__img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 40.1% 43.1%; }
+.sm-top { position: relative; display: flex; flex: none; align-items: center; justify-content: space-between; height: calc(72 * var(--u)); padding: 0 calc(28 * var(--u)); }
+.sm-top::before { content: ""; position: absolute; inset: 0 0 auto; height: 170%; background: linear-gradient(to bottom, rgb(8 8 10 / 0.72), rgb(8 8 10 / 0.4) 45%, rgb(8 8 10 / 0.12) 75%, transparent); }
+.sm-brand { position: relative; display: flex; align-items: center; gap: calc(12 * var(--u)); color: #f5f5f7; font-size: calc(15 * var(--u)); font-weight: 600; letter-spacing: -0.015em; text-shadow: 0 1px 8px rgb(0 0 0 / 0.5); }
+.sm-icon { width: calc(28 * var(--u)); height: calc(28 * var(--u)); border-radius: 23%; box-shadow: 0 0 0 1px rgb(255 255 255 / 0.15), 0 2px 8px rgb(0 0 0 / 0.45); }
+.sm-nav { position: relative; display: flex; align-items: center; gap: calc(24 * var(--u)); color: #dfe1e5; font-size: calc(13 * var(--u)); text-shadow: 0 1px 8px rgb(0 0 0 / 0.6); white-space: nowrap; }
+.sm-gh { display: inline-flex; align-items: center; gap: calc(6 * var(--u)); }
+.sm-gh svg { width: calc(15 * var(--u)); height: calc(15 * var(--u)); fill: currentColor; }
+.sm-dl { display: inline-flex; align-items: center; height: calc(32 * var(--u)); padding: 0 calc(14 * var(--u)); border-radius: 999px; color: #f3f4f6; background: rgb(255 255 255 / 0.1); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.12); font-weight: 500; text-shadow: none; }
+.sm-scrim { position: absolute; inset: auto 0 0; height: 72%; background: linear-gradient(to top, rgb(8 8 10 / 0.88) 0%, rgb(8 8 10 / 0.8) 14%, rgb(8 8 10 / 0.62) 32%, rgb(8 8 10 / 0.38) 52%, rgb(8 8 10 / 0.16) 72%, rgb(8 8 10 / 0.04) 88%, transparent 100%); }
+.sm-copy { position: relative; display: flex; flex-direction: column; gap: calc(28 * var(--u)); padding: 0 calc(28 * var(--u)) calc(48 * var(--u)); }
+.sm-title { display: flex; flex-direction: column; gap: calc(12 * var(--u)); max-width: calc(576 * var(--u)); }
+.pg--space h3 { font-size: calc(51.2 * var(--u)); font-weight: 600; letter-spacing: -0.04em; line-height: 0.96; }
+.sm-title p { max-width: calc(480 * var(--u)); color: #c4c6cc; font-size: calc(17 * var(--u)); line-height: 1.5; text-wrap: pretty; }
+.sm-ways { display: flex; flex-direction: column; gap: calc(12 * var(--u)); }
+.sm-cta { display: flex; align-items: center; gap: calc(12 * var(--u)); white-space: nowrap; }
+.sm-btn, .sm-watch { display: inline-flex; align-items: center; height: calc(44 * var(--u)); border-radius: 999px; font-size: calc(15 * var(--u)); font-weight: 500; }
+.sm-btn { gap: calc(10 * var(--u)); padding: 0 calc(20 * var(--u)) 0 calc(16 * var(--u)); color: #0a0b0d; background: #f3f4f6; box-shadow: 0 1px 2px rgb(0 0 0 / 0.3); font-weight: 600; }
+.sm-btn svg { width: calc(14 * var(--u)); height: calc(14 * var(--u)); fill: none; stroke: currentColor; stroke-width: 1.600; stroke-linecap: round; stroke-linejoin: round; }
+.sm-watch { gap: calc(10 * var(--u)); padding: 0 calc(20 * var(--u)) 0 calc(16 * var(--u)); color: #f3f4f6; background: rgb(255 255 255 / 0.1); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.12); -webkit-backdrop-filter: blur(12px) saturate(1.5); backdrop-filter: blur(12px) saturate(1.5); }
+.sm-watch svg { width: calc(12 * var(--u)); height: calc(12 * var(--u)); fill: currentColor; }
+.sm-watch i { color: #9a9ca3; font-variant-numeric: tabular-nums; }
+.sm-note { height: calc(20 * var(--u)); color: #9a9ca3; font-size: calc(13 * var(--u)); line-height: calc(20 * var(--u)); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sm-product { display: flex; flex-direction: column; gap: calc(64 * var(--u)); padding: calc(128 * var(--u)) calc(40 * var(--u)) calc(96 * var(--u)); }
+.sm-lead { display: flex; flex-direction: column; gap: calc(16 * var(--u)); max-width: calc(640 * var(--u)); }
+.pg--space h4 { font-size: calc(40 * var(--u)); font-weight: 600; letter-spacing: -0.03em; line-height: 1.1; text-wrap: balance; }
+.sm-lead p { color: #9a9ca3; font-size: calc(17 * var(--u)); line-height: 1.55; text-wrap: pretty; }
+.sm-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: calc(64 * var(--u)) calc(40 * var(--u)); }
+.sm-feat { display: flex; flex-direction: column; min-width: 0; }
+.sm-feat > b { margin-top: calc(20 * var(--u)); padding-right: calc(16 * var(--u)); font-size: calc(17 * var(--u)); font-weight: 600; letter-spacing: -0.01em; line-height: 1.5; }
+.sm-feat > p { margin-top: calc(8 * var(--u)); padding-right: calc(16 * var(--u)); color: #9a9ca3; font-size: calc(15 * var(--u)); line-height: 1.6; text-wrap: pretty; }
+.sm-feat kbd { display: inline-flex; align-items: center; justify-content: center; min-width: calc(24 * var(--u)); height: calc(24 * var(--u)); padding: 0 calc(6 * var(--u)); border-radius: calc(6 * var(--u)); color: #e4e6ea; background: rgb(255 255 255 / 0.07); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1), 0 1px 0 rgb(0 0 0 / 0.4); font: calc(13 * var(--u))/1 inherit; font-family: inherit; vertical-align: 0.05em; }
+.sm-demo { position: relative; display: block; aspect-ratio: 16 / 10; overflow: hidden; border-radius: calc(16 * var(--u)); background: #141518; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.06), 0 calc(20 * var(--u)) calc(40 * var(--u)) calc(-24 * var(--u)) rgb(0 0 0 / 0.8); }
+.sm-desk { background: linear-gradient(135deg, #465363, #262c35); }
+.sm-wins { position: absolute; inset: 4.800% 3%; }
+.sm-wins--bar { bottom: 20%; }
+.sm-wins--menu { inset: 12% 3% 3%; }
+.mw { position: absolute; display: block; overflow: hidden; border-radius: calc(6 * var(--u)); background: #e9ebef; box-shadow: 0 calc(6 * var(--u)) calc(18 * var(--u)) rgb(0 0 0 / 0.35); }
+.mw u { display: block; height: 14%; min-height: calc(10 * var(--u)); max-height: calc(16 * var(--u)); background: radial-gradient(circle at calc(8.5 * var(--u)) 50%, #c2c6cd calc(2.5 * var(--u)), transparent calc(2.8 * var(--u))), radial-gradient(circle at calc(16.5 * var(--u)) 50%, #c2c6cd calc(2.5 * var(--u)), transparent calc(2.8 * var(--u))), radial-gradient(circle at calc(24.5 * var(--u)) 50%, #c2c6cd calc(2.5 * var(--u)), transparent calc(2.8 * var(--u))), #dcdfe4; }
+.mw i { display: block; width: 80%; height: calc(4 * var(--u)); margin: 6% 6% 0; border-radius: 99px; background: #d0d3d9; }
+.mw i:nth-of-type(1) { width: 50%; height: calc(6 * var(--u)); background: var(--c); }
+.mw i:nth-of-type(3) { width: 60%; }
+/* The workspace bar: each number with its apps, and a marker on the one in front. */
+.sm-spaces { --ws: 0; }
+.sm-set1 { opacity: calc(1 - var(--ws)); }
+.sm-set2 { opacity: var(--ws); transform: scale(calc(0.94 + 0.06 * var(--ws))); }
+.sm-bar { position: absolute; bottom: 5%; right: 0; left: 0; width: fit-content; margin-inline: auto; display: flex; align-items: center; gap: calc(4 * var(--u)); padding: calc(4 * var(--u)); border-radius: calc(13 * var(--u)); background: rgb(28 29 32 / 0.9); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.09), 0 calc(10 * var(--u)) calc(28 * var(--u)) rgb(0 0 0 / 0.45); }
+.sm-mark { position: absolute; top: calc(4 * var(--u)); left: calc(calc(4 * var(--u)) + var(--ws) * 90 * var(--u)); width: calc((86 - 19 * var(--ws)) * var(--u)); height: calc(28 * var(--u)); border-radius: calc(9 * var(--u)); background: rgb(255 255 255 / 0.13); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1); }
+.sm-ws { position: relative; display: flex; align-items: center; gap: calc(5 * var(--u)); height: calc(28 * var(--u)); padding: 0 calc(10 * var(--u)); border-radius: calc(9 * var(--u)); opacity: 0.45; }
+.sm-ws b { width: calc(9 * var(--u)); color: #fff; font-size: calc(12 * var(--u)); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
+.sm-ws i { width: calc(14 * var(--u)); height: calc(14 * var(--u)); border-radius: calc(4 * var(--u)); background: var(--c); }
+.sm-ws--1 { opacity: calc(1 - 0.55 * var(--ws)); }
+.sm-ws--2 { opacity: calc(0.45 + 0.55 * var(--ws)); }
+.sm-go[data-hot] { background-color: rgb(255 255 255 / 0.08); }
+.sm-go[data-down] { transform: scale(0.95); }
+.sm-term { position: absolute; display: flex; flex-direction: column; overflow: hidden; border-radius: calc(6 * var(--u)); background: #16171a; box-shadow: 0 calc(6 * var(--u)) calc(18 * var(--u)) rgb(0 0 0 / 0.35); }
+.sm-term__tabs { display: flex; flex: none; align-items: flex-end; gap: calc(2 * var(--u)); height: 14%; min-height: calc(16 * var(--u)); max-height: calc(24 * var(--u)); padding: 0 calc(6 * var(--u)); background: #0f1012; }
+.sm-term__tabs i { display: block; flex: 1; height: 80%; border-radius: calc(4 * var(--u)) calc(4 * var(--u)) 0 0; background: radial-gradient(circle at calc(8.5 * var(--u)) 50%, var(--c) calc(2.5 * var(--u)), transparent calc(2.8 * var(--u))), linear-gradient(rgb(255 255 255 / 0.15), rgb(255 255 255 / 0.15)) calc(15 * var(--u)) 50% / calc(100% - calc(21 * var(--u))) calc(4 * var(--u)) no-repeat; opacity: 0.7; }
+.sm-term__tabs i[data-on] { background-color: #16171a; opacity: 1; }
+.sm-term__body { display: flex; flex-direction: column; gap: 7%; padding: 7%; }
+.sm-term__body i { display: block; height: calc(4 * var(--u)); border-radius: 99px; background: rgb(255 255 255 / 0.18); }
+.sm-term__body i:first-child { background: var(--c); }
+.sm-rules { display: flex; flex-direction: column; justify-content: center; gap: calc(6 * var(--u)); padding: 0 6%; color: #1f2126; background: #eceef1; }
+.sm-rules p { display: grid; grid-template-columns: 1.1fr 1.2fr 1fr 0.8fr; align-items: center; }
+.sm-rules__h { padding: 0 calc(8 * var(--u)) calc(4 * var(--u)); color: #6b6e76; font-size: calc(11 * var(--u)); font-weight: 600; }
+.sm-rule { padding: calc(6 * var(--u)) calc(8 * var(--u)); border-radius: calc(6 * var(--u)); background: #fff; box-shadow: 0 1px 0 rgb(0 0 0 / 0.05); font-size: calc(13 * var(--u)); }
+.sm-rule span:first-child { display: flex; align-items: center; gap: calc(6 * var(--u)); }
+.sm-rule i { width: calc(12 * var(--u)); height: calc(12 * var(--u)); border-radius: calc(3 * var(--u)); background: var(--c); }
+.sm-rule .dim { color: #9a9ca3; }
+.sm-menu { position: absolute; z-index: 1; inset: 0 0 auto; display: flex; align-items: center; justify-content: flex-end; gap: calc(8 * var(--u)); height: 9%; padding: 0 3%; color: #24262b; background: rgb(236 238 241 / 0.85); font-size: calc(11 * var(--u)); }
+.sm-menu b { padding: calc(1 * var(--u)) calc(6 * var(--u)); border-radius: calc(4 * var(--u)); color: #eceef1; background: #24262b; font-size: calc(10 * var(--u)); font-weight: 700; }
+.sm-access { display: flex; flex-direction: column; justify-content: center; gap: calc(12 * var(--u)); padding: 0 8%; color: #1f2126; background: #eceef1; }
+.sm-access__h { display: flex; align-items: center; gap: calc(8 * var(--u)); font-size: calc(13 * var(--u)); font-weight: 600; }
+.sm-access__h svg { width: calc(20 * var(--u)); height: calc(20 * var(--u)); }
+.sm-access ul { overflow: hidden; border-radius: calc(10 * var(--u)); background: #fff; box-shadow: 0 0 0 1px rgb(0 0 0 / 0.06); }
+.sm-access li { display: flex; align-items: center; gap: calc(10 * var(--u)); padding: calc(8 * var(--u)) calc(12 * var(--u)); color: rgb(31 33 38 / 0.45); font-size: calc(13 * var(--u)); }
+.sm-access li + li { box-shadow: inset 0 1px 0 rgb(0 0 0 / 0.06); }
+.sm-access li[data-on] { color: #1f2126; }
+.sm-access li > span { flex: 1; }
+.sm-access li .sm-icon, .sm-access li u { display: block; width: calc(20 * var(--u)); height: calc(20 * var(--u)); border-radius: calc(5 * var(--u)); box-shadow: none; }
+.sm-access li u { background: var(--c); opacity: 0.5; }
+.sm-access li > i { position: relative; width: calc(32 * var(--u)); height: calc(18 * var(--u)); border-radius: 99px; background: rgb(0 0 0 / 0.12); }
+.sm-access li > i::after { content: ""; position: absolute; top: calc(2 * var(--u)); left: calc(2 * var(--u)); width: calc(14 * var(--u)); height: calc(14 * var(--u)); border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 0.25); }
+.sm-access li[data-on] > i { background: #3478f6; }
+.sm-access li[data-on] > i::after { left: calc(16 * var(--u)); }
+.sm-foot { display: flex; align-items: center; gap: calc(10 * var(--u)); margin: 0 calc(40 * var(--u)); padding: calc(28 * var(--u)) 0 calc(40 * var(--u)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06); color: #9a9ca3; font-size: calc(13 * var(--u)); white-space: nowrap; }
+.sm-foot .sm-icon { width: calc(20 * var(--u)); height: calc(20 * var(--u)); }
+.sm-foot i { color: #55585f; }
+.sm-foot em { margin-left: auto; color: #6b6e76; }
+/* A phone's window: the page's own phone layout (one column, the short header), at a scale that
+   leaves the line readable in a window a few lines tall. */
+@container (max-width: 27rem) {
+  .pg--space { --u: calc(100cqw / 430); }
+  .sm-hero { min-height: 0; }
+  .sm-top { height: calc(50 * var(--u)); padding: 0 calc(18 * var(--u)); }
+  .sm-top::before { height: 120%; }
+  .sm-icon { width: calc(24 * var(--u)); height: calc(24 * var(--u)); }
+  .sm-brand { gap: calc(9 * var(--u)); }
+  .sm-nav { gap: calc(16 * var(--u)); }
+  .sm-nav > span:not(.sm-gh):not(.sm-dl), .sm-gh em, .sm-title p, .sm-ways { display: none; }
+  .sm-dl { height: calc(28 * var(--u)); padding: 0 calc(12 * var(--u)); }
+  .sm-scrim { height: 100%; }
+  .sm-copy { gap: 0; padding: 0 calc(18 * var(--u)) calc(14 * var(--u)); }
+  .pg--space h3 { font-size: calc(31 * var(--u)); }
+  .sm-product { gap: calc(28 * var(--u)); padding: calc(40 * var(--u)) calc(18 * var(--u)) calc(48 * var(--u)); }
+  .pg--space h4 { font-size: calc(26 * var(--u)); }
+  .sm-lead p { font-size: calc(15 * var(--u)); }
+  .sm-grid { grid-template-columns: minmax(0, 1fr); gap: calc(36 * var(--u)); }
+  .sm-feat:nth-child(1) { order: 2; }
+  .sm-feat:nth-child(n + 3) { order: 3; }
+  .sm-foot { margin: 0 calc(18 * var(--u)); }
+  .sm-foot em { display: none; }
+}
+
+/* ——— X, lights out: the feed. ——— */
+.pg--x { --x-line: #2f3336; --x-dim: #71767b; color: #e7e9ea; background: #000; font-size: 14px; line-height: 1.38; }
+.pg--x .pg__in { padding: 0 0 28px; }
+.x-app { display: grid; grid-template-columns: 54px minmax(0, 1fr); }
+.x-rail { display: flex; flex-direction: column; align-items: center; gap: 19px; padding-top: 12px; color: #e7e9ea; }
+.x-rail .ic { width: 20px; height: 20px; stroke-width: 1.500; }
+.x-rail .ic[data-on] { fill: currentColor; }
+.x-logo { display: grid; width: 26px; height: 26px; place-items: center; }
+.x-logo svg { width: 20px; height: 20px; fill: #e7e9ea; }
+.x-post { display: grid; width: 36px; height: 36px; margin-top: 2px; place-items: center; border-radius: 50%; color: #0f1419; background: #eff3f4; }
+.x-post .ic { width: 18px; height: 18px; }
+.x-main { min-width: 0; box-shadow: inset 1px 0 0 var(--x-line); }
+.x-tabs { display: grid; grid-template-columns: 1fr 1fr; height: 44px; box-shadow: inset 0 -1px 0 var(--x-line); color: var(--x-dim); font-size: 13.500px; font-weight: 520; text-align: center; }
+.x-tabs b { position: relative; align-self: center; justify-self: center; line-height: 44px; }
+.x-tabs b[data-on] { color: #e7e9ea; font-weight: 700; }
+.x-tabs b[data-on]::after { content: ""; position: absolute; inset: auto 0 0; height: 3px; border-radius: 3px; background: #1d9bf0; }
+.x-comp { display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 14px; box-shadow: inset 0 -1px 0 var(--x-line); color: var(--x-dim); font-size: 16px; }
+.x-comp > span { flex: 1; }
+.x-comp > b { height: 30px; padding: 0 15px; border-radius: 15px; color: #0f1419; background: #787a7a; font-size: 13px; font-weight: 700; line-height: 30px; }
+.x-tw { position: relative; display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 0 10px; padding: 10px 14px 6px; box-shadow: inset 0 -1px 0 var(--x-line); }
+/* A reply shown with what it answers: no rule between them, and a line down from the first face. */
+.x-tw--thread { padding-bottom: 2px; box-shadow: none; }
+.x-tw--thread::before { content: ""; position: absolute; top: 50px; bottom: -8px; left: 31px; width: 2px; border-radius: 1px; background: #333639; }
+.x-av { display: grid; flex: none; width: 36px; height: 36px; place-items: center; border-radius: 50%; color: #fff; font-size: 16px; font-weight: 800; line-height: 1; text-transform: uppercase; }
+.x-av--d { background: linear-gradient(135deg, #f0a03c, #c2620f); }
+.x-av--e { background: linear-gradient(135deg, #f0629a, #b4245e); }
+.x-av--bd { color: #fff; background: #b3261e; font: 800 17px Georgia, serif; }
+.x-av--oc { border-radius: 8px; background: #131010; box-shadow: inset 0 0 0 1px #2f3336; }
+.x-av--oc svg { width: 30px; height: 30px; }
+.x-av--mc { width: 18px; height: 18px; color: #fff; background: #121212; box-shadow: inset 0 0 0 1px #3a3a3a; font: 700 11px Georgia, serif; }
+.x-b { min-width: 0; }
+.x-who { display: flex; align-items: center; gap: 4px; min-width: 0; line-height: 18px; white-space: nowrap; }
+.x-who b { flex: none; max-width: 60%; overflow: hidden; font-weight: 700; text-overflow: ellipsis; }
+.x-who span { min-width: 0; overflow: hidden; color: var(--x-dim); text-overflow: ellipsis; }
+.x-ok { flex: none; width: 15px; height: 15px; fill: #1d9bf0; }
+.x-more { flex: none; width: 15px; height: 3px; margin-left: auto; background: radial-gradient(circle, var(--x-dim) 1.300px, transparent 1.600px) 0 0 / 6px 3px repeat-x; }
+.x-t { margin-top: 1px !important; font-size: 14.500px; line-height: 1.36; text-wrap: pretty; }
+.x-acts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; align-items: center; height: 32px; margin: 2px 0 0 -5px !important; color: var(--x-dim); font-size: 12px; font-variant-numeric: tabular-nums; }
+.x-acts > span { display: inline-flex; align-items: center; gap: 3px; min-width: 0; white-space: nowrap; }
+.x-acts .ic { box-sizing: content-box; width: 15px; height: 15px; padding: 5px; border-radius: 50%; stroke-width: 1.300; }
+.x-acts__r { gap: 0 !important; }
+.x-count { display: inline-grid; }
+.x-count i { grid-area: 1 / 1; }
+.x-count i + i { opacity: 0; }
+.x-like[data-hot] { color: #f91880; }
+.x-like[data-hot] .ic { background: rgba(249, 24, 128, 0.12); }
+.x-like[data-down] .ic { transform: scale(0.82); }
+.x-like[data-on] { color: #f91880; }
+.x-like[data-on] .ic { fill: #f91880; stroke: #f91880; }
+.x-count[data-on] i { opacity: 0; }
+.x-count[data-on] i + i { opacity: 1; }
+.x-quote { margin-top: 8px; overflow: hidden; border-radius: 14px; box-shadow: inset 0 0 0 1px var(--x-line); }
+.x-quote .x-who { padding: 9px 12px 0; }
+.x-quote .x-t { padding: 0 12px 9px; }
+/* A photo in a post of its own. */
+.x-photo { display: block; width: 100%; height: auto; margin-top: 8px; border-radius: 14px; aspect-ratio: 840 / 525; object-fit: cover; box-shadow: 0 0 0 1px var(--x-line); }
+.x-quote img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 8.500; object-fit: cover; object-position: 50% 62%; }
+@container (max-width: 27rem) {
+  .x-app { grid-template-columns: minmax(0, 1fr); }
+  .x-rail, .x-comp { display: none; }
+  .x-main { box-shadow: none; }
+  .x-tabs { height: 36px; }
+  .x-tabs b { line-height: 36px; }
+  .x-tw { padding: 8px 12px 4px; }
+  .x-tw--thread::before { top: 48px; left: 29px; }
+}
+
+/* ——— v12 ——— */
+
+/* The four of Anomaly, as they are on X: one 96 px picture each (img/avatar-*.webp), used for
+   their messages, the channel's member stack, thread replies and direct messages in Slack, and
+   for their posts on X. (A Slack face is a rounded square; an X one is a circle: the element's
+   own radius decides.) */
+.pic { background: #2a2c31 center / cover no-repeat; }
+.pic--kit { background-image: url("img/avatar-kit.webp"); }
+.pic--dax { background-image: url("img/avatar-dax.webp"); }
+.pic--jay { background-image: url("img/avatar-jay.webp"); }
+.pic--aiden { background-image: url("img/avatar-aiden.webp"); }
+.pic--greg { background-image: url("img/avatar-greg.webp"); }
+.pic--priya { background-image: url("img/avatar-priya.webp"); }
+.sl-ce { width: 16px; height: 16px; border-radius: 3px; object-fit: cover; display: block; flex: none; }
+
+/* Slack, as its workspace is deleted. Three torn frames, shown one a frame for 120 ms: */
+.pg--slack[data-glitch="1"] .sl-app { transform: translate3d(16px, 0, 0) skewX(-5deg); filter: hue-rotate(95deg) saturate(2.6) contrast(1.2); clip-path: inset(0 0 46% 0); }
+.pg--slack[data-glitch="2"] .sl-app { transform: translate3d(-26px, 5px, 0); filter: invert(1) hue-rotate(160deg) contrast(1.35); clip-path: inset(22% 0 31% 0); }
+.pg--slack[data-glitch="3"] .sl-app { transform: translate3d(9px, -3px, 0) scaleY(1.03); filter: saturate(0.1) brightness(1.7) blur(0.6px); clip-path: inset(58% 0 6% 0); }
+.pg--slack[data-glitch]::after { content: ""; position: absolute; z-index: 2; right: 0; left: 0; height: 13%; background: linear-gradient(180deg, transparent, rgba(255, 46, 99, 0.4) 18%, rgba(54, 197, 240, 0.34) 62%, transparent); mix-blend-mode: screen; pointer-events: none; }
+.pg--slack[data-glitch="1"]::after { top: 54%; }
+.pg--slack[data-glitch="2"]::after { top: 9%; }
+.pg--slack[data-glitch="3"]::after { top: 34%; height: 22%; }
+/* ...and then what is left of it. */
+.pg--slack .sl-dead { position: absolute; z-index: 1; inset: 0; display: none; align-content: safe center; justify-items: center; gap: 0; padding: 20px 24px 24px; color: #9a9b9e; background: #1a1d21; text-align: center; }
+.pg--slack[data-dead] .sl-dead, .pg--slack[data-glitch="3"] .sl-dead { display: grid; }
+.pg--slack[data-glitch="3"] .sl-dead { opacity: 0.55; }
+.pg--slack[data-dead] .pg__in { opacity: 0; }
+.pg--slack .sl-dead__logo { width: 40px; height: 40px; fill: #4b4e55; }
+.pg--slack .sl-dead h3 { margin: 16px 0 0; color: #fff; font-size: clamp(19px, 5.4cqw, 23px); font-weight: 800; letter-spacing: -0.015em; line-height: 1.2; }
+.pg--slack .sl-dead__why { margin: 8px 0 0; max-width: 28ch; font-size: 13.5px; line-height: 1.45; text-wrap: balance; }
+.pg--slack .sl-dead__why span { font-variant-numeric: tabular-nums; }
+.pg--slack .sl-dead__acts { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin: 20px 0 0; }
+.pg--slack .sl-dead__acts span { height: 32px; padding: 0 14px; border-radius: 6px; color: #d1d2d3; box-shadow: inset 0 0 0 1px rgba(209, 210, 211, 0.3); font-size: 12.5px; font-weight: 650; line-height: 32px; white-space: nowrap; }
+.pg--slack .sl-dead__acts span:first-child { color: #6f7175; box-shadow: inset 0 0 0 1px rgba(209, 210, 211, 0.14); }
+.pg--slack .sl-dead__code { margin: 18px 0 0; color: #e0655f; font: 11px var(--mono); letter-spacing: 0.01em; }
+@container (max-width: 27rem) {
+  .pg--slack .sl-dead { padding: 10px 14px; }
+  .pg--slack .sl-dead__logo { width: 26px; height: 26px; }
+  .pg--slack .sl-dead h3 { margin-top: 8px; font-size: 16px; }
+  .pg--slack .sl-dead__why { margin-top: 4px; font-size: 12px; }
+  .pg--slack .sl-dead__acts { margin-top: 10px; gap: 6px; }
+  .pg--slack .sl-dead__acts span { height: 26px; padding: 0 10px; font-size: 11.5px; line-height: 26px; }
+  .pg--slack .sl-dead__code { display: none; }
+}
+/* Its tab: the four bars gone grey, and a red mark over them. */
+.tab[data-dead] .fav--slack { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cg fill='%2355585f'%3E%3Crect x='1.5' y='5' width='6.5' height='3' rx='1.5'/%3E%3Crect x='8' y='1.5' width='3' height='6.5' rx='1.5'/%3E%3Crect x='8' y='8' width='6.5' height='3' rx='1.5'/%3E%3Crect x='5' y='8' width='3' height='6.5' rx='1.5'/%3E%3C/g%3E%3Ccircle cx='11' cy='11' r='4.6' fill='%23ef4444' stroke='%231d1d1f' stroke-width='1'/%3E%3Cpath d='m9.3 9.3 3.4 3.4m0-3.4-3.4 3.4' stroke='%23fff' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E"); }
+.tab[data-dead] em { color: #f08f8a; }

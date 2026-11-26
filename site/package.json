@@ -10,6 +10,8 @@
     "preview": "vite preview",
     "check:downloads": "bun scripts/check-downloads.ts",
     "generate:og": "bun scripts/generate-og.ts",
+    "generate:og-meetings": "bun scripts/generate-og-meetings.ts",
+    "import:meetings": "bun scripts/meetings-import.ts",
     "generate:poster": "bun scripts/generate-poster.ts",
     "generate:og-video": "node scripts/og-video/capture.mjs"
   },

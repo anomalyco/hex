@@ -388,6 +388,7 @@ a {
 }
 
 .wordmark:focus-visible,
+.header__link:focus-visible,
 .header__github:focus-visible,
 .download:focus-visible,
 .command__copy:focus-visible,
@@ -412,6 +413,8 @@ a {
   stroke: none;
 }
 
+/* Meetings beside GitHub, in the same quiet type. */
+.header__link,
 .header__github {
   display: inline-flex;
   align-items: center;
@@ -422,6 +425,7 @@ a {
   transition: color 160ms ease;
 }
 
+.header__link:hover,
 .header__github:hover {
   color: #f3f3f0;
 }
