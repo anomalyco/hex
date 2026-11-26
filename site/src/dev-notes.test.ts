@@ -59,6 +59,10 @@ test("no version lists every build", () => {
   expect(html).not.toContain('class="since"')
 })
 
+test("the page links the stable changelog", () => {
+  expect(renderDevNotes(notes, download, null)).toContain('href="/hex/changelog">their own changelog</a>')
+})
+
 test("notes with no builds still say there are no notes", () => {
   const html = renderDevNotes({ schema: 1, builds: [] }, download, null)
   expect(html).toContain("No dev build notes yet.")

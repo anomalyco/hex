@@ -10,6 +10,8 @@ export const RELEASE_SERVICE = "https://anoma.ly/release"
 export const DEV_DOWNLOAD_PATH = `${BASE_PATH}/download/dev`
 // The dev builds' changelog (worker.ts, src/dev-notes.ts).
 export const DEV_NOTES_PATH = `${BASE_PATH}/dev`
+// The stable releases' changelog, built from docs/releases (src/changelog.ts).
+export const CHANGELOG_PATH = `${BASE_PATH}/changelog`
 // The Release workflow publishes the dev builds' notes to this one-commit
 // branch (publish-dev-notes.sh), which the Worker serves at
 // `${FILES_PATH}/dev-notes.json` and renders at `DEV_NOTES_PATH`, so neither

@@ -181,7 +181,7 @@ secrets; the `homebrew` job pushes that verified file with the tap deploy key
   Windows targets (the run summary says so); Linux needs no signing. It
   publishes only the release: no GitHub release, AUR, Homebrew, Nix record,
   or site deploy. Publishing a dev build is not a release: it leaves
-  `production`, the stable channel, and the release freeze alone. Installs on
+  `production` and the stable channel alone. Installs on
   the Dev channel check every 10 minutes and when the window opens or gains
   focus (at most once a minute), so a push reaches them within minutes of its
   run finishing.
@@ -207,20 +207,53 @@ the same OIDC identity.
 Publish from `dev`. `production` is for site deploys only and moves by
 fast-forward from `dev`.
 
-1. Bump `version` in `Cargo.toml` (and `Cargo.lock`), add
-   `docs/releases/<version>.md`, push to `dev`. Run
-   `scripts/check-onboarding.sh` on that commit and give Dax its result and
-   scene images with the go/no-go; stable releases need his explicit go-ahead.
-2. Let the push to `dev` publish its dev-channel build
-   (`https://anoma.ly/release/hex/desktop/dev.json`) and try it on an install
-   set to the Dev update channel.
-3. Confirm the reviewed commit is still the tip of `dev`. Dispatch Release on
-   `dev` with `channel: stable` and check the run's SHA. After publishing,
-   the workflow tags that commit `v<version>`.
-4. Bump the README version link. The site reads the release from the service
-   when it deploys. Fast-forward `production` when ready to deploy the site;
-   dispatch Deploy there if the push did not touch a site deploy path.
-5. First release on the service only: set the informational item's version in
+A stable release is one Release Radar thread in `#abattoir`: the pre-flight
+and the draft notes are posted there, Kit or Dax approves there, and the
+announcement closes it. Steps 1 and 2 need no one's go-ahead and publish
+nothing; nothing after them starts before the approval in step 3.
+
+```ts
+Release Radar (one #abattoir thread per stable release)
+├─ 1 pre-flight   Release, channel: check, on the tip of dev        publishes nothing
+├─ 2 draft        prep PR: version bump + docs/releases/<version>.md
+├─ 3 approve      check run, onboarding scenes, and notes in the thread → go from Kit or Dax
+├─ 4 release      merge the prep PR → Release, channel: stable → tag v<version>
+├─ 5 site         fast-forward production → Deploy → download buttons and /hex/changelog
+└─ 6 announce     the thread gets the changelog and GitHub release links
+```
+
+1. Pre-flight. Dispatch Release on `dev` with `channel: check`
+   (`gh workflow run release.yml --ref dev -f channel=check`). It builds,
+   signs, and verifies every platform, runs the full Linux, macOS, and
+   Windows suites and the onboarding gate (`scripts/check-onboarding.sh`),
+   and publishes nothing. Every push to `dev` has already published its
+   dev-channel build (`https://anoma.ly/release/hex/desktop/dev.json`), so
+   installs on the Dev update channel are running the candidate.
+2. Draft. Open the prep pull request: bump `version` in `Cargo.toml` (and
+   `Cargo.lock`) and add `docs/releases/<version>.md`. That file is the
+   release's notes everywhere: the GitHub release's body and the release's
+   entry on `https://anoma.ly/hex/changelog`
+   (`site/src/changelog.ts`: a `## Hex <version>` title, `###` sections such
+   as new, labs, and fixes, bullets, and `>` callouts for upgrade notes).
+3. Approve. Post the check run, the onboarding result with its scene images,
+   and the prep pull request in the release's `#abattoir` thread. A stable
+   release needs an explicit go there from Kit or Dax.
+4. Release. Merge the prep pull request, confirm it is the tip of `dev`, and
+   dispatch Release on `dev` with `channel: stable`
+   (`gh workflow run release.yml --ref dev -f channel=stable`); check the
+   run's SHA. It runs the suites and the onboarding gate again on that commit,
+   and after publishing tags it `v<version>`.
+5. Site. Fast-forward `production` to the released commit. Deploy rebuilds
+   the site there: the download buttons read the new stable release from the
+   service, and `/hex/changelog` gains the release from its notes file, with
+   nothing to edit by hand. `README.md` links the version-less
+   `/hex/download/<target>` routes, so it needs no bump. `docs/releases/` is
+   not a site deploy path: dispatch Deploy on `production` when the
+   fast-forward brought no `site/` change.
+6. Announce. Reply in the thread with
+   `https://anoma.ly/hex/changelog#<version>` and the GitHub release once the
+   site shows the release.
+7. First release on the service only: set the informational item's version in
    `packaging/macos/legacy-appcast.xml` (a 2.4.0 / build 20400 placeholder) to
    the release, push it, deploy the old hosts' redirect, and publish the
    item for 2.3.1 Macs (both below, "Transition from Kit's hosting").
@@ -252,6 +285,7 @@ cloudflare.config.ts (cf deploy --prebuilt --mode <mode>, from CI only)
 https://anoma.ly/hex/                      the site; downloads read the service's stable manifest at build time
 ├─ download/dev                            302 to the dev channel's macos-arm64-dmg, read per request
 ├─ dev                                     the dev builds' changelog, rendered per request from the dev-notes branch
+├─ changelog                               the stable changelog, built with the site from docs/releases/<X.Y.Z>.md
 ├─ install-linux.sh, install-windows.ps1   the installers, copied from .github/release/ at build time
 └─ files/                                  the one owner of every release file (below)
    ├─ install-linux.sh, install-windows.ps1, appcast.xml   built and served with the site
