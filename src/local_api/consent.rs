@@ -247,6 +247,9 @@ pub(crate) enum Answer {
     Timeout,
     /// No window can ask (headless service, or the window is gone).
     Unavailable,
+    /// The window is already showing another ask (a pairing and a browser
+    /// connect at once): nothing was shown, and no cooldown starts.
+    Busy,
 }
 
 /// The window's side of the ask. `ask` shows the prompt and blocks until the

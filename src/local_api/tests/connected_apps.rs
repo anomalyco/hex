@@ -463,3 +463,22 @@ fn turning_off_withdraws_the_ask_and_cancels_the_recording() {
     assert_eq!(recording.cancels(), 1);
     assert!(sessions.view().is_none());
 }
+
+/// A window already showing the other route's ask answers busy on both, and
+/// busy starts no cooldown: the page may ask again once it closes.
+#[test]
+fn an_ask_while_the_window_shows_another_is_busy() {
+    let gate = ScriptedGate::new(Answer::Busy);
+    let (api, _, _) = start(connected(), gate.clone(), &app_origin());
+    let port = api.document.port;
+    for path in [
+        connect::AUTHORIZE_PATH,
+        record::PAIR_PATH,
+        connect::AUTHORIZE_PATH,
+    ] {
+        let response = connect_post(port, ASKING, path, &ask_body());
+        assert!(response.starts_with("HTTP/1.1 409"), "{path}: {response}");
+        assert_eq!(body_code(&response), "consent-busy");
+    }
+    assert_eq!(gate.asks(), 3);
+}

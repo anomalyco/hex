@@ -281,6 +281,7 @@ impl Connect {
                 HttpResponse::code(403, "consent-timeout")
             }
             Answer::Unavailable => HttpResponse::code(403, "connect-unavailable"),
+            Answer::Busy => HttpResponse::code(409, "consent-busy"),
         }
     }
 

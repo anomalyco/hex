@@ -461,6 +461,7 @@ impl Sessions {
                 HttpResponse::code(403, "consent-timeout")
             }
             Answer::Unavailable => HttpResponse::code(403, "record-unavailable"),
+            Answer::Busy => HttpResponse::code(409, "consent-busy"),
         }
     }
 

@@ -81,9 +81,8 @@ impl ConsentGate for Desk {
         let id = {
             let mut state = lock(&self.state);
             if state.pending.is_some() {
-                // The local API allows one ask at a time; a second gate call
-                // is a bug, not a second dialog.
-                return Answer::Unavailable;
+                // One dialog at a time across every route that asks.
+                return Answer::Busy;
             }
             state.next_id += 1;
             let id = state.next_id;
@@ -237,6 +236,25 @@ mod tests {
         desk.withdraw(&|_| false);
         assert_eq!(asking.join().unwrap(), Answer::Unavailable);
         assert!(desk.prompt().is_none());
+    }
+
+    #[test]
+    fn a_second_ask_while_one_shows_is_busy() {
+        let desk = Arc::new(Desk::default());
+        let asking = {
+            let desk = desk.clone();
+            thread::spawn(move || desk.ask(&prompt(), Duration::from_secs(5)))
+        };
+        let shown = loop {
+            if let Some(shown) = desk.prompt() {
+                break shown;
+            }
+            thread::sleep(Duration::from_millis(5));
+        };
+        assert_eq!(desk.ask(&prompt(), Duration::from_secs(5)), Answer::Busy);
+        assert_eq!(desk.prompt(), Some(shown.clone()), "the first stays");
+        assert!(desk.answer(shown.id, Answer::Once));
+        assert_eq!(asking.join().unwrap(), Answer::Once);
     }
 
     #[test]
