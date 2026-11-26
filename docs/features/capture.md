@@ -1,9 +1,8 @@
 # Annotate (macOS, Linux, and Windows)
 
 Annotate is Scrawl's capture engine hosted inside Hex (code and settings keep
-the name `capture`), steps 3 to 5 of
-[the plan](../plans/capture-in-hex.md). It runs the real
-`scrawl-capture` crate, imported into `crates/capture`: it records the active
+the name `capture`), running the `scrawl-capture` crate (`crates/capture`) with
+`SharedResources::none()` (no separate ingest server or global shortcut tap): it records the active
 display with ScreenCaptureKit, on Linux the screen-cast portal and
 PipeWire (`capture.linux`), on Windows Windows.Graphics.Capture
 (`capture.windows`), (or a cabled iPhone through `scrawl-helper`'s

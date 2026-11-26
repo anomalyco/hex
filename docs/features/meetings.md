@@ -2926,8 +2926,6 @@ warm; searches 0.6–1.5 ms; a 48,000-char `get_transcript` 0.6 ms;
 max 22 ms), listed, and exited 0 in 76 ms wall. The LaunchAgent is not loaded,
 so ssh-agent access from launchd is unverified.
 
-Granola import: see [granola-import.md](../plans/granola-import.md).
-
 ## Gaps
 
 - End-to-end macOS recordings (process tap, rolling transcript, final

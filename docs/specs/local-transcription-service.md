@@ -8,8 +8,8 @@ helper command is still required; signed consumer distribution remains unverifie
 
 **Authority:** This document describes the embedded service protocol and labels
 proposed distribution separately. The [SDK README](../../sdk/typescript/README.md)
-is the current consumer guide. Delivery scope, evidence, and acceptance gates live in
-[`../plans/typescript-sdk.md`](../plans/typescript-sdk.md).
+is the current consumer guide; remaining standalone native-helper packaging is
+tracked in [`ROADMAP.md`](../../ROADMAP.md).
 
 ## Product Boundary
 

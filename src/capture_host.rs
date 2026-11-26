@@ -1,6 +1,6 @@
-//! The `capture` experiment (macOS, Linux, and Windows): Scrawl's capture
-//! engine, the `scrawl-capture` crate, hosted inside Hex. Step 3 of
-//! `docs/plans/capture-in-hex.md`. Everything here is shared; what differs
+//! Annotate (macOS, Linux, and Windows): Scrawl's capture engine, the
+//! `scrawl-capture` crate, hosted inside Hex (`docs/features/capture.md`,
+//! `docs/hex-annotation.md`). Everything here is shared; what differs
 //! by OS is the engine's own platform adapter (ScreenCaptureKit; the portal,
 //! PipeWire and VA-API; or Windows.Graphics.Capture), where the audio
 //! timeline comes from (`DictationAudio` on macOS, the Linux and Windows
@@ -5276,7 +5276,7 @@ mod tests {
                 word_lag(*model),
                 Some(lag),
                 "{} has a new pinned file: measure its word lag again \
-                 (docs/plans/capture-in-hex.md) before keeping the correction",
+                 (docs/features/capture.md) before keeping the correction",
                 model.as_str()
             );
         }

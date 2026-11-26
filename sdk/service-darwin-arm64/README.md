@@ -10,9 +10,9 @@ must supply an explicit helper command to `create()`.
 
 The TypeScript release workflow does not build or insert `bin/hex-service`.
 The separate service-app scripts package the full desktop executable as
-`hex-service`; they do not produce a transcription-only npm payload. A validated
-signed artifact, consumer packaging, and helper publication remain planned in
-[`docs/plans/typescript-sdk.md`](../../docs/plans/typescript-sdk.md).
+`hex-service`; they do not produce a transcription-only npm payload. The service protocol lives in
+[`docs/specs/local-transcription-service.md`](../../docs/specs/local-transcription-service.md),
+and remaining standalone helper packaging is tracked in [`ROADMAP.md`](../../ROADMAP.md).
 
 The service-app packager requires an explicit `HEX_TEAM_ID` and a
 matching Developer ID Application signing identity, using the same validation

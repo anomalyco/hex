@@ -295,8 +295,7 @@ candidate spans per decode and sort first. Both live in Hex's transcribe.cpp for
 (branch `hex/vocabulary-sounds-like`: `decode_rnnt_tree` and
 `rescore_vocabulary` in `src/arch/parakeet/decoder.cpp`, while `vocabulary.cpp`
 finds candidates, classifies spans, and runs the exact-spelling pass,
-`force_vocabulary_spellings`); measurements are in
-[vocabulary-boost-results.md](../research/vocabulary-boost-results.md).
+`force_vocabulary_spellings`).
 
 Provisional defaults, each changed in one place:
 

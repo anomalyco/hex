@@ -304,7 +304,6 @@ hex app
   `ThemeChanged` when the OS theme actually changed. The subclass removes
   itself when the window is destroyed.
 - Without a tray (creation failed) closing the window quits Hex.
-  See the [single-process plan](plans/single-process.md#windows-under-rune).
 
 **This app has never run on Windows.** Earlier releases shipped a GPUI app
 that a person did run; that app is gone, and the Rune app replaces it in the
