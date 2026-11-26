@@ -399,7 +399,7 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Lowercase", ["Małe litery", "小写", "小文字", "Kleinbuchstaben", "Minúsculas", "Малі літери"]),
     ("Lowercases everything", ["Zmienia wszystko na małe litery", "全部转为小写", "すべて小文字にします", "Schreibt alles klein", "Pone todo en minúsculas", "Робить усе малими літерами"]),
     ("No final period", ["Bez kropki na końcu", "去掉末尾句号", "最後の句点なし", "Kein Schlusspunkt", "Sin punto final", "Без крапки в кінці"]),
-    ("Drops the last . ! or ?", ["Usuwa ostatnią . ! lub ?", "去掉最后的 . ! 或 ?", "最後の . ! ? を削除します", "Entfernt das letzte . ! oder ?", "Quita el último . ! o ?", "Прибирає останню . ! чи ?"]),
+    ("Drops the final period, keeps ? and !", ["Usuwa kropkę na końcu, zostawia ? i !", "去掉末尾的句号，保留问号和感叹号", "最後の句点を削除し、? と ! は残します", "Entfernt den Schlusspunkt, behält ? und !", "Quita el punto final, conserva ? y !", "Прибирає крапку в кінці, лишає ? і !"]),
     ("SpongeBob case", ["Styl SpongeBoba", "海绵宝宝大小写", "スポンジ・ボブ表記", "SpongeBob-Schreibweise", "Estilo Bob Esponja", "Стиль Губки Боба"]),
     ("aLtErNaTeS every letter", ["nAp RzEmIeNnIe litery", "字母大小写交替", "文字を交互に大小にします", "wEcHsElT jeden Buchstaben", "aLtErNa cada letra", "чЕрГуЄ кожну літеру"]),
     ("Copied. Paste it into your agent and say what you want", ["Skopiowano. Wklej to swojemu agentowi i powiedz, czego chcesz", "已复制。粘贴给你的智能体，说出你想要的", "コピーしました。エージェントに貼り付けて、望むことを伝えてください", "Kopiert. Füge es bei deinem Agenten ein und sag, was du willst", "Copiado. Pégalo en tu agente y di lo que quieres", "Скопійовано. Вставте це своєму агентові й скажіть, чого хочете"]),

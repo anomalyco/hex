@@ -1563,10 +1563,12 @@ and the `output-trust` golden cover the prompt. Windows `cmd` quoting is a
 pure-function test only; the job object and macOS paths compile on CI but are
 not run against real programs there. No check reaches a remote TLS host.
 
-The built-ins are Lowercase, SpongeBob case, and No trailing punctuation. The
-last removes only the final contiguous run of sentence marks (including
-full-width marks), preserving internal punctuation, trailing whitespace, and
-closing quotes/brackets. Punctuation inside a final closing quote is preserved.
+The built-ins are Lowercase, SpongeBob case, and No final period
+(`no-trailing-punctuation`). The last removes only the final contiguous run
+of full stops, commas, semicolons, and colons (including full-width marks),
+preserving internal punctuation, trailing whitespace, and closing
+quotes/brackets. A final `?`, `!`, or ellipsis (`…` or `...`) stays, since
+it changes what the message says. Punctuation inside a final closing quote is preserved.
 Select it after Lowercase for lowercase messages without the final period.
 The `no_trailing_punctuation_*` and `built_in_transformations_chain_in_selected_order`
 tests in [personal_commands.rs](../../src/personal_commands.rs) cover text behavior

@@ -500,7 +500,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Lowercase", "Строчные"),
     ("Lowercases everything", "Делает все буквы строчными"),
     ("No final period", "Без точки в конце"),
-    ("Drops the last . ! or ?", "Убирает последний знак . ! или ?"),
+    ("Drops the final period, keeps ? and !", "Убирает точку в конце, оставляет ? и !"),
     ("SpongeBob case", "Стиль Губки Боба"),
     ("aLtErNaTeS every letter", "ЧеРеДуЕт регистр каждой буквы"),
     ("Copied. Paste it into your agent and say what you want", "Скопировано. Вставьте это в своего агента и скажите, что вам нужно"),
