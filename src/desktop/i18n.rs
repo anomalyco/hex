@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use strings::TRANSLATIONS;
 
 mod agents;
+mod always_listening;
 mod annotate_dictation;
 mod calls;
 mod clipboard_phrase;
@@ -411,6 +412,7 @@ pub(super) fn all_translations() -> impl Iterator<Item = &'static (&'static str,
         .chain(meeting_mute::TRANSLATIONS)
         .chain(confirm_cancel::TRANSLATIONS)
         .chain(middle_mouse::TRANSLATIONS)
+        .chain(always_listening::TRANSLATIONS)
         .chain(style::TRANSLATIONS)
         .chain(signature::TRANSLATIONS)
         .chain(clipboard_phrase::TRANSLATIONS)

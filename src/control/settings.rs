@@ -1665,6 +1665,10 @@ mod tests {
             crate::app_settings::UNLOAD_IDLE_MINUTES
         );
         assert_eq!(
+            choices("labs.always_listening_pause_seconds"),
+            crate::app_settings::ALWAYS_LISTENING_PAUSE_SECONDS
+        );
+        assert_eq!(
             choices("labs.keep_microphone_open_seconds"),
             crate::app_settings::KEEP_MICROPHONE_OPEN_SECONDS
         );

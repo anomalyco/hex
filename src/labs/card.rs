@@ -82,6 +82,7 @@ impl Feature {
             Self::YoloMode => "YOLO mode",
             Self::CopyDictationAudio => "Copy dictation audio",
             Self::StopPhrase => "Stop phrase",
+            Self::AlwaysListening => "Always listening",
             Self::HoldThroughKeys => "Hold through other keys",
             Self::ModesEditor => "Modes editor",
             Self::DropTranscribe => "Transcribe dropped audio",
@@ -315,6 +316,9 @@ impl Feature {
             }
             Self::StopPhrase => {
                 "Say a phrase to finish a hands-free dictation; the phrase isn't added to the text"
+            }
+            Self::AlwaysListening => {
+                "Speak to start a dictation and pause to finish it, with no shortcut. The shortcut pauses listening"
             }
             Self::ConfirmLongCancels => {
                 "After 10 seconds, cancelling a dictation takes two presses, so one slip keeps your words"

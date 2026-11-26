@@ -172,6 +172,9 @@ fn every_number_choice_key_matches_its_backing_constant() {
         let expected: Vec<u32> = match key.key {
             "screenshots.frame_rate" => SCREENSHOT_FRAME_RATES.to_vec(),
             "labs.unload_idle_minutes" => UNLOAD_IDLE_MINUTES.to_vec(),
+            "labs.always_listening_pause_seconds" => {
+                crate::app_settings::ALWAYS_LISTENING_PAUSE_SECONDS.to_vec()
+            }
             "labs.keep_microphone_open_seconds" => KEEP_MICROPHONE_OPEN_SECONDS.to_vec(),
             "meetings.calendar.lead_minutes" => CALENDAR_LEAD_MINUTES.map(u32::from).to_vec(),
             other => panic!(

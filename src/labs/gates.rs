@@ -650,6 +650,16 @@ pub fn unload_idle() -> Option<std::time::Duration> {
         .then(|| std::time::Duration::from_secs(UNLOAD_IDLE_MINUTES.load(Ordering::Acquire) * 60))
 }
 
+/// The quiet that finishes a dictation the open microphone started, while
+/// Labs › Always listening is on (Linux; read with each chunk of microphone
+/// audio and at each idle shortcut press).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn always_listening() -> Option<std::time::Duration> {
+    feature_on(Feature::AlwaysListening).then(|| {
+        std::time::Duration::from_secs(ALWAYS_LISTENING_PAUSE_SECONDS.load(Ordering::Acquire))
+    })
+}
+
 /// How long a capture's microphone keeps open after it ends, while Labs ›
 /// Keep mic open after dictating is on: read as each capture ends and
 /// on every pass that would release the microphone, so turning the lab off

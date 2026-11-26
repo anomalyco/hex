@@ -1024,6 +1024,17 @@
       ],
       "summary": "Hold the middle mouse button for half a second to start dictating hands-free, and again to finish. Escape cancels",
       "title": "Middle mouse dictation"
+    },
+    {
+      "added": "2026-11-25",
+      "group": "dictation",
+      "groupTitle": "Dictation",
+      "id": "always-listening",
+      "oses": [
+        "linux"
+      ],
+      "summary": "Speak to start a dictation and pause to finish it, with no shortcut. The shortcut pauses listening",
+      "title": "Always listening"
     }
   ]
 }

@@ -163,6 +163,10 @@ static WRITE_LOCK: Mutex<()> = Mutex::new(());
 /// `Feature::UnloadIdle` in [`BANK`].
 static UNLOAD_IDLE_MINUTES: AtomicU64 = AtomicU64::new(15);
 
+/// The quiet seconds that finish a dictation, paired with
+/// `Feature::AlwaysListening` in [`BANK`].
+static ALWAYS_LISTENING_PAUSE_SECONDS: AtomicU64 = AtomicU64::new(2);
+
 /// The seconds a capture's microphone keeps open after it ends, paired with
 /// `Feature::KeepMicrophoneOpen` in [`BANK`]: 0 turns it off.
 static MICROPHONE_LINGER_SECONDS: AtomicU64 = AtomicU64::new(0);
@@ -321,6 +325,10 @@ fn store_all(settings: &LabsSettings) {
     // Publish payloads before bank bits so any reader observing a bit enabled
     // sees the matching companion value.
     UNLOAD_IDLE_MINUTES.store(unload_idle_minutes(settings), Ordering::Release);
+    ALWAYS_LISTENING_PAUSE_SECONDS.store(
+        u64::from(settings.always_listening_pause_seconds.max(1)),
+        Ordering::Release,
+    );
     MICROPHONE_LINGER_SECONDS.store(linger_seconds(settings), Ordering::Release);
     HUD_BOTTOM_GAP.store(hud_gap_points(settings), Ordering::Release);
     CAPS_LOCK_SLOW_BLINK.store(
