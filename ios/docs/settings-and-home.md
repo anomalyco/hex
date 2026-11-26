@@ -123,16 +123,16 @@ Simplified Chinese in `Localizable.xcstrings`) and its pictures in
 `Assets.xcassets/WhatsNew/<name>.imageset`. Pictures are crops of real simulator
 screenshots, never drawn: dark (Hex is always dark), one JPEG at 3× (quality 82, 1206 px
 wide on an iPhone 18 Pro), with a `zh-Hans` variant where the picture shows Hex's own words.
-1.0.5's eight files are 344 KB. The 1.0.5 crops, from iPhone 18 Pro screenshots (1206 × 2622):
+1.0.5's eight files are 336 KB. The 1.0.5 crops, from iPhone 18 Pro screenshots (1206 × 2622):
 
 | Picture | Scene | Crop (w×h+x+y) |
 | --- | --- | --- |
 | `languages` | `full-keyboard-typing-dark --keyboard-layout sv --dictation-language sv-SE` | 1206x800+0+1766 |
 | `emoji` | `full-keyboard-emoji-word-dark` (debug builds) | 1206x470+0+1766 |
-| `replacements` | Settings › Dictation › Word replacements with three entries added by hand | 1206x530+0+1030 |
+| `replacements` | Settings › Dictation › Custom vocabulary › Word replacements, three entries added by hand | 1206x530+0+1030 |
 | `kept` (and `zh-Hans`) | `full-keyboard-strip-stopped-dark` (debug builds) | 1206x470+0+1766 |
 | `key-colors` | `full-keyboard-typing-dark --experiment-keyboard-themes --keyboard-theme burgundy` | 1206x800+0+1766 |
-| `feedback` (and `zh-Hans`) | Home › Send feedback, Idea, a message typed | 1206x780+0+250 |
+| `feedback` (and `zh-Hans`) | Home › Send feedback with Idea picked (a message typed in English) | 1206x780+0+250 |
 
 ## Send feedback (`HEXMobile/Feedback/`)
 
