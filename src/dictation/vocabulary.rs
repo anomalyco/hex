@@ -84,8 +84,7 @@ pub(crate) fn serialize_saved<S: serde::Serializer>(
 }
 
 /// How readily transcription swaps heard words for a vocabulary term that
-/// sounds like them. Measured on real recordings in
-/// `docs/research/vocabulary-boost-results.md`.
+/// sounds like them (`docs/features/vocabulary.md`).
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VocabularyBoost {

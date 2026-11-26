@@ -748,8 +748,7 @@ through `~/.local/bin/hex` also uses the activated version. The signed update
 path is implemented but still awaiting a complete cross-version validation on
 the supported Arch/i3 host.
 
-See [`plans/linux.md`](plans/linux.md) for the engineering contract and remaining
-validation work. The native Wayland implementation builds on the feature
+The native Wayland implementation builds on the feature
 proposed in [PR #28](https://github.com/anomalyco/hex/pull/28), with separate
 input-state, lifecycle, and paste regression coverage. Physical device,
 compositor, and target-application smoke tests remain necessary before a release.

@@ -199,7 +199,7 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 ├── 2.3.1 or Swift Hex -> Sparkle offers the new Hex -> Install Update   // setup.legacy-update; macOS
 │   ├── Replaces the old app in place (its file name kept) and opens the new one
 │   ├── Accepted only because app/Info.plist keeps the old SUPublicEDKey;
-│   │   scripts/validate-app.sh requires it. Feed items: docs/plans/swift-app-handoff.md
+│   │   scripts/validate-app.sh requires it. See docs/releasing.md
 │   └── No automated check; a clean-Mac install from each old app is the proof
 ├── 2.3.1 Linux or Windows updates into this build     // setup.legacy-adopt
 │   ├── It lands in <data>/voice-control/versions/<version>; its first app or
@@ -350,6 +350,7 @@ Run setup again (Labs) or `hex onboarding reset` -> the same story from the star
 on every build; settings, models, and permissions stay, so their pages pass
 ```
 
+```ts
 General > Speech model, selected model not downloaded     // settings.model-missing (#676)
 ├── Muted "Hex can't listen until the speech model has downloaded"
 ├── Downloading -> progress bar beside the model
@@ -2116,12 +2117,6 @@ Software Update window; no installation was performed. That path remains the
 workaround for older versions, including after Remind Me Later. A repaired
 installed-sidebar click remains unverified.
 
-The [historical release verification](release-verification.md) records publication
-evidence through 2.1.20, including signing, artifact checks, CI results, and skipped
-native checks. Those release-specific results do not verify the current working
-tree, installed-app behavior, or physical Linux compatibility; retain each entry's
-stated limits when using it as evidence.
-
 [Recovery](recovery.md) separates supported recovery from known defects.
 [desktop/login_item.rs](../../src/desktop/login_item.rs), [macos_rune/status_item.rs](../../src/macos_rune/status_item.rs),
 [updater.rs](../../src/updater.rs), the
@@ -2802,10 +2797,6 @@ harness does not compile the Linux application or prove its runtime integration;
 the test has **not been executed on Linux**. These checks do not exercise physical
 devices or persistence failure on disk.
 
-The [September 4 service-build evidence](release-verification.md#linux-service-build)
-records an Arch/i3 client-independent ownership check, not transcription accuracy
-or physical logout, Wayland, or signed cross-version update proof.
-
 ```ts
 Linux General > Sounds > Sound volume     // dictate.feedback.linux; X11 + Wayland
 ├── Default / older settings -> 50%
@@ -2850,10 +2841,6 @@ path with a sound spy: immediate feedback without any audio, while a 100 ms tap
 still discards. Existing timing checks in [dictation.rs](../../src/dictation.rs)
 cover the unchanged intentional-hold boundary. These are not proof of audible
 native playback or physical hotkey-to-sound timing.
-
-The [September 4 sound-build evidence](release-verification.md#linux-recording-sounds-builds)
-records the initial and immediate-start builds. It does not establish audible
-native playback, measured physical key-to-sound latency, or Wayland UI behavior.
 
 Both Linux CI triggers include `tests/**`, and the
 [Nix source fileset](../../nix/package.nix) includes those sources. The
@@ -3850,8 +3837,7 @@ Windows requests are recorded, never performed; the macOS native host
 (`dev.rune-ui-macos`) has no automated test of its own. They skip the goldens without a GPU
 adapter and do not prove a real window, input method, or physical shortcut.
 Before the single-process change, a headless script against an isolated
-service saved a new mode and a correction. See
-[the Rune port plan](../plans/rune-ui.md) for what was observed.
+service saved a new mode and a correction.
 
 `dev.rune-ui-macos` lives in [macos_rune.rs](../../src/macos_rune.rs) and
 [rune_ui/macos_host.rs](../../src/rune_ui/macos_host.rs). On hailmary

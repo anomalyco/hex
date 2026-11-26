@@ -258,15 +258,13 @@ Release Radar (one #abattoir thread per stable release)
    the release, push it, deploy the old hosts' redirect, and publish the
    item for 2.3.1 Macs (both below, "Transition from Kit's hosting").
 
-The first Anomaly-signed macOS release also changes the bundle ID to
-`anomaly.hex` (docs/plans/macos-signing.md). Its notes must tell Mac users
-that macOS sees a new app: grant Microphone, Accessibility, and (for
-meetings) Screen & System Audio Recording once more, removing any
-stale Hex entry in System Settings first; turn Launch at login on again; and
-point `DisableUpdates` profiles at `anomaly.hex`. Settings, history, and
-models do not carry over from 2.3.1 on any OS: 2.3.1 kept them in
-`voice-control`, and Hex now reads only `hex` and imports nothing. Decide how
-2.3.1 installs reach it first (same doc, "Existing installs").
+The Anomaly-signed macOS bundle uses `anomaly.hex` (SDK helper
+`anomaly.hex.service`, virtual microphone driver `anomaly.hex.microphone.driver`,
+test build `anomaly.hex.test`). Compared to 2.3.1 (`com.kitlangton.hex2`),
+macOS treats `anomaly.hex` as a new app (fresh Microphone, Accessibility,
+Screen & System Audio Recording, Launch at login, and `DisableUpdates`
+managed-preference domain), while settings, history, and models live in `hex`
+(2.3.1's `voice-control` is not imported).
 
 Versions are display text and never compared: each channel has one current
 release, which installs follow.
@@ -383,11 +381,14 @@ app (new updater, and on macOS a new bundle ID), so:
   `packaging/macos/legacy-appcast.xml`, served by the site build: one
   informational item that tells 2.3.1 users to download the new Hex from
   https://anoma.ly/hex (no enclosure, so Sparkle installs nothing). Edit that
-  file and push; Deploy serves it. Superseded (Kit, 2026-11-02): the 2.3.1
-  and Swift feeds offer the released ZIP itself, signed with their old Sparkle
-  key, so Install Update moves those Macs onto the new Hex
-  (docs/plans/swift-app-handoff.md, "Legacy Update"). Keep `SUPublicEDKey` in
-  `app/Info.plist`.
+  file and push; Deploy serves it. Superseded (2026-11-02): the 2.3.1
+  (`com.kitlangton.hex2`) and Swift (`com.kitlangton.Hex`) feeds offer the
+  released `Hex.app` ZIP signed with their shared EdDSA key
+  (`CFBundleVersion` >= 30300, `sparkle:minimumSystemVersion` 15.0, `arm64`),
+  so Sparkle's Install Update replaces the old app in place; once setup is
+  ready, `anomaly.hex` asks any running retired Hex bundle to quit without
+  importing Swift data. Keep `SUPublicEDKey` in `app/Info.plist`
+  (`scripts/validate-app.sh` enforces it).
 - **Windows signer:** the updater accepts only a Valid Authenticode signature
   whose signer is `AUTHENTICODE_SIGNER` in `src/updater/windows.rs` (OpenCode's
   Artifact Signing subject). Check the first Azure-signed Hex build's subject
@@ -458,7 +459,7 @@ jobs that run repository code.
 | `shared/AUR_SSH_KEY` | pushes `hex-bin`; one key for every Anomaly AUR package (`github-actions-hex-aur`) |
 | `shared/HOMEBREW_TAP_DEPLOY_KEY` | pushes `Casks/hex.rb`; one deploy key on `anomalyco/homebrew-tap` for every app (`anomaly-release`) |
 | vars `AZURE_*` | Authenticode (docs/windows-signing.md); not secrets, `azure/login` uses OIDC |
-| `shared/APPLE_SIGNING_CERTIFICATE`, `shared/APPLE_NOTARY_KEY`, vars `APPLE_NOTARY_*` | macOS signing and notarization (docs/plans/macos-signing.md) |
+| `shared/APPLE_SIGNING_CERTIFICATE`, `shared/APPLE_NOTARY_KEY`, vars `APPLE_NOTARY_*` | macOS signing and notarization (team `5NZ4Q7NXJ4`) |
 | `hex/release/RELEASE_SIGNING_KEY` | ed25519 PEM; signs each Linux executable (`<target>-sig`), public key `.github/release/linux-signing.pub` and `src/updater/linux.rs` |
 | `SPARKLE_ED_PRIVATE_KEY` | old 2.3.1 appcast key; unused, kept for old clients |
 
