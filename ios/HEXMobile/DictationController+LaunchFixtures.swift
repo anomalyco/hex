@@ -265,6 +265,11 @@ extension DictationController {
             KeyboardParakeetSettings().recordKeyboardLimit(118 * megabyte)
         }
         if step == "toosmalldownloaded" {
+            // Hex itself dictates with Apple's speech recognition, as on an iPhone 14, so the
+            // model is the keyboard's alone and Remove shows.
+            if #available(iOS 26.0, *) {
+                transcriber = AppleSpeechTranscriber(language: SpeechLanguage(locale: Locale(identifier: "en-US"), module: .speech))
+            }
             let file = ParakeetTranscriber.cacheDirectory.appendingPathComponent("fixture.bin")
             FileManager.default.createFile(atPath: file.path, contents: nil)
             let handle = try? FileHandle(forWritingTo: file)
