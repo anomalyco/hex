@@ -1327,7 +1327,7 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
     } else if ui.open.is_some() {
         ui.open = None;
         true
-    } else if meetings::cancel_edit(ui) {
+    } else if meetings::cancel_edit(ui, tx) {
         true
     } else {
         ui.pane == Pane::History && ui.history.cancel_delete(tx)

@@ -1778,6 +1778,18 @@ fn deleting_a_meeting_takes_the_menu_then_a_confirmation() {
             .all(|m| m.id != "preview-notes")
     );
 
+    // The confirmation keeps the keyboard: Cancel takes focus, and Escape
+    // hands it back to the ⋯ menu.
+    let mut rt = runtime("meetings", true, PANE_SIZE);
+    tap(&mut rt, "meeting-more");
+    let delete = menu_item(&rt, "meeting-actions", "Delete…");
+    tap(&mut rt, &delete);
+    assert!(focused(&rt).ends_with("/meeting-cancel-delete"));
+    key(&mut rt, Key::Escape, Mods::default());
+    settle(&mut rt);
+    assert!(rt.state.meetings.delete_armed.is_none(), "Escape cancels");
+    assert!(focused(&rt).ends_with("/meeting-more"));
+
     let mut rt = runtime("meetings-delete", true, PANE_SIZE);
     key(&mut rt, Key::Escape, Mods::default());
     assert!(rt.state.meetings.delete_armed.is_none(), "Escape cancels");
