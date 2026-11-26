@@ -3129,9 +3129,17 @@ the pump (`rune_hud::rehome`, `rune_hud::macos`):
 
 - While the HUD is shown, each pump turn checks whether the panel is on the
   active Space. When a Space switch or a full-screen exit left it behind, Hex
-  orders the panel out, clears the mask, sets the mask Rune intends (never the
-  panel's read-back), and orders it back in. That reorders the panel but leaves
-  Rune's presence state and alpha alone. The window server applies that
+  orders the panel out, orders it back in with `MoveToActiveSpace` in place of
+  `CanJoinAllSpaces` (the rest of Rune's mask kept), and then writes the mask
+  Rune intends (never the panel's read-back) directly, with no clear first:
+  the mask differs from the pulled one, so AppKit applies the write, and a
+  clear would leave the shown panel without `FullScreenAuxiliary` for a
+  moment. The re-home reorders the panel but leaves Rune's presence state and
+  alpha alone. Clearing and re-setting the intended mask alone, as Hex did
+  before, did not move a panel stranded on another application's full-screen
+  Space while Hex was a Regular (Dock) app, for example with Settings open in
+  its own full-screen Space: every attempt failed until the person went back
+  to that Space (#2875). The window server applies that
   asynchronously, so an attempt counts only once a later tick confirms it:
   seen on the active Space, it took; still elsewhere after its wait, it failed,
   and that tick tries again. The waits double from 150 ms to at most 3 s
@@ -3151,8 +3159,9 @@ the pump (`rune_hud::rehome`, `rune_hud::macos`):
   for it.
 
 The live-text plate beside the HUD is a separate panel and does not get this
-repair yet. Not yet observed on hardware; only the macOS compile and the pure
-`rune_hud::rehome` unit tests are checked.
+repair yet. Not yet observed on hardware, including the `MoveToActiveSpace`
+pull from #2875; only the macOS compile and the pure `rune_hud::rehome` unit
+tests are checked.
 
 At the top position the HUD sits 6 pt below the menu bar (`rune_hud::hud_placement::TOP_OFFSET`), or below the
 notch (`NSScreen.safeAreaInsets`) where a fullscreen Space hides the menu bar

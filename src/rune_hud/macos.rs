@@ -159,13 +159,33 @@ fn apply_behavior(panel: &NSWindow) {
     panel.setCollectionBehavior(intended_behavior());
 }
 
-/// Orders the panel out, applies its behaviors, and orders it back in
-/// regardless, so the window server applies them to whichever Space is active.
+/// The behaviors a re-home orders the panel in with: the intended ones with
+/// `MoveToActiveSpace` in place of `CanJoinAllSpaces` (AppKit takes only one
+/// of the two). Writing the intended mask back does not move a panel the
+/// window server has tied to one Space, notably another application's
+/// full-screen Space while Hex is a Regular (Dock) app (#2875); ordering it in
+/// with this one should put it on the active Space, as AppKit documents for
+/// `MoveToActiveSpace` (not yet observed fixing #2875 on hardware).
+fn pull_behavior() -> NSWindowCollectionBehavior {
+    let all_spaces = NSWindowCollectionBehavior::CanJoinAllSpaces.0;
+    NSWindowCollectionBehavior(
+        (intended_behavior().0 & !all_spaces) | NSWindowCollectionBehavior::MoveToActiveSpace.0,
+    )
+}
+
+/// Orders the panel out, orders it back in regardless with
+/// [`pull_behavior`] so it should land on whichever Space is active, then
+/// writes the intended behaviors so it joins every Space from there. That
+/// write has no clear first, unlike [`apply_behavior`]: the mask is
+/// [`pull_behavior`] at that point, so the write is a change AppKit applies,
+/// and a clear would leave the shown panel without `FullScreenAuxiliary` on
+/// another application's full-screen Space, which could move it off again.
 /// This reorders the panel but leaves Rune's presence state and alpha alone.
 fn rehome_panel(panel: &NSWindow) {
     panel.orderOut(None);
-    apply_behavior(panel);
+    panel.setCollectionBehavior(pull_behavior());
     panel.orderFrontRegardless();
+    panel.setCollectionBehavior(intended_behavior());
 }
 
 /// The pump's handle on the HUD (main thread).
@@ -282,9 +302,9 @@ impl DictationIndicatorUi {
     /// Puts a shown HUD back on the active Space. Changing the activation
     /// policy (the Dock icon follows Settings) can tie Rune's panel to one
     /// Space while AppKit still reports `CanJoinAllSpaces`, and Rune repairs
-    /// that only as its panel shows (#1084). Clearing the mask and setting the
-    /// intended one back makes the window server apply it again; the panel is
-    /// ordered out and back in, so this reorders the panel but leaves Rune's
+    /// that only as its panel shows (#1084). The panel is ordered out and back
+    /// in with `MoveToActiveSpace`, then given the intended mask again
+    /// ([`rehome_panel`], #2875), so this reorders the panel but leaves Rune's
     /// presence state and alpha alone. The window server applies that later,
     /// so an attempt is judged, and logged, only on a later tick: one that
     /// still finds the panel elsewhere after [`rehome::wait`] counts it and
