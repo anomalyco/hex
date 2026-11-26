@@ -631,6 +631,42 @@ final class DictationSSOTTests: XCTestCase {
             XCTAssertFalse(line(reason)?.contains("right now") ?? true)
         }
 
+        // The two memory causes say their numbers, whole megabytes rounded down, when the keyboard
+        // measured them; without them, the same words without numbers, never "0 MB".
+        let mb = KeyboardParakeetBudget.megabyte
+        XCTAssertEqual(
+            KeyboardParakeetStatus.line(
+                state: .idle, isDownloaded: true, hold: .keyboardTooSmall,
+                keyboardState: nil, keyboardLimit: 118 * mb + mb / 2, now: now
+            ),
+            "This iPhone's keyboard has 118 MB; the model needs 131 MB, so it uses Apple's speech recognition."
+        )
+        XCTAssertEqual(KeyboardParakeetStatus.tooSmallLine(keyboardLimit: 131 * mb - 1), "This iPhone's keyboard has 130 MB; the model needs 131 MB, so it uses Apple's speech recognition.")
+        for limit in [nil, 0, mb / 2, 131 * mb] {
+            XCTAssertEqual(
+                KeyboardParakeetStatus.tooSmallLine(keyboardLimit: limit),
+                "This iPhone's keyboard doesn't have the memory for it, so it uses Apple's speech recognition."
+            )
+        }
+        settings.setKeyboardState(.unavailable, reason: .shortOfMemory, free: 41 * mb + 3)
+        XCTAssertEqual(settings.shortOfMemoryFree, 41 * mb + 3)
+        XCTAssertEqual(
+            KeyboardParakeetStatus.line(
+                state: .idle, isDownloaded: true, hold: nil, keyboardState: settings.keyboardState,
+                reason: settings.unavailableReason, free: settings.shortOfMemoryFree, now: now
+            ),
+            "The keyboard had 41 MB free when it last opened; loading the model needs 58 MB, so it used Apple's speech recognition. It tries again the next time it opens."
+        )
+        for free in [nil, 0, mb / 2, 58 * mb] {
+            XCTAssertEqual(KeyboardParakeetStatus.shortOfMemoryLine(free: free), line(.shortOfMemory))
+        }
+        settings.setKeyboardState(.unavailable, reason: .shortOfMemory)
+        XCTAssertNil(settings.shortOfMemoryFree, "after a memory warning nothing was measured")
+        settings.setKeyboardState(.unavailable, reason: .loadFailed, free: 41 * mb)
+        XCTAssertNil(settings.shortOfMemoryFree, "only with short of memory")
+        settings.setKeyboardState(.ready)
+        XCTAssertNil(defaults.object(forKey: KeyboardParakeetSettings.keyboardStateFreeKey))
+
         // Try again, beside a load that failed: the keyboard drops its compiled copies and tries
         // again the next time it opens, even in the process that set it aside.
         settings.setKeyboardState(.unavailable, reason: .loadFailed)

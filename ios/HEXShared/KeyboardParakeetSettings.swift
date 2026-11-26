@@ -16,6 +16,9 @@ nonisolated struct KeyboardParakeetSettings {
     static let keyboardStateMultilingualKey = "experiments.keyboardParakeet.keyboardStateMultilingual"
     /// Why the keyboard said `.unavailable` (`UnavailableReason`); none from builds before 1.0.5.
     static let keyboardStateReasonKey = "experiments.keyboardParakeet.keyboardStateReason"
+    /// With `shortOfMemory` from the budget check: what was free then (bytes,
+    /// `os_proc_available_memory`), so Settings can say it. Stays on the iPhone.
+    static let keyboardStateFreeKey = "experiments.keyboardParakeet.keyboardStateFree"
     /// The keyboard's memory limit on this iPhone, as the keyboard measured it.
     static let keyboardLimitKey = "experiments.keyboardParakeet.keyboardLimit"
     static let keyboardLimitNotification = "anomaly.hex.keyboardParakeet.keyboardLimit"
@@ -111,19 +114,35 @@ nonisolated struct KeyboardParakeetSettings {
         _ state: KeyboardState?,
         multilingual: Bool = false,
         reason: UnavailableReason? = nil,
+        free: Int? = nil,
         now: Date = Date()
     ) {
-        // Hex reads these from another process: `.unavailable` gets its reason before the
-        // state, so it is never seen without one (`forgetUnavailableWithoutReason`).
+        // Hex reads these from another process: `.unavailable` gets its reason (and what was
+        // free) before the state, so it is never seen without one
+        // (`forgetUnavailableWithoutReason`).
         if state == .unavailable {
             defaults?.set(reason?.rawValue, forKey: Self.keyboardStateReasonKey)
+            if reason == .shortOfMemory, let free, free > 0 {
+                defaults?.set(free, forKey: Self.keyboardStateFreeKey)
+            } else {
+                defaults?.removeObject(forKey: Self.keyboardStateFreeKey)
+            }
         }
         defaults?.set(state?.rawValue, forKey: Self.keyboardStateKey)
         defaults?.set(multilingual, forKey: Self.keyboardStateMultilingualKey)
         defaults?.set(now.timeIntervalSince1970, forKey: Self.keyboardStateAtKey)
         if state != .unavailable {
             defaults?.removeObject(forKey: Self.keyboardStateReasonKey)
+            defaults?.removeObject(forKey: Self.keyboardStateFreeKey)
         }
+    }
+
+    /// What was free when the keyboard last said it was short of memory (bytes), where it
+    /// measured it: not after a memory warning, nor from a keyboard before it said.
+    var shortOfMemoryFree: Int? {
+        guard unavailableReason == .shortOfMemory,
+              let free = defaults?.object(forKey: Self.keyboardStateFreeKey) as? Int, free > 0 else { return nil }
+        return free
     }
 
     /// A keyboard from before 1.0.5 said `.unavailable` without a reason, and nothing else

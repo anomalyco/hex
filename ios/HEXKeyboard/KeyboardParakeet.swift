@@ -103,7 +103,10 @@ final class KeyboardParakeet {
         let memory = Self.memory()
         guard KeyboardParakeetBudget.allowsLoad(footprint: memory.footprint, available: memory.available) else {
             note("parakeet: \(choice.label) not loaded, short of memory \(memory)")
-            settings.setKeyboardState(.unavailable, multilingual: choice.multilingual, reason: .shortOfMemory)
+            // What was free goes with it, for Settings' line; it stays on the iPhone.
+            settings.setKeyboardState(
+                .unavailable, multilingual: choice.multilingual, reason: .shortOfMemory, free: memory.available
+            )
             return
         }
         guard Self.hasNeuralEngine else {
