@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // `bun run build [--mode dev]`: release data from the release service, typecheck, client build
-// (Cloudflare Build Output), SSR build, prerender, then the Labs and iPhone pages.
+// (Cloudflare Build Output), SSR build, prerender, then the Labs, iPhone, and changelog pages.
 import { parseArgs } from "node:util"
 import { $ } from "bun"
 
@@ -14,3 +14,4 @@ await $`vite build --mode ${mode} --ssr src/prerender.tsx --outDir dist-server`
 await $`bun scripts/prerender.ts --mode ${mode}`
 await $`bun scripts/labs.ts --mode ${mode}`
 await $`bun scripts/iphone.ts --mode ${mode}`
+await $`bun scripts/changelog.ts --mode ${mode}`

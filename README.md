@@ -65,7 +65,8 @@ Add a GGUF model of your own with "Add model file…" in the picker; see
 ## Downloads
 
 Stable is the current release. Dev is the newest build of `dev` and updates
-itself from the dev channel.
+itself from the dev channel. The [changelog](https://anoma.ly/hex/changelog)
+says what each release changed.
 
 | Platform | Stable | Dev |
 | --- | --- | --- |

@@ -109,6 +109,9 @@ export default function App() {
         </section>
       </main>
       <footer className="site-footer">
+        <nav className="site-footer__links" aria-label="More about Hex">
+          <a href={`${import.meta.env.BASE_URL}changelog`}>Changelog</a>
+        </nav>
         <div className="copyright">
           <img src={signature} alt="" aria-hidden="true" width={163} height={64} />
           <p>

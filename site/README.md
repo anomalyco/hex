@@ -78,6 +78,20 @@ VITE_SHOUT_CAPTURE=1 bunx vite --port 5531
 HEX_SITE_URL=http://127.0.0.1:5531 bun run generate:poster
 ```
 
+## Changelog
+
+`/hex/changelog` is the stable changelog: every `docs/releases/<X.Y.Z>.md`,
+newest first, each under its version's anchor (`#3.5.0`) with a link to its
+GitHub release (`v<version>` from 3.0.0, `app-v<version>` from 2.1.16 through
+2.3.1, none before). `scripts/changelog.ts` reads the folder at build and
+`src/changelog.ts` renders it in the Labs pages' look, so a release appears
+when the site next deploys and nothing is written by hand. Files that aren't
+`<X.Y.Z>.md` (`linux-wayland-beta.md`) are not releases and are left out. The
+notes' Markdown is a title, `###` sections, paragraphs, bullets, `>` callouts,
+and inline code, bold, links, and `#123` issue references; anything else
+reads as a paragraph. `/hex/dev`, the dev builds' notes, links it and is
+linked from it, and the landing page's footer links it.
+
 ## Performance
 
 `perf/hex.bench.ts` is a [strobe](https://github.com/anomalyco/strobe) bench: load to

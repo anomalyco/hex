@@ -1807,11 +1807,16 @@ downloads through GitHub's `releases/latest` redirect. Never overwrite a publish
 and the dev Worker `hex-dev-site` (dev.anoma.ly/hex), both reading the frozen
 2.3.1 history from `hex-production-files`; the installers and appcast ship with
 the site build and the dev notes come from the `dev-notes` branch.
+`/hex/changelog` is the stable changelog, built with the site from every
+`docs/releases/<X.Y.Z>.md` (newest first; a release's notes file is its
+entry, so never write the page by hand), beside `/hex/dev`, the dev builds'
+notes the Worker renders per request.
 `cf deploy --prebuilt --mode <mode>` picks one, and
 only CI deploys: Deploy (`deploy.yml`) runs on site changes or a dispatch
 from `dev` or `production`, and deploys the site for that branch. No subdomains. The site's download links come
-from the service's stable manifest when it builds. After publishing a version,
-bump the explicit GitHub mirror/version link in `README.md`; the Release
+from the service's stable manifest when it builds. `README.md`'s download
+links are the version-less `/hex/download/<target>` routes, so a release
+changes nothing there; the Release
 workflow updates the Homebrew cask. `bun run --cwd site check:downloads` fails until every download link
 serves a file; every deploy runs it. Verify the live links afterwards.
 The Rust app is named `Hex`, packaged as `Hex.app`,
@@ -1863,7 +1868,9 @@ hooks or persist a second launch-at-login flag.
 
 Onboarding gates every stable release. Before any stable release, run
 `scripts/check-onboarding.sh` on the release candidate commit and include its
-result, with the scene images it writes, in the go/no-go given to Dax. It
+result, with the scene images it writes, in the go/no-go given to Kit or Dax
+in the release's `#abattoir` thread (`docs/releasing.md`, "Cutting a
+release"). It
 renders every onboarding scene (Setting up Hex with nothing found, a stopped
 download, the model step with found models, with the recommended model already
 present, ours downloading, and Back to it, the demo, the macOS permissions and
@@ -2010,10 +2017,6 @@ seam once there are two real adapters or a current test requires substitution.
 
 `ROADMAP.md` is the authoritative work list. Keep these constraints visible:
 
-- Release freeze (Kit, 2026-10-22): publish no Hex release on any OS, stable or
-  staging-to-stable, and don't move `production` (it stays at `app-v2.3.1`),
-  until Kit lifts it after the Rune front end has been tested thoroughly on
-  real Macs and Windows PCs. Test builds are fine.
 - Validate public onboarding from a clean macOS account and signed Linux updates
   on the supported Arch/i3 host.
 - Validate native Wayland on a real compatible compositor, including physical
