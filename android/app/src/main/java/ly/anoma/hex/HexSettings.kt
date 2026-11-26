@@ -114,7 +114,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     var page by rememberSaveable {
         mutableStateOf(when (startPage) {
             MainActivity.PAGE_KEYBOARD -> Page.Keyboard
-            MainActivity.PAGE_DIAGNOSTICS -> Page.Diagnostics
+            MainActivity.PAGE_DIAGNOSTICS -> if (BuildConfig.DIAGNOSTICS) Page.Diagnostics else Page.Home
             else -> Page.Home
         })
     }
@@ -434,7 +434,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                         }
                     }
                     Page.Feedback -> FeedbackForm(done = { open(Page.Home) })
-                    Page.Diagnostics -> DiagnosticsPage()
+                    Page.Diagnostics -> if (BuildConfig.DIAGNOSTICS) DiagnosticsPage()
                     Page.Replacements -> WordReplacementsPage(speech, words, revision)
                     Page.WordsFile -> WordsFilePage(speech, words, revision)
                     Page.Labs -> {
