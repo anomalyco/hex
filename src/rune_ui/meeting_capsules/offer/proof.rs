@@ -41,6 +41,7 @@ fn provider_cases() -> Vec<(&'static str, MeetingCandidate)> {
         ("webex", "com.webex.meetingmanager", "Webex", None, ""),
         ("element", "im.riot.app", "Element", None, ""),
         ("phone", "com.apple.mobilephone", "Phone", None, ""),
+        ("kontur-talk", "kontur.talk", "Толк", None, ""),
         (
             "voice",
             BRAVE,

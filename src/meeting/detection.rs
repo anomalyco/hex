@@ -141,6 +141,7 @@ fn known_provider_label(key: &str) -> Option<&'static str> {
                 .map(|(_, _, label)| *label)
         })
         .or_else(|| is_webex_host(key).then_some(MeetingSource::Webex.label()))
+        .or_else(|| is_ktalk_host(key).then_some(MeetingSource::KonturTalk.label()))
 }
 
 /// The provider key a website's calls use. Teams pages are the Microsoft
@@ -574,6 +575,7 @@ pub enum MeetingSource {
     GoogleVoice,
     Messenger,
     GroupMe,
+    KonturTalk,
 }
 
 impl MeetingSource {
@@ -600,6 +602,7 @@ impl MeetingSource {
             Self::GoogleVoice => "Google Voice",
             Self::Messenger => "Messenger",
             Self::GroupMe => "GroupMe",
+            Self::KonturTalk => "Kontur Talk",
         }
     }
 }
@@ -720,16 +723,20 @@ fn more_call_app(canonical_bundle: &str) -> Option<(MeetingSource, &'static str)
         "com.webex.meetingmanager" => (MeetingSource::Webex, "Webex meeting"),
         "im.riot.app" => (MeetingSource::Element, "Element call"),
         "com.apple.mobilephone" => (MeetingSource::Phone, "Phone call"),
+        "kontur.talk" => (MeetingSource::KonturTalk, "Kontur Talk meeting"),
         _ => return None,
     })
 }
 
-/// A website host as a site key: lowercase, without `www.`, and a Webex
-/// subdomain as `webex.com`, so one choice covers every Webex page.
+/// A website host as a site key: lowercase, without `www.`, and a Webex or
+/// Kontur Talk subdomain as `webex.com` or `ktalk.ru`, so one choice covers
+/// every page of that service.
 fn call_site_host(host: &str) -> String {
     let host = site_host(host);
     if is_webex_host(&host) {
         "webex.com".into()
+    } else if is_ktalk_host(&host) {
+        "ktalk.ru".into()
     } else {
         host
     }
@@ -738,6 +745,12 @@ fn call_site_host(host: &str) -> String {
 /// Whether a website host is Webex's: `webex.com` or any of its subdomains.
 fn is_webex_host(host: &str) -> bool {
     host == "webex.com" || host.ends_with(".webex.com")
+}
+
+/// Whether a website host is Kontur Talk's: `ktalk.ru` or a company's own
+/// `<company>.ktalk.ru` space.
+fn is_ktalk_host(host: &str) -> bool {
+    host == "ktalk.ru" || host.ends_with(".ktalk.ru")
 }
 
 /// A website host as a site key: lowercase, without `www.`.
@@ -756,6 +769,9 @@ fn call_site_source(host: &str) -> Option<MeetingSource> {
     }
     if is_webex_host(&host) {
         return Some(MeetingSource::Webex);
+    }
+    if is_ktalk_host(&host) {
+        return Some(MeetingSource::KonturTalk);
     }
     MORE_CALL_SITES
         .iter()
@@ -1375,6 +1391,20 @@ mod tests {
                 "Phone call",
                 STABLE_FOR,
             ),
+            (
+                "kontur.talk",
+                MeetingSource::KonturTalk,
+                "kontur.talk",
+                "Kontur Talk meeting",
+                STABLE_FOR,
+            ),
+            (
+                "kontur.talk.helper.Renderer",
+                MeetingSource::KonturTalk,
+                "kontur.talk",
+                "Kontur Talk meeting",
+                STABLE_FOR,
+            ),
         ] {
             let app = ActiveMicrophoneApplication {
                 pid: 7,
@@ -1419,12 +1449,28 @@ mod tests {
                 MeetingSource::Webex,
                 "webex.com",
             ),
+            (
+                "https://acme.ktalk.ru/abc123",
+                MeetingSource::KonturTalk,
+                "ktalk.ru",
+            ),
+            (
+                "https://ktalk.ru/abc123",
+                MeetingSource::KonturTalk,
+                "ktalk.ru",
+            ),
         ] {
             let page = context("Brave Browser", Some(url), "A call");
             let call = candidate_from_microphone(&brave(), &page).unwrap();
             assert_eq!(call.source, source, "{url}");
             assert_eq!(call.site.as_deref(), Some(site), "{url}");
         }
+        assert_eq!(known_provider_label("kontur.talk"), Some("Kontur Talk"));
+        assert_eq!(known_provider_label("ktalk.ru"), Some("Kontur Talk"));
+        // A lookalike host is not Kontur Talk's.
+        let page = context("Brave Browser", Some("https://notktalk.ru/abc"), "A call");
+        let call = candidate_from_microphone(&brave(), &page).unwrap();
+        assert_eq!(call.source, MeetingSource::BrowserCall);
     }
 
     #[test]
