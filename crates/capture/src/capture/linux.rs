@@ -19,6 +19,7 @@ use super::{
     CANDIDATE_EDGE, CARBON_CMD_KEY, CARBON_CONTROL_KEY, CARBON_OPTION_KEY, CARBON_SHIFT_KEY,
     Sampler, SharedCaptureTelemetry, ShortcutConfig, ShortcutKind, shortcut_label,
 };
+use crate::linux::egl::{self, Reader};
 use crate::linux::media::{FPS, Writer};
 use crate::linux::pipewire::{self, Frame, PixelFormat, Stream, VideoFormat};
 use crate::linux::portal::{self, Source};
@@ -234,6 +235,8 @@ enum Encoding {
         movie: Option<Writer>,
         /// Why the GPU couldn't encode, when it was tried.
         hardware: Option<String>,
+        /// Reads tiled GPU buffers back as rows, made at the first one.
+        readback: Option<Box<Reader>>,
     },
 }
 
@@ -341,12 +344,31 @@ fn record(sampler: &Sampler) -> Result<Option<super::Movie>> {
         .take()
         .context("the portal opened no PipeWire remote")?;
     let mut stream = Stream::connect(remote, cast.node)?;
-    let asked = Instant::now();
-    let format = loop {
+    let mut asked = Instant::now();
+    let mut tiled_offered = false;
+    let mut format = loop {
         if let Some(format) = stream.format() {
             break format;
         }
         if let Some(why) = stream.ended() {
+            // The desktop has neither linear GPU buffers nor shared memory (niri on NVIDIA):
+            // offer once more with the tiled layouts the GPU can read back.
+            if !tiled_offered && refused_formats(&why) {
+                tiled_offered = true;
+                match egl::tiled_modifiers() {
+                    Ok(tiled) if tiled.iter().any(|(_, modifiers)| !modifiers.is_empty()) => {
+                        let layouts: usize = tiled.iter().map(|(_, m)| m.len()).sum();
+                        scrawl_log(format!(
+                            "The screen stream refused linear and shared-memory buffers ({why}); offering {layouts} tiled layouts the GPU reads back"
+                        ));
+                        stream.offer_tiled(&tiled)?;
+                        asked = Instant::now();
+                        continue;
+                    }
+                    Ok(_) => scrawl_log("No GPU reads back tiled screen buffers"),
+                    Err(error) => scrawl_log(format!("GPU readback unavailable: {error:#}")),
+                }
+            }
             bail!("{why}");
         }
         if sampler.stopping.load(Ordering::Acquire) {
@@ -403,6 +425,7 @@ fn record(sampler: &Sampler) -> Result<Option<super::Movie>> {
     crate::log::start_metric("sck_ready_ms", sampler.started_at);
 
     let tick = Duration::from_secs(1) / FPS;
+    let mut seen = format;
     let mut first: Option<(Instant, u64)> = None;
     let mut written = 0_u64;
     let mut have_frame = false;
@@ -413,6 +436,12 @@ fn record(sampler: &Sampler) -> Result<Option<super::Movie>> {
             scrawl_log(format!("The screen stream stopped: {why}"));
             break;
         }
+        follow_format(
+            stream.format(),
+            &mut seen,
+            &mut format,
+            matches!(encoding, Encoding::Software { .. }),
+        );
         let mut fresh_frame = false;
         if let Some(frame) = stream.newest() {
             let mut loaded = load(&mut encoding, &frame, &format);
@@ -435,6 +464,7 @@ fn record(sampler: &Sampler) -> Result<Option<super::Movie>> {
                         pixels: Vec::new(),
                         movie: None,
                         hardware: None,
+                        readback: None,
                     },
                 ));
                 encoding = software_encoding(&format, out, path.as_deref(), Some(why));
@@ -543,6 +573,40 @@ fn record(sampler: &Sampler) -> Result<Option<super::Movie>> {
     };
     movie.finish()?;
     Ok(Some(super::Movie::written(path, offset_ms)))
+}
+
+/// Whether a stream failure is PipeWire finding no format both sides take.
+fn refused_formats(why: &str) -> bool {
+    why.contains("no more input formats") || why.contains("no more output formats")
+}
+
+/// Follows a format the producer settled on again mid-stream (`seen` is the last one): one
+/// with only a new buffer layout (a renegotiated modifier) is taken on the CPU path, so the
+/// buffers are read as they now are. The GPU encoder was opened for one layout and the movie for
+/// one size, so any other change is only logged, once.
+fn follow_format(
+    now: Option<VideoFormat>,
+    seen: &mut VideoFormat,
+    format: &mut VideoFormat,
+    software: bool,
+) {
+    let Some(now) = now.filter(|now| now != seen) else {
+        return;
+    };
+    *seen = now;
+    let same_frames = (now.pixel, now.width, now.height, now.dmabuf)
+        == (format.pixel, format.width, format.height, format.dmabuf);
+    if same_frames && software {
+        scrawl_log(format!(
+            "The screen's buffers changed layout: modifier {:#x}",
+            now.modifier
+        ));
+        *format = now;
+    } else {
+        scrawl_log(format!(
+            "The screen stream changed format mid-recording ({now:?}); keeping {format:?}"
+        ));
+    }
 }
 
 /// A screen or area on X11, read from the X server and encoded with x264 (see the module
@@ -701,6 +765,7 @@ fn software_encoding(
         pixels: Vec::new(),
         movie,
         hardware,
+        readback: None,
     }
 }
 
@@ -708,26 +773,29 @@ fn load(encoding: &mut Encoding, frame: &Frame, format: &VideoFormat) -> Result<
     match encoding {
         Encoding::Hardware { encoder, .. } => encoder.load(frame),
         Encoding::Software {
-            pixels, hardware, ..
+            pixels,
+            hardware,
+            readback,
+            ..
         } => {
             let row = format.width as usize * 4;
             pixels.resize(row * format.height as usize, 0);
-            // A tiled GPU buffer's bytes aren't rows; the CPU must not read it as if they were.
-            let readable = if frame.dmabuf && format.modifier != pipewire::MODIFIER_LINEAR {
-                Err(anyhow::anyhow!(
-                    "the screen's GPU buffers are tiled (modifier {:#x}), which the CPU can't read",
-                    format.modifier
-                ))
-            } else {
-                frame.rows(row, format.height as usize)
+            let with_why = |error: anyhow::Error| match hardware.as_deref() {
+                None => error,
+                Some(why) => error.context(format!("hardware encoding is unavailable: {why}")),
             };
-            let rows = match (readable, hardware.as_deref()) {
-                (Ok(rows), _) => rows,
-                (Err(error), None) => return Err(error),
-                (Err(error), Some(why)) => {
-                    return Err(error.context(format!("hardware encoding is unavailable: {why}")));
-                }
-            };
+            // A tiled GPU buffer's bytes aren't rows; the CPU must not read it as if they were,
+            // so the GPU copies it out as rows.
+            if frame.dmabuf && format.modifier != pipewire::MODIFIER_LINEAR {
+                let reader = readback.get_or_insert_with(Box::default);
+                return reader.read(frame, format, pixels).map_err(|error| {
+                    with_why(error.context(format!(
+                        "could not read back the screen's tiled GPU buffer (modifier {:#x})",
+                        format.modifier
+                    )))
+                });
+            }
+            let rows = frame.rows(row, format.height as usize).map_err(with_why)?;
             if frame.dmabuf {
                 pipewire::sync_dmabuf(frame.fd, true);
             }
@@ -816,6 +884,42 @@ mod tests {
         assert_eq!(logical_screen(Some((3840, 2160)), (3840, 2160)), None);
         assert_eq!(logical_screen(Some((1440, 2560)), (3840, 2160)), None);
         assert_eq!(logical_screen(Some((0, 0)), (3840, 2160)), None);
+    }
+
+    #[test]
+    fn only_a_new_buffer_layout_is_followed_on_the_cpu() {
+        use crate::linux::pipewire::{MODIFIER_LINEAR, PixelFormat, VideoFormat};
+        let first = VideoFormat {
+            pixel: PixelFormat::Bgrx,
+            width: 1920,
+            height: 1080,
+            dmabuf: true,
+            modifier: 0x0300_0000_0060_6014,
+        };
+        let relaid = VideoFormat {
+            modifier: 0x0300_0000_0060_6015,
+            ..first
+        };
+        let (mut seen, mut format) = (first, first);
+        super::follow_format(Some(relaid), &mut seen, &mut format, true);
+        assert_eq!(format, relaid);
+        // The GPU encoder keeps the layout it was opened for; a new size is never taken.
+        let (mut seen, mut format) = (first, first);
+        super::follow_format(Some(relaid), &mut seen, &mut format, false);
+        assert_eq!((format, seen), (first, relaid));
+        let resized = VideoFormat {
+            width: 1280,
+            modifier: MODIFIER_LINEAR,
+            ..first
+        };
+        super::follow_format(Some(resized), &mut seen, &mut format, true);
+        assert_eq!(format, first);
+    }
+
+    #[test]
+    fn only_a_format_refusal_offers_tiled_buffers() {
+        assert!(super::refused_formats("no more input formats"));
+        assert!(!super::refused_formats("the screen stream ended"));
     }
 
     #[test]

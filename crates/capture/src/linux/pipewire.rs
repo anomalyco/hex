@@ -2,10 +2,13 @@
 //! when a capture starts, so Hex neither builds nor ships against it, and nothing changes for
 //! a desktop without it until a capture is asked for.
 //!
-//! The stream offers two formats: 32-bit RGB as a linear DMA-BUF (what niri and most
-//! compositors hand out) and the same as shared memory. The recorder takes the newest buffer
-//! on its own clock with [`Stream::newest`], which holds it until the next call so the producer
-//! can't reuse it while the GPU or the CPU reads it.
+//! The stream offers 32-bit RGB as a linear DMA-BUF (what most compositors hand out) and the
+//! same as shared memory. A desktop that has neither (niri on NVIDIA hands out only tiled
+//! DMA-BUFs) refuses both; the recorder then offers again with the tiled layouts the GPU reads
+//! back through EGL ([`Stream::offer_tiled`], `super::egl`), so EGL is only touched there. The
+//! recorder
+//! takes the newest buffer on its own clock with [`Stream::newest`], which holds it until the
+//! next call so the producer can't reuse it while the GPU or the CPU reads it.
 
 use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
@@ -189,6 +192,9 @@ const CHOICE_RANGE: u32 = 1;
 const CHOICE_ENUM: u32 = 3;
 const CHOICE_FLAGS: u32 = 4;
 const PROP_MANDATORY: u32 = 1 << 3;
+/// The producer picks one of the offered modifiers (one it can allocate) and offers again.
+const PROP_DONT_FIXATE: u32 = 1 << 4;
+const CHOICE_NONE: u32 = 0;
 const DATA_MEM_PTR: u32 = 1;
 const DATA_MEM_FD: u32 = 2;
 const DATA_DMA_BUF: u32 = 3;
@@ -235,6 +241,30 @@ impl PixelFormat {
         };
         u32::from_le_bytes(code)
     }
+}
+
+/// Every layout offered, Bgrx preferred.
+pub const PIXELS: [PixelFormat; 4] = [
+    PixelFormat::Bgrx,
+    PixelFormat::Rgbx,
+    PixelFormat::Bgra,
+    PixelFormat::Rgba,
+];
+
+/// The formats the stream offers, most wanted first: a linear DMA-BUF, shared memory, then
+/// for each layout the tiled DMA-BUFs in `tiled` (none on the first try). PipeWire tries a
+/// consumer's formats in order, so a tiled one is only taken when the others match nothing.
+fn offered_formats(tiled: &[(PixelFormat, Vec<u64>)]) -> Vec<Vec<u64>> {
+    let mut offered = vec![
+        enum_format(&PIXELS, &[MODIFIER_LINEAR]),
+        enum_format(&PIXELS, &[]),
+    ];
+    for (pixel, modifiers) in tiled {
+        if !modifiers.is_empty() {
+            offered.push(enum_format(&[*pixel], modifiers));
+        }
+    }
+    offered
 }
 
 /// Builds pods 8-byte aligned, as SPA reads them.
@@ -316,9 +346,10 @@ fn pair(a: u32, b: u32) -> [u8; 8] {
     out
 }
 
-/// The formats offered: 32-bit RGB at any size, as a linear DMA-BUF when `dmabuf`, else as
-/// shared memory.
-fn enum_format(dmabuf: bool) -> Vec<u64> {
+/// A format offered: 32-bit RGB in `formats` (the first preferred) at any size, as a DMA-BUF
+/// in one of `modifiers` (the first preferred) when there are some, else as shared memory.
+/// With several modifiers the producer may fixate the one it allocates best (`DONT_FIXATE`).
+fn enum_format(formats: &[PixelFormat], modifiers: &[u64]) -> Vec<u64> {
     let mut pod = Pod::default();
     pod.object(OBJECT_FORMAT, PARAM_ENUM_FORMAT, |pod| {
         pod.prop(FORMAT_MEDIA_TYPE, 0);
@@ -326,24 +357,37 @@ fn enum_format(dmabuf: bool) -> Vec<u64> {
         pod.prop(FORMAT_MEDIA_SUBTYPE, 0);
         pod.id(MEDIA_SUBTYPE_RAW);
         pod.prop(FORMAT_VIDEO_FORMAT, 0);
-        let formats = [
-            PixelFormat::Bgrx,
-            PixelFormat::Bgrx,
-            PixelFormat::Rgbx,
-            PixelFormat::Bgra,
-            PixelFormat::Rgba,
-        ]
-        .map(|f| (f as u32).to_ne_bytes());
+        let formats: Vec<[u8; 4]> = formats
+            .iter()
+            .take(1)
+            .chain(formats)
+            .map(|&f| (f as u32).to_ne_bytes())
+            .collect();
         pod.choice(
             CHOICE_ENUM,
             TYPE_ID,
             4,
             &formats.iter().map(|f| &f[..]).collect::<Vec<_>>(),
         );
-        if dmabuf {
-            pod.prop(FORMAT_VIDEO_MODIFIER, PROP_MANDATORY);
-            let linear = MODIFIER_LINEAR.to_ne_bytes();
-            pod.choice(CHOICE_ENUM, TYPE_LONG, 8, &[&linear, &linear]);
+        if !modifiers.is_empty() {
+            let choose = if modifiers.len() > 1 {
+                PROP_DONT_FIXATE
+            } else {
+                0
+            };
+            pod.prop(FORMAT_VIDEO_MODIFIER, PROP_MANDATORY | choose);
+            let modifiers: Vec<[u8; 8]> = modifiers
+                .iter()
+                .take(1)
+                .chain(modifiers)
+                .map(|m| m.to_ne_bytes())
+                .collect();
+            pod.choice(
+                CHOICE_ENUM,
+                TYPE_LONG,
+                8,
+                &modifiers.iter().map(|m| &m[..]).collect::<Vec<_>>(),
+            );
         }
         pod.prop(FORMAT_VIDEO_SIZE, 0);
         pod.choice(
@@ -418,7 +462,17 @@ pub struct VideoFormat {
 ///
 /// # Safety
 /// `pod` points at a whole pod.
+#[cfg(test)]
 unsafe fn parse_format(pod: *const SpaPod) -> Option<VideoFormat> {
+    unsafe { parse(pod) }.map(|(format, _)| format)
+}
+
+/// [`parse_format`], and whether the modifier is settled: `false` while it's still a choice
+/// the producer has yet to fixate (`DONT_FIXATE`), when it will offer the format again.
+///
+/// # Safety
+/// `pod` points at a whole pod.
+unsafe fn parse(pod: *const SpaPod) -> Option<(VideoFormat, bool)> {
     let header = unsafe { &*pod };
     if header.kind != TYPE_OBJECT {
         return None;
@@ -429,6 +483,7 @@ unsafe fn parse_format(pod: *const SpaPod) -> Option<VideoFormat> {
     };
     let (mut pixel, mut size, mut dmabuf) = (None, None, false);
     let mut modifier = MODIFIER_LINEAR;
+    let mut settled = true;
     let mut at = 8;
     while at + 16 <= body.len() {
         let key = word(at)?;
@@ -456,6 +511,14 @@ unsafe fn parse_format(pod: *const SpaPod) -> Option<VideoFormat> {
             }
             FORMAT_VIDEO_MODIFIER => {
                 dmabuf = true;
+                if word(at + 4)? & PROP_DONT_FIXATE != 0
+                    && value_kind == TYPE_CHOICE
+                    && word(at + 16)? != CHOICE_NONE
+                {
+                    let mut choices = value.chunks_exact(8);
+                    let default = choices.next();
+                    settled = choices.all(|choice| Some(choice) == default);
+                }
                 if kind == TYPE_LONG
                     && let Some(bytes) = first(8).and_then(|b| <[u8; 8]>::try_from(b).ok())
                 {
@@ -467,13 +530,14 @@ unsafe fn parse_format(pod: *const SpaPod) -> Option<VideoFormat> {
         at += 16 + value_size.next_multiple_of(8);
     }
     let (width, height) = size?;
-    Some(VideoFormat {
+    let format = VideoFormat {
         pixel: pixel?,
         width,
         height,
         dmabuf,
         modifier,
-    })
+    };
+    Some((format, settled))
 }
 
 // ─── The stream ──────────────────────────────────────────────────────────────
@@ -529,14 +593,18 @@ unsafe extern "C" fn on_param(data: *mut c_void, id: u32, param: *const SpaPod) 
         return;
     }
     let listener = unsafe { &*data.cast::<Listener>() };
-    let Some(format) = (unsafe { parse_format(param) }) else {
+    let Some((format, settled)) = (unsafe { parse(param) }) else {
         return;
     };
-    listener
-        .shared
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .format = Some(format);
+    // A modifier the producer has yet to fixate isn't the buffers' layout: it offers the
+    // format again with the one it picked.
+    if settled {
+        listener
+            .shared
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .format = Some(format);
+    }
     let words = buffers(format.dmabuf);
     let mut params = [words.as_ptr().cast::<SpaPod>()];
     unsafe { (listener.pw.pw_stream_update_params)(listener.stream, params.as_mut_ptr(), 1) };
@@ -597,6 +665,8 @@ pub struct Frame {
     /// The buffer's fd: a DMA-BUF, or shared memory.
     pub fd: i64,
     pub dmabuf: bool,
+    /// How many planes (`spa_data`) the buffer has; only the first is read.
+    pub planes: u32,
     pub offset: u32,
     pub stride: u32,
     /// The whole buffer object's size, for importing it.
@@ -637,6 +707,8 @@ pub struct Stream {
     core: *mut c_void,
     listener: Box<Listener>,
     hook: Box<SpaHook>,
+    /// The portal's node the stream connects to.
+    node: u32,
 }
 
 // The raw handles are only used under the thread loop's lock.
@@ -676,6 +748,7 @@ impl Stream {
                 held: AtomicPtr::new(ptr::null_mut()),
             }),
             hook: Box::new(SpaHook([0; 6])),
+            node: 0,
         };
         if unsafe { (pw.pw_thread_loop_start)(thread_loop) } < 0 {
             bail!("could not start the PipeWire loop");
@@ -715,13 +788,19 @@ impl Stream {
                 (&raw const *self.listener).cast_mut().cast(),
             );
         }
-        let (dmabuf, shm) = (enum_format(true), enum_format(false));
-        let mut params = [dmabuf.as_ptr().cast::<SpaPod>(), shm.as_ptr().cast()];
+        self.node = node;
+        self.connect_stream(&[])
+    }
+
+    /// Connects the stream to the node, offering [`offered_formats`] with `tiled`.
+    fn connect_stream(&self, tiled: &[(PixelFormat, Vec<u64>)]) -> Result<()> {
+        let offered = offered_formats(tiled);
+        let mut params: Vec<*const SpaPod> = offered.iter().map(|p| p.as_ptr().cast()).collect();
         let status = unsafe {
-            (pw.pw_stream_connect)(
-                stream,
+            (self.pw.pw_stream_connect)(
+                self.listener.stream,
                 DIRECTION_INPUT,
-                node,
+                self.node,
                 // Hex maps buffers itself (`Stream::map`), so a buffer PipeWire removes is never
                 // unmapped while the recorder still copies from it.
                 STREAM_FLAG_AUTOCONNECT,
@@ -733,6 +812,22 @@ impl Stream {
             bail!("could not connect the PipeWire stream ({status})");
         }
         Ok(())
+    }
+
+    /// After the producer refused every format before agreeing on one, connects again also
+    /// offering `tiled`: the tiled DMA-BUF layouts the GPU reads back, by pixel layout.
+    pub fn offer_tiled(&mut self, tiled: &[(PixelFormat, Vec<u64>)]) -> Result<()> {
+        let pw = self.pw;
+        unsafe { (pw.pw_thread_loop_lock)(self.thread_loop) };
+        unsafe { (pw.pw_stream_disconnect)(self.listener.stream) };
+        *self
+            .listener
+            .shared
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Shared::default();
+        let connected = self.connect_stream(tiled);
+        unsafe { (pw.pw_thread_loop_unlock)(self.thread_loop) };
+        connected
     }
 
     /// The negotiated format, once the producer agreed to one.
@@ -834,9 +929,11 @@ impl Stream {
         } else {
             (Ok(data.data.cast::<u8>().cast_const()), data.maxsize)
         };
+        let planes = unsafe { (*(*newest).buffer).n_datas };
         Some(Frame {
             fd: data.fd,
             dmabuf,
+            planes,
             offset: chunk.offset,
             stride,
             size: object,
@@ -952,6 +1049,7 @@ mod tests {
         let frame = Frame {
             fd: -1,
             dmabuf: true,
+            planes: 1,
             offset: 0,
             stride: 16,
             size: 64,
@@ -964,13 +1062,24 @@ mod tests {
 
     #[test]
     fn offered_formats_parse_back() {
-        for dmabuf in [true, false] {
-            let words = enum_format(dmabuf);
+        let tiled: u64 = 0x0300_0000_0060_6014;
+        assert_eq!(offered_formats(&[]).len(), 2);
+        let offered = offered_formats(&[
+            (PixelFormat::Bgrx, Vec::new()),
+            (PixelFormat::Bgra, vec![tiled, tiled + 1]),
+        ]);
+        assert_eq!(offered.len(), 3);
+        let expected = [
+            (PixelFormat::Bgrx, true, MODIFIER_LINEAR),
+            (PixelFormat::Bgrx, false, MODIFIER_LINEAR),
+            (PixelFormat::Bgra, true, tiled),
+        ];
+        for (words, (pixel, dmabuf, modifier)) in offered.iter().zip(expected) {
             let format = unsafe { parse_format(words.as_ptr().cast()) }.unwrap();
-            assert_eq!(format.pixel, PixelFormat::Bgrx);
+            assert_eq!(format.pixel, pixel);
             assert_eq!((format.width, format.height), (1920, 1080));
             assert_eq!(format.dmabuf, dmabuf);
-            assert_eq!(format.modifier, MODIFIER_LINEAR);
+            assert_eq!(format.modifier, modifier);
             let bytes: &[u8] =
                 unsafe { std::slice::from_raw_parts(words.as_ptr().cast(), words.len() * 8) };
             let max_fps_key = FORMAT_VIDEO_MAX_FRAMERATE.to_ne_bytes();
@@ -978,6 +1087,10 @@ mod tests {
             assert!(bytes.windows(4).any(|w| w == max_fps_key));
             assert!(bytes.windows(8).any(|w| w == fps_60_1));
         }
+        // Every tiled layout is offered, not only the preferred one.
+        let bytes: Vec<u8> = offered[2].iter().flat_map(|w| w.to_ne_bytes()).collect();
+        let second = (tiled + 1).to_ne_bytes();
+        assert!(bytes.windows(8).any(|w| w == second));
     }
 
     #[test]
@@ -1021,5 +1134,21 @@ mod tests {
         assert!(format.dmabuf);
         assert_eq!(format.modifier, tiled);
         assert_eq!((format.width, format.height), (2880, 1800));
+    }
+
+    #[test]
+    fn a_modifier_the_producer_has_yet_to_fixate_is_not_settled() {
+        let tiled: u64 = 0x0300_0000_0060_6014;
+        let words = enum_format(&[PixelFormat::Bgrx], &[tiled, tiled + 1]);
+        let (format, settled) = unsafe { parse(words.as_ptr().cast()) }.unwrap();
+        assert!(!settled);
+        assert!(format.dmabuf);
+        // One modifier, or the linear offer, is final as it stands.
+        for modifiers in [&[tiled][..], &[MODIFIER_LINEAR]] {
+            let words = enum_format(&[PixelFormat::Bgrx], modifiers);
+            let (format, settled) = unsafe { parse(words.as_ptr().cast()) }.unwrap();
+            assert!(settled);
+            assert_eq!(format.modifier, modifiers[0]);
+        }
     }
 }
