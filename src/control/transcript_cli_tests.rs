@@ -791,6 +791,14 @@ fn parses_release_commands_and_rejects_invalid_limits_and_times() {
         vec!["hex", "meetings", "list", "--json"],
         vec!["hex", "meetings", "show", "latest", "--md"],
         vec!["hex", "meetings", "search", "problems"],
+        vec![
+            "hex",
+            "meetings",
+            "search",
+            "--meeting",
+            "latest",
+            "problems",
+        ],
         vec!["hex", "meetings", "chapters", "latest", "--json"],
         vec![
             "hex",
@@ -845,4 +853,98 @@ fn parses_release_commands_and_rejects_invalid_limits_and_times() {
         crate::meeting::query::parse_time("2026-10-20T12:00:00.123456Z", NOW, false).unwrap(),
         second + 123
     );
+}
+
+#[test]
+fn meetings_search_with_meeting_flag_scopes_to_that_meeting() {
+    let meetings_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/meetings");
+    let root = temp();
+    let dest = root.join("meetings");
+    copy_dir_all(&meetings_dir, &dest);
+
+    let mut all = Vec::new();
+    meetings_to(
+        &root,
+        &MeetingsCommand::Search {
+            query: "cron".into(),
+            meeting: None,
+            since: None,
+            until: None,
+            limit: 10,
+        },
+        NOW,
+        &mut all,
+    )
+    .unwrap();
+    let all = String::from_utf8(all).unwrap();
+    assert!(all.contains("1790000000000-1001"), "{all}");
+    assert!(all.contains("1790001000000-1003"), "{all}");
+
+    let mut scoped = Vec::new();
+    meetings_to(
+        &root,
+        &MeetingsCommand::Search {
+            query: "cron".into(),
+            meeting: Some("1790000000000-1001".into()),
+            since: None,
+            until: None,
+            limit: 10,
+        },
+        NOW,
+        &mut scoped,
+    )
+    .unwrap();
+    let scoped = String::from_utf8(scoped).unwrap();
+    assert!(scoped.contains("1790000000000-1001"), "{scoped}");
+    assert!(!scoped.contains("1790001000000-1003"), "{scoped}");
+
+    // Unknown meeting id fails clearly instead of searching everything.
+    let mut missing = Vec::new();
+    assert!(
+        meetings_to(
+            &root,
+            &MeetingsCommand::Search {
+                query: "cron".into(),
+                meeting: Some("does-not-exist".into()),
+                since: None,
+                until: None,
+                limit: 10,
+            },
+            NOW,
+            &mut missing,
+        )
+        .is_err()
+    );
+
+    // `latest` resolves like `meetings show latest`.
+    let mut latest = Vec::new();
+    meetings_to(
+        &root,
+        &MeetingsCommand::Search {
+            query: "cron".into(),
+            meeting: Some("latest".into()),
+            since: None,
+            until: None,
+            limit: 10,
+        },
+        NOW,
+        &mut latest,
+    )
+    .unwrap();
+    let latest = String::from_utf8(latest).unwrap();
+    assert!(!latest.contains("1790000000000-1001"), "{latest}");
+    let _ = fs::remove_dir_all(&root);
+}
+
+fn copy_dir_all(src: &Path, dst: &Path) {
+    std::fs::create_dir_all(dst).unwrap();
+    for entry in std::fs::read_dir(src).unwrap() {
+        let entry = entry.unwrap();
+        let target = dst.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir_all(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
 }

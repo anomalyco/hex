@@ -28,8 +28,8 @@ pub(super) fn discard_confirm(p: Paint, top: bool, stopping: bool) -> El {
 }
 
 /// The finished meeting: its title and length as a link that opens it in
-/// Hex, the summary when there is one, then Copy transcript over Copy agent
-/// prompt. A ring round its ✕ drains over its stay, held while the pointer
+/// Hex, the summary when there is one, then Copy agent prompt over Copy
+/// transcript. A ring round its ✕ drains over its stay, held while the pointer
 /// is inside.
 pub(in crate::rune_ui::meeting_capsules) fn ready(
     p: Paint,
@@ -128,25 +128,25 @@ pub(in crate::rune_ui::meeting_capsules) fn ready(
         .px(PANEL_PAD)
         .child(panel_row(
             p,
-            "copy-all",
-            &icons::OUTLINE_COPY,
-            tr("Copy transcript"),
-            copied(LiveCopy::All),
-            true,
-            true,
-            1.0,
-            |c, tx| c.copy_all(tx),
-        ))
-        .child(panel_row(
-            p,
             "copy-prompt",
             &icons::OUTLINE_CONSOLE,
             tr("Copy agent prompt"),
             copied(LiveCopy::Prompt),
-            false,
+            true,
             true,
             1.0,
             |c, tx| c.copy_prompt(tx),
+        ))
+        .child(panel_row(
+            p,
+            "copy-all",
+            &icons::OUTLINE_COPY,
+            tr("Copy transcript"),
+            copied(LiveCopy::All),
+            false,
+            true,
+            1.0,
+            |c, tx| c.copy_all(tx),
         ));
     // The title band sits on the anchored edge; 8 pt stay clear under its
     // hover fill, and the summary keeps 12 pt from the copies.

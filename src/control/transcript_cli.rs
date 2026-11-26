@@ -135,6 +135,9 @@ pub enum MeetingsCommand {
     /// Search transcripts and notes with the same stemmed, fuzzy BM25 query as MCP.
     Search {
         query: String,
+        /// Limit the search to one meeting, by id, unique prefix, or latest.
+        #[arg(long)]
+        meeting: Option<String>,
         #[arg(long)]
         since: Option<String>,
         #[arg(long)]
@@ -672,9 +675,17 @@ fn meeting_list_json(
 
 pub fn meetings(command: &MeetingsCommand) -> Result<()> {
     let root = crate::app_paths::support_dir()?;
-    let library = Library::new(root.join("meetings"));
     let now = crate::desktop::events::now_ms();
-    let mut out = io::stdout().lock();
+    meetings_to(&root, command, now, io::stdout().lock())
+}
+
+fn meetings_to(
+    root: &Path,
+    command: &MeetingsCommand,
+    now: u64,
+    mut out: impl Write,
+) -> Result<()> {
+    let library = Library::new(root.join("meetings"));
     match command {
         MeetingsCommand::List(args) => {
             let query = ListQuery {
@@ -749,10 +760,15 @@ pub fn meetings(command: &MeetingsCommand) -> Result<()> {
         }
         MeetingsCommand::Search {
             query,
+            meeting,
             since,
             until,
             limit,
         } => {
+            let meeting_id = meeting
+                .as_deref()
+                .map(|id| resolve(&library, id).map(|found| found.id.clone()))
+                .transpose()?;
             write!(
                 out,
                 "{}",
@@ -761,11 +777,11 @@ pub fn meetings(command: &MeetingsCommand) -> Result<()> {
                         query: query.clone(),
                         since: since.clone(),
                         until: until.clone(),
-                        meeting_id: None,
+                        meeting_id,
                         limit: *limit as usize,
                         fuzzy: true,
                         include_in_progress: true,
-                        vocabulary: crate::dictation::vocabulary::read_saved(&root),
+                        vocabulary: crate::dictation::vocabulary::read_saved(root),
                     },
                     now
                 )?

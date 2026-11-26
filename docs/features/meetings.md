@@ -382,7 +382,8 @@ a real Windows PC has not been observed.
 
 Not on Linux yet: website names for browser calls (Windows reads its
 browsers' windows, macOS their tabs). Not on Linux and Windows yet: Copy
-section from the tray, and the `hex meetings` and `hex mcp` commands (shared-control). Dragging a capsule to
+section from the tray (`hex meetings` and `hex mcp` are wired through
+`ControlCli` on every OS). Dragging a capsule to
 another corner works on Windows, on X11 desktops, and on a capsule floated on
 XWayland (GNOME with Labs › Call recording controls on GNOME), though none of
 that has been tried by hand on a real Windows PC or X11 desktop; only a native
@@ -1282,7 +1283,7 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │       Mute the microphone while recording, in its place), or, for its
      │       first 10 s, "Started automatically" shows beside the meter
      ├── Hover -> the pill reveals three full-width actions beside the header:
-     │   Stop nearest the meter, Copy agent prompt, Copy all; pointer
+     │   Stop nearest the meter, Copy agent prompt, Copy transcript; pointer
      │   leaving -> eases back to rest (a held press keeps it open). A bottom
      │   corner opens upward, its header nearest the screen edge
      │   ├── A quiet 28 pt ✕ (Discard recording) on the rows' icon spine, on
@@ -1417,8 +1418,8 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      ├── Copy agent prompt (first, filled) -> a prompt telling a coding agent
      │   to read this meeting with `hex meetings show <id> --md`, catch up with
      │   `--from <mm:ss>` from the last turn copied into it, and search with
-     │   `hex meetings search` (agent_prompt; the hex path is this executable)
-     ├── Copy all -> the in-call transcript so far as speaker-turn Markdown;
+     │   `hex meetings search --meeting <id>` (agent_prompt; the hex path is this executable)
+     ├── Copy transcript -> the in-call transcript so far as speaker-turn Markdown;
      │   disabled until there is text
      │   └── It reads the Parakeet in-call transcript (TranscriptReader) once a
      │       second on the ticker thread, never on the main thread
@@ -1945,8 +1946,8 @@ interactive, non-activating `NSPanel`s at status level on every Space,
 fed by the controller events the menu-bar pump receives
 ([macos_rune.rs](../../src/macos_rune.rs)). The offer (20 s), "left the
 call", the finished meeting panel (15 s, title, summary, Copy agent prompt,
-Copy all, notes refresh) and a recording pill (voice bars and elapsed time at
-rest; Stop, Copy agent prompt, Copy all under the pointer; in the configured
+Copy transcript, notes refresh) and a recording pill (voice bars and elapsed time at
+rest; Stop, Copy agent prompt, Copy transcript under the pointer; in the configured
 corner, dragged between corners) are ported. The copies are checked by
 `the_recording_capsule_copies_the_in_call_transcript`,
 `the_agent_prompt_names_real_commands`, and
@@ -2370,8 +2371,8 @@ Detail (a raised card beside the list)
     race or a Trash error leaves it listed)
 Under "Summary" and "Transcript" headings; the list's icons keep one column
 Empty: "No meetings yet" with a one-line hint, Start recording, and a note
-that meetings stay on this Mac and move to the Trash after 7 days; "No
-meetings match." while searching
+that meetings are kept in Hex on this Mac for 7 days before moving to the
+Trash while exported Markdown stays; "No meetings match." while searching
 System Audio Recording not allowed -> a warning above the list ("Hex can't
 hear the other participants") with Open System Settings
 Meetings off (macOS) -> the sidebar still lists Meetings; its pane is
@@ -2929,19 +2930,26 @@ Granola import: see [granola-import.md](../plans/granola-import.md).
 
 ## Gaps
 
-- No executed end-to-end recording with a real call, Screen Recording grant, or
-  speakers echo in this change; see the test script in the handoff.
-- The process tap, its System Audio Recording prompt, and display-sleep
-  recovery have not run in a recorded meeting. TCC status comes from the
-  private `TCCAccessPreflight`; a denied tap would otherwise record silence.
-- Microphone and system audio now run on separate device clocks aligned by
+- End-to-end macOS recordings (process tap, rolling transcript, final
+  publication, and Apple Intelligence titles/summaries) have run on real calls
+  in daily use (37 recorded meetings, 54.7 h as of 2026-11-25), including
+  `hex meetings show <id> --md` mid-call. Windows and Linux still have no
+  recorded end-to-end call.
+- Display-sleep recovery on the process tap and a denied System Audio
+  Recording prompt remain unverified in a live call. TCC status comes from
+  the private `TCCAccessPreflight`; a denied tap would otherwise record
+  silence. The 15 s system digital-silence watchdog now refreshes Core Audio
+  taps in place (and reopens other backends without retry sleep), but has not
+  yet been re-measured on a live call app.
+- Microphone and system audio run on separate device clocks aligned by
   arrival time; drift below the 1 s gap threshold is uncorrected and echo
   thresholds were tuned on ScreenCaptureKit's shared clock.
 - In-call text trails speech by one chunk plus its settling (seconds, see the
   replay numbers); nothing shows a partial sentence before then. A track that
   falls more than 120 s behind skips audio until Stop rebuilds it.
-- The recording capsule's Copy agent prompt / Copy all are unverified on a
-  real Mac screen; Copy all can trail the transcript by up to a second.
+- The recording capsule's Copy agent prompt / Copy transcript are unverified
+  on a real Mac screen; Copy transcript can trail the live transcript by up
+  to a second while recording.
 - The Meetings pane and five capsule states (recording rest and open,
   auto-started, call-ended, and ready) are verified by Rune goldens rendered
   offscreen on Linux, not on a Mac screen; the offer, finalizing, and
@@ -2951,14 +2959,10 @@ Granola import: see [granola-import.md](../plans/granola-import.md).
   speakers, and Bluetooth are unmeasured. The 2026-10-16 replay audio was lost
   with Studio's temporary directory, so those numbers cannot be re-run. Real
   NSFileManager trashing and the native rename field are unexercised in the app.
-- CPU, memory, and latency numbers come from the replay harness on the Pro,
-  not a recording in the app with real capture and hotkey dictations.
-- The short-chunk rolling transcript has not run in a real call yet.
-- Why the rolling worker stalled for over a minute on the Pro is unknown; slow
-  chunks (> 5 s) are now logged.
-- Titles and summaries have not run after a real recording in the app; the CLI
-  path exercised the real model, and the provisional-title thread, its manifest
-  write, and the menu/pane refresh are unexercised in a live recording.
+- CPU, memory, and latency numbers come from the replay harness, not a
+  recording in the app with real capture and hotkey dictations.
+- Why the rolling worker stalled for over a minute in earlier replay testing
+  is unknown; slow chunks (> 5 s) are now logged.
 - The transcript-language rule in the notes and chapter prompts is prompt-level
   only: it has not run on a real Mac against a non-English meeting, so whether
   Apple Intelligence and a given OpenCode model honour it, and how they word a

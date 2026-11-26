@@ -903,7 +903,7 @@ fn empty_state(ui: &Ui, p: Paint) -> El {
     let where_kept = match kept {
         MeetingRetention::Forever => tr("Meetings stay on this Mac.").to_owned(),
         kept => tr_fill(
-            "Meetings stay on this Mac and move to the Trash after {}.",
+            "Kept in Hex on this Mac for {}, then moved to the Trash. Exported Markdown stays.",
             tr(kept.label()),
         ),
     };
@@ -1026,10 +1026,12 @@ fn copy_buttons(p: Paint, pane: &MeetingsPane, meeting: &Meeting) -> [El; 2] {
                     return;
                 };
                 let text = if what == "prompt" {
-                    format!(
-                        "Use my Hex meeting {:?} as context.\n\nRead its notes and transcript:\n  hex meetings show {} --md\n",
+                    let recording = (meeting.status == Status::Recording)
+                        .then(|| meeting.turns().last().map_or(0, |turn| turn.start_ms));
+                    super::meeting_capsules::meeting_agent_prompt(
+                        &meeting.id,
                         shown_title(meeting),
-                        meeting.id,
+                        recording,
                     )
                 } else {
                     transcript_markdown(meeting.turns(), meeting.imported)

@@ -3009,7 +3009,7 @@ macOS `hex app` -> one menu-bar process, Rune window // dev.rune-ui-macos
 ├── While the window shows, its poll re-checks timed state every 250 ms (Rune Tx::wake_after); close hides it (Dock policy restored)
 ├── ⌘Q / menu-bar Quit / Ctrl-C quit and join
 ├── Meeting capsules: Rune interactive overlays (offer, call ended, ready, recording
-│   with Copy agent prompt / Copy all of the in-call transcript; compact until hovered,
+│   with Copy agent prompt / Copy transcript of the in-call transcript; compact until hovered,
 │   dragged to any corner)
 └── Modes app icons: Finder's icon (NSWorkspace) in the picker, chips, and mode rows
 Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows

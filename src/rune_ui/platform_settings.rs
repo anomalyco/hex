@@ -655,10 +655,12 @@ fn retention_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         tr("Keep meetings"),
         match chosen {
             None => Some(tr(
-                "Moves new meetings' audio, transcripts, and notes to the Trash",
+                "Moves new meetings in Hex to the Trash; exported Markdown stays",
             )),
             Some(MeetingRetention::Forever) => None,
-            Some(_) => Some(tr("Moves audio, transcripts, and notes to the Trash")),
+            Some(_) => Some(tr(
+                "Moves meetings in Hex to the Trash; exported Markdown stays",
+            )),
         },
         control,
     )
