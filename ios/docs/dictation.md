@@ -488,7 +488,18 @@ hold. A `.unavailable` without a reason can only come from a keyboard before 1.0
 reason is written before the state), says nothing true, and Hex forgets it at launch
 (`forgetUnavailableWithoutReason`; TestFlight build 153 on an iPhone 14 showed it), so no
 reason means the keyboard hasn't said anything since: "Downloaded. The keyboard gets it
-ready the next time it opens." Dictating in another
+ready the next time it opens." The two memory causes carry their numbers where the keyboard
+measured them, whole megabytes rounded down, and stay on the iPhone: "This iPhone's keyboard
+has 118 MB; the model needs 131 MB, …" (the limit it records at each open) and "The keyboard
+had 41 MB free when it last opened; loading the model needs 58 MB, …" (`keyboardStateFree`,
+written with `shortOfMemory` by the budget check, not after a memory warning); without them
+the same words without numbers. A switch turned on by hand downloads at once on any
+connection and whatever space is free, but never where the keyboard measured under 131 MB
+(`KeyboardParakeetDownload.downloads`); before the keyboard has ever opened it still
+downloads at once. Where English's model is on the iPhone and the keyboard is too small for
+it, the line offers **Remove (464 MB)** (the folder's size on disk), which deletes it as
+turning the switch off does, with the switch left on; never by itself, not while Hex
+dictates with that model, and not for Multilingual, which Hex dictates with too. Dictating in another
 language than English, Hinglish included, it says "Only for English dictation." even once
 downloaded: Apple's speech recognition takes that dictation whatever the keyboard last wrote
 (build 147 said "Ready in the keyboard", which reads as Parakeet taking Hinglish). Each dictation logs

@@ -1895,6 +1895,16 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertNil(hold(unmetered: nil, mobileData: true))
         XCTAssertEqual(hold(unmetered: false, free: 1_500_000_000, mobileData: true), .needsSpace)
         XCTAssertEqual(hold(english: false, unmetered: false, mobileData: true), .notEnglish)
+
+        // Turned on by hand: at once whatever the connection or space, but never where the
+        // keyboard measured that it can't use it (an iPhone 14 on TestFlight 153 had 464 MB it
+        // could never load); before the keyboard has measured anything, still at once.
+        XCTAssertFalse(KeyboardParakeetDownload.downloads(turnedOnByHand: true, hold: .keyboardTooSmall))
+        XCTAssertTrue(KeyboardParakeetDownload.downloads(turnedOnByHand: true, hold: .notOnWiFi))
+        XCTAssertTrue(KeyboardParakeetDownload.downloads(turnedOnByHand: true, hold: .needsSpace))
+        XCTAssertTrue(KeyboardParakeetDownload.downloads(turnedOnByHand: true, hold: .keyboardNotMeasured))
+        XCTAssertTrue(KeyboardParakeetDownload.downloads(turnedOnByHand: false, hold: nil))
+        XCTAssertFalse(KeyboardParakeetDownload.downloads(turnedOnByHand: false, hold: .keyboardNotMeasured))
     }
 
     /// Settings › Dictation › Model: both models' downloads start by themselves only on Wi-Fi

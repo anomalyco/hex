@@ -242,8 +242,10 @@ extension DictationController {
     /// real rule: pass `--simulate-cellular` and the keyboard has measured room for the model,
     /// so only the connection holds it. The other states leave the keyboard unmeasured, so
     /// nothing really downloads on the simulator's Wi-Fi. English also has what the keyboard
-    /// said about a downloaded model, preparing|short|noengine|failed, and toosmall, a keyboard
-    /// limit under KeyboardParakeetBudget.requiredLimit.
+    /// said about a downloaded model, preparing|short|noengine|failed (short with 41 MB free),
+    /// and toosmall, a keyboard limit of 118 MB, under KeyboardParakeetBudget.requiredLimit;
+    /// toosmalldownloaded has English's model on the iPhone all the same (a sparse file of its
+    /// size), as a switch turned on by hand used to download it, for Remove.
     private func applySpeechModelFixture(_ scene: String) {
         let multilingual = scene.contains("-multilingual-")
         let step = scene.split(separator: "-").last.map(String.init) ?? "waiting"
@@ -254,15 +256,23 @@ extension DictationController {
             "failed": (.unavailable, .loadFailed),
         ]
         let said = multilingual ? nil : keyboardSaid[step]
-        let card = multilingual ? "waiting" : said == nil ? step : "ready"
+        let card = multilingual ? "waiting" : said == nil && step != "toosmalldownloaded" ? step : "ready"
         KeyboardParakeetDownload.shared.applyFixture("model-card-\(card)")
+        let megabyte = KeyboardParakeetBudget.megabyte
         if step == "waiting" {
             KeyboardParakeetSettings().recordKeyboardLimit(KeyboardParakeetBudget.requiredLimit)
-        } else if step == "toosmall" {
-            KeyboardParakeetSettings().recordKeyboardLimit(KeyboardParakeetBudget.requiredLimit - 32 * KeyboardParakeetBudget.megabyte)
+        } else if step.hasPrefix("toosmall") {
+            KeyboardParakeetSettings().recordKeyboardLimit(118 * megabyte)
+        }
+        if step == "toosmalldownloaded" {
+            let file = ParakeetTranscriber.cacheDirectory.appendingPathComponent("fixture.bin")
+            FileManager.default.createFile(atPath: file.path, contents: nil)
+            let handle = try? FileHandle(forWritingTo: file)
+            try? handle?.truncate(atOffset: UInt64(KeyboardParakeetDownload.bytes))
+            try? handle?.close()
         }
         if let said {
-            KeyboardParakeetSettings().setKeyboardState(said.0, reason: said.1)
+            KeyboardParakeetSettings().setKeyboardState(said.0, reason: said.1, free: step == "short" ? 41 * megabyte : nil)
         }
         MultilingualParakeetSettings().isEnabled = multilingual
         downloadNetwork.forgetMobileData()

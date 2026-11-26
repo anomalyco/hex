@@ -5277,6 +5277,16 @@
         }
       }
     },
+    "Remove (%@)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除（%@）"
+          }
+        }
+      }
+    },
     "Until it's ready, the keyboard uses Apple's speech recognition" : {
       "localizations" : {
         "zh-Hans" : {
@@ -6217,6 +6227,16 @@
         }
       }
     },
+    "The keyboard had %lld MB free when it last opened; loading the model needs %lld MB, so it used Apple's speech recognition. It tries again the next time it opens." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "键盘上次打开时只有 %1$lld MB 可用内存，载入模型需要 %2$lld MB，因此使用了 Apple 的语音识别。下次打开时会再试一次。"
+          }
+        }
+      }
+    },
     "This iPhone can't run it in the keyboard, so the keyboard uses Apple's speech recognition." : {
       "localizations" : {
         "zh-Hans" : {
@@ -6243,6 +6263,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这台 iPhone 的键盘内存不够运行它，因此使用 Apple 的语音识别。"
+          }
+        }
+      }
+    },
+    "This iPhone's keyboard has %lld MB; the model needs %lld MB, so it uses Apple's speech recognition." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPhone 的键盘有 %1$lld MB 内存，模型需要 %2$lld MB，因此使用 Apple 的语音识别。"
           }
         }
       }
