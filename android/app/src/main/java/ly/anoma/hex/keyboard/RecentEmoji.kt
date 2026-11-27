@@ -9,7 +9,9 @@ internal class RecentEmoji(context: Context, private val learning: () -> Boolean
     private val prefs = context.getSharedPreferences("androidx.emoji2.emojipicker.preferences", Context.MODE_PRIVATE)
     private val list = prefs.getString(KEY, null)?.split(",")?.filter { it.isNotEmpty() }?.toMutableList() ?: mutableListOf()
     // The picker reads them on a worker thread; a pick records on the main thread.
-    override suspend fun getRecentEmojiList(): List<String> = synchronized(list) { list.toList() }
+    override suspend fun getRecentEmojiList(): List<String> = recent()
+    /** Newest first, for Labs › Keyboard › Emoji search. */
+    fun recent(): List<String> = synchronized(list) { list.toList() }
     override fun recordSelection(emoji: String) {
         if (!learning()) return
         val joined = synchronized(list) { list.remove(emoji); list.add(0, emoji); list.joinToString(",") }

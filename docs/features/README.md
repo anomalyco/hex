@@ -3330,6 +3330,17 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   FLAG_SHOW_UI)`, `TypingPreferences.volumeInMenu`); Android picks the stream as a volume key does,
 │   and the row changes no volume. Off, the menu is unchanged. Checks: none automated; it was not
 │   compiled here (no Android SDK) and nothing was tried on a device or emulator.
+├── Labs › Keyboard › Emoji search (off) -> a Search emoji bar atop the emoji panel; tapped, the keys
+│   return under a search field in the strip's place and type into it (`KeyboardEngine.emojiQuery`,
+│   `EmojiQuery`): no suggestions, corrections, swipes, adaptive touch or learning, nothing kept.
+│   Results in the panel's extra height (`EmojiSearchView`), ranked as iPhone Hex's
+│   EmojiLibrary.search + EmojiSuggester.search (`EmojiSearch`, `searchBoost`), from
+│   assets/emoji/search-en.txt (86 KB, 1,923 emoji, generated from the iOS emoji index by
+│   android/scripts/build-emoji-search.py, read lazily and filtered by `Paint.hasGlyph`). Empty query:
+│   recents, then the everyday emoji. A pick types into the app's field and joins Recently used; ✕ and
+│   Return go back to the panel; Back (an OnBackInvokedCallback on Android 13+, the key on 12) leaves for
+│   the letters. No network. Checks: the search tests in EmojiKeywordsTest.kt; `:app:testDebugUnitTest`
+│   (404 tests) passed; tried on an API 36 emulator in light and dark.
 ├── Symbol pages -> Gboard's ?123 and =< pages (Pixel 8 emulator, API 36), the same on every
 │   layout: ?123 draws 1–0, then @ # $ _ & - + ( ) /, then * " ' : ; ! ? between the page switch
 │   and delete, and =< draws ~ ` | • √ π ÷ × § Δ, then £ ¢ € ¥ ^ ° = { } \, then % © ® ™ ✓ [ ]

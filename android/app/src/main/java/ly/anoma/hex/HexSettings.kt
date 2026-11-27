@@ -167,6 +167,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val english = ModelStore.english.state.collectAsState().value
     var signatureDraft by remember { mutableStateOf(speech.signatureText) }
     val emojiSuggestions = remember(revision) { typing.emojiSuggestions }
+    val emojiSearch = remember(revision) { typing.emojiSearch }
     val keyboardTools = remember(revision) { typing.keyboardTools }
     val clipboardHistory = remember(revision) { typing.clipboardHistory }
     val smartQuotes = remember(revision) { typing.smartQuotes }
@@ -576,6 +577,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 Rule()
                                 Toggle(stringResource(R.string.emoji_suggestions), stringResource(R.string.emoji_suggestions_detail),
                                     emojiSuggestions) { typing.emojiSuggestions = it }
+                                Rule()
+                                // Labs › Keyboard › Emoji search: off, the emoji panel has no search bar.
+                                Toggle(stringResource(R.string.emoji_search), stringResource(R.string.emoji_search_detail),
+                                    emojiSearch) { typing.emojiSearch = it }
                                 Rule()
                                 Toggle(stringResource(R.string.keyboard_tools), stringResource(R.string.keyboard_tools_detail),
                                     keyboardTools) { typing.keyboardTools = it }
