@@ -11,7 +11,7 @@ use std::sync::mpsc::{Receiver, sync_channel};
 
 use super::controls::{
     ButtonKind, CardRow, METRICS, ModalWidth, Paint, button, card, icon_row, modal_panel,
-    modal_sheet, note, setting_row, toggle_row,
+    modal_scroll_body, modal_sheet, note, setting_row, toggle_row,
 };
 use super::{Menu, Modal, Pane, Ui, icons};
 use crate::app_settings::{MeetingPolicy, MeetingProviderChoice};
@@ -467,7 +467,11 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Vec<El> {
         "calls-sheet",
         tr("Calls"),
         ModalWidth::Medium,
-        vec![card(p, "default", default_rows(ui, p, &mut menus)), list],
+        vec![modal_scroll_body(
+            p,
+            "calls-body",
+            vec![card(p, "default", default_rows(ui, p, &mut menus)), list],
+        )],
         vec![
             button(
                 p,
@@ -500,5 +504,69 @@ mod tests {
         assert_eq!(label(20261115), "Sun");
         assert_eq!(label(20261114), "Nov 14");
         assert_eq!(label(20251231), "Dec 31, 2025");
+    }
+
+    #[test]
+    fn calls_modal_fits_and_scrolls_in_short_window() {
+        use crate::rune_ui::controls::MODAL;
+
+        let mut ui = crate::rune_ui::scenes::mac_fixture();
+        let seen: Vec<SeenCall> = (0..20)
+            .map(|i| SeenCall {
+                key: format!("meet-{i:02}.example.org"),
+                label: format!("Call room {i:02}"),
+                application: None,
+                last_seen_ms: 1_700_000_000_000 - i * 60_000,
+            })
+            .collect();
+        fixture(&mut ui, seen, 1_700_000_000_000, true);
+        let env = rune::Env {
+            system_dark: true,
+            scale: 2.0,
+        };
+        let text =
+            rune::text::TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES);
+        let mut rt =
+            crate::rune_ui::offscreen::runtime(ui, crate::rune_ui::view, (980.0, 620.0), env, text);
+        rt.poll = Some(crate::rune_ui::poll);
+        rt.on_key = Some(crate::rune_ui::on_key);
+        rt.settle_all();
+        rt.frame(0.0);
+
+        let rect = |rt: &rune::Runtime<Ui>, key: &str| {
+            rt.presented(key)
+                .map(|(r, _)| r)
+                .or_else(|| {
+                    rt.elements()
+                        .into_iter()
+                        .find(|e| e.key.as_deref() == Some(key) || e.path.ends_with(key))
+                        .map(|e| e.rect)
+                })
+                .unwrap_or_else(|| panic!("no element {key}"))
+        };
+        let dialog = rect(&rt, "calls-sheet");
+        assert!(
+            dialog[1] >= MODAL.margin - 0.5 && dialog[1] + dialog[3] <= 620.0 - MODAL.margin + 0.5,
+            "Calls modal stays inside window margins: {dialog:?}"
+        );
+        let done = rect(&rt, "close-calls");
+        assert!(
+            done[1] + done[3] <= dialog[1] + dialog[3],
+            "Done stays inside dialog: {done:?} in {dialog:?}"
+        );
+        let vp = rect(&rt, "calls-body");
+        let mut last = rect(&rt, "call19");
+        for _ in 0..200 {
+            if last[1] >= vp[1] && last[1] + last[3] <= vp[1] + vp[3] {
+                break;
+            }
+            rt.wheel(vp[0] + vp[2] / 2.0, vp[1] + vp[3] / 2.0, -30.0);
+            rt.frame(1.0 / 60.0);
+            last = rect(&rt, "call19");
+        }
+        assert!(
+            last[1] >= vp[1] && last[1] + last[3] <= vp[1] + vp[3],
+            "scrolling reveals call19: {last:?} in {vp:?}"
+        );
     }
 }

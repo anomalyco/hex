@@ -615,12 +615,16 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
     // sits past the remove buttons instead of over them.
     let terms = col()
         .key("term-column")
+        .shrink()
+        .min_h(0.0)
         .pl(METRICS.row_px - SIDE_ROOM)
         .child(column_labels(p))
         .child(
             col()
                 .key("term-list")
                 .h(height.min(ROWS_HEIGHT))
+                .shrink()
+                .min_h(0.0)
                 .child(super::faded_body(p.k, "term-scroll", rows, FADES)),
         );
     let mut footer = vec![button(

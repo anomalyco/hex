@@ -473,6 +473,28 @@ pub(super) fn faded_body_sticky(
         .min_h(0.0)
 }
 
+/// A vertically scrolling body that hugs its content while it fits and
+/// shrinks to scroll when its parent constrains it (such as a modal sheet in
+/// a short window). Edges fade only while content is hidden under them, so a
+/// short body shows no fade, no extra padding, and no scroll bar.
+pub(super) fn fit_scroll_body(k: &rune_kit::Kit, key: &str, content: El) -> El {
+    const FADE: f32 = 16.0;
+    let viewport = col()
+        .key(key)
+        .shrink()
+        .min_h(0.0)
+        .scroll(super::ScrollSpec {
+            stick_bottom: false,
+        })
+        .scroll_edge_fade(FADE)
+        .scroll_margin(FADE)
+        .child(content);
+    viewport
+        .scroll_bar_styled(scroll_style(k))
+        .shrink()
+        .min_h(0.0)
+}
+
 /// The bar every scrolling body in a list-and-detail pane draws.
 fn scroll_style(k: &rune_kit::Kit) -> rune_kit::ScrollBarStyle {
     rune_kit::ScrollBarStyle::from_kit(k)

@@ -10,7 +10,9 @@ use std::time::Duration;
 use rune::{El, Tx, col, el, row, text};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
-use super::controls::{ButtonKind, METRICS, ModalWidth, Paint, button, modal_panel, modal_sheet};
+use super::controls::{
+    ButtonKind, METRICS, ModalWidth, Paint, button, modal_panel, modal_scroll_body, modal_sheet,
+};
 use super::lists::{inline_slider, list_row, source_list};
 use super::settings::sound_volume;
 use super::{Modal, Ui};
@@ -201,7 +203,11 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
         "sound-sets",
         tr("Sounds"),
         ModalWidth::Narrow,
-        vec![volume_row, sets.mx(METRICS.row_px - ROW_BLEED)],
+        vec![modal_scroll_body(
+            p,
+            "sound-sets-body",
+            vec![volume_row, sets.mx(METRICS.row_px - ROW_BLEED)],
+        )],
         vec![
             button(
                 p,

@@ -1341,6 +1341,24 @@ pub(crate) fn capsule_confirm<S: 'static>(
     }
 }
 
+/// Wraps modal body items in a scrollable column that hugs its content while
+/// it fits and shrinks to scroll inside `modal_sheet` when the window is
+/// shorter than the body. Spans the modal's full width so card shadows stay
+/// unclipped and the scroll bar runs down the modal's right edge.
+pub(super) fn modal_scroll_body(p: Paint, key: &str, items: Vec<El>) -> El {
+    let card_edge = METRICS.gutter - METRICS.row_px;
+    const SHADOW_ROOM: f32 = 4.0;
+    let content = col()
+        .key("body-content")
+        .px(card_edge)
+        .py(SHADOW_ROOM)
+        .gap(MODAL.gap)
+        .children(items);
+    super::list_detail::fit_scroll_body(p.k, key, content)
+        .mx(-card_edge)
+        .my(-SHADOW_ROOM)
+}
+
 /// Wraps `panel` in a modal sheet's overlay elevation, scrim, and centered
 /// modal layer: keys stay inside, Escape or a press outside runs `close`, and
 /// focus returns to the control that opened it.
@@ -1349,7 +1367,8 @@ pub(super) fn modal_sheet(p: Paint, prefix: &str, mut panel: El, close: fn(&mut 
         panel = panel.box_shadow(*shadow);
     }
     let layer = |key: String| {
-        el().key(key)
+        col()
+            .key(key)
             .role("none")
             .absolute(0.0, 0.0)
             .w_full()
@@ -1361,9 +1380,10 @@ pub(super) fn modal_sheet(p: Paint, prefix: &str, mut panel: El, close: fn(&mut 
             .on_press(close)
             .transition(modal_scrim_transition(p)),
         layer(format!("{prefix}-layer"))
+            .py(MODAL.margin)
             .center()
             .transition(modal_transition(p))
-            .child(panel.modal(true, close)),
+            .child(panel.shrink().min_h(0.0).modal(true, close)),
     ]
 }
 
