@@ -3,6 +3,7 @@
 //! Separate notes file is on. Export chooses a stem free for both, and
 //! Descriptive meeting file names moves the pair together.
 
+#[cfg(test)]
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -149,24 +150,22 @@ fn update(manifest: &mut MeetingManifest, transcript: &Path, create: bool) -> Re
         None if create => first_free_path(transcript)?,
         None => return Ok(()),
     };
-    if path.exists() {
-        let unchanged = manifest
-            .notes_export_sha256
-            .as_deref()
-            .is_some_and(|written| super::file_sha256(&path).as_deref() == Some(written));
-        if !unchanged {
-            tracing::info!(
-                meeting = manifest.id,
-                path = %path.display(),
-                "kept the meeting's notes file, which changed since Hex wrote it"
-            );
-            return Ok(());
-        }
+    let mut written = manifest.notes_export_sha256.clone();
+    let outcome = super::write::markdown::rewrite(
+        &path,
+        &mut written,
+        super::write::markdown::RewritePolicy::WholeFileIfOwned,
+        |_| render(manifest, transcript),
+    )?;
+    if outcome == super::write::markdown::RewriteOutcome::NotOwned {
+        tracing::info!(
+            meeting = manifest.id,
+            "kept the meeting notes file, which changed since Hex wrote it"
+        );
+        return Ok(());
     }
-    let markdown = render(manifest, transcript);
-    write_atomically(&path, &markdown)?;
     manifest.notes_export_path = Some(path);
-    manifest.notes_export_sha256 = Some(super::text_sha256(markdown.as_bytes()));
+    manifest.notes_export_sha256 = written;
     Ok(())
 }
 
@@ -300,26 +299,6 @@ fn percent_encode(name: &str) -> String {
         }
     }
     encoded
-}
-
-/// Replaces the file atomically: the complete new bytes are flushed under a
-/// temporary name before the rename, so a crash leaves one whole file.
-fn write_atomically(path: &Path, markdown: &str) -> Result<()> {
-    let folder = path
-        .parent()
-        .ok_or_else(|| eyre!("{} has no folder", path.display()))?;
-    let name = path
-        .file_name()
-        .ok_or_else(|| eyre!("{} has no name", path.display()))?
-        .to_string_lossy();
-    let temporary = folder.join(format!(".{name}.tmp"));
-    fs::write(&temporary, markdown)?;
-    if let Ok(metadata) = fs::metadata(path) {
-        let _ = fs::set_permissions(&temporary, metadata.permissions());
-    }
-    crate::durable::sync_file(&temporary)?;
-    fs::rename(&temporary, path)?;
-    Ok(super::sync_directory(folder)?)
 }
 
 #[cfg(test)]

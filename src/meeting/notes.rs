@@ -18,7 +18,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use super::generator::{self, GeneratedNotes, GenerationError, NotesWriter};
 use super::{
     Labels, MeetingManifest, MeetingStatus, TranscriptEntry, TranscriptReader, coalesce_transcript,
-    format_duration, read_manifest, root, sync_directory, write_manifest,
+    format_duration, read_manifest, root, write_manifest,
 };
 use crate::desktop::events::now_ms;
 
@@ -815,54 +815,31 @@ pub(super) fn rewrite_export_transcript(
     let Some(path) = manifest.export_path.clone().filter(|path| path.exists()) else {
         return Ok(());
     };
-    let original =
-        fs::read_to_string(&path).wrap_err_with(|| format!("could not read {}", path.display()))?;
-    if manifest.export_sha256.as_deref() != Some(super::text_sha256(original.as_bytes()).as_str()) {
-        return Ok(());
-    }
-    let rendered = super::markdown::render_document(manifest, entries);
-    rewrite_markdown_file(&path, &mut manifest.export_sha256, |_| rendered)?;
+    let mut written = manifest.export_sha256.clone();
+    super::write::markdown::rewrite(
+        &path,
+        &mut written,
+        super::write::markdown::RewritePolicy::WholeFileIfOwned,
+        |_| super::markdown::render_document(manifest, entries),
+    )?;
+    manifest.export_sha256 = written;
     Ok(())
 }
 
-/// The file is replaced atomically, and only if nothing changed it meanwhile.
-/// `written` is the SHA-256 of the copy Hex last wrote; it follows the
-/// rewrite only while the file was still that copy, so a file the user
-/// edited never becomes Hex's to expire.
+/// Merge only Hex's known sections. The shared writer rechecks observed
+/// bytes after syncing the temporary, without acquiring edited-file ownership.
 fn rewrite_markdown_file(
     path: &Path,
     written: &mut Option<String>,
     rewrite: impl FnOnce(&str) -> String,
 ) -> Result<()> {
-    let original =
-        fs::read_to_string(path).wrap_err_with(|| format!("could not read {}", path.display()))?;
-    let updated = rewrite(&original);
-    if updated == original {
-        return Ok(());
-    }
-    let unchanged = written.as_deref() == Some(super::text_sha256(original.as_bytes()).as_str());
-    let folder = path
-        .parent()
-        .ok_or_else(|| eyre!("{} has no folder", path.display()))?;
-    let name = path
-        .file_name()
-        .ok_or_else(|| eyre!("{} has no name", path.display()))?
-        .to_string_lossy();
-    let temporary = folder.join(format!(".{name}.notes.tmp"));
-    fs::write(&temporary, &updated)?;
-    if let Ok(metadata) = fs::metadata(path) {
-        let _ = fs::set_permissions(&temporary, metadata.permissions());
-    }
-    crate::durable::sync_file(&temporary)?;
-    if fs::read_to_string(path).ok().as_deref() != Some(original.as_str()) {
-        let _ = fs::remove_file(&temporary);
-        return Err(eyre!("the Markdown changed while it was being updated"));
-    }
-    fs::rename(&temporary, path)?;
-    if unchanged {
-        *written = Some(super::text_sha256(updated.as_bytes()));
-    }
-    Ok(sync_directory(folder)?)
+    super::write::markdown::rewrite(
+        path,
+        written,
+        super::write::markdown::RewritePolicy::MergeKnownSections,
+        rewrite,
+    )
+    .map(|_| ())
 }
 
 static IN_PROGRESS: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
@@ -870,8 +847,8 @@ static IN_PROGRESS: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 pub(super) struct InProgress(String);
 
 impl InProgress {
-    /// Claims the one writer slot for `id`: notes, or a transcript edit
-    /// (`super::edit`) that must not race a summary.
+    /// Claims the process-local writer slot for notes, transcript edits and
+    /// renames. It does not lock out another process or the active recorder.
     pub(super) fn claim(id: &str) -> Option<Self> {
         IN_PROGRESS
             .lock()
@@ -940,7 +917,7 @@ fn summarize_in(directory: &Path, id: &str, claim: InProgress) -> Result<Meeting
 fn summarize_with(
     directory: &Path,
     id: &str,
-    _claim: InProgress,
+    claim: InProgress,
     mut generate: impl FnMut(&str, &str, Duration) -> Result<GeneratedNotes, GenerationError>,
 ) -> Result<MeetingManifest> {
     let mut manifest = read_manifest(directory)?;
@@ -986,8 +963,6 @@ fn summarize_with(
             generate(instructions, prompt, timeout)
         },
     );
-    // Re-read so concurrent manifest updates are not lost.
-    let mut manifest = read_manifest(directory)?;
     match result {
         Ok(Some(summary)) => {
             tracing::info!(
@@ -998,37 +973,54 @@ fn summarize_with(
                 elapsed_ms = started.elapsed().as_millis() as u64,
                 "generated meeting notes"
             );
-            let previous_title = display_title(&manifest);
-            manifest.notes = Some(MeetingNotes::from_summary(summary, started.elapsed()));
-            manifest.notes_error = None;
-            let title = display_title(&manifest);
-            if let Err(error) = apply_notes_to_export(
-                &mut manifest,
-                &previous_title,
-                &title,
+            publish_notes(
+                directory,
+                claim,
+                MeetingNotes::from_summary(summary, started.elapsed()),
                 crate::app_settings::meeting_descriptive_filenames(),
                 crate::app_settings::meeting_notes_file(),
-            ) {
-                tracing::warn!(%error, meeting = id, "could not add notes to meeting Markdown");
-                manifest.notes_error = Some(format!("Notes not added to Markdown: {error}"));
-            }
-            write_manifest(directory, &manifest)?;
-            Ok(manifest)
+            )
         }
         // Defensive fallback: `has_speech` returned above for a transcript
         // with no lines, and `excerpt` yields "[…]" for any line.
         Ok(None) => {
+            let mut manifest = read_manifest(directory)?;
             manifest.notes_error = None;
             write_manifest(directory, &manifest)?;
             Ok(manifest)
         }
         Err(error) => {
+            let mut manifest = read_manifest(directory)?;
             tracing::warn!(%error, meeting = id, "could not generate meeting notes");
             manifest.notes_error = Some(error.to_string());
             write_manifest(directory, &manifest)?;
             Err(error)
         }
     }
+}
+
+/// Publish notes and export metadata while retaining the generation claim.
+pub(super) fn publish_notes(
+    directory: &Path,
+    claim: InProgress,
+    notes: MeetingNotes,
+    descriptive_filenames: bool,
+    separate_notes: bool,
+) -> Result<MeetingManifest> {
+    let (manifest, ()) = super::write::MeetingWrite::claimed(directory, claim).update(|manifest| {
+        let previous_title = display_title(manifest);
+        manifest.notes = Some(notes);
+        manifest.notes_error = None;
+        let title = display_title(manifest);
+        if let Err(error) = apply_notes_to_export(
+            manifest, &previous_title, &title, descriptive_filenames, separate_notes,
+        ) {
+            tracing::warn!(%error, meeting = manifest.id, "could not add notes to meeting Markdown");
+            manifest.notes_error = Some(format!("Notes not added to Markdown: {error}"));
+        }
+        Ok(())
+    })?;
+    Ok(manifest)
 }
 
 /// Runs the real model on a transcript file without recording anything:

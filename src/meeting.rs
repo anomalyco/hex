@@ -80,6 +80,7 @@ mod turn;
 mod warning;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod watcher;
+mod write;
 pub use capture::{microphone_muted, track_levels};
 #[cfg(all(debug_assertions, target_os = "macos"))]
 pub use chapters::chapters_file;
@@ -1230,46 +1231,7 @@ fn rename_meeting_with(
     title: &str,
     descriptive_filenames: bool,
 ) -> Result<MeetingManifest> {
-    let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
-    if title.is_empty() {
-        return Err(eyre!("The title is empty"));
-    }
-    let id = directory
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let mut manifest = read_manifest(directory)?;
-    let previous = display_title(&manifest);
-    manifest.title = title;
-    set_title_source(&mut manifest, TitleSource::User);
-    let next = display_title(&manifest);
-    let mut markdown_error = None;
-    let title_changed = previous != next;
-    let mut heading_updated = title_changed;
-    if heading_updated
-        && let Some(path) = manifest.export_path.clone().filter(|path| path.exists())
-        && let Err(error) =
-            notes::retitle_markdown_file(&path, &mut manifest.export_sha256, &previous, &next)
-    {
-        tracing::warn!(%error, meeting = id, "could not retitle meeting Markdown");
-        markdown_error = Some(error);
-        heading_updated = false;
-    }
-    // The notes writer applies its own title and renames the file; leaving
-    // the name alone here keeps it from racing that in-place rewrite. A
-    // failed heading update keeps the old name too, as notes do. The notes
-    // file follows the title independently, since it is Hex's own copy.
-    if heading_updated && !notes_in_progress(&manifest.id) {
-        export_name::rename_to_title(&mut manifest, &next, descriptive_filenames);
-    }
-    if title_changed && !notes_in_progress(&manifest.id) {
-        notes_file::refresh(&mut manifest);
-    }
-    write_manifest(directory, &manifest)?;
-    match markdown_error {
-        Some(error) => Err(error.wrap_err("Renamed, but the Markdown heading was not updated")),
-        None => Ok(manifest),
-    }
+    write::rename(directory, title, descriptive_filenames)
 }
 
 /// Debug CLI: transcribes a finished or interrupted meeting's WAV tracks
