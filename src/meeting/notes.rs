@@ -5,6 +5,7 @@
 //! summary of at most two sentences. Agents read the transcript for detail.
 
 use std::collections::BTreeSet;
+#[cfg(any(debug_assertions, test))]
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,7 +13,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use color_eyre::eyre::{Result, WrapErr, eyre};
+#[cfg(any(debug_assertions, test))]
+use color_eyre::eyre::WrapErr;
+use color_eyre::eyre::{Result, eyre};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::generator::{self, GeneratedNotes, GenerationError, NotesWriter};
