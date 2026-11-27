@@ -152,11 +152,13 @@ impl WindowsHotkey {
             .and_then(|number| number.parse::<u8>().ok())
             .is_some_and(|number| (1..=24).contains(&number));
         // Keys that type nothing may stand alone: function keys, mouse
-        // buttons, Menu, Pause, and Scroll Lock, and the navigation keys,
-        // which Settings allow alone only with Labs › Special keys alone.
+        // buttons, Menu, Pause, and Scroll Lock, and Caps Lock and the
+        // navigation keys, which Settings allow alone only with Labs ›
+        // Special keys alone.
         let types_nothing = function_key
             || HotkeyKey::mouse_number(key).is_some()
             || HotkeyKey::special_name(key)
+            || HotkeyKey::caps_lock_name(key)
             || HotkeyKey::navigation_name(key);
         if !types_nothing && modifier_count == 0 {
             return Err(eyre!(
@@ -1185,6 +1187,9 @@ pub(crate) use chord::{ChordCapture, ChordPoll, NumpadWatch};
 /// flag, which no virtual key of its own names.
 const NUMPAD_ENTER: u32 = 0x100 | VK_RETURN as u32;
 
+/// Caps Lock's virtual key.
+const VK_CAPITAL: u16 = 0x14;
+
 /// The numpad key a keyboard hook last saw go down and not yet up, by its
 /// `num` code, for the chord capture: polled key state can't tell Numpad 1
 /// with Num Lock off from End. Zero for none. The capture runs a hook of
@@ -1246,7 +1251,7 @@ fn numpad_key(event: &KBDLLHOOKSTRUCT) -> Option<u32> {
 /// [`virtual_key`] accepts (letters, digits, function keys, and the
 /// layout's punctuation are scanned separately). Numpad keys are named
 /// `num 1`, `num *`, ...: their own keys, not the top row's.
-const CAPTURE_NAMED_KEYS: [(u16, &str); 45] = [
+const CAPTURE_NAMED_KEYS: [(u16, &str); 46] = [
     (VK_SPACE, "space"),
     (VK_RETURN, "enter"),
     (VK_TAB, "tab"),
@@ -1263,6 +1268,10 @@ const CAPTURE_NAMED_KEYS: [(u16, &str); 45] = [
     (0x28, "down"),
     (0x13, "pause"),
     (0x91, "scroll lock"),
+    // The recorder reads Caps Lock from its hook, which keeps the press
+    // (`chord::CAPS_LOCK_DOWN`); a shortcut on it keeps every press it fires
+    // on, so the lock never flips.
+    (VK_CAPITAL, "caps lock"),
     (0x5D, "menu"),
     // The punctuation keys, by their layout-independent virtual keys; the
     // keycap shows what each types on the active layout (`keycap_label`).
@@ -1358,6 +1367,7 @@ pub(crate) fn virtual_key(key: &str) -> Result<u32> {
         "return" => u32::from(VK_RETURN),
         "escape" => u32::from(VK_ESCAPE),
         "num enter" => NUMPAD_ENTER,
+        name if HotkeyKey::caps_lock_name(name) => u32::from(VK_CAPITAL),
         name if HotkeyKey::special_name(name) && name != "menu" && name != "pause" => 0x91,
         "page_up" => 0x21,
         "page_down" => 0x22,
@@ -1555,6 +1565,11 @@ mod tests {
         assert_ne!(virtual_key("num 1").unwrap(), virtual_key("1").unwrap());
         assert_eq!(HotkeyKey::named("num *").label, "Num *");
         assert_eq!(HotkeyKey::named("scroll lock").label, "Scroll Lock");
+        // Caps Lock, however `hex settings` spells it.
+        for name in ["caps lock", "capslock", "caps_lock", "Caps Lock"] {
+            assert_eq!(virtual_key(name).unwrap(), u32::from(VK_CAPITAL), "{name}");
+            assert_eq!(HotkeyKey::named(name).label, "Caps Lock");
+        }
     }
 
     #[test]
@@ -1595,6 +1610,7 @@ mod tests {
         assert!(alone("menu").validate().is_ok());
         // Settings gate these behind Labs › Special keys alone.
         assert!(alone("home").validate().is_ok());
+        assert!(alone("caps lock").validate().is_ok());
         assert!(alone("num 5").validate().is_err());
         let control = WindowsHotkey {
             control: Some(ModifierSide::Either),

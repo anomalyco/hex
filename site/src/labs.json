@@ -409,7 +409,7 @@
         "windows",
         "linux"
       ],
-      "summary": "Use a special key alone as a shortcut: Insert, Home, End, Page Up, or Page Down on Windows, and Menu, Pause, or Scroll Lock on Linux",
+      "summary": "Use a special key alone as a shortcut: Caps Lock, Insert, Home, End, Page Up, or Page Down on Windows, and Menu, Pause, or Scroll Lock on Linux",
       "title": "Special keys alone"
     },
     {

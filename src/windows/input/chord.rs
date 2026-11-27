@@ -1,7 +1,7 @@
 //! The settings pane's chord recorder: it polls the key state for the next
 //! shortcut the user presses.
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
 
@@ -14,15 +14,29 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use super::modifiers::{LeftControl, altgr_only, note_left_control};
 use super::{
-    CAPTURE_NAMED_KEYS, MOUSE_KEYS, ModifierState, NUMPAD_DOWN, NUMPAD_ENTER, WindowsHotkey,
-    key_down, track_numpad,
+    CAPTURE_NAMED_KEYS, HEX_INJECTED, MOUSE_KEYS, ModifierState, NUMPAD_DOWN, NUMPAD_ENTER,
+    VK_CAPITAL, WindowsHotkey, key_down, track_numpad,
 };
 use crate::app_settings::{HotkeyModifiers, ModifierSide};
+
+/// Caps Lock is down in the recorder, as the capture's hook saw it. The hook
+/// keeps that press from Windows, so recording Caps Lock never flips the
+/// lock, and the polled key state never shows it.
+static CAPS_LOCK_DOWN: AtomicBool = AtomicBool::new(false);
+
+/// Whether the capture's hook keeps this Caps Lock event: a press while
+/// Hex's window is in front, then its repeats and its release, wherever
+/// focus went since. `held` is whether it kept the press this event
+/// belongs to. Other apps keep their Caps Lock while the recorder is open.
+fn keeps_caps_lock(is_down: bool, held: bool, foreground: impl FnOnce() -> bool) -> bool {
+    held || (is_down && foreground())
+}
 
 /// The capture's own keyboard hook, on the thread that polls: it tells
 /// numpad keys from the navigation keys they send with Num Lock off
 /// (`NUMPAD_DOWN`), whether or not the listener's hook runs (#815). It only
-/// watches; every key goes on to the next hook. The thread must `pump`.
+/// watches, and every key goes on to the next hook, except Caps Lock pressed
+/// in Hex's window (`CAPS_LOCK_DOWN`). The thread must `pump`.
 pub(crate) struct NumpadWatch(HHOOK);
 
 impl NumpadWatch {
@@ -59,6 +73,7 @@ impl Drop for NumpadWatch {
         // SAFETY: the hook this watch installed.
         unsafe { UnhookWindowsHookEx(self.0) };
         NUMPAD_DOWN.store(0, Ordering::Relaxed);
+        CAPS_LOCK_DOWN.store(false, Ordering::Relaxed);
     }
 }
 
@@ -74,6 +89,13 @@ unsafe extern "system" fn numpad_hook(code: i32, wparam: WPARAM, lparam: LPARAM)
             // the poll reads.
             note_left_control(LeftControl::of(event.vkCode, event.scanCode), is_down);
             track_numpad(event, is_down);
+            if event.vkCode == u32::from(VK_CAPITAL) && event.dwExtraInfo != HEX_INJECTED {
+                let held = CAPS_LOCK_DOWN.load(Ordering::Relaxed);
+                if keeps_caps_lock(is_down, held, super::app_is_foreground) {
+                    CAPS_LOCK_DOWN.store(is_down, Ordering::Relaxed);
+                    return 1;
+                }
+            }
         }
     }
     unsafe { CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam) }
@@ -267,7 +289,15 @@ fn pressed_capture_key() -> Option<String> {
             }
         }
     }
-    if let Some((_, name)) = CAPTURE_NAMED_KEYS.into_iter().find(|&(vk, _)| key_down(vk)) {
+    if CAPS_LOCK_DOWN.load(Ordering::Relaxed) {
+        return Some("caps lock".into());
+    }
+    // Caps Lock is the hook's to report: a press the hook did not keep
+    // flipped the lock, and is not recorded.
+    if let Some((_, name)) = CAPTURE_NAMED_KEYS
+        .into_iter()
+        .find(|&(vk, _)| vk != VK_CAPITAL && key_down(vk))
+    {
         return Some(name.to_string());
     }
     for vk in 0x41..=0x5A_u16 {
@@ -294,6 +324,21 @@ fn pressed_capture_key() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_recorder_keeps_a_whole_caps_lock_press_made_in_hexs_window() {
+        let front = || true;
+        let behind = || false;
+        // A press in Hex's window is kept, so the lock does not flip.
+        assert!(keeps_caps_lock(true, false, front));
+        // Its repeats and its release are kept wherever focus went.
+        assert!(keeps_caps_lock(true, true, behind));
+        assert!(keeps_caps_lock(false, true, behind));
+        // Another app's Caps Lock is its own, press and release.
+        assert!(!keeps_caps_lock(true, false, behind));
+        assert!(!keeps_caps_lock(false, false, behind));
+        assert!(!keeps_caps_lock(false, false, front));
+    }
 
     #[test]
     fn altgr_records_right_alt_alone() {

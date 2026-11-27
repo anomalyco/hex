@@ -886,7 +886,7 @@ mod tests {
         ];
         for english in [
             "Use Menu, Pause, or Scroll Lock as a shortcut by itself, such as Caps Lock remapped to Menu",
-            "Use Insert, Home, End, Page Up, or Page Down as a shortcut by itself",
+            "Use Caps Lock, Insert, Home, End, Page Up, or Page Down as a shortcut by itself",
         ] {
             let translations = table
                 .get(english)

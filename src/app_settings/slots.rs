@@ -419,9 +419,10 @@ pub fn check_shortcut_policy(
     {
         return Err(ShortcutRefusal::MicrophoneKeyOnScreenshot);
     }
-    // Windows: a navigation key alone needs Labs › Special keys alone.
+    // Windows: Caps Lock or a navigation key alone needs Labs › Special keys
+    // alone.
     if cfg!(target_os = "windows")
-        && binding.is_lone_navigation_key()
+        && binding.is_lone_windows_special_key()
         && !settings.special_keys_allowed()
     {
         let key_name = binding
