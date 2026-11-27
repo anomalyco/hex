@@ -2285,12 +2285,14 @@ pub fn is_scrawl_app_running() -> bool {
     {
         use objc2_app_kit::NSRunningApplication;
         use objc2_foundation::NSString;
-        let current_pid = std::process::id() as i32;
-        let apps = NSRunningApplication::runningApplicationsWithBundleIdentifier(
-            &NSString::from_str(SCRAWL_BUNDLE_ID),
-        );
-        apps.iter()
-            .any(|app| app.processIdentifier() != current_pid && !app.isTerminated())
+        objc2::rc::autoreleasepool(|_| {
+            let current_pid = std::process::id() as i32;
+            let apps = NSRunningApplication::runningApplicationsWithBundleIdentifier(
+                &NSString::from_str(SCRAWL_BUNDLE_ID),
+            );
+            apps.iter()
+                .any(|app| app.processIdentifier() != current_pid && !app.isTerminated())
+        })
     }
     #[cfg(not(target_os = "macos"))]
     {

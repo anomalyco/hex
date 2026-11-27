@@ -374,7 +374,13 @@ impl Prober {
             .spawn(move || {
                 for (job_session, target, x, y) in queue {
                     if job_session == worker_session.load(Ordering::Acquire)
-                        && let Some(hit) = lookup(x, y)
+                        && let Some(hit) = {
+                            #[cfg(target_os = "macos")]
+                            let hit = objc2::rc::autoreleasepool(|_| lookup(x, y));
+                            #[cfg(not(target_os = "macos"))]
+                            let hit = lookup(x, y);
+                            hit
+                        }
                     {
                         worker_hits
                             .lock()
@@ -496,6 +502,43 @@ pub fn stroke_probe_point(
 mod tests {
     use super::*;
     use crate::model::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_prober_drains_autoreleased_objects_between_lookups() {
+        use objc2::rc::{Retained, Weak};
+        use objc2_foundation::NSObject;
+
+        fn lookup(_: f64, _: f64) -> Option<Hit> {
+            thread_local! {
+                static PREVIOUS: std::cell::RefCell<Option<Weak<NSObject>>> = const {
+                    std::cell::RefCell::new(None)
+                };
+            }
+            let drained = PREVIOUS.with(|previous| {
+                let drained = previous
+                    .borrow()
+                    .as_ref()
+                    .is_none_or(|weak| weak.load().is_none());
+                let object = NSObject::new();
+                *previous.borrow_mut() = Some(Weak::from_retained(&object));
+                // Model a framework's temporary object, without screen or AX permissions.
+                let _ = Retained::autorelease_ptr(object);
+                drained
+            });
+            Some(Hit {
+                role: if drained { "drained" } else { "leaked" }.into(),
+                ..Hit::default()
+            })
+        }
+
+        let prober = Prober::start(lookup);
+        prober.probe(Target::Pointer(1), 0.0, 0.0);
+        prober.probe(Target::Pointer(2), 0.0, 0.0);
+        let hits = prober.finish();
+        assert_eq!(hits.len(), 2);
+        assert!(hits.values().all(|hit| hit.role == "drained"));
+    }
 
     #[test]
     fn labels_are_one_short_line_and_name_the_element() {

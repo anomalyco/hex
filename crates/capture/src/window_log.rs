@@ -686,11 +686,20 @@ fn run(
     loop {
         let finishing = stopping.load(Ordering::Acquire);
         let t = started_at.elapsed().as_millis() as u64;
-        let cursor = crate::capture::current_mouse_screen();
+        // The 15 Hz app lookup needs a pool even when no window snapshot is due.
+        let poll = || {
+            (
+                crate::capture::current_mouse_screen(),
+                crate::capture::frontmost_external_pid(),
+            )
+        };
+        #[cfg(target_os = "macos")]
+        let (cursor, front) = objc2::rc::autoreleasepool(|_| poll());
+        #[cfg(not(target_os = "macos"))]
+        let (cursor, front) = poll();
         if let Some([x, y]) = cursor {
             log.push_cursor(t, f64::from(x) - frame.x, f64::from(y) - frame.y, frame);
         }
-        let front = crate::capture::frontmost_external_pid();
         let since = last_snapshot.map(|s| s.elapsed());
         let moved = cursor != cursor_at_snapshot;
         let due = !finishing
