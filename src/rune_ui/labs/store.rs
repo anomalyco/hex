@@ -174,7 +174,12 @@ pub(in crate::rune_ui) fn page(ui: &Ui, p: Paint, cx: &rune::Cx<Ui>, layer: &mut
                 .unwrap_or_default(),
             layer,
         ))
-        .child(super::super::scroll_body(p.k, "scroll", content))
+        .child(super::super::faded_body(
+            p.k,
+            "scroll",
+            content,
+            super::super::SHEET_FADE,
+        ))
 }
 
 /// Whether `row` matches a lowercase search.
@@ -267,6 +272,7 @@ fn chips(ui: &Ui, p: Paint, rows: &[Row], width: f32, layer: &mut Vec<El>) -> El
     let mut bar = row()
         .key("chips")
         .px(METRICS.gutter)
+        .pt(super::super::list_detail::BODY_TOP)
         .pb(8.0)
         .gap(CHIP_GAP)
         .child(chip(

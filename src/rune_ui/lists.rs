@@ -69,6 +69,39 @@ pub(super) fn tone_tag(p: Paint, key: &str, label: &str, tone: Tone) -> El {
         )
 }
 
+/// A [`status_pill`]'s height.
+pub(super) const PILL_H: f32 = 20.0;
+/// A [`status_pill`]'s dot.
+const PILL_DOT: f32 = 5.5;
+
+/// A soft status pill, never pressable: a borderless capsule washed in the
+/// tone's ink, a small dot, and the label in that ink. It reports a live
+/// state (Recording) where a [`tone_tag`] would name a kind.
+pub(super) fn status_pill(p: Paint, key: &str, label: &str, tone: Tone) -> El {
+    let (_, _, ink) = tone.colors(p);
+    let wash = if p.k.dark { 0.16 } else { 0.12 };
+    let mut font = p.k.ty.small_medium.lh(12.0);
+    font.size = 11.5;
+    row()
+        .key(key)
+        .role("status")
+        .label(label)
+        .h(PILL_H)
+        .px(8.0)
+        .gap(5.0)
+        .center_y()
+        .radius(999.0)
+        .fill(ink.alpha(wash))
+        .child(
+            el().key("dot")
+                .size(PILL_DOT, PILL_DOT)
+                .radius(PILL_DOT / 2.0)
+                .fill(ink)
+                .a11y_hidden(),
+        )
+        .child(text(label).key("label").font(font).color(ink))
+}
+
 /// A list's group heading (a task, a day).
 pub(super) fn group_label(p: Paint, key: &str, label: &str, first: bool) -> El {
     text(label)

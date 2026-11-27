@@ -28,14 +28,14 @@ const LIST_X: f32 = HANG;
 /// actions and its text rail matches the title's rhythm.
 const DETAIL_X: f32 = METRICS.gutter;
 /// From the rule under the header to the search field and the detail's title.
-const BODY_TOP: f32 = 16.0;
+pub(super) const BODY_TOP: f32 = 16.0;
 /// The search field's height (the kit's `TextInput`). The detail's first row
 /// is as tall and starts where the field does, so the field, the title and
 /// the title's actions share one centre line across the divider.
 pub(super) const BAR_H: f32 = 28.0;
-/// A status tag's height. The meta line is as tall with or without a tag,
+/// A status pill's height. The meta line is as tall with or without one,
 /// so the body under it holds still when a recording finishes.
-pub(super) const META_H: f32 = 18.0;
+pub(super) const META_H: f32 = super::lists::PILL_H;
 /// A quiet header action's height, a step under the pane header's buttons.
 pub(super) const QUIET_H: f32 = 24.0;
 
@@ -47,36 +47,30 @@ pub(super) static EDIT_ICON: &Icon = &rune_theme_opencode::icons::EDIT;
 pub(super) static HISTORY_ICON: &Icon = &rune_theme_opencode::icons::STATUS;
 pub(super) static SEARCH_ICON: &Icon = &rune_theme_opencode::icons::MAGNIFYING_GLASS;
 
-/// The pane's body, a full-bleed split: a hairline under the header, then
+/// The pane's body, a full-bleed split under the pane header's rule:
 /// `list` (a [`list_column`]), a hairline divider, and the detail filling
 /// the panel to its right and bottom edges.
 pub(super) fn body(p: Paint, key: &str, list: El, detail: El) -> El {
-    col()
-        .key(key)
-        .grow(1.0)
-        .shrink()
-        .min_h(0.0)
-        .child(hairline(p, "body-rule").h(p.hair))
-        .child(
-            row()
-                .key("split")
-                .grow(1.0)
-                .shrink()
-                .min_h(0.0)
-                .child(list)
-                .child(hairline(p, "split-rule").w(p.hair).h_full())
-                .child(
-                    col()
-                        .key("detail-card")
-                        .grow(1.0)
-                        .shrink()
-                        .min_w(0.0)
-                        .px(DETAIL_X)
-                        .pt(BODY_TOP)
-                        .clip_soft(0.0)
-                        .child(detail),
-                ),
-        )
+    col().key(key).grow(1.0).shrink().min_h(0.0).child(
+        row()
+            .key("split")
+            .grow(1.0)
+            .shrink()
+            .min_h(0.0)
+            .child(list)
+            .child(hairline(p, "split-rule").w(p.hair).h_full())
+            .child(
+                col()
+                    .key("detail-card")
+                    .grow(1.0)
+                    .shrink()
+                    .min_w(0.0)
+                    .px(DETAIL_X)
+                    .pt(BODY_TOP)
+                    .clip_soft(0.0)
+                    .child(detail),
+            ),
+    )
 }
 
 fn hairline(p: Paint, key: &str) -> El {

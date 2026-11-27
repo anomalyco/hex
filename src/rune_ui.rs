@@ -100,7 +100,7 @@ use onboarding_kit::live::Page;
 use scenes::{SCENES, Scene, fixture, mac_fixture, portal_fixture};
 use settings::Capture;
 pub(crate) use shortcut_rule::shortcut_rules;
-use sidebar::{BuildKind, Pane, pane_header, sidebar};
+use sidebar::{BuildKind, Pane, pane_header, pane_header_rule, sidebar};
 
 /// How long typing pauses before a text field's edit is saved.
 const DRAFT_DELAY: Duration = Duration::from_millis(250);
@@ -1586,6 +1586,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
             },
             actions,
         ))
+        .child(pane_header_rule(p))
         .child(body);
     // The OS window is the accessibility tree's root; this box adds nothing
     // to it.
@@ -1646,8 +1647,13 @@ fn window_focused(ui: &mut Ui, focused: bool, tx: &mut Tx) {
     }
 }
 
-/// How far a scroll body's top and bottom edges fade out.
-const SCROLL_FADE: (f32, f32) = (4.0, 24.0);
+/// How far a pane's scroll body fades at its top and bottom. The top inset
+/// is the room under the pane header's rule, so every pane's first card,
+/// field or row starts as far under it as the list-and-detail panes' do.
+const SCROLL_FADE: (f32, f32) = (list_detail::BODY_TOP, 24.0);
+/// A sheet's or a band's scroll body, which starts under its own header or
+/// controls rather than the pane header's rule.
+const SHEET_FADE: (f32, f32) = (4.0, 24.0);
 
 /// A vertically scrolling body whose edges fade out. At rest its content
 /// sits clear of the fades, so the first and last borders, rings, and fills
