@@ -224,14 +224,15 @@ pub(crate) fn quit() {
     }
 }
 
-/// Shows or hides the Dock icon, and marks the HUD's panel for a repair only
-/// when the activation policy actually changed: that can tie Rune's panel to
-/// one Space while AppKit still reports every Space (#1725), but a call that
-/// leaves the policy as it was changes nothing for the window server and must
-/// not reorder a shown HUD.
+/// Shows or hides the Dock icon, and marks the HUD's and the screenshot cards'
+/// panels for a repair only when the activation policy actually changed: that
+/// can tie a Rune panel to one Space while AppKit still reports every Space
+/// (#1725, #2950), but a call that leaves the policy as it was changes nothing
+/// for the window server and must not reorder a shown panel.
 pub(crate) fn set_dock_icon_visible(visible: bool) {
     if crate::app_settings::set_dock_icon_visible(visible) {
         crate::rune_hud::activation_policy_changed();
+        crate::rune_ui::screenshot_thumbnail::spaces::activation_policy_changed();
     }
 }
 
@@ -566,6 +567,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
         shutdown,
         indicator_events,
         hud,
+        card_spaces: Default::default(),
         status_actions: None,
         controller_events,
         controller_commands: calendar_commands,
@@ -687,6 +689,8 @@ struct Pump {
     shutdown: &'static AtomicBool,
     indicator_events: Receiver<DictationIndicatorEvent>,
     hud: crate::rune_hud::HudSender,
+    /// Keeps the screenshot cards on every Space, as `indicator` the HUD.
+    card_spaces: crate::rune_ui::screenshot_thumbnail::spaces::CardSpaces,
     status_actions: Option<Receiver<StatusItemAction>>,
     controller_events: Receiver<ControllerEvent>,
     /// The meeting controller's commands: the menu's Join takes the same
@@ -912,6 +916,7 @@ impl Pump {
         // reports the active Space, before the usual per-tick check.
         indicator.reassert_after_activation_policy_change();
         indicator.follow_pointer();
+        self.card_spaces.tick();
         while let Ok(call) = self.developer_calls.try_recv() {
             let reply = self.developer(call.command, indicator);
             let _ = call.reply.send(reply);

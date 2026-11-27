@@ -23,6 +23,8 @@
 mod card;
 pub(crate) mod editor;
 mod flight;
+#[cfg(target_os = "macos")]
+pub(crate) mod spaces;
 
 use std::cell::Cell;
 use std::path::PathBuf;
@@ -73,6 +75,9 @@ const RECENT: usize = 10;
 static HOVERED: AtomicBool = AtomicBool::new(false);
 /// Whether a closed card can come back, for the menu bar.
 static RESTORABLE: AtomicBool = AtomicBool::new(false);
+/// Whether the cards' overlay is shown (asked to show and not yet hidden),
+/// for the pump that keeps it on every Space.
+static SHOWN: AtomicBool = AtomicBool::new(false);
 /// The cards' overlay, for the editor to hand a card back to.
 static CARDS: OnceLock<OverlayHandle<Cards>> = OnceLock::new();
 /// The card open in the editor and where it rests now, for the editor to
@@ -545,6 +550,7 @@ fn poll(s: &mut Cards, now: f64, tx: &mut Tx) -> bool {
         if now - at >= LEAVE_S {
             s.leaving = None;
             if let Some(overlay) = &s.overlay {
+                SHOWN.store(false, Ordering::Release);
                 overlay.hide();
             }
             return true;
@@ -617,6 +623,7 @@ impl Thumbnail {
         let handle = self.overlay.clone();
         self.overlay.update(move |s, tx| {
             if s.restore() {
+                SHOWN.store(true, Ordering::Release);
                 handle.show();
                 tx.animated();
                 tx.wake_after(Duration::ZERO);
@@ -664,6 +671,7 @@ impl Thumbnail {
                 recording,
             };
             s.push(shot, capture, sharp);
+            SHOWN.store(true, Ordering::Release);
             handle.show();
             tx.animated();
             tx.wake_after(Duration::ZERO);
