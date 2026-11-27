@@ -257,13 +257,18 @@ disable event (timeout | user input)
 every 5 s on the tap thread
   ├── tap disabled without notice -> re-enable  // "event tap was disabled without notice"
   ├── tap invalidated or re-enable fails -> recreate  // "recreated event tap"
+  ├── replacement stays disabled -> recreate after 5, 10, 20, 40, then every 60 s
+  │                                         // "event tap stayed disabled; recreating it"
+  ├── retired tap -> invalidated before release  // macOS drops its registration (#2968)
   └── creation fails -> retry next check    // "could not recreate event tap", logged once
   -> key or modifier gap -> recover.tap-interruption
 tap thread holds a user-initiated activity  // App Nap cannot throttle it; idle sleep allowed
 ```
-Source: `TapSet::check`, `reenable_disabled_taps`, and `AppNapOptOut` in
-[suppression.rs](../../src/suppression.rs). No check: it needs macOS to disable
-a real tap. Proof limit: reported field failure (#612), not reproduced.
+Source: `TapSet::check`, `AttachedTap`'s drop, `reenable_disabled_taps`, and
+`AppNapOptOut` in [suppression/tap.rs](../../src/suppression/tap.rs). Check:
+`a_tap_macos_keeps_disabled_is_rebuilt_less_often_up_to_once_a_minute` covers
+the retry spacing; disabling a real tap still needs macOS. Proof limit:
+reported field failures (#612, #2968), not reproduced.
 
 The [2.1.11 release notes](../releases/2.1.11.md) describe the shipped navigation
 and missed-release fix; they are historical context, not a current-tree test.
