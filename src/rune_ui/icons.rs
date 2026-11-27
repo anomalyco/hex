@@ -26,12 +26,16 @@ pub(super) fn tile(p: super::Paint, icon: &'static Icon, size: f32) -> rune::El 
 
 macro_rules! line_icon {
     ($static:ident, $name:literal, [$($d:literal),+ $(,)?]) => {
+        line_icon!($static, $name, "1.75", [$($d),+]);
+    };
+    ($static:ident, $name:literal, $width:literal, [$($d:literal),+ $(,)?]) => {
         pub(super) static $static: Icon = Icon {
             name: $name,
             view: 24.0,
             body: concat!($(
                 "<path d=\"", $d,
-                "\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+                "\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"", $width,
+                "\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
             ),+),
         };
     };
@@ -245,6 +249,16 @@ line_icon!(
     "hex-row-sparkles",
     [
         "M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z",
+    ]
+);
+// [`SPARKLES`] at the theme's outline weight, 1 pt drawn at 16 pt, so it
+// sits beside `OUTLINE_COPY` in a detail's quiet actions.
+line_icon!(
+    SPARKLES_OUTLINE,
+    "hex-sparkles-outline",
+    "1.5",
+    [
+        "M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"
     ]
 );
 line_icon!(

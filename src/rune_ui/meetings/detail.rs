@@ -4,6 +4,9 @@
 use super::*;
 use crate::meeting::{Label, MeetingSource, Tracks};
 
+/// The meta line's source icon, a step under the 16 pt list icons.
+const SOURCE_ICON: f32 = 14.0;
+
 pub(super) fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
     let pane = &ui.meetings;
     let active = meeting.status.is_active();
@@ -17,7 +20,6 @@ pub(super) fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) 
     let can_select = selectable(ui, meeting);
     let selecting = can_select && pane.selection.active();
     let mut actions = Vec::new();
-    let mut copies = None;
     let mut confirm = None;
     if armed && !active && !meeting.notes_running {
         // The confirmation sits under the title until it is answered.
@@ -50,30 +52,15 @@ pub(super) fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) 
                 )),
         );
     } else if !renaming && !selecting {
-        // The title field brings its own Save and Cancel.
+        // The title field brings its own Save and Cancel. The copies, Select
+        // lines, then More (Rename lives there), as quiet icons in the bar.
+        if !meeting.turns().is_empty() {
+            actions.extend(copy_actions(p, pane, meeting, [None, None]));
+        }
         if can_select {
             actions.push(selection::action(p));
         }
-        // The copies, then More (Rename lives there), on one
-        // row under the meta line, clear of the title.
-        let turns = !meeting.turns().is_empty();
-        let more = overflow(ui, p, meeting, layer);
-        if turns || more.is_some() || !actions.is_empty() {
-            copies = Some(
-                row()
-                    .key("meeting-actions-row")
-                    .gap(8.0)
-                    .center_y()
-                    .children(
-                        turns
-                            .then(|| copy_buttons(p, pane, meeting))
-                            .into_iter()
-                            .flatten(),
-                    )
-                    .children(actions.drain(..))
-                    .children(more),
-            );
-        }
+        actions.extend(overflow(ui, p, meeting, layer));
     }
 
     let title = if renaming {
@@ -113,16 +100,31 @@ pub(super) fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) 
     } else {
         ld::card_heading(p, shown_title(meeting))
     };
-    let mut meta_line = vec![
+    // The source first, after its small icon, then when and how long.
+    let mut meta_line: Vec<String> = meeting.app.clone().into_iter().collect();
+    meta_line.extend([
         day_label(&meeting.day).to_string(),
         meeting.clock.clone(),
         length(meeting.duration_ms),
-    ];
-    meta_line.extend(meeting.app.clone());
+    ]);
     let mut meta: Vec<El> = status_tag(p, meeting.status, pane.stop_pending)
         .into_iter()
         .collect();
-    meta.push(ld::meta_text(p, &meta_line.join(" · ")));
+    meta.push(
+        row()
+            .key("meta-source")
+            .gap(6.0)
+            .center_y()
+            .shrink()
+            .min_w(0.0)
+            .child(
+                rune::icon(platform_icon(meeting), SOURCE_ICON)
+                    .key("source-icon")
+                    .color(p.k.c.icon_muted)
+                    .a11y_hidden(),
+            )
+            .child(ld::meta_text(p, &meta_line.join(" · "))),
+    );
 
     let errors = [
         pane.action_error
@@ -147,7 +149,13 @@ pub(super) fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) 
             .filter(|_| active)
             .map(|error| ("live-error", tr("Live transcript unavailable."), error)),
     ];
-    let mut body = col().key("detail-body").gap(24.0).pt(4.0).pb(16.0);
+    // The title leads the document and scrolls with it; the bar stays.
+    let mut body = col()
+        .key("detail-body")
+        .gap(24.0)
+        .pt(4.0)
+        .pb(16.0)
+        .child(title);
     for (key, title, error) in errors.into_iter().flatten() {
         body = body.child(error_panel(p, key, title, error, Tone::Danger));
     }
@@ -223,10 +231,8 @@ pub(super) fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) 
         .key("meeting-detail")
         .grow(1.0)
         .shrink()
-        .child(ld::card_header(title, meta, Vec::new()))
-        .children(copies.map(|row| row.pt(12.0)))
+        .child(ld::utility_bar(meta, actions))
         .children(confirm)
-        .child(ld::card_rule(p))
         .child(ld::card_scroll_sticky(
             p,
             "meeting-transcript",
@@ -404,15 +410,17 @@ pub(super) fn overflow(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>
     if items == 0 {
         return None;
     }
-    let trigger = IconButton::new(&MORE_ICON)
-        .variant(IconButtonVariant::Neutral)
-        .control_size(ControlSize::Small)
-        .help(tr("More"))
-        .on_press(|ui: &mut Ui| {
+    let trigger = ld::quiet_action(
+        p,
+        "meeting-more",
+        &MORE_ICON,
+        None,
+        tr("More"),
+        Some(ui.open == Some(Menu::MeetingActions)),
+        |ui: &mut Ui, _| {
             ui.open = (ui.open != Some(Menu::MeetingActions)).then_some(Menu::MeetingActions);
-        })
-        .build(p.k)
-        .key("meeting-more");
+        },
+    );
     Some(menu.trigger(trigger).build(p.k, layer))
 }
 
@@ -480,15 +488,16 @@ pub(super) fn transcript(
     lines
 }
 
-/// A section of the detail's body (Summary, Chapters,
-/// Transcript), a step above the speakers' small muted names.
+/// A section of the detail's body (Summary, Chapters, Transcript): a muted
+/// label, as a settings section's, so it frames the 14 pt words under it
+/// rather than reading as more of them.
 pub(super) fn body_heading(p: Paint, key: &str, label: &str) -> El {
     text(label)
         .key(key)
         .role("heading")
         .level(3)
-        .font(p.k.ty.ui_medium)
-        .color(p.text())
+        .font(p.label())
+        .color(p.muted())
 }
 
 impl Turn {
