@@ -190,6 +190,14 @@ pub fn neutral_voice() -> bool {
     feature_on(Feature::NeutralVoice)
 }
 
+/// Labs › Clean up what I say: Hex's cleanup tagger takes ums, repeats, false
+/// starts, and spoken corrections out of each English dictation on this Mac
+/// (macOS; read as each capture starts, which fetches and loads the model,
+/// and as each dictation's processing starts).
+pub fn cleanup_tagger() -> bool {
+    feature_on(Feature::CleanupTagger)
+}
+
 /// A pasted dictation gets one leading space when the character before the
 /// cursor asks for one (macOS; read as each paste commits).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]

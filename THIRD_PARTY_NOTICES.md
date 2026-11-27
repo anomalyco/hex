@@ -157,6 +157,20 @@ Notice supplied with the files:
 
 The weights are provided as-is, without warranties, as the licence states.
 
+## Cleanup Tagger
+
+Hex's cleanup tagger is Hex's own model, fine-tuned from Google's
+`bert_uncased_L-4_H-512_A-8` (https://github.com/google-research/bert), which
+is licensed under the Apache License 2.0. On macOS, Hex downloads
+`HexCleanupTagger-1.mlpackage.zip` from
+https://github.com/anomalyco/hex/releases/tag/ios-model-cleanup-tagger-1 only
+while Labs › Clean up what I say is on; it does not ship the weights. The
+model's word list, BERT's uncased vocabulary
+(`ios/HEXKeyboard/CleanupTagger/HexCleanupTaggerVocab.txt`), is part of the
+macOS app.
+
+License: https://www.apache.org/licenses/LICENSE-2.0
+
 ## Wayland Input Method Protocol
 
 `src/linux/protocols/input-method-unstable-v2.xml` is the upstream

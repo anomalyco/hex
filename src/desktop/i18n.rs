@@ -13,6 +13,7 @@ use strings::TRANSLATIONS;
 
 mod agents;
 mod calls;
+mod cleanup;
 mod clipboard_phrase;
 mod clock;
 mod confirm_cancel;

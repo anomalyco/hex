@@ -477,6 +477,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: rewrite dictations in chosen modes into plain, neutral wording on this Mac, so your writing style doesn't show (macOS)",
     ),
     key(
+        "labs.cleanup_tagger",
+        Kind::Bool,
+        "Labs: remove ums, repeated words, false starts, and spoken self-corrections from English dictations with a small model on this Mac that only removes words; turning it on downloads the 26 MB model at the next dictation (macOS)",
+    ),
+    key(
         "labs.second_dictation_shortcut",
         Kind::Bool,
         "Labs: second_dictation_hotkey dictates like the dictation shortcut",

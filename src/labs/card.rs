@@ -33,6 +33,7 @@ impl Feature {
             Self::FillerWords => "Remove filler words",
             Self::CleanUpWithAppleIntelligence => "Clean up with Apple Intelligence",
             Self::NeutralVoice => "Neutral voice",
+            Self::CleanupTagger => "Clean up what I say",
             Self::SecondDictationShortcut => "Second dictation shortcut",
             Self::TerminalPasteShortcut => "Terminal paste shortcut",
             Self::SmartSpacing => "Smart spacing",
@@ -168,6 +169,9 @@ impl Feature {
             }
             Self::NeutralVoice => {
                 "Rewrite dictations in chosen modes into plain, neutral wording on this Mac, so your writing style doesn't show"
+            }
+            Self::CleanupTagger => {
+                "Remove ums, repeats, and things you correct out loud from English dictations, with a small model on this Mac that never adds a word"
             }
             Self::SecondDictationShortcut => {
                 "Another shortcut that dictates like the main one, such as a key on an external keyboard"

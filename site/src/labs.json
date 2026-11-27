@@ -279,6 +279,17 @@
       "title": "Neutral voice"
     },
     {
+      "added": "2026-11-26",
+      "group": "output",
+      "groupTitle": "Output",
+      "id": "clean-up-what-i-say",
+      "oses": [
+        "macos"
+      ],
+      "summary": "Remove ums, repeats, and things you correct out loud from English dictations, with a small model on this Mac that never adds a word",
+      "title": "Clean up what I say"
+    },
+    {
       "added": "2026-10-31",
       "group": "shortcuts",
       "groupTitle": "Shortcuts",

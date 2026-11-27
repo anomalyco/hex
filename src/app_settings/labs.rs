@@ -154,6 +154,11 @@ pub struct LabsSettings {
     /// wording on this Mac instead of the OpenCode rewrite and the cleanup
     /// (macOS).
     pub neutral_voice: bool,
+    /// Ums, repeated words, false starts, and spoken corrections leave an
+    /// English dictation: Hex's own tagger proposes the words to remove, on
+    /// this Mac's CPU, and a guard admits them. It only removes words (macOS,
+    /// Labs › Clean up what I say).
+    pub cleanup_tagger: bool,
     /// `second_dictation_hotkey` dictates like the dictation shortcut (issue 627).
     pub second_dictation_shortcut: bool,
     /// Up to four more dictation shortcuts, each with its own activation
@@ -530,6 +535,7 @@ impl Default for LabsSettings {
             filler_words: false,
             clean_up_with_apple_intelligence: false,
             neutral_voice: false,
+            cleanup_tagger: false,
             second_dictation_shortcut: false,
             more_dictation_shortcuts: false,
             terminal_paste_shortcut: false,

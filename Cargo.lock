@@ -2287,6 +2287,7 @@ dependencies = [
  "dirs",
  "ed25519-dalek",
  "embed-resource",
+ "flate2",
  "fs2",
  "futures-util",
  "getrandom 0.4.3",

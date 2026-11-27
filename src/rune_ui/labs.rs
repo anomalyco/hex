@@ -848,6 +848,11 @@ fn rows(ui: &Ui) -> Vec<Row> {
     rows.push(row(Feature::SpokenFormatting, None));
     rows.push(row(Feature::SpokenSymbols, None));
     rows.push(row(Feature::FillerWords, None));
+    // Core ML runs the tagger, and only macOS builds link its bridge, so
+    // Linux renders of macOS scenes leave it out.
+    if caps.os == super::platform::Os::Macos && cfg!(target_os = "macos") {
+        rows.push(row(Feature::CleanupTagger, Some(&SPARKLES)));
+    }
     // Every OS writes each dictation in the chosen style after its
     // corrections and before its transformations.
     rows.push(row(Feature::DictationStyle, None));
@@ -1064,6 +1069,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::FillerWords => "lab-filler-words",
         Feature::CleanUpWithAppleIntelligence => "lab-clean-up",
         Feature::NeutralVoice => "lab-neutral-voice",
+        Feature::CleanupTagger => "lab-clean-up-what-i-say",
         Feature::SecondDictationShortcut => "lab-second-dictation-shortcut",
         Feature::MoreDictationShortcuts => "lab-more-dictation-shortcuts",
         Feature::TerminalPasteShortcut => "lab-terminal-paste-shortcut",

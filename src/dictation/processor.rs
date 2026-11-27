@@ -58,6 +58,9 @@ struct DictationLabs {
     spoken_formatting: bool,
     spoken_symbols: bool,
     filler_words: bool,
+    /// Labs › Clean up what I say: the tagger takes disfluencies out of an
+    /// English dictation ahead of any cleanup pass or rewrite (macOS).
+    cleanup_tagger: bool,
     /// Labs › Dictation style's choice while on; None leaves the text as
     /// the corrections and rewrite wrote it.
     dictation_style: Option<DictationStyle>,
@@ -70,6 +73,7 @@ impl DictationLabs {
             spoken_formatting: crate::labs::spoken_formatting(),
             spoken_symbols: crate::labs::spoken_symbols(),
             filler_words: crate::labs::filler_words(),
+            cleanup_tagger: crate::labs::cleanup_tagger(),
             dictation_style: crate::labs::dictation_style(),
         }
     }
@@ -594,6 +598,25 @@ impl Profiles {
                 language,
             );
         }
+        // Labs › Clean up what I say: the tagger takes the ums, repeats, and
+        // spoken corrections out of what was heard, ahead of the Apple
+        // Intelligence pass or the mode's rewrite. Verbatim, numbers alone,
+        // and typed text stay as they are.
+        let (corrected, tagged) = if source == Source::Dictation {
+            crate::dictation::cleanup::stage(
+                labs.cleanup_tagger,
+                &corrected,
+                &crate::dictation::cleanup::Dictation {
+                    language,
+                    style,
+                    numbers_only,
+                    cancelled,
+                    vocabulary: &profile.vocabulary,
+                },
+            )
+        } else {
+            (corrected, None)
+        };
         if profile.ai_enabled && numbers_only {
             tracing::info!(
                 profile = profile.name,
@@ -618,7 +641,9 @@ impl Profiles {
                 Processed {
                     text,
                     nothing: false,
-                    observation,
+                    // One step is recorded: the Apple Intelligence pass when
+                    // it ran, else the tagger's.
+                    observation: observation.or(tagged),
                     transformations: profile.transformations.clone(),
                 },
                 style,
@@ -2047,6 +2072,7 @@ mod tests {
             spoken_formatting: true,
             spoken_symbols: true,
             filler_words: true,
+            cleanup_tagger: false,
             dictation_style: None,
         };
         let speech = "um first new line done comma thanks";
@@ -2129,6 +2155,113 @@ mod tests {
         );
         assert_eq!(api.text, "Um, I'll call Ravi.");
         assert_eq!(dictated.transformations, ["lowercase"]);
+    }
+
+    /// Labs › Clean up what I say: the tagger's deletions reach the paste of
+    /// an English dictation, after the corrections and ahead of the style and
+    /// the transformations, and nothing else.
+    #[test]
+    fn the_cleanup_tagger_cleans_an_english_dictation_and_nothing_else() {
+        use crate::app_settings::DictationStyle;
+        use crate::dictation::text_replacements::TextReplacement;
+        let profiles = Profiles::new(
+            Profile::new("Global", "")
+                .replacements(ReplacementSet::new(&[TextReplacement {
+                    matched_phrase: "ravi".into(),
+                    output: "Ravi".into(),
+                }]))
+                .transformations(vec!["lowercase".into()]),
+        );
+        let context = context("Zed", None);
+        let cancelled = AtomicBool::new(false);
+        let on = DictationLabs {
+            cleanup_tagger: true,
+            ..DictationLabs::default()
+        };
+        let said = "Um, call ravi on Tuesday, no wait, Thursday.";
+        let run = |text: &str, language: &str, source: Source, labs: DictationLabs| {
+            profiles.process_cancellable_inner(
+                text, language, &context, &cancelled, source, None, true, labs,
+            )
+        };
+        crate::dictation::cleanup::stand_in(Some(Ok(&["um", "tuesday", "no", "wait"])));
+
+        let cleaned = run(said, "en", Source::Dictation, on);
+        assert_eq!(cleaned.text, "Call Ravi on Thursday.");
+        let observation = cleaned.observation.as_ref().unwrap();
+        assert_eq!(observation.profile, "Clean up what I say");
+        assert_eq!((&observation.model, &observation.fallback), (&None, &None));
+        assert_eq!(cleaned.transformations, ["lowercase"]);
+
+        // The lab off, another language, typed text, Verbatim, and numbers
+        // alone never reach the tagger.
+        let as_heard = "Um, call Ravi on Tuesday, no wait, Thursday.";
+        let off = run(said, "en", Source::Dictation, DictationLabs::default());
+        assert_eq!((off.text.as_str(), &off.observation), (as_heard, &None));
+        for language in ["de", "auto"] {
+            let other = run(said, language, Source::Dictation, on);
+            assert_eq!((other.text.as_str(), &other.observation), (as_heard, &None));
+        }
+        let typed = run(said, "en", Source::TypedText, on);
+        assert_eq!((typed.text.as_str(), &typed.observation), (as_heard, &None));
+        let verbatim = DictationLabs {
+            dictation_style: Some(DictationStyle::Verbatim),
+            ..on
+        };
+        let verbatim = run(said, "en", Source::Dictation, verbatim);
+        assert_eq!(verbatim.text, as_heard);
+        assert_eq!(verbatim.observation, None);
+        let numbers = run("1, 2, 3", "en", Source::Dictation, on);
+        assert_eq!(
+            (numbers.text.as_str(), &numbers.observation),
+            ("1, 2, 3", &None)
+        );
+
+        // The style writes the tagger's text, not the words as heard.
+        let casual = DictationLabs {
+            dictation_style: Some(DictationStyle::Casual),
+            ..on
+        };
+        assert_eq!(
+            run(said, "en", Source::Dictation, casual).text,
+            "call Ravi on Thursday"
+        );
+        crate::dictation::cleanup::stand_in(None);
+    }
+
+    /// A tagger that is still downloading, late, or broken pastes the
+    /// corrected words as heard and says why in History.
+    #[test]
+    fn a_tagger_that_cannot_answer_keeps_the_corrected_transcript() {
+        use crate::dictation::cleanup::Skip;
+        let profiles = Profiles::new(Profile::new("Global", ""));
+        let on = DictationLabs {
+            cleanup_tagger: true,
+            ..DictationLabs::default()
+        };
+        for (skip, why) in [
+            (Skip::ModelMissing, "the cleanup model is still downloading"),
+            (Skip::Late, "the cleanup took longer than 150 ms"),
+            (Skip::Failed("no model".into()), "no model"),
+        ] {
+            crate::dictation::cleanup::stand_in(Some(Err(skip)));
+            let processed = profiles.process_cancellable_inner(
+                "Um, so we go",
+                "en",
+                &context("Zed", None),
+                &AtomicBool::new(false),
+                Source::Dictation,
+                None,
+                true,
+                on,
+            );
+            assert_eq!(processed.text, "Um, so we go");
+            assert!(!processed.nothing);
+            let observation = processed.observation.unwrap();
+            assert_eq!(observation.profile, "Clean up what I say");
+            assert_eq!(observation.fallback.as_deref(), Some(why));
+        }
+        crate::dictation::cleanup::stand_in(None);
     }
 
     /// Labs › Transform typed text runs the same profile but never the

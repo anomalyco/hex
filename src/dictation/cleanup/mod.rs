@@ -16,21 +16,32 @@
 //!
 //! The pieces a model run needs are here too: a [`Tokenizer`] turns words
 //! into the [`Chunk`]s the tagger reads, and a chunk turns the tagger's
-//! answer back into proposals. Nothing runs a model or calls any of this
-//! yet.
+//! answer back into proposals.
+//!
+//! Labs › Clean up what I say runs all of it on macOS ([`stage`]): the
+//! tagger is the iPhone app's 28 MB model, fetched while the lab is on
+//! (`model`, `archive`) and kept warm on the CPU through Core ML
+//! (`tagger`). No other OS runs a model yet.
 #![cfg_attr(
     not(test),
     expect(
         dead_code,
         unused_imports,
-        reason = "no dictation proposes a cleanup edit yet"
+        reason = "nothing reads a plan's edits or the guard's refusals yet, and only macOS runs the tagger"
     )
 )]
 
+#[cfg(any(target_os = "macos", test))]
+mod archive;
 mod chunk;
 mod guard;
+#[cfg(any(target_os = "macos", test))]
+mod model;
 mod plan;
 mod render;
+mod stage;
+#[cfg(any(target_os = "macos", test))]
+mod tagger;
 mod tokenizer;
 mod words;
 
@@ -40,6 +51,11 @@ pub(crate) use guard::{
 };
 pub(crate) use plan::{Disfluency, Edit, EditOp, EditPlan, Proposal};
 pub(crate) use render::render;
+#[cfg(target_os = "macos")]
+pub(crate) use stage::prepare;
+pub(crate) use stage::{Dictation, reconcile, stage};
+#[cfg(test)]
+pub(crate) use stage::{Skip, stand_in};
 pub(crate) use tokenizer::{Tokenizer, WrongVocabularySize};
 pub(crate) use words::{Span, Words};
 
@@ -47,3 +63,5 @@ pub(crate) use words::{Span, Words};
 mod parity_tests;
 #[cfg(test)]
 mod property_tests;
+#[cfg(all(test, target_os = "macos"))]
+mod real_model_tests;
