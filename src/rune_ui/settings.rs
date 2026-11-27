@@ -1375,3 +1375,37 @@ mod gnome_keys_tests {
         assert!(!gnome_keeps("Super+D"));
     }
 }
+
+#[cfg(all(test, target_os = "windows"))]
+mod windows_special_keys_tests {
+    use super::*;
+
+    #[test]
+    fn recorder_accepts_caps_lock_without_the_special_keys_lab() {
+        let mut settings = AppSettings::default();
+        assert!(!settings.labs.standalone_special_keys);
+        for name in ["capslock", "insert", "home", "end", "pageup", "pagedown"] {
+            let binding = HotkeyBinding {
+                modifiers: Default::default(),
+                key: Some(HotkeyKey::named(name)),
+            };
+            let expected = if name == "capslock" {
+                Ok(())
+            } else {
+                Err(tr("Add a modifier"))
+            };
+            assert_eq!(
+                validate(&settings, ShortcutTarget::Dictation, &binding),
+                expected,
+                "{name}"
+            );
+            settings.labs.standalone_special_keys = true;
+            assert_eq!(
+                validate(&settings, ShortcutTarget::Dictation, &binding),
+                Ok(()),
+                "{name}"
+            );
+            settings.labs.standalone_special_keys = false;
+        }
+    }
+}

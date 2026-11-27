@@ -143,9 +143,9 @@ pub fn parse_hotkey(
         if binding.is_bare_primary_click() {
             return Err("mouse1 (left click) needs a modifier, such as option+mouse1".into());
         }
-        // Menu, Pause, and Scroll Lock alone, and on Windows Caps Lock and
-        // the navigation keys alone, are checked against their Labs toggle
-        // when set (`special_key_refusal`).
+        // Menu, Pause, and Scroll Lock alone, and on Windows the navigation
+        // keys alone, are checked against their Labs toggle when set.
+        // Windows accepts Caps Lock alone without a Lab.
         if modifiers.is_empty()
             && !HotkeyKey::is_function_name(&key.label)
             && !key.is_mouse()

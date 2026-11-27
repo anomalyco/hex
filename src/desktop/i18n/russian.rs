@@ -1434,7 +1434,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Show each speech model's error rate, language, and how it was tested, in the model list", "Показывайте в списке моделей долю ошибок каждой модели речи, её язык и способ проверки"),
     ("Offer Parakeet Ultra, a tuned Parakeet v3 from Moondream, in the speech model list", "Предлагайте Parakeet Ultra, настроенный Moondream вариант Parakeet v3, в списке моделей речи"),
     ("Use Menu, Pause, or Scroll Lock as a shortcut by itself, such as Caps Lock remapped to Menu", "Используйте Menu, Pause или Scroll Lock как сочетание сами по себе, например Caps Lock, переназначенный на Menu"),
-    ("Use Caps Lock, Insert, Home, End, Page Up, or Page Down as a shortcut by itself", "Используйте Caps Lock, Insert, Home, End, Page Up или Page Down как сочетание сами по себе"),
+    ("Use Insert, Home, End, Page Up, or Page Down as a shortcut by itself", "Используйте Insert, Home, End, Page Up или Page Down как сочетание сами по себе"),
     ("Shorten long pauses before the recording is turned into text, so slow computers paste sooner", "Сокращайте длинные паузы до превращения записи в текст, чтобы медленные компьютеры вставляли быстрее"),
     ("Add your own speech model files saved in smaller formats (Q6_K, Q5_K, or Q4_K). They take less space, but Hex hasn't checked them, so accuracy may vary.", "Добавляйте свои файлы моделей речи, сохранённые в меньших форматах (Q6_K, Q5_K или Q4_K). Они занимают меньше места, но Hex их не проверял, поэтому точность может отличаться."),
     ("Show only downloaded speech models in the list, with the space they take", "Показывайте в списке только загруженные модели речи и занимаемое ими место"),

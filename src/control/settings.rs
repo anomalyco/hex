@@ -1520,6 +1520,49 @@ mod tests {
         }
     }
 
+    #[test]
+    fn caps_lock_alone_needs_no_lab_on_windows_but_navigation_still_does() {
+        let rules = ShortcutRules {
+            key_named: |name| Ok(HotkeyKey::named(name)),
+            rule: |_, _| Ok(()),
+        };
+        let settings = AppSettings::default();
+        assert!(!settings.labs.standalone_special_keys);
+        for name in ["capslock", "caps_lock", "Caps Lock"] {
+            let result = apply(&settings, "dictation_hotkey", name, &rules);
+            if cfg!(target_os = "windows") {
+                let saved = result.unwrap().settings;
+                assert_eq!(format_hotkey(&saved.dictation_hotkey), "capslock");
+                let on = apply(&saved, "labs.standalone_special_keys", "on", &rules)
+                    .unwrap()
+                    .settings;
+                let off = apply(&on, "labs.standalone_special_keys", "off", &rules)
+                    .unwrap()
+                    .settings;
+                assert_eq!(off.dictation_hotkey, saved.dictation_hotkey);
+            } else {
+                assert_eq!(result.unwrap_err().code, "invalid-value");
+            }
+        }
+        for name in ["insert", "home", "end", "pageup", "pagedown"] {
+            let error = apply(&settings, "dictation_hotkey", name, &rules).unwrap_err();
+            assert_eq!(error.code, "invalid-value", "{name}");
+            if cfg!(target_os = "windows") {
+                assert!(error.message.contains("Special keys alone"), "{name}");
+                let on = apply(&settings, "labs.standalone_special_keys", "on", &rules)
+                    .unwrap()
+                    .settings;
+                let saved = apply(&on, "dictation_hotkey", name, &rules)
+                    .unwrap()
+                    .settings;
+                let off = apply(&saved, "labs.standalone_special_keys", "off", &rules)
+                    .unwrap()
+                    .settings;
+                assert_eq!(off.dictation_hotkey, HotkeyBinding::default(), "{name}");
+            }
+        }
+    }
+
     /// Issue 1050: § alone is a Linux shortcut only with Labs › Section key
     /// alone on, and turning the toggle off puts it back to the default.
     #[test]
