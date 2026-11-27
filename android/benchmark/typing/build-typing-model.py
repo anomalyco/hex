@@ -14,14 +14,14 @@ English also takes two things the books can't give it:
   "csv"), each at its tier's cost; a word the books have only gets commoner.
 Both join the vocabulary before pairs are counted, so their pairs are counted too. So do SCOWL's
 names and other words it spells with a capital (its upper and proper-names lists, sizes up to 70):
-those with one capital first, three letters or more ("Monday", "Mary", "London"), and those with a
+those with one capital first, NAME_LETTERS letters or more ("Monday", "Mary", "London"), and those with a
 capital inside that aren't acronyms ("iPhone", "GitHub", "McDonald"), in lowercase like every word,
 ranked by their counts with the rest. The capitals of the first come from the phone's dictionary
 (iOS) and en.capitals (Android); the second are written to <output>.spellings beside the model, one
 word<TAB>spelling line each, sorted by UTF-8 bytes.
 Last, after pairs are counted (the books barely have them), words newer than the books: the 2023-2025
 English news of the Leipzig Corpora Collection (ENGLISH_NEWS, CC BY 4.0, pinned by size and
-SHA-256), each a word the vocabulary lacks that NEWS_SITES news sites use, NEWS_LETTERS letters or
+SHA-256), each a word the vocabulary lacks that NEWS_SITES news sites use, NAME_LETTERS letters or
 more and not an acronym ("ChatGPT", "TikTok", "Nvidia", "wellbeing"), at the count its share of the
 news stands for; its commonest spelling after a sentence's first word goes to <output>.spellings
 when it isn't lowercase.
@@ -55,7 +55,7 @@ MAX_WORDS = {"en": 100_000, "es": 110_000}
 MAX_BYTES = 3_600_000      # the whole model
 MIN_PAIR = 2_000           # pairs rarer than this (1980-2019) can't make the cut
 # SCOWL's lists of names and other words it spells with a capital: their words spelled with
-# one capital first ("Monday", "Mary", "London"), three letters or more, join the English
+# one capital first ("Monday", "Mary", "London"), NAME_LETTERS letters or more, join the English
 # vocabulary in lowercase, as the model spells every word.
 SCOWL_NAMES = tuple(f"{region}-{kind}" for region in ("english", "american", "british") for kind in ("upper", "proper-names"))
 # English words the books (1980-2019) are too old to have, from the news of 2023-2025: the Leipzig
@@ -70,8 +70,11 @@ ENGLISH_NEWS = {
     "eng_news_2025_1M.tar.gz": ("https://downloads.wortschatz-leipzig.de/corpora/eng_news_2025_1M.tar.gz",
                                 "2026-11-27", 291283406, "7cad9136013d27b6230841558d19c5ab39b18c502dce8ccd3a821fdf74b4081b"),
 }
-NEWS_SITES = 100   # a word the vocabulary lacks joins when this many news sites use it,
-NEWS_LETTERS = 4   # and it has this many letters: three-letter names ("Eid", "Isa", "Ole") took "did" and "is a" in the gate
+NEWS_SITES = 100   # a word the vocabulary lacks joins when this many news sites use it
+# The fewest letters of a name from SCOWL or a word from the news: three-letter ones took ordinary
+# words ("Eid" "did" and "Isa" "is a" in the typing gate; "Tyr" "the" and "Ira" "is" in sloppy
+# swipes) and slid taps ("Asa" for an "a" dragged a little too far and back).
+NAME_LETTERS = 4
 LETTERS = {"en": "abcdefghijklmnopqrstuvwxyz'", "es": "abcdefghijklmnopqrstuvwxyzñáéíóúü"}
 CONTRACTIONS = {"en": {
     "don't": "do not", "doesn't": "does not", "didn't": "did not", "can't": "can not", "won't": "will not",
@@ -199,7 +202,7 @@ def word_list(lang, work):
                             words.add(w)
                 elif kind in SCOWL_NAMES:
                     for w in t.extractfile(m).read().decode("latin-1").split():
-                        if w == w[:1].upper() + w[1:].lower() and len(w.replace("'", "")) >= 3:
+                        if w == w[:1].upper() + w[1:].lower() and len(w.replace("'", "")) >= NAME_LETTERS:
                             words.add(w.lower())
         return (words | set(scowl_spellings(work))).__contains__
     from spylls.hunspell import Dictionary
@@ -302,12 +305,12 @@ def news_counts(work):
 
 
 def news_words(work, vocab, total):
-    """The words of the news the vocabulary lacks that NEWS_SITES sites use, NEWS_LETTERS letters or more, not acronyms:
+    """The words of the news the vocabulary lacks that NEWS_SITES sites use, NAME_LETTERS letters or more, not acronyms:
     each with the count its share of the news stands for in the books' total, and its commonest spelling after a
     sentence's first word."""
     tokens, rows = news_counts(work)
     return {w: (round(total * n / tokens), spelling) for w, (n, s, spelling) in rows.items()
-            if s >= NEWS_SITES and len(w) >= NEWS_LETTERS and w not in vocab and not acronym(spelling)}
+            if s >= NEWS_SITES and len(w) >= NAME_LETTERS and w not in vocab and not acronym(spelling)}
 
 
 def check_words(args):
