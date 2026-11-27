@@ -207,6 +207,8 @@
     <string name="smart_quotes_detail">Types ’ ‘ “ ” for \' and \"</string>
     <string name="swipe_delete_letters">Delete swiped words letter by letter</string>
     <string name="swipe_delete_letters_detail">Delete after a swipe removes one letter, not the word</string>
+    <string name="space_hold_cursor">Hold space to move the cursor</string>
+    <string name="space_hold_cursor_detail">Hold the space bar, then slide to move the cursor. Change language from the Hex menu</string>
     <string name="imported_words">SwiftKey words</string>
     <string name="imported_words_detail">Suggests the words SwiftKey learned from you, from its export. Stays on this phone.</string>
     <string name="imported_words_import">Import words…</string>

@@ -3330,6 +3330,15 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   FLAG_SHOW_UI)`, `TypingPreferences.volumeInMenu`); Android picks the stream as a volume key does,
 │   and the row changes no volume. Off, the menu is unchanged. Checks: none automated; it was not
 │   compiled here (no Android SDK) and nothing was tried on a device or emulator.
+├── Labs › Keyboard › Hold space to move the cursor (off) -> the space bar held still for Android's
+│   touch-and-hold delay becomes a trackpad instead of opening the dictation-language menu
+│   (`SpaceGesture.hold`, `TypingPreferences.spaceHoldCursor`): a click as it starts, then one
+│   character each 12.6 dp from where it was held, and lifting types nothing, moved or not (iPhone
+│   Hex's trackpad). A tap, and a slide without a hold, are unchanged; the language stays in the Hex
+│   menu's Language page, and TalkBack's long click still opens it. Off, holding opens the menu as
+│   before. Checks: `aHeldSpaceBarMovesTheCursorFromWhereItWasHeldAndTypesNothing` in
+│   InsertionTest.kt; `:app:testDebugUnitTest` (400 tests) and the release build's R8 step passed, and
+│   hold-slide, hold-release, tap and the lab off were tried on an API 36 emulator.
 ├── Symbol pages -> Gboard's ?123 and =< pages (Pixel 8 emulator, API 36), the same on every
 │   layout: ?123 draws 1–0, then @ # $ _ & - + ( ) /, then * " ' : ; ! ? between the page switch
 │   and delete, and =< draws ~ ` | • √ π ÷ × § Δ, then £ ¢ € ¥ ^ ° = { } \, then % © ® ™ ✓ [ ]

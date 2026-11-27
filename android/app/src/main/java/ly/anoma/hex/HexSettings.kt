@@ -171,6 +171,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val clipboardHistory = remember(revision) { typing.clipboardHistory }
     val smartQuotes = remember(revision) { typing.smartQuotes }
     val swipeDeleteLetters = remember(revision) { typing.swipeDeleteLetters }
+    val spaceHoldCursor = remember(revision) { typing.spaceHoldCursor }
     val marksTakeFixSpace = remember(revision) { typing.marksTakeFixSpace }
     val adaptiveTouch = remember(revision) { typing.adaptiveTouch }
     // Labs › Keyboard › Adaptive touch: how far it has learned (labelled taps on one key plane, and whether any reads your
@@ -585,6 +586,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 Rule()
                                 Toggle(stringResource(R.string.swipe_delete_letters), stringResource(R.string.swipe_delete_letters_detail),
                                     swipeDeleteLetters) { typing.swipeDeleteLetters = it }
+                                Rule()
+                                // Labs › Keyboard › Hold space to move the cursor: off, holding the space bar opens the language menu.
+                                Toggle(stringResource(R.string.space_hold_cursor), stringResource(R.string.space_hold_cursor_detail),
+                                    spaceHoldCursor) { typing.spaceHoldCursor = it }
                                 Rule()
                                 ImportedWordsRows(typing, revision)
                                 Rule()

@@ -9,27 +9,38 @@ import kotlin.math.sign
  * along the line at once, one character after [start] of travel and one more each [step]; a press
  * that lifts within [QUICK_MS] types a space however far it drifted (Gboard: 150 ms always, 200 ms
  * for short drifts), and so does any press that never
- * moved the cursor. Only Hex's long press differs: held still, it opens the dictation-language menu. */
+ * moved the cursor. Only Hex's long press differs: held still, it opens the dictation-language menu, or with
+ * Labs › Keyboard › Hold space to move the cursor it becomes a trackpad ([hold]), as iPhone Hex's space bar. */
 internal class SpaceGesture(private val start: Float, private val step: Float, private val stillSlop: Float) {
     companion object { const val QUICK_MS = 180L }
     var sliding = false
         private set
+    /** Held still past the hold delay with Labs › Keyboard › Hold space to move the cursor on ([hold]). */
+    var held = false
+        private set
     private var originX = 0f
+    private var lastX = 0f
     private var originY = 0f
     private var downAt = 0L
     private var moved = 0f
 
-    fun down(x: Float, y: Float, time: Long) { sliding = false; originX = x; originY = y; downAt = time; moved = 0f }
+    fun down(x: Float, y: Float, time: Long) { sliding = false; held = false; originX = x; lastX = x; originY = y; downAt = time; moved = 0f }
 
     /** The finger moved: how many characters the cursor should be from where it was, or null until it slides. */
     fun move(x: Float, y: Float, time: Long): Int? {
         val dx = x - originX
+        lastX = x
+        if (held) return dx.sign.toInt() * (abs(dx) / step).toInt()
         moved = maxOf(moved, abs(dx), abs(y - originY))
         if (!sliding && abs(dx) >= start && time - downAt >= QUICK_MS) sliding = true
         return if (sliding) dx.sign.toInt() * characters(abs(dx)) else null
     }
 
     fun characters(distance: Float) = if (distance < start) 0 else ((distance - start) / step).toInt() + 1
+
+    /** The press was held still past the hold delay: the bar is a trackpad from where the finger is now, as iPhone
+     * Hex's (one character each [step], no [start] to travel first), and lifting types nothing, moved or not. */
+    fun hold() { held = true; sliding = true; originX = lastX }
 
     /** Still enough for a long press to mean the menu. */
     val still get() = moved < stillSlop

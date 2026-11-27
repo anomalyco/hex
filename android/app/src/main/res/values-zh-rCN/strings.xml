@@ -183,6 +183,8 @@
     <string name="smart_quotes_detail">用 ’ ‘ “ ” 代替 \' 和 \"</string>
     <string name="swipe_delete_letters">逐个字母删除滑行输入的单词</string>
     <string name="swipe_delete_letters_detail">滑行输入后按删除键只删除一个字母，而不是整个单词</string>
+    <string name="space_hold_cursor">按住空格键移动光标</string>
+    <string name="space_hold_cursor_detail">按住空格键后滑动即可移动光标。在 Hex 菜单中切换语言</string>
     <string name="imported_words">SwiftKey 词语</string>
     <string name="imported_words_detail">从 SwiftKey 的导出文件中读取它从你这里学到的词语并用于建议。仅保存在这台手机上。</string>
     <string name="imported_words_import">导入词语…</string>
