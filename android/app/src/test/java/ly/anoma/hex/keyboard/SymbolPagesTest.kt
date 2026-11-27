@@ -65,8 +65,9 @@ class SymbolPagesTest {
     }
 
     @Test fun everyPrintableAsciiCharacterTypesOnEveryLayout() {
-        val ascii = ('!'..'~').toList()
         for (language in Spoken.entries) for (currency in currencies) {
+            // ЙЦУКЕН draws no Latin letters, as Gboard's and iPhone's Russian don't: they are a layout switch away.
+            val ascii = ('!'..'~').filter { language != Spoken.Russian || !it.isLetter() }
             val typed = LinkedHashSet<Char>()
             typed += letters(language)
             typed += symbols(page(language, more = false, currency = currency))

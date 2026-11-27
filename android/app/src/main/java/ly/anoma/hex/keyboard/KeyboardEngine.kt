@@ -352,9 +352,12 @@ internal class KeyboardEngine(
     fun configureTyping(keepWord: Boolean = false) {
         val typing = typingLanguage()
         // No model of its own: English's word list still gives the keys their geometry and your personal
-        // dictionary, marked as a stand-in so none of English's words reach the strip or autocorrect.
-        val language = typing ?: layoutLanguage().layoutCode
+        // dictionary, marked as a stand-in so none of English's words reach the strip or autocorrect. A layout
+        // with keys of its own but no model yet (Русский) reads no words: its letters type as tapped.
+        val layout = layoutLanguage()
+        val language = typing ?: layout.layoutCode
         val standIn = typing == null
+        literalLayout = typing == null && !layout.hasModel
         val active = word
         if (wordField && keepWord && active != null && active.standIn == standIn && active.decoder.model.language == language &&
             active.spatial == feedback.spatial && active.token.isNotEmpty() && endsWith(prefix + active.token)) {
@@ -362,7 +365,7 @@ internal class KeyboardEngine(
             showPlane(); showSuggestions(active); return
         }
         resetTyping()
-        word = if (wordField) {
+        word = if (wordField && !literalLayout) {
             try {
                 TypingWord(models.getOrPut(language) { loadDecoder(language).also(::loadPersonal) }, feedback.spatial)
                     .also {
@@ -554,7 +557,7 @@ internal class KeyboardEngine(
             // The text after the cursor already separates the picked word: space has nothing to add.
             heldAnchor != null && heldAnchor == b -> { clearSpaces(); showPredictions(b); return }
             pickedAnchor != null && pickedAnchor == b -> { clearSpaces(); spaceAnchor = b; spaceAt = now; showPredictions(b); return }
-            word != null && !exactField && spaceAnchor == b && now - spaceAt <= SpaceRules.DOUBLE_SPACE_MS && SpaceRules.periodFits(b) -> {
+            (word != null || (wordField && literalLayout)) && !exactField && spaceAnchor == b && now - spaceAt <= SpaceRules.DOUBLE_SPACE_MS && SpaceRules.periodFits(b) -> {
                 clearSpaces()
                 if (replace(" ", ". ")) { resetTyping(); showPredictions(before()); inputDone(); return }
             }
@@ -844,17 +847,20 @@ internal class KeyboardEngine(
      * (not a password, email address or number, where Hex reads no words), with its typing model loaded and not
      * English's list standing in for a language without one. */
     val swipes get() = feedback.swipe && !secure && word?.standIn == false && !symbols && pad == null && target.connected
-    /** Where [swipes] would be but English's list only stands in for the dictation language's words: a swipe types
-     * nothing, as before, and the strip says so ([swipeUnavailable]). */
-    val swipeUnreadable get() = feedback.swipe && !secure && word?.standIn == true && !symbols && pad == null && target.connected
+    /** Where [swipes] would be but English's list only stands in for the dictation language's words, or the layout has
+     * no model yet: a swipe types nothing, as before, and the strip says so ([swipeUnavailable]). */
+    val swipeUnreadable get() = feedback.swipe && !secure && (word?.standIn == true || (wordField && literalLayout)) &&
+        !symbols && pad == null && target.connected
+    /** The layout has keys but no typing model yet (Русский): no word is read, so taps type as tapped. */
+    private var literalLayout = false
 
     /** A letter touch became a swipe: its key no longer types. Null when it can't be one here. */
     fun beginSwipe(): SwipeContext? {
-        val w = word ?: return null
         if (!swipes) {
             if (swipeUnreadable && !toldSwipe) { toldSwipe = true; swipeUnavailable() }
             return null
         }
+        val w = word ?: return null
         // A word delete took back stays remembered for this swipe; anything else ends the Undo dictation offer.
         if (dictated != null) offerUndo(null)
         continuation.clear(); cancelChip(); forgetSwipe(); adaptive?.forget()

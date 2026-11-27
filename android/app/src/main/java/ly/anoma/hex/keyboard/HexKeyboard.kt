@@ -438,7 +438,7 @@ class HexKeyboard : InputMethodService() {
      * starts, a tap or its ✕ (in place of Hex Preview's update line, which comes back in the next field). */
     private fun swipeUnavailable() {
         val language = swipeUnreadableIn(feedback.layout, preferences.spoken) ?: return
-        view?.notice(StripNotice(getString(R.string.keyboard_note_swipe, language.label), getString(R.string.keyboard_note_dismiss),
+        view?.notice(StripNotice(getString(R.string.keyboard_note_swipe, language), getString(R.string.keyboard_note_dismiss),
             tap = {}, dismiss = {}))
     }
     internal fun beginSpeech(): Boolean {

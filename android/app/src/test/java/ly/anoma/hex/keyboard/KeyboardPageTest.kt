@@ -17,6 +17,17 @@ class KeyboardPageTest {
         assertEquals("1234567890", page(numberRow = true).digits)
     }
 
+    @Test fun russianIsYcukenWithShiftAndDeleteOneLetterWide() {
+        val russian = page(numberRow = false, language = Spoken.Russian)
+        assertEquals(listOf("йцукенгшщзх", "фывапролджэ", "ячсмитьбю"), russian.lines)
+        assertEquals(1f, KeyboardMetrics.sideWidth(russian, russian.lines))
+        // ё and ъ have no keys: they are held on е and ь, capitals too.
+        assertEquals(listOf("е", "ё"), LetterFeedback.options('е', "ru"))
+        assertEquals(listOf("Е", "Ё"), LetterFeedback.options('Е', "ru"))
+        assertEquals(listOf("ь", "ъ"), LetterFeedback.options('ь', "ru"))
+        assertEquals(emptyList<String>(), LetterFeedback.options('к', "ru"))
+    }
+
     @Test fun offThereIsNoNumberRow() {
         assertNull(page(numberRow = false).digits)
     }

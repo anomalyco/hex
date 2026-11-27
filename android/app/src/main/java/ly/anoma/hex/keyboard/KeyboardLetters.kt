@@ -13,6 +13,9 @@ internal object KeyboardLetters {
         "fr" to listOf("azertyuiop", "qsdfghjklm", "wxcvbn'"),
         "it" to listOf("qwertyuiop", "asdfghjkl", "zxcvbnm"),
         "pt" to listOf("qwertyuiop", "asdfghjkl", "zxcvbnm"),
+        // ЙЦУКЕН, as iPhone Hex and Gboard draw it: 11, 11 and 9 letters, so shift and delete are one
+        // letter wide. ё is held on е and ъ on ь.
+        "ru" to listOf("йцукенгшщзх", "фывапролджэ", "ячсмитьбю"),
     )
 
     /** The number row's digits, in the order Gboard's row 1 holds them. */

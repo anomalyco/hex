@@ -601,7 +601,10 @@ class InsertionTest {
         assertEquals(DictationLanguage.Russian, DictationLanguage.automatic(null, listOf("ru")))
         assertEquals(DictationLanguage.Russian, DictationLanguage.matching("ru"))
         assertEquals(null, DictationLanguage.Polish.layout)
-        assertEquals(null, DictationLanguage.Russian.layout)
+        assertEquals(Spoken.Russian, DictationLanguage.Russian.layout)
+        // Automatic picks ЙЦУКЕН for a Russian phone, and a pinned Русский layout dictates Русский.
+        assertEquals(DictationLanguage.Russian, DictationLanguage.automatic(Spoken.Russian, listOf("en")))
+        assertEquals(Spoken.Russian, Spoken.matching("ru"))
         fun format(text: String, style: Style, language: DictationLanguage) = SpokenText.format(text, SpeechOptions(style, language,
             clean = true, translate = false, formatLists = true, spokenPunctuation = true))
         // Cleanup has no Polish rules, so the particle "no" ("well") is not English's correction marker.
@@ -622,7 +625,9 @@ class InsertionTest {
         assertEquals(Spoken.Portuguese, typingLayout(null, DictationLanguage.Portuguese))
         assertEquals(null, typingLayout(null, DictationLanguage.Dutch))
         assertEquals(null, typingLayout(null, DictationLanguage.Polish))
+        // Русский has its own keys but no model yet, dictated or pinned: its letters type as tapped.
         assertEquals(null, typingLayout(null, DictationLanguage.Russian))
+        assertEquals(null, typingLayout(Spoken.Russian, DictationLanguage.English))
         // A pinned Keyboard › Keyboard layout has its own model whatever is dictated.
         assertEquals(Spoken.English, typingLayout(Spoken.English, DictationLanguage.Portuguese))
         assertEquals(Spoken.English, typingLayout(Spoken.English, DictationLanguage.Dutch))
@@ -631,9 +636,12 @@ class InsertionTest {
     }
     @Test fun aSwipeNamesTheDictationLanguageWithoutATypingModel() {
         // A swipe there types nothing, so the strip says swipes aren't available in the language, as the space bar names it.
-        assertEquals("Nederlands", swipeUnreadableIn(null, DictationLanguage.Dutch)?.label)
-        assertEquals("Polski", swipeUnreadableIn(null, DictationLanguage.Polish)?.label)
-        assertEquals("Русский", swipeUnreadableIn(null, DictationLanguage.Russian)?.label)
+        assertEquals("Nederlands", swipeUnreadableIn(null, DictationLanguage.Dutch))
+        assertEquals("Polski", swipeUnreadableIn(null, DictationLanguage.Polish))
+        assertEquals("Русский", swipeUnreadableIn(null, DictationLanguage.Russian))
+        // A pinned layout without a model names the layout, not what is dictated.
+        assertEquals("Русский", swipeUnreadableIn(Spoken.Russian, DictationLanguage.English))
+        assertEquals(null, swipeUnreadableIn(Spoken.English, DictationLanguage.Russian))
         // A pinned layout's model reads swipes, and so does a dictation language with its own: nothing to say.
         assertEquals(null, swipeUnreadableIn(Spoken.English, DictationLanguage.Dutch))
         assertEquals(null, swipeUnreadableIn(Spoken.German, DictationLanguage.Polish))
