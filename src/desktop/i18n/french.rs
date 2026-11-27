@@ -16,6 +16,7 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
     ("macOS isn't letting Hex paste. Add Hex in System Settings > Privacy & Security > System & App Protection Override, then restart Hex.", "macOS empêche Hex de coller. Ajoutez Hex dans Réglages Système > Confidentialité et sécurité > Dérogation à la protection du système et des apps, puis relancez Hex."),
+    ("Windows blocked Hex's paste. Your words are on the clipboard: press Ctrl+V. Security software or an app running as administrator can cause this.", "Windows a bloqué le collage de Hex. Vos mots sont dans le presse-papiers : appuyez sur Ctrl+V. Un logiciel de sécurité ou une app exécutée en tant qu'administrateur peut en être la cause."),
     ("Sent to", "Envoyé à"),
     ("Nothing here yet", "Rien ici pour l’instant"),
     ("Dictations, annotations, and captures show here.", "Les dictées, les annotations et les captures apparaissent ici."),

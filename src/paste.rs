@@ -41,11 +41,24 @@ pub(crate) const fn keystroke_refused(split: bool, allowed: bool) -> bool {
 pub(crate) const POST_EVENT_REFUSED: &str = "macOS isn't letting Hex paste. Add Hex in System Settings > Privacy & Security > \
      System & App Protection Override, then restart Hex.";
 
-/// Whether `message` is that refusal: the one failure the HUD explains even
-/// with Labs › Failure notices off, because nothing else says why the words
-/// never landed.
+/// Whether `message` is that refusal: a failure the HUD explains even with
+/// Labs › Failure notices off, because nothing else says why the words never
+/// landed.
 pub(crate) fn refused_by_macos(message: &str) -> bool {
     message.contains(POST_EVENT_REFUSED)
+}
+
+/// What a Windows paste says when `SendInput` rejects its chord: an elevated
+/// window or security software blocking Hex's simulated input (#2975). The
+/// transcript stays on the clipboard. It is also the HUD notice's English
+/// source and its i18n key.
+pub(crate) const WINDOWS_PASTE_BLOCKED: &str = "Windows blocked Hex's paste. Your words are on the clipboard: \
+     press Ctrl+V. Security software or an app running as administrator can cause this.";
+
+/// Whether `message` is that Windows refusal, which, like the macOS one, the
+/// HUD explains even with Labs › Failure notices off.
+pub(crate) fn blocked_by_windows(message: &str) -> bool {
+    message.contains(WINDOWS_PASTE_BLOCKED)
 }
 
 /// Refuses a paste that would post a keystroke when macOS 27.3 has not

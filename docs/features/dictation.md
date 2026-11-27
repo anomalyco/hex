@@ -1040,6 +1040,14 @@ takes the paste.
 Windows paste                                     // dictate.windows-paste-target
 ├── Capture starts -> The window in front is remembered, with its process
 ├── Target is an app -> Ctrl+V goes there
+│   └── Windows rejects the chord (SendInput accepts fewer events: an
+│       elevated window, or security software such as 360 Total Security
+│       blocking Hex's simulated input, #2975) -> the job fails with the error
+│       tone, the transcript stays on the clipboard (no restore), and the HUD
+│       notice says to press Ctrl+V and names both likely causes. Like the
+│       macOS refused-paste notice, it shows even with Labs › Failure notices
+│       off; the sent/total counts go to the log only. A YOLO Return rejected
+│       the same way fails with a short "Windows blocked Hex's Return key"
 ├── Target is the shell
 │   ├── The remembered window is still its process's, alive, visible, not
 │   │   minimized, not Hex's, not the shell
@@ -1075,7 +1083,12 @@ Checks: `the_desktop_and_taskbars_take_no_paste`,
 `another_process_using_a_shell_class_is_not_the_shell` in
 [paste_target.rs](../../src/dictation/paste_target.rs), and
 `a_copied_dictation_completes_the_practice_like_a_paste` in
-[practice.rs](../../src/rune_ui/practice.rs). Proof limits: the classification
+[practice.rs](../../src/rune_ui/practice.rs). The blocked-paste notice:
+`a_refused_paste_is_shown_with_failure_notices_off` in
+[live_text.rs](../../src/rune_ui/live_text.rs),
+`known_microphone_failures_get_an_actionable_explanation` in [activity.rs](../../src/desktop/activity.rs), and
+`the_blocked_windows_paste_notice_has_every_language` in
+[i18n.rs](../../src/desktop/i18n.rs). Proof limits: the classification
 and the practice mapping are unit-tested only; the foreground read, the return
 attempt, and the copy fallback have not run on a real Windows PC.
 
