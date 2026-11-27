@@ -178,6 +178,9 @@ impl Pump {
             ControlCommand::MeetingDelete { id } => {
                 Some(control::meeting_deleted(crate::meeting::delete(&id)))
             }
+            ControlCommand::MeetingRename { id, title } => Some(control::meeting_renamed(
+                crate::meeting::rename_finished(&id, &title),
+            )),
             ControlCommand::MeetingCopyLast => Some(
                 crate::meeting::latest_transcript_markdown()
                     .and_then(|markdown| {

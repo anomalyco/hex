@@ -2436,6 +2436,17 @@ Agents -> hex meetings delete <id>                 // exact `meetings list --jso
      row at its next 1 s rescan
   // checks: deleting_a_meeting_answers_its_refusal_code; JSON shape
   // {"version":4,"command":"meeting-delete","id":"…"} (control.rs)
+
+Agents -> hex meetings rename <id> <title>         // exact `meetings list --json` id
+  -> the pane's rename (meeting/write), claimed before the checks, through
+     the running Hex without raising its window (meeting/retitle)
+  -> finished only, as the pane offers it: unknown id -> not-found; empty
+     title -> invalid-value; recording/transcribing/notes/final.pending ->
+     the meetings delete codes, exit 1, title unchanged
+  -> done -> "Renamed to “<title>”"; an open pane shows it at its next rescan
+  // checks: renaming_by_id_saves_the_title_and_refuses_what_the_pane_would
+  // (meeting/retitle.rs); JSON shape {"version":4,"command":"meeting-rename",
+  // "id":"…","title":"…"} (control.rs)
 ```
 
 Choice: Delete trashes the Markdown copy too, since it holds the transcript;

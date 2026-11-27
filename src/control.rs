@@ -125,6 +125,12 @@ pub enum ControlCommand {
         /// The exact id `hex meetings list --json` prints.
         id: String,
     },
+    /// Rename a finished meeting, as the Meetings pane's Rename does.
+    MeetingRename {
+        /// The exact id `hex meetings list --json` prints.
+        id: String,
+        title: String,
+    },
     SettingsGet {
         #[serde(default)]
         key: Option<String>,
@@ -307,6 +313,19 @@ pub fn meeting_deleted(
         Ok(meeting) => {
             ControlReply::done(format!("Deleted “{}”; moved to the Trash", meeting.title))
         }
+        Err(error) => ControlReply::error(error.code(), error.message()),
+    }
+}
+
+/// `hex meetings rename`: the meeting module's typed answer as a reply.
+pub fn meeting_renamed(
+    answer: Result<crate::meeting::MeetingManifest, crate::meeting::RenameError>,
+) -> ControlReply {
+    match answer {
+        Ok(manifest) => ControlReply::done(format!(
+            "Renamed to “{}”",
+            crate::meeting::display_title(&manifest)
+        )),
         Err(error) => ControlReply::error(error.code(), error.message()),
     }
 }
@@ -1282,6 +1301,10 @@ mod tests {
             ControlCommand::MeetingDelete {
                 id: "1790000500000-1002".into(),
             },
+            ControlCommand::MeetingRename {
+                id: "1790000500000-1002".into(),
+                title: "Design review".into(),
+            },
             ControlCommand::SettingsGet { key: None },
             ControlCommand::SettingsSet {
                 key: "release_microphone_while_idle".into(),
@@ -1393,6 +1416,16 @@ mod tests {
             json,
             serde_json::json!({"version": 4, "command": "meeting-delete",
                 "id": "1790000500000-1002"})
+        );
+        let json = serde_json::to_value(ControlRequest::new(ControlCommand::MeetingRename {
+            id: "1790000500000-1002".into(),
+            title: "Design review".into(),
+        }))
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"version": 4, "command": "meeting-rename",
+                "id": "1790000500000-1002", "title": "Design review"})
         );
         // Optional fields may be left out.
         let request: ControlRequest =

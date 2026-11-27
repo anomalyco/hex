@@ -89,7 +89,7 @@ Agent or terminal                                  // control.cli; every OS
 │   ├── Runs here: no running Hex, no /control request
 │   └── The script on stdout and nothing else, generated from the same clap
 │       tree every command parses
-├── hex meetings record [--title] | stop | copy-last | delete <id>
+├── hex meetings record [--title] | stop | copy-last | delete <id> | rename <id> <title>
 │   ├── Meetings off -> feature-off; recording shows in the menu bar and HUD
 │   │   exactly like a menu-bar recording
 │   ├── record while the last meeting stops (or was still starting) ->
@@ -103,14 +103,20 @@ Agent or terminal                                  // control.cli; every OS
 │   │   on the stop request alone; after 8 s it answers anyway, and status
 │   │   may still read stopping
 │   ├── No meetings cancel: Hex cannot discard a recording
-│   └── delete -> the pane's Delete for the exact `meetings list --json` id:
-│       Markdown, tracked notes file, then recording folder to the Trash,
-│       never `rm`; works with Meetings off, asks no confirmation
-│       ├── unknown id -> not-found; recording | transcribing | notes |
-│       │   final.pending -> meeting-recording | -transcribing | -notes |
-│       │   -final-pending, exit 1, nothing moved
-│       └── done -> "Deleted “<title>”; moved to the Trash", the open Meetings
-│           window drops the row at its next 1 s scan
+│   ├── delete -> the pane's Delete for the exact `meetings list --json` id:
+│   │   Markdown, tracked notes file, then recording folder to the Trash,
+│   │   never `rm`; works with Meetings off, asks no confirmation
+│   │   ├── unknown id -> not-found; recording | transcribing | notes |
+│   │   │   final.pending -> meeting-recording | -transcribing | -notes |
+│   │   │   -final-pending, exit 1, nothing moved
+│   │   └── done -> "Deleted “<title>”; moved to the Trash", the open Meetings
+│   │       window drops the row at its next 1 s scan
+│   └── rename -> the pane's Rename for the exact `meetings list --json` id,
+│       done without bringing Hex forward; works with Meetings off
+│       ├── unknown id -> not-found; empty title -> invalid-value; recording |
+│       │   transcribing | notes | final.pending -> the delete refusal codes,
+│       │   exit 1, title unchanged
+│       └── done -> "Renamed to “<title>”"; `meetings list` shows it at once
 ├── hex settings list | get <key|prefix> | set <key> <value>
 │   ├── The window's save, then ReloadSettings -> live, no restart
 │   ├── Unknown key, bad value, read-only key -> refused, nothing written
@@ -188,7 +194,9 @@ reload as the window's do, and `settings set` refuses a key whose capability
 the OS lacks
 (`settings list` marks it "not on this OS"). `meetings record|stop|copy-last`
 go to the meeting recorder (`meeting/runtime`) as the tray's items do, and
-`meetings delete` calls the pane's own delete (`meeting/delete`).
+`meetings delete` calls the pane's own delete (`meeting/delete`), and
+`meetings rename` the pane's rename under the same refusals
+(`meeting/retitle`).
 `control::meetings` holds the rules both hosts and `hex status` share: the
 record/stop decision from the mirrored state (a recording or a start whose
 stop is under way answers `record` with `busy` and `stop` with `unchanged`)

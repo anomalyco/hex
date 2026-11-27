@@ -55,13 +55,35 @@ pub(super) fn rename(
     title: &str,
     descriptive_filenames: bool,
 ) -> Result<MeetingManifest> {
-    let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
-    if title.is_empty() {
+    if normalized_title(title).is_empty() {
         return Err(eyre!("The title is empty"));
     }
     // This short-lived claim also permits the existing active-recording
     // rename path; it is never held for the lifetime of the recording.
-    let (manifest, markdown_error) = MeetingWrite::claim(directory)?.update(|manifest| {
+    rename_claimed(
+        MeetingWrite::claim(directory)?,
+        title,
+        descriptive_filenames,
+    )
+}
+
+/// A title as it is saved: runs of whitespace become one space, trimmed.
+pub(super) fn normalized_title(title: &str) -> String {
+    title.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// `rename` under a claim the caller already holds, so it can check the
+/// meeting between claiming and writing (`hex meetings rename`).
+pub(super) fn rename_claimed(
+    mut write: MeetingWrite<'_>,
+    title: &str,
+    descriptive_filenames: bool,
+) -> Result<MeetingManifest> {
+    let title = normalized_title(title);
+    if title.is_empty() {
+        return Err(eyre!("The title is empty"));
+    }
+    let (manifest, markdown_error) = write.update(|manifest| {
         let previous = super::display_title(manifest);
         manifest.title = title;
         super::set_title_source(manifest, super::TitleSource::User);

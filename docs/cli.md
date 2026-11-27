@@ -46,6 +46,7 @@ hex
 │   ├── stop                       Stop & Transcribe; unchanged once it is stopping
 │   ├── copy-last                  copy the last meeting transcript to the clipboard
 │   ├── delete <id>                move a finished meeting's Markdown and recording to the Trash
+│   ├── rename <id> <title>        rename a finished meeting, as the Meetings pane's Rename
 │   └── list | show | search       read-only (docs/transcript-cli.md)
 ├── settings
 │   ├── list                       every setting: key, value, kind, choices, writable, about
@@ -365,6 +366,20 @@ the final transcript of a run Hex quit during, is refused with its own code
 works whether or not Meetings is on, so a caller should ask the person first
 and offer the same two-step confirmation the pane does.
 
+`meetings rename <id> <title>` is the Meetings pane's Rename, carried out by
+the running Hex on every OS without bringing it forward: it saves the title
+(runs of whitespace become one space), updates the exported Markdown's heading
+while it still reads the old title, and with Export › Descriptive meeting file
+names on renames that file to follow. The id is the one `hex meetings list
+--json` prints; put `--` before the id when the title could start with a dash
+(`hex meetings rename --json -- "$id" "Design review"`). As in the pane, only a
+finished meeting renames: an unknown id is `not-found`, an empty title
+`invalid-value`, and a meeting that is recording, transcribing, writing notes
+or a transcript edit, or waiting for its final transcript is refused with the
+same codes `meetings delete` uses, exit 1, with the title unchanged. A done
+reply reads `Renamed to “<title>”`, and `hex meetings list --json` shows the
+new title at once. It works whether or not Meetings is on.
+
 ## `hex dev call-window` (dev builds, macOS)
 
 `hex dev call-window` reads another app's windows through Accessibility and
@@ -514,6 +529,7 @@ dictation {action, print?, raw?}                 action: start | stop | toggle |
 paste-last
 typed-text
 meeting-record {title?} | meeting-stop | meeting-copy-last | meeting-delete {id}
+meeting-rename {id, title}
 settings-get {key?} | settings-set {key, value}
 model-list | model-use {model, language?} | model-install {model, language?} | model-cancel
 window-show {pane?} | window-hide | window-story {story, variant?, play}
@@ -627,10 +643,10 @@ invalid-value          the value doesn't parse or is out of range
 confirmation-required  clears history; pass --yes
 shortcut-in-use        another Hex shortcut already uses that binding
 not-found              no such capture (or no readable supported annotation manifest), or no meeting with that id
-meeting-recording      deleting a meeting that is still recording
-meeting-transcribing   deleting a meeting that is still transcribing
-meeting-notes          deleting a meeting while Hex writes its notes
-meeting-final-pending  deleting a meeting that is waiting for its final transcript
+meeting-recording      deleting or renaming a meeting that is still recording
+meeting-transcribing   deleting or renaming a meeting that is still transcribing
+meeting-notes          deleting or renaming a meeting while Hex writes its notes
+meeting-final-pending  deleting or renaming a meeting that is waiting for its final transcript
                        (Hex quit during it; the next launch finishes it)
 unknown-model          no such model id (`hex model list`)
 model-unavailable      an imported model that is missing, changed, or behind its Labs toggle,
