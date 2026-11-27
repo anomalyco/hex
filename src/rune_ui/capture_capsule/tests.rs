@@ -975,15 +975,6 @@ fn draw(
     (w, crop, full[..(4 * w * crop) as usize].to_vec())
 }
 
-fn read_png(path: &std::path::Path) -> (u32, u32, Vec<u8>) {
-    let decoder = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).unwrap()));
-    let mut reader = decoder.read_info().unwrap();
-    let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
-    let info = reader.next_frame(&mut pixels).unwrap();
-    pixels.truncate(info.buffer_size());
-    (info.width, info.height, pixels)
-}
-
 /// The goldens' states: one of each kind of capsule.
 #[cfg(target_os = "macos")]
 const GOLDENS: &[&str] = &[
@@ -1038,45 +1029,13 @@ fn capture_capsule_goldens() {
     for (name, pres) in stills().into_iter().filter(|(n, _)| GOLDENS.contains(n)) {
         for dark in [false, true] {
             let theme = if dark { "dark" } else { "light" };
-            let path = folder.join(format!("capture-capsule-{name}-{theme}.png"));
+            let file = format!("capture-capsule-{name}-{theme}");
+            let path = folder.join(format!("{file}.png"));
             let (w, h, pixels) = render(&gpu, pres.clone(), dark);
-            if std::env::var_os("HEX_UPDATE_GOLDENS").is_some() {
-                rune::render::write_png(&path, w, h, &pixels).unwrap();
-                continue;
-            }
-            let actual = std::env::temp_dir().join(format!(
-                "rune-settings-capture-capsule-{name}-{theme}-actual.png"
-            ));
-            if !path.exists() {
-                rune::render::write_png(&actual, w, h, &pixels).unwrap();
-                misses.push(format!(
-                    "{name}-{theme}: missing golden; actual at {}",
-                    actual.display()
-                ));
-                continue;
-            }
-            let (golden_w, golden_h, golden) = read_png(&path);
-            if (golden_w, golden_h) != (w, h) {
-                rune::render::write_png(&actual, w, h, &pixels).unwrap();
-                misses.push(format!(
-                    "{name}-{theme}: size changed; actual at {}",
-                    actual.display()
-                ));
-                continue;
-            }
-            // GPUs differ in the last bit of blending and glyph coverage; a
-            // layout or colour change moves far more.
-            let differing = pixels
-                .chunks(4)
-                .zip(golden.chunks(4))
-                .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 12))
-                .count();
-            if differing > (w * h) as usize / 500 {
-                rune::render::write_png(&actual, w, h, &pixels).unwrap();
-                misses.push(format!(
-                    "{name}-{theme}: {differing} pixels differ; actual at {}",
-                    actual.display()
-                ));
+            if let Err(miss) =
+                crate::rune_ui::offscreen::compare_golden(&file, &path, w, h, &pixels)
+            {
+                misses.push(miss);
             }
         }
     }

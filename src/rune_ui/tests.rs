@@ -4148,15 +4148,6 @@ fn golden_path(name: &str) -> std::path::PathBuf {
         .join(format!("rune-{name}.png"))
 }
 
-fn read_png(path: &std::path::Path) -> (u32, u32, Vec<u8>) {
-    let decoder = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).unwrap()));
-    let mut reader = decoder.read_info().unwrap();
-    let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
-    let info = reader.next_frame(&mut pixels).unwrap();
-    pixels.truncate(info.buffer_size());
-    (info.width, info.height, pixels)
-}
-
 fn check_golden(scene: &str, dark: bool, size: (f32, f32)) {
     check_render(scene, dark, render(scene, dark, size));
 }
@@ -4171,67 +4162,20 @@ fn check_render(scene: &str, dark: bool, pixels: Option<(u32, u32, Vec<u8>)>) {
         eprintln!("skipping golden {name}: no GPU adapter");
         return;
     };
-    if let Some(folder) = std::env::var_os("HEX_GOLDEN_RENDERS") {
-        let folder = std::path::PathBuf::from(folder);
-        std::fs::create_dir_all(&folder).unwrap();
-        rune::render::write_png(&folder.join(format!("{name}.png")), width, height, &pixels)
-            .unwrap();
-    }
-    let path = golden_path(&name);
-    if std::env::var_os("HEX_UPDATE_GOLDENS").is_some() {
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        rune::render::write_png(&path, width, height, &pixels).unwrap();
-        return;
-    }
-    if !path.exists() {
-        let actual = std::env::temp_dir().join(format!("rune-settings-{name}-actual.png"));
-        rune::render::write_png(&actual, width, height, &pixels).unwrap();
-        let miss = format!(
-            "{} is missing; run with HEX_UPDATE_GOLDENS=1 (render at {})",
-            path.display(),
-            actual.display()
-        );
-        if !GOLDEN_MISSES.with(|misses| {
-            misses
-                .borrow_mut()
-                .as_mut()
-                .map(|misses| misses.push(miss.clone()))
-                .is_some()
-        }) {
-            panic!("{miss}");
-        }
-        return;
-    }
-    let (golden_width, golden_height, golden) = read_png(&path);
-    assert_eq!(
-        (golden_width, golden_height),
-        (width, height),
-        "{name} size changed"
-    );
-    // GPU drivers differ in the last bit of blending and glyph coverage;
-    // a layout or colour change moves far more than this.
-    let differing = pixels
-        .chunks(4)
-        .zip(golden.chunks(4))
-        .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 12))
-        .count();
-    let limit = (width * height) as usize / 500;
-    if differing > limit {
-        let actual = std::env::temp_dir().join(format!("rune-settings-{name}-actual.png"));
-        rune::render::write_png(&actual, width, height, &pixels).unwrap();
-        let miss = format!(
-            "{name}: {differing} pixels differ (limit {limit}); actual render at {}",
-            actual.display()
-        );
-        if !GOLDEN_MISSES.with(|misses| {
-            misses
-                .borrow_mut()
-                .as_mut()
-                .map(|misses| misses.push(miss.clone()))
-                .is_some()
-        }) {
-            panic!("{miss}");
-        }
+    if let Err(miss) = crate::rune_ui::offscreen::compare_golden(
+        &name,
+        &golden_path(&name),
+        width,
+        height,
+        &pixels,
+    ) && !GOLDEN_MISSES.with(|misses| {
+        misses
+            .borrow_mut()
+            .as_mut()
+            .map(|misses| misses.push(miss.clone()))
+            .is_some()
+    }) {
+        panic!("{miss}");
     }
 }
 

@@ -13,6 +13,11 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
     TABLE.get_or_init(|| merged(TRANSLATIONS, Language::Portuguese))
 }
 
+#[cfg(test)]
+pub(super) fn entries() -> impl Iterator<Item = (&'static str, &'static str)> {
+    super::screenshots::entries(TRANSLATIONS, Language::Portuguese)
+}
+
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
     ("macOS isn't letting Hex paste. Add Hex in System Settings > Privacy & Security > System & App Protection Override, then restart Hex.", "O macOS não está deixando o Hex colar. Adicione o Hex em Ajustes do Sistema > Privacidade e Segurança > Substituição da proteção do sistema e dos apps e reinicie o Hex."),
@@ -209,30 +214,18 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Its file changed since it was imported. Check it again, import it again, or remove it.", "O arquivo dele mudou desde a importação. Verifique-o de novo, importe-o de novo ou remova-o."),
     ("The imported model", "O modelo importado"),
     ("{model} is missing, so Hex uses {fallback} until you import it again or choose another model", "{model} sumiu, então o Hex usa {fallback} até você importá-lo de novo ou escolher outro modelo"),
-    ("{model} changed since it was imported, so Hex uses {fallback} until you import it again or choose another model", "{model} mudou desde a importação, então o Hex usa {fallback} até você importá-lo de novo ou escolher outro modelo"),
     ("Remove {}?", "Remover {}?"),
     ("Import again…", "Importar de novo…"),
     ("Choose a speech model", "Escolha um modelo de voz"),
     ("Hex found speech models already on this computer.", "O Hex encontrou modelos de voz que já estão neste computador."),
-    ("Hex's recommended model", "O modelo recomendado pelo Hex"),
-    ("Tested by Hex for quality and reliability", "Testado pelo Hex quanto à qualidade e confiabilidade"),
-    ("Already downloaded, no download needed", "Já baixado, não é preciso baixar"),
-    ("Use a model already on this computer", "Usar um modelo que já está neste computador"),
     ("Not tested by Hex", "Não testado pelo Hex"),
     ("Compatible doesn't mean accurate: a model that loads can still transcribe poorly.", "Compatível não significa preciso: um modelo que carrega ainda pode transcrever mal."),
-    ("{revision} · {compression} · {source}", "{revision} · {compression} · {source}"),
     ("Found on this computer", "Encontrado neste computador"),
     ("Model could not be used.", "Não foi possível usar o modelo."),
     ("It may be too big for this computer's GPU memory.", "Ele pode ser grande demais para a memória de GPU deste computador."),
     ("Forget", "Esquecer"),
     ("Forget it?", "Esquecê-lo?"),
     ("Checking the model stopped.", "A verificação do modelo parou."),
-    ("Use the copy already on this computer", "Usar a cópia que já está neste computador"),
-    ("Download instead", "Baixar em vez disso"),
-    ("Download recommended model", "Baixar o modelo recomendado"),
-    ("Already on this computer: {source}", "Já está neste computador: {source}"),
-    ("Known model", "Modelo conhecido"),
-    ("Not verified by Hex · Not benchmarked", "Não verificado pelo Hex · Sem testes comparativos"),
     ("Imported", "Importado"),
     ("Not benchmarked", "Sem testes comparativos"),
     ("{} languages", "{} idiomas"),
@@ -1494,37 +1487,3 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Indicator on any display", "Indicador em qualquer tela"),
     ("Drag the meeting recording indicator to another display and it stays there", "Arraste o indicador de gravação de reunião para outra tela e ele fica lá"),
 ];
-
-#[cfg(test)]
-mod tests {
-    use super::TRANSLATIONS;
-
-    #[test]
-    fn every_interface_string_has_a_portuguese_translation() {
-        let portuguese = super::table();
-        let missing: Vec<&str> = super::super::all_translations()
-            .map(|(english, _)| *english)
-            .filter(|english| portuguese.get(english).is_none_or(|text| text.is_empty()))
-            .collect();
-        assert!(missing.is_empty(), "no Portuguese for {missing:?}");
-    }
-
-    #[test]
-    fn portuguese_keys_are_unique_and_keep_their_placeholders() {
-        let mut seen = std::collections::HashSet::new();
-        for (english, portuguese) in TRANSLATIONS {
-            assert!(seen.insert(english), "duplicate key {english:?}");
-            let names = english
-                .split('{')
-                .skip(1)
-                .filter_map(|part| part.split_once('}'))
-                .map(|(name, _)| name);
-            for name in names {
-                assert!(
-                    portuguese.contains(&format!("{{{name}}}")),
-                    "translation of {english:?} lost {{{name}}}: {portuguese:?}"
-                );
-            }
-        }
-    }
-}

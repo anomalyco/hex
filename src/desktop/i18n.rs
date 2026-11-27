@@ -608,6 +608,57 @@ mod tests {
         assert_eq!(language_from_env(None, None, None), "");
     }
 
+    fn extra_language_tables() -> [(
+        &'static str,
+        &'static std::collections::HashMap<&'static str, &'static str>,
+    ); 4] {
+        [
+            ("French", super::french::table()),
+            ("Portuguese", super::portuguese::table()),
+            ("Russian", super::russian::table()),
+            ("Hungarian", super::hungarian::table()),
+        ]
+    }
+
+    fn extra_language_entries() -> [(&'static str, Vec<(&'static str, &'static str)>); 4] {
+        [
+            ("French", super::french::entries().collect()),
+            ("Portuguese", super::portuguese::entries().collect()),
+            ("Russian", super::russian::entries().collect()),
+            ("Hungarian", super::hungarian::entries().collect()),
+        ]
+    }
+
+    /// Asserts that `english` has a non-empty translation in every supported
+    /// non-English language: the 6-column table, French, Portuguese, Russian,
+    /// Hungarian, and Traditional Chinese.
+    fn assert_every_language(
+        six_column: &std::collections::HashMap<&'static str, [&'static str; 6]>,
+        english: &str,
+    ) {
+        let translations = six_column
+            .get(english)
+            .unwrap_or_else(|| panic!("{english:?} has no translations"));
+        assert!(
+            translations
+                .iter()
+                .all(|translation| !translation.is_empty()),
+            "{english:?} is missing a language"
+        );
+        for (language, table) in extra_language_tables() {
+            assert!(
+                table.get(english).is_some_and(|text| !text.is_empty()),
+                "{language} has no translation for {english:?}"
+            );
+        }
+        assert!(
+            super::traditional_chinese::table()
+                .get(english)
+                .is_some_and(|text| !text.is_empty()),
+            "Traditional Chinese has no translation for {english:?}"
+        );
+    }
+
     #[test]
     fn templates_keep_their_placeholder_in_every_language() {
         for (english, translated) in all_translations() {
@@ -618,6 +669,24 @@ mod tests {
                         "translation of {english:?} lost its placeholder: {translation:?}"
                     );
                 }
+            }
+        }
+        for (language, entries) in extra_language_entries() {
+            for (english, translation) in entries {
+                if english.contains("{}") {
+                    assert!(
+                        translation.contains("{}"),
+                        "{language} translation of {english:?} lost its placeholder: {translation:?}"
+                    );
+                }
+            }
+        }
+        for (english, translation) in super::traditional_chinese::table() {
+            if english.contains("{}") {
+                assert!(
+                    translation.contains("{}"),
+                    "Traditional Chinese translation of {english:?} lost its placeholder: {translation:?}"
+                );
             }
         }
     }
@@ -769,20 +838,39 @@ mod tests {
     }
 
     #[test]
+    fn every_interface_string_has_every_language_table() {
+        let keys: std::collections::HashSet<&str> =
+            all_translations().map(|(english, _)| *english).collect();
+        for (language, table) in extra_language_tables() {
+            let missing: Vec<&str> = keys
+                .iter()
+                .copied()
+                .filter(|english| table.get(english).is_none_or(|text| text.is_empty()))
+                .collect();
+            assert!(missing.is_empty(), "no {language} for {missing:?}");
+            let stale: Vec<&str> = table
+                .keys()
+                .copied()
+                .filter(|english| !keys.contains(english))
+                .collect();
+            assert!(stale.is_empty(), "stale {language} keys: {stale:?}");
+        }
+        let traditional = super::traditional_chinese::table();
+        let missing: Vec<&str> = keys
+            .iter()
+            .copied()
+            .filter(|english| traditional.get(english).is_none_or(String::is_empty))
+            .collect();
+        assert!(missing.is_empty(), "no Traditional Chinese for {missing:?}");
+    }
+
+    #[test]
     fn every_translated_string_has_every_language() {
         let table: std::collections::HashMap<_, _> = all_translations().copied().collect();
         let mut checked = 0;
         for source in SOURCES {
             for literal in translated_literals(source) {
-                let translations = table
-                    .get(literal.as_str())
-                    .unwrap_or_else(|| panic!("{literal:?} has no translations"));
-                assert!(
-                    translations
-                        .iter()
-                        .all(|translation| !translation.is_empty()),
-                    "{literal:?} is missing a language"
-                );
+                assert_every_language(&table, literal.as_str());
                 checked += 1;
             }
         }
@@ -794,30 +882,14 @@ mod tests {
     #[test]
     fn the_refused_paste_notice_has_every_language() {
         let table: std::collections::HashMap<_, _> = all_translations().copied().collect();
-        let translations = table
-            .get(crate::paste::POST_EVENT_REFUSED)
-            .expect("the refused paste notice is translated");
-        assert!(
-            translations
-                .iter()
-                .all(|translation| !translation.is_empty()),
-            "the refused paste notice is missing a language"
-        );
+        assert_every_language(&table, crate::paste::POST_EVENT_REFUSED);
     }
 
     /// The blocked Windows paste notice is looked up through a constant too.
     #[test]
     fn the_blocked_windows_paste_notice_has_every_language() {
         let table: std::collections::HashMap<_, _> = all_translations().copied().collect();
-        let translations = table
-            .get(crate::paste::WINDOWS_PASTE_BLOCKED)
-            .expect("the blocked Windows paste notice is translated");
-        assert!(
-            translations
-                .iter()
-                .all(|translation| !translation.is_empty()),
-            "the blocked Windows paste notice is missing a language"
-        );
+        assert_every_language(&table, crate::paste::WINDOWS_PASTE_BLOCKED);
     }
 
     /// Labs › Confirm long cancels' notice is looked up through a constant
@@ -825,22 +897,7 @@ mod tests {
     #[test]
     fn the_confirm_cancel_notice_has_every_language() {
         let table: std::collections::HashMap<_, _> = all_translations().copied().collect();
-        let translations = table
-            .get(crate::dictation::cancel_confirm::NOTICE)
-            .expect("the confirm cancel notice is translated");
-        assert!(
-            translations
-                .iter()
-                .all(|translation| !translation.is_empty())
-        );
-        for language in [
-            super::french::table(),
-            super::portuguese::table(),
-            super::russian::table(),
-            super::hungarian::table(),
-        ] {
-            assert!(language.contains_key(crate::dictation::cancel_confirm::NOTICE));
-        }
+        assert_every_language(&table, crate::dictation::cancel_confirm::NOTICE);
     }
 
     /// The sound picker translates each set's name and character, which are
@@ -853,14 +910,7 @@ mod tests {
             .into_iter()
             .flat_map(|set| [set.name(), set.character()]);
         for english in strings {
-            let translations = table
-                .get(english)
-                .unwrap_or_else(|| panic!("{english:?} has no translations"));
-            assert!(
-                translations
-                    .iter()
-                    .all(|translation| !translation.is_empty())
-            );
+            assert_every_language(&table, english);
         }
     }
 
@@ -878,15 +928,7 @@ mod tests {
             .chain(crate::labs::Group::ALL.map(crate::labs::Group::title))
             .filter(|english| *english != "Playground");
         for english in strings {
-            let translations = table
-                .get(english)
-                .unwrap_or_else(|| panic!("{english:?} has no translations"));
-            assert!(
-                translations
-                    .iter()
-                    .all(|translation| !translation.is_empty()),
-                "{english:?} is missing a language"
-            );
+            assert_every_language(&table, english);
         }
     }
 
@@ -896,37 +938,11 @@ mod tests {
     #[test]
     fn both_special_key_summaries_have_every_language() {
         let table: std::collections::HashMap<_, _> = all_translations().copied().collect();
-        let others = [
-            ("French", super::french::table()),
-            ("Portuguese", super::portuguese::table()),
-            ("Russian", super::russian::table()),
-            ("Hungarian", super::hungarian::table()),
-        ];
         for english in [
             "Use Menu, Pause, or Scroll Lock as a shortcut by itself, such as Caps Lock remapped to Menu",
             "Use Insert, Home, End, Page Up, or Page Down as a shortcut by itself",
         ] {
-            let translations = table
-                .get(english)
-                .unwrap_or_else(|| panic!("{english:?} has no translations"));
-            assert!(
-                translations
-                    .iter()
-                    .all(|translation| !translation.is_empty()),
-                "{english:?} is missing a language"
-            );
-            for (language, table) in &others {
-                assert!(
-                    table.get(english).is_some_and(|text| !text.is_empty()),
-                    "{language} has no {english:?}"
-                );
-            }
-            assert!(
-                super::traditional_chinese::table()
-                    .get(english)
-                    .is_some_and(|text| !text.is_empty()),
-                "Traditional Chinese has no {english:?}"
-            );
+            assert_every_language(&table, english);
         }
     }
 
@@ -937,15 +953,7 @@ mod tests {
         use crate::desktop::host::ListenerStatus;
         let table: std::collections::HashMap<_, _> = all_translations().copied().collect();
         for english in ListenerStatus::ALL.into_iter().map(ListenerStatus::name) {
-            let translations = table
-                .get(english)
-                .unwrap_or_else(|| panic!("{english:?} has no translations"));
-            assert!(
-                translations
-                    .iter()
-                    .all(|translation| !translation.is_empty()),
-                "{english:?} is missing a language"
-            );
+            assert_every_language(&table, english);
         }
     }
 
@@ -956,15 +964,7 @@ mod tests {
         use crate::app_settings::AppearanceTheme;
         let table: std::collections::HashMap<_, _> = all_translations().copied().collect();
         for english in AppearanceTheme::ALL.into_iter().map(AppearanceTheme::name) {
-            let translations = table
-                .get(english)
-                .unwrap_or_else(|| panic!("{english:?} has no translations"));
-            assert!(
-                translations
-                    .iter()
-                    .all(|translation| !translation.is_empty()),
-                "{english:?} is missing a language"
-            );
+            assert_every_language(&table, english);
         }
     }
 
@@ -978,21 +978,13 @@ mod tests {
             .into_iter()
             .flat_map(|style| [style.name(), style.hint()])
         {
-            let translations = table
-                .get(english)
-                .unwrap_or_else(|| panic!("{english:?} has no translations"));
-            assert!(
-                translations
-                    .iter()
-                    .all(|translation| !translation.is_empty()),
-                "{english:?} is missing a language"
-            );
+            assert_every_language(&table, english);
         }
     }
 
     #[test]
     fn named_placeholders_survive_translation() {
-        for (english, translated) in all_translations() {
+        let assert_named = |language: &str, english: &str, translation: &str| {
             let names = english
                 .split('{')
                 .skip(1)
@@ -1000,13 +992,24 @@ mod tests {
                 .map(|(name, _)| name)
                 .filter(|name| !name.is_empty());
             for name in names {
-                for translation in translated {
-                    assert!(
-                        translation.contains(&format!("{{{name}}}")),
-                        "translation of {english:?} lost {{{name}}}: {translation:?}"
-                    );
-                }
+                assert!(
+                    translation.contains(&format!("{{{name}}}")),
+                    "{language} translation of {english:?} lost {{{name}}}: {translation:?}"
+                );
             }
+        };
+        for (english, translated) in all_translations() {
+            for translation in translated {
+                assert_named("six-column", english, translation);
+            }
+        }
+        for (language, entries) in extra_language_entries() {
+            for (english, translation) in entries {
+                assert_named(language, english, translation);
+            }
+        }
+        for (english, translation) in super::traditional_chinese::table() {
+            assert_named("Traditional Chinese", english, translation);
         }
     }
 
@@ -1018,6 +1021,15 @@ mod tests {
                 seen.insert(english),
                 "duplicate translation key {english:?}"
             );
+        }
+        for (language, entries) in extra_language_entries() {
+            let mut seen = std::collections::HashSet::new();
+            for (english, _) in entries {
+                assert!(
+                    seen.insert(english),
+                    "duplicate {language} translation key {english:?}"
+                );
+            }
         }
     }
 }

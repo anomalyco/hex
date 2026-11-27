@@ -14,12 +14,13 @@ pub(super) enum Language {
     Hungarian,
 }
 
-/// A one-language table with these strings added.
-pub(super) fn merged(
-    table: &[(&'static str, &'static str)],
+/// Every `(english, translated)` entry for a one-language table plus all
+/// overflow sections, preserving duplicates so tests can catch them.
+pub(super) fn entries(
+    table: &'static [(&'static str, &'static str)],
     language: Language,
-) -> HashMap<&'static str, &'static str> {
-    let sections: &[&[(&'static str, &'static str)]] = match language {
+) -> impl Iterator<Item = (&'static str, &'static str)> {
+    let sections: &'static [&'static [(&'static str, &'static str)]] = match language {
         Language::French => &[
             FRENCH,
             super::agents::FRENCH,
@@ -102,7 +103,14 @@ pub(super) fn merged(
         .iter()
         .chain(sections.iter().flat_map(|section| section.iter()))
         .copied()
-        .collect()
+}
+
+/// A one-language table with these strings added.
+pub(super) fn merged(
+    table: &'static [(&'static str, &'static str)],
+    language: Language,
+) -> HashMap<&'static str, &'static str> {
+    entries(table, language).collect()
 }
 
 /// Columns: Polish, Chinese (Simplified), Japanese, German, Spanish, Ukrainian.

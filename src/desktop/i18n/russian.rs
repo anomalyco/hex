@@ -13,6 +13,11 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
     TABLE.get_or_init(|| merged(TRANSLATIONS, Language::Russian))
 }
 
+#[cfg(test)]
+pub(super) fn entries() -> impl Iterator<Item = (&'static str, &'static str)> {
+    super::screenshots::entries(TRANSLATIONS, Language::Russian)
+}
+
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
     ("macOS isn't letting Hex paste. Add Hex in System Settings > Privacy & Security > System & App Protection Override, then restart Hex.", "macOS не разрешает Hex вставлять текст. Добавьте Hex в «Системные настройки» > «Конфиденциальность и безопасность» > «Переопределение защиты системы и приложений», затем перезапустите Hex."),
@@ -206,30 +211,18 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Its file changed since it was imported. Check it again, import it again, or remove it.", "Её файл изменился после импорта. Проверьте его снова, импортируйте заново или удалите."),
     ("The imported model", "Импортированная модель"),
     ("{model} is missing, so Hex uses {fallback} until you import it again or choose another model", "{model} не найдена, поэтому Hex использует {fallback}, пока вы не импортируете её снова или не выберете другую модель"),
-    ("{model} changed since it was imported, so Hex uses {fallback} until you import it again or choose another model", "{model} изменилась после импорта, поэтому Hex использует {fallback}, пока вы не импортируете её снова или не выберете другую модель"),
     ("Remove {}?", "Удалить {}?"),
     ("Import again…", "Импортировать снова…"),
     ("Choose a speech model", "Выберите модель речи"),
     ("Hex found speech models already on this computer.", "Hex нашёл модели речи, которые уже есть на этом компьютере."),
-    ("Hex's recommended model", "Модель, рекомендованная Hex"),
-    ("Tested by Hex for quality and reliability", "Проверена Hex на качество и надёжность"),
-    ("Already downloaded, no download needed", "Уже загружена, скачивать не нужно"),
-    ("Use a model already on this computer", "Использовать модель, которая уже есть на этом компьютере"),
     ("Not tested by Hex", "Не проверена Hex"),
     ("Compatible doesn't mean accurate: a model that loads can still transcribe poorly.", "Совместимая — не значит точная: модель, которая загружается, всё равно может плохо распознавать."),
-    ("{revision} · {compression} · {source}", "{revision} · {compression} · {source}"),
     ("Found on this computer", "Найдена на этом компьютере"),
     ("Model could not be used.", "Не удалось использовать модель."),
     ("It may be too big for this computer's GPU memory.", "Возможно, она слишком велика для памяти GPU этого компьютера."),
     ("Forget", "Забыть"),
     ("Forget it?", "Забыть её?"),
     ("Checking the model stopped.", "Проверка модели остановлена."),
-    ("Use the copy already on this computer", "Использовать копию, которая уже есть на этом компьютере"),
-    ("Download instead", "Лучше загрузить"),
-    ("Download recommended model", "Загрузить рекомендуемую модель"),
-    ("Already on this computer: {source}", "Уже есть на этом компьютере: {source}"),
-    ("Known model", "Известная модель"),
-    ("Not verified by Hex · Not benchmarked", "Не проверена Hex · Без тестов"),
     ("Imported", "Импортирована"),
     ("Not benchmarked", "Без тестов"),
     ("{} languages", "Языков: {}"),
@@ -374,9 +367,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Shortcuts", "Сочетания клавиш"),
     ("Your desktop granted {}", "Окружение рабочего стола назначило {}"),
     ("Your desktop did not grant this shortcut", "Окружение рабочего стола не назначило это сочетание"),
-    ("Last dictation discarded: {}", "Последняя диктовка отброшена: {}"),
-    ("too quiet, check your mic level", "слишком тихо, проверьте уровень микрофона"),
-    ("no speech heard, check your mic level", "речь не услышана, проверьте уровень микрофона"),
     ("GNOME keyboard shortcuts", "Сочетания клавиш GNOME"),
     ("Add GNOME keyboard shortcuts", "Добавить сочетания клавиш GNOME"),
     ("Adds dictation, paste last and Annotate to GNOME Settings › Keyboard › Custom Shortcuts with your shortcuts. GNOME runs them on the key press, so dictation toggles.", "Добавляет диктовку, вставку последней диктовки и Annotate в Настройки GNOME › Клавиатура › Особые комбинации клавиш с вашими сочетаниями. GNOME запускает их при нажатии клавиши, поэтому диктовка переключается."),
@@ -1497,37 +1487,3 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Indicator on any display", "Индикатор на любом экране"),
     ("Drag the meeting recording indicator to another display and it stays there", "Перетащите индикатор записи встречи на другой экран, и он останется там"),
 ];
-
-#[cfg(test)]
-mod tests {
-    use super::TRANSLATIONS;
-
-    #[test]
-    fn every_interface_string_has_a_russian_translation() {
-        let russian = super::table();
-        let missing: Vec<&str> = super::super::all_translations()
-            .map(|(english, _)| *english)
-            .filter(|english| russian.get(english).is_none_or(|text| text.is_empty()))
-            .collect();
-        assert!(missing.is_empty(), "no Russian for {missing:?}");
-    }
-
-    #[test]
-    fn russian_keys_are_unique_and_keep_their_placeholders() {
-        let mut seen = std::collections::HashSet::new();
-        for (english, russian) in TRANSLATIONS {
-            assert!(seen.insert(english), "duplicate key {english:?}");
-            let names = english
-                .split('{')
-                .skip(1)
-                .filter_map(|part| part.split_once('}'))
-                .map(|(name, _)| name);
-            for name in names {
-                assert!(
-                    russian.contains(&format!("{{{name}}}")),
-                    "translation of {english:?} lost {{{name}}}: {russian:?}"
-                );
-            }
-        }
-    }
-}
