@@ -683,7 +683,7 @@ pub(crate) fn reveal(path: &Path) {
         .raw_arg(super::explorer_select(&path))
         .spawn()
     {
-        tracing::error!(%error, "could not reveal meeting file");
+        tracing::error!(%error, "could not reveal the file");
     }
 }
 
@@ -702,7 +702,7 @@ pub(crate) fn open_folder(path: &Path) {
 }
 
 /// Moves `path` to the Recycle Bin, where it can be restored.
-pub(super) fn move_to_trash(path: &Path) -> Result<()> {
+pub(crate) fn move_to_trash(path: &Path) -> Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::Shell::{
         FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, SHFILEOPSTRUCTW,

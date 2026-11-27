@@ -97,7 +97,7 @@ pub(crate) fn reveal(path: &Path) {
         .arg(path)
         .spawn()
     {
-        tracing::error!(%error, "could not reveal meeting file");
+        tracing::error!(%error, "could not reveal the file");
     }
 }
 

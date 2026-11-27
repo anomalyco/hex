@@ -431,44 +431,61 @@ pub(super) fn copy(ui: &mut Ui, id: u64) {
         return;
     };
     ui.captures.copied = None;
-    #[cfg(target_os = "macos")]
-    {
-        let spawned = std::thread::Builder::new()
-            .name("hex-capture-copy".into())
-            .spawn(move || {
-                let copied = match &entry {
-                    Listed::Saved(saved) => crate::screenshots::save::copy_saved(
-                        &saved.file,
-                        saved.kind == CaptureKind::Recording,
-                    ),
-                    Listed::Annotated(annotation) => objc2::rc::autoreleasepool(|_| {
-                        scrawl_capture::handoff::copy_bundle_to_clipboard(&annotation.bundle)
-                    }),
-                };
-                match copied {
-                    Ok(()) => *COPIED.lock().unwrap_or_else(|e| e.into_inner()) = Some(id),
-                    Err(error) => {
-                        tracing::warn!(error = format!("{error:#}"), "could not copy the capture");
-                        crate::feedback::play(crate::feedback::Tone::Error);
-                    }
-                }
-            });
-        if let Err(error) = spawned {
-            tracing::warn!(%error, "could not copy the capture");
-        }
+    let spawned = std::thread::Builder::new()
+        .name("hex-capture-copy".into())
+        .spawn(move || match copy_entry(&entry) {
+            Ok(()) => *COPIED.lock().unwrap_or_else(|e| e.into_inner()) = Some(id),
+            Err(error) => {
+                tracing::warn!(error = format!("{error:#}"), "could not copy the capture");
+                crate::feedback::play(crate::feedback::Tone::Error);
+            }
+        });
+    if let Err(error) = spawned {
+        tracing::warn!(%error, "could not copy the capture");
     }
-    #[cfg(not(target_os = "macos"))]
-    let _ = entry;
 }
 
+/// A shot's picture and file, a recording's file, or an annotation's
+/// summary on the clipboard, as the Mac's cards and Annotate copy them.
+#[cfg(target_os = "macos")]
+fn copy_entry(entry: &Listed) -> anyhow::Result<()> {
+    match entry {
+        Listed::Saved(saved) => crate::screenshots::save::copy_saved(
+            &saved.file,
+            saved.kind == CaptureKind::Recording,
+        ),
+        Listed::Annotated(annotation) => objc2::rc::autoreleasepool(|_| {
+            scrawl_capture::handoff::copy_bundle_to_clipboard(&annotation.bundle)
+        }),
+    }
+}
+
+/// A saved shot or recording as a file (a file drop on Windows, a file URI
+/// on Linux), or an annotation's summary as Annotate's own Copy puts it.
+#[cfg(not(target_os = "macos"))]
+fn copy_entry(entry: &Listed) -> anyhow::Result<()> {
+    match entry {
+        Listed::Saved(saved) => crate::history::recordings::copy_to_clipboard(&saved.file),
+        Listed::Annotated(annotation) => crate::capture_host::copy_to_clipboard(&annotation.bundle),
+    }
+}
+
+/// What the reveal action reads: Finder on macOS, the file manager's
+/// folder (Explorer with the item selected, or its folder on Linux)
+/// elsewhere.
+pub(super) fn reveal_label() -> &'static str {
+    if cfg!(target_os = "macos") {
+        tr("Show in Finder")
+    } else {
+        tr("Show in folder")
+    }
+}
+
+/// Shows entry `id`'s file selected in Finder or Explorer, or opens its
+/// folder on Linux.
 pub(super) fn reveal(ui: &mut Ui, id: u64) {
-    if let Some(entry) = ui.captures.entry(id)
-        && let Err(error) = std::process::Command::new("open")
-            .arg("-R")
-            .arg(entry.file())
-            .spawn()
-    {
-        tracing::warn!(%error, "could not show the capture in Finder");
+    if let Some(entry) = ui.captures.entry(id) {
+        crate::meeting::reveal(entry.file());
     }
 }
 
@@ -632,7 +649,7 @@ pub(super) fn item(ui: &Ui, p: Paint, entry: &Listed) -> El {
             p,
             "row-reveal",
             FINDER_ICON,
-            tr("Show in Finder"),
+            reveal_label(),
             move |ui: &mut Ui, _| reveal(ui, id),
         ),
         ld::row_action(

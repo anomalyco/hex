@@ -39,8 +39,9 @@ mod os;
 #[path = "meeting/windows.rs"]
 mod os;
 pub(crate) mod window_title;
-/// Linux's Trash, for capture retention too: distros ship no `trash` command.
-#[cfg(target_os = "linux")]
+/// Linux's Trash and Windows' Recycle Bin, for capture retention and the
+/// Annotate list too: distros ship no `trash` command.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) use os::move_to_trash;
 #[cfg(target_os = "macos")]
 pub(crate) use os::{

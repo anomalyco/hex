@@ -414,7 +414,7 @@ fn file_detail(ui: &Ui, p: Paint, entry: &Listed) -> El {
             p,
             "file-reveal",
             captures::FINDER_ICON,
-            tr("Show in Finder"),
+            captures::reveal_label(),
             move |ui: &mut Ui, _| captures::reveal(ui, id),
         ));
         actions.push(ld::ghost_icon(

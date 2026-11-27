@@ -339,6 +339,15 @@ Annotate pane                            // capture.pane
 │   ├── Annotations / Captures tab -> past annotations (and Screenshots shots /
 │   │   recordings while that Lab is on) from the last 30 days, searchable with
 │   │   Copy, Show in Finder, and two-step Move to Trash (rune_ui::captures)
+│   │   ├── Copy -> an annotation's summary as Annotate's own Copy puts it;
+│   │   │   a saved shot or recording as a file (macOS: picture and file;
+│   │   │   Windows: a file drop; Linux: a file URI)
+│   │   ├── Show in Finder -> "Show in folder" on Windows (Explorer with the
+│   │   │   item selected) and Linux (xdg-open on its folder), through
+│   │   │   meeting::reveal
+│   │   └── Move to Trash -> the Trash, the Recycle Bin on Windows, or Linux's
+│   │       freedesktop Trash (meeting::move_to_trash); not observed on a
+│   │       Windows PC
 │   └── Settings tab ->
 ├── Annotate (capture.enabled, default on) -> off: no host, shortcut,
 │   input, retention, or folder, and the pane shows only the top card. On
