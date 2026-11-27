@@ -55,8 +55,9 @@ thread_local! {
 }
 
 /// In a test, this thread acts as a stable build until the guard drops.
-/// The window's tests use it, and they run on Linux.
-#[cfg(all(test, target_os = "linux"))]
+/// The window's tests use it, and they run on Linux; `hex dev call-window`'s
+/// use it on macOS.
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 pub(crate) fn pretend_stable() -> impl Drop {
     struct Guard;
     impl Drop for Guard {

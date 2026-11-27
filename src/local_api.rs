@@ -14,6 +14,7 @@ use serde::Serialize;
 use crate::app_settings::AppSettings;
 use crate::desktop::events::{EventLog, VoiceEvent, now_ms};
 
+mod developer;
 mod dictation;
 mod discovery;
 mod http;
@@ -23,6 +24,8 @@ mod streams;
 pub(crate) mod timestamps;
 mod transcriptions;
 
+#[cfg(target_os = "macos")]
+pub use developer::accessibility_probe;
 #[cfg(debug_assertions)]
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 pub use discovery::call_developer;
@@ -619,17 +622,8 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                     tracing::debug!(%error, "transcription client disconnected");
                 }
             }
-            RequestAction::DeveloperControl {
-                content_length,
-                body_prefix,
-            } => {
-                let response = developer_control(
-                    &mut stream,
-                    content_length,
-                    body_prefix,
-                    context.developer_control.as_ref(),
-                    &context.shutdown,
-                );
+            RequestAction::Developer(action) => {
+                let response = developer::handle(&mut stream, action, &context);
                 if let Err(error) = write_response(&mut stream, response) {
                     tracing::debug!(%error, "developer control client disconnected");
                 }
@@ -689,8 +683,8 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
             &context.timestamps,
         );
     }
-    if request.method == "POST" && path == "/dev/control" {
-        return developer_control_action(request, context.developer_control.is_some());
+    if request.method == "POST" && developer::routes(path) {
+        return developer::action(request, context);
     }
     if request.method == "POST" && path == "/control" {
         return json_post_action(
@@ -849,20 +843,6 @@ fn transcription_action(
     }
 }
 
-fn developer_control_action(request: HttpRequest, available: bool) -> RequestAction {
-    json_post_action(
-        request,
-        available,
-        "developer-control-unavailable",
-        MAX_DEVELOPER_CONTROL_BYTES,
-        "developer-control-too-large",
-        |content_length, body_prefix| RequestAction::DeveloperControl {
-            content_length,
-            body_prefix,
-        },
-    )
-}
-
 fn dictation_start_action(request: HttpRequest, available: bool) -> RequestAction {
     json_post_action(
         request,
@@ -905,48 +885,6 @@ fn dictation_path(path: &str) -> Option<(u64, &str)> {
     let id = parts.next()?.parse().ok()?;
     let action = parts.next()?;
     (parts.next().is_none()).then_some((id, action))
-}
-
-fn developer_control(
-    stream: &mut TcpStream,
-    content_length: usize,
-    mut body: Vec<u8>,
-    controls: Option<&SyncSender<crate::control::developer_control::DeveloperCall>>,
-    shutdown: &AtomicBool,
-) -> HttpResponse {
-    if let Err(error) = read_body_bounded(
-        stream,
-        content_length,
-        &mut body,
-        shutdown,
-        MAX_DEVELOPER_CONTROL_BYTES,
-        DEVELOPER_CONTROL_TIMEOUT,
-    ) {
-        return body_read_response(error);
-    }
-    let Ok(command) = serde_json::from_slice(&body) else {
-        return HttpResponse::code(400, "invalid-developer-command");
-    };
-    let Some(controls) = controls else {
-        return HttpResponse::code(404, "developer-control-unavailable");
-    };
-    let (reply, response) = mpsc::sync_channel(1);
-    match controls.try_send(crate::control::developer_control::DeveloperCall { command, reply }) {
-        Ok(()) => {}
-        Err(TrySendError::Full(_)) => {
-            return HttpResponse::code(503, "developer-control-busy");
-        }
-        Err(TrySendError::Disconnected(_)) => {
-            return HttpResponse::code(503, "developer-control-unavailable");
-        }
-    }
-    match response.recv_timeout(DEVELOPER_CONTROL_TIMEOUT) {
-        Ok(reply) => HttpResponse::json(200, &reply),
-        Err(RecvTimeoutError::Timeout) => HttpResponse::code(504, "developer-ui-timeout"),
-        Err(RecvTimeoutError::Disconnected) => {
-            HttpResponse::code(503, "developer-control-unavailable")
-        }
-    }
 }
 
 /// Hands one `hex` control request to the app and waits for its reply.
@@ -1328,10 +1266,7 @@ enum RequestAction {
         /// `timestamps=segment|word` was asked for, and the lab allows it.
         timestamps: crate::transcription::transcript::TimestampLevel,
     },
-    DeveloperControl {
-        content_length: usize,
-        body_prefix: Vec<u8>,
-    },
+    Developer(developer::Action),
     Control {
         content_length: usize,
         body_prefix: Vec<u8>,

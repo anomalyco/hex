@@ -1,0 +1,89 @@
+[
+  {
+    "role": "AXWindow",
+    "subrole": "AXStandardWindow",
+    "title": "Huddle: #design-sync",
+    "children": [
+      {
+        "role": "AXGroup",
+        "children": [
+          {
+            "role": "AXWebArea",
+            "title": "Huddle",
+            "children": [
+              {
+                "role": "AXGroup",
+                "subrole": "AXLandmarkMain",
+                "dom_classes": ["p-huddle_grid"],
+                "children": [
+                  {
+                    "role": "AXCell",
+                    "dom_id": "huddle-grid-gridcell-self_U0AAAAAAA01",
+                    "dom_classes": ["p-huddle_peer_tile"],
+                    "children": [
+                      {
+                        "role": "AXButton",
+                        "description": "View Mira Okonkwo's profile"
+                      },
+                      {
+                        "role": "AXStaticText",
+                        "title": "audio is off",
+                        "value": "audio is off"
+                      },
+                      {
+                        "role": "AXGroup",
+                        "dom_classes": ["p-huddle_peer_tile__overlay"]
+                      }
+                    ]
+                  },
+                  {
+                    "role": "AXCell",
+                    "dom_id": "huddle-grid-gridcell-5b1f0c52-7d1e-4a55-9a37-0d6f6f3c2e10_U0BBBBBBB02",
+                    "dom_classes": ["p-huddle_peer_tile"],
+                    "children": [
+                      {
+                        "role": "AXButton",
+                        "description": "View Teodor Blanc's profile"
+                      },
+                      {
+                        "role": "AXStaticText",
+                        "title": "audio is on",
+                        "value": "audio is on"
+                      },
+                      {
+                        "role": "AXGroup",
+                        "dom_classes": [
+                          "p-huddle_peer_tile__overlay",
+                          "p-huddle_peer_tile__overlay--active_speaker"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "role": "AXButton",
+                "description": "Mute microphone",
+                "value": "0"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "role": "AXButton",
+        "subrole": "AXCloseButton"
+      }
+    ]
+  },
+  {
+    "role": "AXWindow",
+    "subrole": "AXFloatingWindow",
+    "title": "Huddle mini window",
+    "children": [
+      {
+        "role": "AXGroup"
+      }
+    ]
+  }
+]
