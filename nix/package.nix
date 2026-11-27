@@ -123,6 +123,12 @@ rustPlatform.buildRustPackage (finalAttrs: {
       ../skills
       # The iOS cleaner's instructions, compared by a test.
       ../ios/HEXMobile/TranscriptCleanup.swift
+      # The iOS cleanup tagger's vocabulary and fixtures: Rust tests run the
+      # desktop cleanup against them.
+      ../ios/HEXKeyboard/CleanupTagger/HexCleanupTaggerVocab.txt
+      ../ios/HEXMobileTests/Fixtures/cleanup-reconstruct.json
+      ../ios/HEXMobileTests/Fixtures/cleanup-tagger-handwritten.json
+      ../ios/HEXMobileTests/Fixtures/cleanup-tokenizer.json
       # The Labs registry's published copy: a Rust test compares it to the registry.
       ../site/src/labs.json
       ../macos/HexMicrophoneDriver/Info.plist
