@@ -12,17 +12,17 @@
 use super::*;
 
 /// The outline: the body opens and closes on these, and the width leads.
-const OPEN: Spring = Spring::new(0.42, 0.0);
-const CLOSE: Spring = Spring::new(0.38, 0.0);
-/// The width's share of the body's duration (0.37 beside 0.45).
+const OPEN: Spring = Spring::new(0.28, 0.0);
+const CLOSE: Spring = Spring::new(0.24, 0.0);
+/// The width's share of the body's duration (0.23 beside 0.28).
 const WIDTH_LEAD: f32 = 0.82;
 /// What arrives, and what leaves (sooner).
-pub(super) const ENTER: Spring = Spring::new(0.3, 0.0);
-pub(super) const EXIT: Spring = Spring::new(0.25, 0.0);
+pub(super) const ENTER: Spring = Spring::new(0.20, 0.0);
+pub(super) const EXIT: Spring = Spring::new(0.16, 0.0);
 /// Reduce Motion: no travel, a short fade.
 pub(super) const REDUCED: Spring = Spring::new(0.18, 0.0);
 /// Details follow the main change, most important first.
-pub(super) const STAGGER: f64 = 0.04;
+pub(super) const STAGGER: f64 = 0.025;
 /// An edge at full speed fades this much of what it crosses.
 const VEIL: f32 = 24.0;
 /// Seconds of an edge's travel its fade covers.
@@ -53,7 +53,7 @@ pub(super) fn grid(v: f32) -> f32 {
 /// How long a track in full flight takes to believe a new target. A retarget
 /// changes where the spring pulls, not how hard it pulls this frame, so the
 /// edge's speed bends round instead of dropping in one frame.
-const RETARGET: f32 = 0.05;
+const RETARGET: f32 = 0.03;
 /// A track carrying less than this share of the speed its spring would
 /// reach on the new move has no momentum worth bending: it just leaves.
 const MOMENTUM: f32 = 0.25;
@@ -731,8 +731,13 @@ mod tests {
         for frame in 1..=90 {
             stage.step(&open, false, frame as f64 / 60.0);
             let veil = stage.veil();
-            // The fade never pops: it grows and shrinks with the edge's speed.
-            assert!((veil.0 - last.0).abs() < 6.0 && (veil.1 - last.1).abs() < 6.0);
+            // The fade never pops: it grows and shrinks with the edge's speed,
+            // no faster in a frame than its ease takes it from none to all.
+            let ease = VEIL * (1.0 - (-1.0f32 / 60.0 / VEIL_EASE).exp()) + 0.01;
+            assert!(
+                (veil.0 - last.0).abs() < ease && (veil.1 - last.1).abs() < ease,
+                "f{frame}: {last:?} → {veil:?}"
+            );
             peak = (peak.0.max(veil.0), peak.1.max(veil.1));
             last = veil;
         }

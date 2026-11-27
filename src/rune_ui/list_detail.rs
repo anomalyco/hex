@@ -8,7 +8,7 @@ use rune::{Align, El, Icon, col, el, icon, row, text};
 use rune_kit::ScrollBar;
 
 use super::Ui;
-use super::controls::{DESCRIPTION, METRICS, Paint, raised};
+use super::controls::{DESCRIPTION, METRICS, Paint};
 
 /// How far boxes (fields, row fills, the card) hang past the gutter, so the
 /// text inside them lands on the title's edge.
@@ -17,10 +17,27 @@ pub(super) const HANG: f32 = METRICS.gutter - METRICS.row_px;
 const LIST_W: f32 = METRICS.list_w;
 /// How far a list fades as rows slide under the search field.
 const LIST_FADE: (f32, f32) = (18.0, 28.0);
-/// The pane bar's thumb: 8 pt at rest and 10 under the pointer, inside the
-/// strip every scrolling body leaves clear for it.
-const PANE_THUMB: f32 = 8.0;
-const PANE_THUMB_HOVER: f32 = 10.0;
+/// The pane bar's thumb: a sleek 4 pt pill at rest and 6 under the pointer,
+/// 2 pt in from the scrolling body's right edge.
+const PANE_THUMB: f32 = 4.0;
+const PANE_THUMB_HOVER: f32 = 6.0;
+/// The list column's inset on both sides, so row fills sit as far from the
+/// divider as from the panel's edge and row text lands on the title's rail.
+const LIST_X: f32 = HANG;
+/// The detail's inset: the gutter, so its right edge matches the header's
+/// actions and its text rail matches the title's rhythm.
+const DETAIL_X: f32 = METRICS.gutter;
+/// From the rule under the header to the search field and the detail's title.
+const BODY_TOP: f32 = 16.0;
+/// The search field's height (the kit's `TextInput`). The detail's first row
+/// is as tall and starts where the field does, so the field, the title and
+/// the title's actions share one centre line across the divider.
+pub(super) const BAR_H: f32 = 28.0;
+/// A status tag's height. The meta line is as tall with or without a tag,
+/// so the body under it holds still when a recording finishes.
+pub(super) const META_H: f32 = 18.0;
+/// A quiet header action's height, a step under the pane header's buttons.
+pub(super) const QUIET_H: f32 = 24.0;
 
 pub(super) static COPY_ICON: &Icon = &rune_theme_opencode::icons::OUTLINE_COPY;
 pub(super) static TRASH_ICON: &Icon = &rune_theme_opencode::icons::TRASH;
@@ -30,37 +47,60 @@ pub(super) static EDIT_ICON: &Icon = &rune_theme_opencode::icons::EDIT;
 pub(super) static HISTORY_ICON: &Icon = &rune_theme_opencode::icons::STATUS;
 pub(super) static SEARCH_ICON: &Icon = &rune_theme_opencode::icons::MAGNIFYING_GLASS;
 
-/// The pane's body: `list` (a [`list_column`]) beside the detail's raised
-/// card, which hangs as far past the right gutter as the rows do past the
-/// left.
+/// The pane's body, a full-bleed split: a hairline under the header, then
+/// `list` (a [`list_column`]), a hairline divider, and the detail filling
+/// the panel to its right and bottom edges.
 pub(super) fn body(p: Paint, key: &str, list: El, detail: El) -> El {
-    row().key(key).grow(1.0).shrink().child(list).child(
-        raised(p, "detail-card")
-            .grow(1.0)
-            .shrink()
-            .min_w(0.0)
-            .ml(METRICS.split_gap)
-            .mr(HANG)
-            .mb(HANG)
-            .px(METRICS.detail_pad)
-            .pt(METRICS.detail_pad)
-            .clip_soft(0.0)
-            .child(detail),
-    )
+    col()
+        .key(key)
+        .grow(1.0)
+        .shrink()
+        .min_h(0.0)
+        .child(hairline(p, "body-rule").h(p.hair))
+        .child(
+            row()
+                .key("split")
+                .grow(1.0)
+                .shrink()
+                .min_h(0.0)
+                .child(list)
+                .child(hairline(p, "split-rule").w(p.hair).h_full())
+                .child(
+                    col()
+                        .key("detail-card")
+                        .grow(1.0)
+                        .shrink()
+                        .min_w(0.0)
+                        .px(DETAIL_X)
+                        .pt(BODY_TOP)
+                        .clip_soft(0.0)
+                        .child(detail),
+                ),
+        )
 }
 
-/// The search field over the scrolling list, both on the title's edge.
+fn hairline(p: Paint, key: &str) -> El {
+    el().key(key).fill(p.k.c.border_weak).a11y_hidden()
+}
+
+/// The search field over the scrolling list, both inset alike from the
+/// panel's edge and the divider; the list's bar runs down the divider.
 pub(super) fn list_column(p: Paint, search: El, scroll_key: &str, list: El) -> El {
     col()
         .key("list-column")
-        .w(LIST_W)
+        .w(LIST_W + LIST_X)
         .h_full()
-        .pl(HANG)
-        .child(search)
+        .child(
+            col()
+                .key("search-row")
+                .px(LIST_X)
+                .pt(BODY_TOP)
+                .child(search),
+        )
         .child(super::faded_body(
             p.k,
             scroll_key,
-            super::lists::source_list(list),
+            super::lists::source_list(list).px(LIST_X),
             LIST_FADE,
         ))
 }
@@ -280,8 +320,98 @@ pub(super) fn card_header(title: El, meta: Vec<El>, actions: Vec<El>) -> El {
         )
 }
 
-/// The detail card's heading, a clear step above the 14 pt body.
-pub(super) const CARD_HEADING: rune::TextStyle = super::controls::DISPLAY;
+/// A detail's utility bar: what the item is on the left, its quiet actions
+/// on the right. The bar is as tall as the search field and starts where it
+/// does, so both sides of the divider share one centre line, and the last
+/// action ends on the gutter, under the pane header's. The title is left to
+/// the document under it.
+pub(super) fn utility_bar(meta: Vec<El>, actions: Vec<El>) -> El {
+    row()
+        .key("detail-bar")
+        .min_h(BAR_H)
+        .gap(12.0)
+        .center_y()
+        .child(meta_row(meta).grow(1.0).shrink().min_w(0.0))
+        .child(row().key("actions").gap(2.0).center_y().children(actions))
+}
+
+/// A detail's meta line: a status tag, if any, then the meta words, centred
+/// on one line [`META_H`] tall.
+pub(super) fn meta_row(meta: Vec<El>) -> El {
+    row()
+        .key("meta")
+        .min_h(META_H)
+        .gap(8.0)
+        .center_y()
+        .children(meta)
+}
+
+/// A quiet action in a detail's header: a ghost button whose icon and label
+/// rest muted, a step under the title's ink, and take the text colour under
+/// the pointer. With no `label` it is the icon alone in a square. `name`
+/// says in full what it does: the accessible name, and the tooltip when the
+/// label is shorter. `open` is whether the menu it opens is open, for an
+/// action that opens one: it holds the pressed look meanwhile.
+pub(super) fn quiet_action(
+    p: Paint,
+    key: &str,
+    glyph: &'static Icon,
+    label: Option<&str>,
+    name: &str,
+    open: Option<bool>,
+    press: impl Fn(&mut Ui, &mut rune::Tx) + 'static,
+) -> El {
+    let hovered = p.text();
+    let glyph_ink = if open == Some(true) {
+        hovered
+    } else {
+        p.k.c.icon_muted
+    };
+    let glyph_size = if label.is_some() { 14.0 } else { METRICS.icon };
+    let shown = label.map(str::to_owned);
+    let mut button = rune_kit::Button::new(name)
+        .variant(rune_kit::ButtonVariant::GhostMuted)
+        .label_with(move |font, ink| {
+            row()
+                .gap(6.0)
+                .center_y()
+                .child(
+                    icon(glyph, glyph_size)
+                        .key("icon")
+                        .color(glyph_ink)
+                        .group_color(hovered),
+                )
+                .children(shown.map(|label| {
+                    text(label)
+                        .key("label")
+                        .font(font)
+                        .color(ink)
+                        .group_color(hovered)
+                }))
+        })
+        .on_press_tx(press);
+    if let Some(open) = open {
+        button = button.expanded(open);
+    }
+    if label != Some(name) {
+        button = button.help(name);
+    }
+    let button = button
+        .build(p.k)
+        .h(QUIET_H)
+        .radius(p.k.radius.sm)
+        .description("")
+        .hover_group()
+        .key(key);
+    if label.is_some() {
+        button.px(8.0)
+    } else {
+        button.px(0.0).w(QUIET_H)
+    }
+}
+
+/// The detail's heading: the document's title, at its column's whole width.
+pub(super) const CARD_HEADING: rune::TextStyle = super::controls::HEADLINE;
 
 /// [`card_title`] at [`CARD_HEADING`], for the meeting's card.
 pub(super) fn card_heading(p: Paint, title: &str) -> El {
@@ -289,20 +419,9 @@ pub(super) fn card_heading(p: Paint, title: &str) -> El {
         .key("detail-title")
         .role("heading")
         .level(2)
-        .font(p.display())
+        .font(CARD_HEADING)
         .color(p.text())
         .wrap()
-}
-
-/// The hairline between the card's header and its scrolling
-/// body, across the card's whole width.
-pub(super) fn card_rule(p: Paint) -> El {
-    el().key("detail-rule")
-        .h(p.hair)
-        .mt(16.0)
-        .mx(-METRICS.detail_pad)
-        .fill(p.k.c.border_weak)
-        .a11y_hidden()
 }
 
 pub(super) fn card_title(p: Paint, title: &str) -> El {
@@ -331,13 +450,9 @@ pub(super) fn card_scroll(p: Paint, key: &str, content: El) -> El {
 /// A [`card_scroll`] that, with `stick_bottom`, follows content added at
 /// its end while scrolled to the bottom.
 pub(super) fn card_scroll_sticky(p: Paint, key: &str, content: El, stick_bottom: bool) -> El {
-    faded_body_sticky(
-        p.k,
-        key,
-        content.pr(scroll_gutter(p.k)),
-        LIST_FADE,
-        stick_bottom,
-    )
+    // The viewport spans the detail's whole width, so its bar runs down the
+    // panel's right edge; the content keeps the detail's inset.
+    faded_body_sticky(p.k, key, content.px(DETAIL_X), LIST_FADE, stick_bottom).mx(-DETAIL_X)
 }
 
 /// The window's faded scroll body (`super::faded_body`); with

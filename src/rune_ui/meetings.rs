@@ -13,8 +13,7 @@
 
 use rune::{El, TextEdit, Tx, col, row, text};
 use rune_kit::{
-    Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant, Loader, Menu as KitMenu,
-    MenuItem, Placement, TextInput,
+    Button, ButtonVariant, ControlSize, Loader, Menu as KitMenu, MenuItem, Placement, TextInput,
 };
 
 use super::controls::{
@@ -1003,51 +1002,64 @@ fn system_audio_notice(p: Paint) -> El {
         ))
 }
 
-/// The detail's two copies, labelled, transcript first.
-fn copy_buttons(p: Paint, pane: &MeetingsPane, meeting: &Meeting) -> [El; 2] {
+/// What a detail copy puts on the clipboard: the agent prompt for
+/// `"prompt"`, otherwise the transcript as Markdown.
+fn copy_detail(ui: &mut Ui, tx: &mut Tx, id: &str, what: &'static str) {
+    let Some(meeting) = ui.meetings.meeting(id) else {
+        return;
+    };
+    let text = if what == "prompt" {
+        let recording = (meeting.status == Status::Recording)
+            .then(|| meeting.turns().last().map_or(0, |turn| turn.start_ms));
+        super::meeting_capsules::meeting_agent_prompt(&meeting.id, shown_title(meeting), recording)
+    } else {
+        transcript_markdown(meeting.turns(), meeting.imported)
+    };
+    copy(ui, tx, id.to_string(), what, text);
+}
+
+/// The detail's two copies as quiet actions, transcript first, each under
+/// its short `labels` entry, or as its icon alone without one. The tooltip
+/// gives the full name.
+fn copy_actions(
+    p: Paint,
+    pane: &MeetingsPane,
+    meeting: &Meeting,
+    labels: [Option<&'static str>; 2],
+) -> [El; 2] {
     let copied = |what: &str| {
         pane.copied
             .as_ref()
             .is_some_and(|(id, copied)| id == &meeting.id && copied == what)
     };
-    let labelled = |key: &'static str, what: &'static str, glyph, label: &'static str| {
-        let done = copied(what);
-        let id = meeting.id.clone();
-        Button::new(if done { tr("Copied") } else { label })
-            .variant(ButtonVariant::Neutral)
-            .control_size(ControlSize::Small)
-            .icon(if done { p.k.glyph.check_small } else { glyph })
-            .on_press_tx(move |ui: &mut Ui, tx: &mut Tx| {
-                let Some(meeting) = ui.meetings.meeting(&id) else {
-                    return;
-                };
-                let text = if what == "prompt" {
-                    let recording = (meeting.status == Status::Recording)
-                        .then(|| meeting.turns().last().map_or(0, |turn| turn.start_ms));
-                    super::meeting_capsules::meeting_agent_prompt(
-                        &meeting.id,
-                        shown_title(meeting),
-                        recording,
-                    )
-                } else {
-                    transcript_markdown(meeting.turns(), meeting.imported)
-                };
-                copy(ui, tx, id.clone(), what, text);
-            })
-            .build(p.k)
-            .key(key)
-    };
+    let quiet =
+        |key: &'static str, what: &'static str, glyph, label: Option<&'static str>, name| {
+            let done = copied(what);
+            let id = meeting.id.clone();
+            ld::quiet_action(
+                p,
+                key,
+                if done { p.k.glyph.check_small } else { glyph },
+                label.map(|label| if done { tr("Copied") } else { label }),
+                name,
+                None,
+                move |ui: &mut Ui, tx: &mut Tx| copy_detail(ui, tx, &id, what),
+            )
+        };
+    let [transcript, prompt] = labels;
     [
-        labelled(
+        quiet(
             "meeting-copy-transcript",
             "transcript",
             ld::COPY_ICON,
+            transcript,
             tr("Copy transcript"),
         ),
-        labelled(
+        quiet(
             "meeting-copy-prompt",
             "prompt",
-            &rune_theme_opencode::icons::OUTLINE_CONSOLE,
+            &super::icons::SPARKLES_OUTLINE,
+            prompt,
             tr("Copy agent prompt"),
         ),
     ]

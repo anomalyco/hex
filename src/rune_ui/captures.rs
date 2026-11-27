@@ -450,10 +450,9 @@ pub(super) fn copy(ui: &mut Ui, id: u64) {
 #[cfg(target_os = "macos")]
 fn copy_entry(entry: &Listed) -> anyhow::Result<()> {
     match entry {
-        Listed::Saved(saved) => crate::screenshots::save::copy_saved(
-            &saved.file,
-            saved.kind == CaptureKind::Recording,
-        ),
+        Listed::Saved(saved) => {
+            crate::screenshots::save::copy_saved(&saved.file, saved.kind == CaptureKind::Recording)
+        }
         Listed::Annotated(annotation) => objc2::rc::autoreleasepool(|_| {
             scrawl_capture::handoff::copy_bundle_to_clipboard(&annotation.bundle)
         }),

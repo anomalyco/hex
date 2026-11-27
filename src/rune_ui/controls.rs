@@ -21,6 +21,10 @@ use super::Ui;
 pub(super) const DESCRIPTION: TextStyle = TextStyle::new(12.0, 440.0).lh(16.0);
 /// User-content detail titles (such as a meeting's name) and headline stat numbers.
 pub(super) const DISPLAY: TextStyle = TextStyle::new(18.0, 600.0).lh(24.0);
+/// A document's title where it leads its own column at full width: a
+/// meeting's name over its summary and transcript. Above [`DISPLAY`], and
+/// tracked in a touch as large type wants.
+pub(super) const HEADLINE: TextStyle = TextStyle::new(22.0, 600.0).lh(28.0).tracking(-0.3);
 const SELECT_WIDTH: f32 = 220.0;
 /// A select whose rows carry a description: wide enough for a full choice
 /// name beside the hint under it, which takes whatever is left.

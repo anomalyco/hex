@@ -123,7 +123,7 @@ the inner shape is free and takes its component's own token.
 
 ## Typography by role
 
-Five sizes: 18 (display), 14, 13, 12, 11. Never place two styles of the same
+Six sizes: 22 (headline), 18 (display), 14, 13, 12, 11. Never place two styles of the same
 size beside each other to make hierarchy; step size (13 over 12) or colour.
 Use `p.tabular(...)` (`'tnum' 1`) on any number that changes in place or
 stacks in a column; reserve `ty.mono` for code, paths, and commands only.
@@ -131,7 +131,8 @@ stacks in a column; reserve `ty.mono` for code, paths, and commands only.
 | Role | Helper / Token | Colour |
 |---|---|---|
 | Pane title, modal title, kind detail title | `p.title()` (`ty.body_medium`, 14/500/21) | `text_base` |
-| User-content detail title (meeting name), stat number | `p.display()` (`DISPLAY`, 18/600/24; `p.tabular` for stats) | `text_base` |
+| Document title leading its own full-width column (meeting name) | `ld::card_heading` (`HEADLINE`, 22/600/28, tracking −0.3) | `text_base` |
+| User-content detail title, stat number | `p.display()` (`DISPLAY`, 18/600/24; `p.tabular` for stats) | `text_base` |
 | Document body: transcript, summary | `p.k.ty.body` (14/400/21) | `text_base` |
 | Section label above a card, row value | `p.label()` (`ty.ui_medium` lh 16) | `text_muted` / `text_base` |
 | Heading inside a detail, list title, capsule title/primary row, button | `p.strong()` (`ty.ui_medium`, 13/530/20) | `text_base` |

@@ -124,11 +124,13 @@ impl Selection {
 
 /// The detail header's way into selection mode.
 pub(super) fn action(p: Paint) -> El {
-    ld::ghost_icon(
+    ld::quiet_action(
         p,
         "meeting-select-lines",
         &SELECT_ICON,
+        None,
         tr("Select lines"),
+        None,
         |ui: &mut Ui, _| ui.meetings.selection.start(),
     )
 }
