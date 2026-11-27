@@ -1077,9 +1077,10 @@ hex capture stop                         // capture.stop
     │   missing -> the 480 px sampled frames
     ├── Spoken cues (look, now, here, this…) pick the keyframe the screen
     │   changes to; they also count in Spanish (mira, ahora, aquí, esto…),
-    │   French, German, Portuguese, and Italian, whatever the dictation
-    │   language. Check: scrawl-capture keyframes
-    │   spoken_cues_count_in_other_languages
+    │   French, German, Portuguese, Italian, and Turkish (şimdi, bakın, işte,
+    │   burası…; a capital İ still matches), whatever the dictation language.
+    │   Check: scrawl-capture keyframes spoken_cues_count_in_other_languages,
+    │   turkish_spoken_cues_match_with_a_dotted_capital_i
     ├── Transcription fails -> logged; the bundle has no words, and the outcome says why
     ├── Written -> image and text copied to the clipboard (Scrawl's handoff),
     │   or the light zip alone with Labs › Copy a capture as one file (capture.copy)
