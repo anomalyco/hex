@@ -240,7 +240,7 @@ fn turns(entries: &[crate::meeting::TranscriptEntry], labels: crate::meeting::La
             }
             Turn {
                 mine: turn.source == crate::meeting::MeetingSource::Microphone,
-                name: labels.of(&turn).name().map(str::to_owned),
+                name: labels.of(&turn).name().cloned(),
                 start_ms: turn.start_ms,
                 text: turn.text,
                 pause_before_ms,
@@ -309,7 +309,8 @@ mod tests {
     #[test]
     fn a_named_speaker_gets_their_own_turn_under_their_name() {
         let mut speakers = crate::meeting::Speakers::default();
-        let priya = speakers.add("Priya Nair", crate::meeting::NameSource::CallApp);
+        let name = crate::meeting::SpeakerName::parse("Priya Nair").unwrap();
+        let priya = Some(speakers.add(name.clone(), crate::meeting::NameSource::CallApp));
         let said = |speaker: &Option<_>, start_ms, text| TranscriptEntry {
             speaker: speaker.clone(),
             ..TranscriptEntry::new(MeetingSource::System, start_ms, start_ms + 900, text)
@@ -325,7 +326,7 @@ mod tests {
             .map(|turn| (turn.speaker(false), turn.entries.len()))
             .collect::<Vec<_>>();
         assert_eq!(shown, [("Priya Nair", 2), ("Them", 1)]);
-        assert_eq!(turns[0].name.as_deref(), Some("Priya Nair"));
+        assert_eq!(turns[0].name, Some(name));
         assert_eq!(turns[1].name, None);
     }
 

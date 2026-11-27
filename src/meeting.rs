@@ -102,7 +102,7 @@ pub use recording::recording;
 #[cfg(test)]
 pub use retention::audio_expired;
 pub use retention::{expire, expire_audio, list, retention_for};
-pub use speakers::{Label, Labels, Speakers};
+pub use speakers::{Label, Labels, SpeakerName, Speakers, Tracks};
 #[cfg(test)]
 pub use speakers::{NameSource, SpeakerId};
 pub use transcript::TranscriptReader;

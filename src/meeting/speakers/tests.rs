@@ -8,6 +8,14 @@ use crate::meeting::{chapter_entries, markdown, notes, section_markdown, transcr
 
 const APP: NameSource = NameSource::CallApp;
 
+fn name(shown: &str) -> SpeakerName {
+    SpeakerName::parse(shown).unwrap()
+}
+
+fn id(number: u32) -> SpeakerId {
+    SpeakerId::numbered(number).unwrap()
+}
+
 /// A manifest exactly as a build without speakers wrote it.
 const OLD_MANIFEST: &str = r#"{
   "schema_version": 1,
@@ -94,8 +102,8 @@ fn said(
 /// line.
 fn named_call() -> (MeetingManifest, Vec<TranscriptEntry>) {
     let mut manifest = manifest();
-    let priya = manifest.speakers.add("Priya Nair", APP).unwrap();
-    let marcus = manifest.speakers.add("Marcus Webb", APP).unwrap();
+    let priya = manifest.speakers.add(name("Priya Nair"), APP);
+    let marcus = manifest.speakers.add(name("Marcus Webb"), APP);
     let entries = vec![
         said(
             MeetingSource::Microphone,
@@ -160,7 +168,7 @@ fn speakers_are_saved_as_a_table_and_an_id_on_each_named_line() {
 #[test]
 fn ids_are_minted_per_meeting_and_never_reused_within_one() {
     let mut speakers = Speakers::default();
-    let ids = ["Ana", "Ben", "Cy"].map(|name| speakers.add(name, APP).unwrap());
+    let ids = ["Ana", "Ben", "Cy"].map(|shown| speakers.add(name(shown), APP));
     assert_eq!(
         serde_json::to_value(&ids).unwrap(),
         serde_json::json!(["s1", "s2", "s3"])
@@ -171,7 +179,7 @@ fn ids_are_minted_per_meeting_and_never_reused_within_one() {
         {"id": "s2", "name": "Ben", "from": "calendar"},
     ]))
     .unwrap();
-    let ana = read.add("Ana", NameSource::User).unwrap();
+    let ana = read.add(name("Ana"), NameSource::User);
     assert_eq!(serde_json::to_value(&ana).unwrap(), "s1");
     assert_eq!(read.names().collect::<Vec<_>>(), ["Ben", "Ana"]);
 }
@@ -183,8 +191,8 @@ fn a_hostile_name_comes_out_clean() {
     let markup = "  Priya\n**Nair**\t`rm`\u{202E} <b>[x](http://evil)\\\u{E0041}\u{0} ";
     let hostile = format!("{markup}{}", "a".repeat(500));
     let mut speakers = Speakers::default();
-    let id = speakers.add(&hostile, APP).unwrap();
-    let name = speakers.name(&id).unwrap();
+    let id = speakers.add(name(&hostile), APP);
+    let name = speakers.name(&id).unwrap().as_str();
 
     assert!(
         name.starts_with("Priya Nair rm bx(http://evil) aaa"),
@@ -208,27 +216,25 @@ fn a_hostile_name_comes_out_clean() {
 #[test]
 fn a_name_keeps_what_real_names_need() {
     let mut speakers = Speakers::default();
-    for name in [
+    for shown in [
         "Sam's iPhone",
         "José Ñ. (he/him)",
         "田中 太郎",
         "kit_l@work",
         "Tom & Ana 👩‍💻",
     ] {
-        let id = speakers.add(name, APP).unwrap();
-        assert_eq!(speakers.name(&id), Some(name));
+        let id = speakers.add(name(shown), APP);
+        assert_eq!(speakers.name(&id).map(SpeakerName::as_str), Some(shown));
     }
 }
 
 #[test]
 fn a_name_can_never_be_one_of_hexs_own_labels_or_nothing() {
-    let mut speakers = Speakers::default();
-    for name in [
+    for shown in [
         "You", " you ", "**You**", "THEM", "Speaker", "notes", "", " \n\t", "***", "\u{200B}",
     ] {
-        assert_eq!(speakers.add(name, APP), None, "{name:?}");
+        assert_eq!(SpeakerName::parse(shown), None, "{shown:?}");
     }
-    assert!(speakers.is_empty());
 }
 
 #[test]
@@ -238,17 +244,45 @@ fn a_table_read_from_disk_is_cleaned_like_one_built_here() {
         {"id": "s1", "name": "A second s1", "from": "user"},
         {"id": "s2", "name": "You", "from": "call_app"},
         {"id": "s3", "name": "  ", "from": "calendar"},
+        // Not ids Hex could have minted, an origin it does not know, and a
+        // row that is not a row: each is dropped without losing the rest.
+        {"id": "U024BE7LH", "name": "Ana", "from": "call_app"},
+        {"id": "s04", "name": "Ben", "from": "call_app"},
+        {"id": "s0", "name": "Cy", "from": "call_app"},
+        {"id": "s5", "name": "Di", "from": "voiceprint"},
+        "s6",
+        {"id": "s7", "name": "Marcus Webb", "from": "user"},
     ]))
     .unwrap();
-    assert_eq!(speakers.names().collect::<Vec<_>>(), ["Priya Nair"]);
-    // The dropped rows' lines fall back to the track's label.
-    let orphan = said(
-        MeetingSource::System,
-        Some(&SpeakerId("s2".into())),
-        0,
-        "Hi.",
+    assert_eq!(
+        speakers.names().collect::<Vec<_>>(),
+        ["Priya Nair", "Marcus Webb"]
     );
+    // The dropped rows' lines fall back to the track's label.
+    let orphan = said(MeetingSource::System, Some(&id(2)), 0, "Hi.");
     assert_eq!(Labels::by_track(&speakers).of(&orphan).as_str(), "Them");
+}
+
+#[test]
+fn a_saved_line_whose_speaker_is_not_an_id_reads_as_unnamed() {
+    let line = |speaker: &str| {
+        let saved = format!(
+            r#"{{"source":"system","start_ms":0,"end_ms":900,"text":"Hi.","speaker":{speaker}}}"#
+        );
+        serde_json::from_str::<TranscriptEntry>(&saved).unwrap()
+    };
+    assert_eq!(line(r#""s12""#).speaker, Some(id(12)));
+    for other in [
+        r#""U024BE7LH""#,
+        r#""s""#,
+        r#""s0""#,
+        r#""s01""#,
+        "7",
+        "null",
+        "{}",
+    ] {
+        assert_eq!(line(other).speaker, None, "{other}");
+    }
 }
 
 #[test]
@@ -274,24 +308,21 @@ fn printing_a_table_for_a_log_never_prints_a_name() {
 #[test]
 fn a_line_is_called_by_its_speakers_name_or_else_what_it_always_was() {
     use MeetingSource::{Microphone, System};
+    let priya = name("Priya Nair");
     let cases = [
-        (System, Some("Priya Nair"), false, "Priya Nair"),
-        (System, None, false, "Them"),
-        (Microphone, None, false, "You"),
+        (System, Some(&priya), Tracks::Call, "Priya Nair"),
+        (System, None, Tracks::Call, "Them"),
+        (Microphone, None, Tracks::Call, "You"),
         // The microphone is the local user, whatever a line claims.
-        (Microphone, Some("Priya Nair"), false, "You"),
+        (Microphone, Some(&priya), Tracks::Call, "You"),
         // An imported file has one track.
-        (System, None, true, "Speaker"),
-        (Microphone, None, true, "Speaker"),
-        (System, Some("Priya Nair"), true, "Priya Nair"),
+        (System, None, Tracks::Imported, "Speaker"),
+        (Microphone, None, Tracks::Imported, "Speaker"),
+        (System, Some(&priya), Tracks::Imported, "Priya Nair"),
     ];
-    for (source, name, imported, label) in cases {
-        let got = Label::of(source, name, imported);
-        assert_eq!(
-            got.as_str(),
-            label,
-            "{source:?} {name:?} imported {imported}"
-        );
+    for (source, name, tracks, label) in cases {
+        let got = Label::of(source, name, tracks);
+        assert_eq!(got.as_str(), label, "{source:?} {name:?} {tracks:?}");
         assert_eq!(got.to_string(), label);
         assert_eq!(got.name(), name.filter(|_| source == System));
     }
@@ -300,7 +331,7 @@ fn a_line_is_called_by_its_speakers_name_or_else_what_it_always_was() {
 #[test]
 fn a_speaker_the_table_does_not_know_is_called_by_the_track() {
     let (manifest, mut entries) = named_call();
-    entries[1].speaker = Some(SpeakerId("s9".into()));
+    entries[1].speaker = Some(id(9));
     let labels = entries
         .iter()
         .map(|entry| manifest.labels().of(entry).as_str())
@@ -322,8 +353,7 @@ fn a_rendered_label_reads_back_to_its_track() {
         ("Speaker", MeetingSource::System),
         ("Priya Nair", MeetingSource::System),
     ] {
-        assert_eq!(Label::parse(text).source(), source);
-        assert_eq!(Label::parse(text).as_str(), text);
+        assert_eq!(Label::heard_on(text), source);
     }
 }
 

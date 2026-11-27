@@ -128,8 +128,12 @@ mod tests {
     fn a_turn_splits_where_the_speaker_changes() {
         let mut speakers = crate::meeting::Speakers::default();
         let from = crate::meeting::NameSource::CallApp;
-        let priya = speakers.add("Priya Nair", from);
-        let marcus = speakers.add("Marcus Webb", from);
+        let mut add = |name| {
+            let name = crate::meeting::SpeakerName::parse(name).unwrap();
+            Some(speakers.add(name, from))
+        };
+        let priya = add("Priya Nair");
+        let marcus = add("Marcus Webb");
         let said = |speaker: &Option<crate::meeting::SpeakerId>, start_ms, text| TranscriptEntry {
             speaker: speaker.clone(),
             ..entry(MeetingSource::System, start_ms, start_ms + 900, text)

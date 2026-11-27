@@ -2,7 +2,7 @@
 //! chapters, the live or final transcript as turns, and the ⋯ menu.
 
 use super::*;
-use crate::meeting::{Label, MeetingSource};
+use crate::meeting::{Label, MeetingSource, Tracks};
 
 pub(super) fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
     let pane = &ui.meetings;
@@ -499,7 +499,12 @@ impl Turn {
         } else {
             MeetingSource::System
         };
-        Label::of(source, self.name.as_deref(), imported)
+        let tracks = if imported {
+            Tracks::Imported
+        } else {
+            Tracks::Call
+        };
+        Label::of(source, self.name.as_ref(), tracks)
     }
 
     /// The label in the interface's language. A person's name is shown as
@@ -509,7 +514,7 @@ impl Turn {
             Label::You => tr("You"),
             Label::Them => tr("Them"),
             Label::Speaker => tr("Speaker"),
-            Label::Named(name) => name,
+            Label::Named(name) => name.as_str(),
         }
     }
 }

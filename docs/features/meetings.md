@@ -2826,7 +2826,10 @@ What a line is called -> one rule (src/meeting/speakers.rs, Labels::of)
 ├── Otherwise exactly as before: You, Them, or Speaker where an imported
 │   file's one track already said Speaker
 ├── A microphone line is always You, whatever its speaker field says
-└── An id the table does not know -> the track's label
+├── An id the table does not know -> the track's label
+└── A saved speaker that is not an id Hex could have minted (`s` and a
+    number), or a table row whose id, name or origin does not parse -> read
+    as absent; the line is called by its track and the meeting still opens
 Turns -> adjacent lines join only on the same track and the same speaker; a
          named line never merges into an unnamed one
 Readers that show the name
@@ -2845,7 +2848,8 @@ Readers that stay You / Them
 │   under way has no names
 └── get_transcript's speaker filter (you | them | all)
 Names are untrusted: other people choose them, and models and agents read them
-├── Cleaned on the way into the table, and again when a manifest is read:
+├── A name exists in the code only as a cleaned value (SpeakerName), made
+│   from call-app text or from a manifest the same way:
 │   one line, single spaces, no control characters, zero-width spaces,
 │   direction overrides or Unicode tags, none of * ` [ ] < > \, 64 characters
 ├── Refused: nothing left, or You / Them / Speaker / Notes in any case, so
@@ -2860,6 +2864,7 @@ Checks: `an_old_manifest_and_transcript_round_trip_byte_for_byte`,
 `a_hostile_name_comes_out_clean`,
 `a_name_can_never_be_one_of_hexs_own_labels_or_nothing`,
 `a_table_read_from_disk_is_cleaned_like_one_built_here`,
+`a_saved_line_whose_speaker_is_not_an_id_reads_as_unnamed`,
 `printing_a_table_for_a_log_never_prints_a_name`,
 `a_line_is_called_by_its_speakers_name_or_else_what_it_always_was`,
 `a_turn_splits_where_the_speaker_changes`,

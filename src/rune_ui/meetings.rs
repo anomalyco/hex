@@ -64,7 +64,7 @@ impl Status {
 pub(super) struct Turn {
     pub(super) mine: bool,
     /// The remote speaker's name, when the meeting could name them.
-    pub(super) name: Option<String>,
+    pub(super) name: Option<crate::meeting::SpeakerName>,
     pub(super) start_ms: u64,
     pub(super) text: String,
     /// A silence of 30 s or more before this turn.

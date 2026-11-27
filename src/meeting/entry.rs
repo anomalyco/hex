@@ -15,7 +15,11 @@ pub struct TranscriptEntry {
     /// Who said it, when Hex is sure: an id in the meeting's speaker table.
     /// Absent from the saved line otherwise, which is every line written
     /// before speakers existed.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "SpeakerId::saved"
+    )]
     pub speaker: Option<SpeakerId>,
 }
 

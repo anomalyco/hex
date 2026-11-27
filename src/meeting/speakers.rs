@@ -7,16 +7,22 @@
 //! `You`, `Them` or `Speaker`, exactly as before speakers existed.
 //!
 //! Names are untrusted. Other people on a call choose them, and they end up
-//! in Markdown, in prompts and in what agents read. So a name is cleaned on
-//! its way into the table (when it is added, and again when a table is read
-//! from disk), and it never reaches a log: [`Speaker`] prints without it.
+//! in Markdown, in prompts and in what agents read. So the only way to hold
+//! a name is a [`SpeakerName`], which exists only once the text has been
+//! cleaned, whether it was typed, seen in a call app or read from disk. It
+//! never reaches a log: a [`SpeakerName`] prints without its text.
+//!
+//! The file formats, the shape of an id and the cleaning are this module's
+//! business. Everything else holds a [`SpeakerId`] or a [`SpeakerName`]
+//! and asks [`Labels`].
 //!
 //! Nothing produces a speaker yet. Until something does, every table is
 //! empty and every line is called what it was always called.
 
 use std::fmt;
+use std::num::NonZeroU32;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use super::{MeetingManifest, MeetingSource, TranscriptEntry};
 
@@ -32,10 +38,116 @@ static NOBODY: Speakers = Speakers(Vec::new());
 
 /// A speaker's id inside one meeting: short and opaque (`s1`, `s2`), minted
 /// by that meeting's table and meaningless outside it. A call app's own user
-/// id is never one, and never reaches the disk.
-#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-#[serde(transparent)]
-pub struct SpeakerId(String);
+/// id is never one: text of any other shape does not read as an id at all.
+#[derive(Clone, Eq, Hash, PartialEq, Serialize)]
+#[serde(into = "String")]
+pub struct SpeakerId(NonZeroU32);
+
+impl SpeakerId {
+    fn numbered(number: u32) -> Option<Self> {
+        NonZeroU32::new(number).map(Self)
+    }
+
+    /// Reads an id as it is saved: `s` and a number, written the one way
+    /// Hex writes it.
+    fn parse(saved: &str) -> Option<Self> {
+        let id = Self::numbered(saved.strip_prefix('s')?.parse().ok()?)?;
+        (id.to_string() == saved).then_some(id)
+    }
+
+    /// A saved line's `speaker`. Anything that is not an id Hex could have
+    /// minted reads as no speaker, so the line is called by its track and
+    /// the transcript still opens.
+    pub(super) fn saved<'de, D: Deserializer<'de>>(saved: D) -> Result<Option<Self>, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Saved {
+            Text(String),
+            Other(serde::de::IgnoredAny),
+        }
+        Ok(match Saved::deserialize(saved)? {
+            Saved::Text(text) => Self::parse(&text),
+            Saved::Other(_) => None,
+        })
+    }
+}
+
+impl fmt::Display for SpeakerId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "s{}", self.0)
+    }
+}
+
+impl fmt::Debug for SpeakerId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{self}")
+    }
+}
+
+impl From<SpeakerId> for String {
+    fn from(id: SpeakerId) -> Self {
+        id.to_string()
+    }
+}
+
+/// A speaker's display name, cleaned: one line, single spaces, nothing
+/// invisible, no [`MARKUP`], at most [`NAME_CHARS`] characters, and never
+/// one of Hex's own labels, so that nobody on a call can make their words
+/// read as `You`. Holding one is the proof; nothing downstream checks again.
+#[derive(Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct SpeakerName(String);
+
+impl SpeakerName {
+    /// Cleans text someone else chose. `None` when nothing usable is left.
+    pub fn parse(shown: &str) -> Option<Self> {
+        let visible = shown
+            .chars()
+            .map(|character| {
+                if character.is_whitespace() {
+                    ' '
+                } else {
+                    character
+                }
+            })
+            .filter(|character| !character.is_control() && !is_invisible(*character))
+            .filter(|character| !MARKUP.contains(character))
+            .collect::<String>();
+        let spaced = visible.split_whitespace().collect::<Vec<_>>().join(" ");
+        let name = spaced.chars().take(NAME_CHARS).collect::<String>();
+        let name = name.trim_end();
+        let own = ["You", "Them", "Speaker", "Notes"];
+        (!name.is_empty() && !own.iter().any(|label| name.eq_ignore_ascii_case(label)))
+            .then(|| Self(name.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for SpeakerName {
+    /// Without the text, so that no log line or panic message can carry it.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("SpeakerName(..)")
+    }
+}
+
+impl TryFrom<String> for SpeakerName {
+    type Error = &'static str;
+
+    /// A saved name is cleaned like any other, and is no name when nothing
+    /// usable is left.
+    fn try_from(saved: String) -> Result<Self, Self::Error> {
+        Self::parse(&saved).ok_or("not a usable name")
+    }
+}
+
+impl From<SpeakerName> for String {
+    fn from(name: SpeakerName) -> Self {
+        name.0
+    }
+}
 
 /// Where a speaker's name came from.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -50,29 +162,16 @@ pub enum NameSource {
 }
 
 /// One remote speaker a meeting could name.
-#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct Speaker {
     id: SpeakerId,
-    /// Untrusted text from someone else on the call, already cleaned.
-    name: String,
+    name: SpeakerName,
     from: NameSource,
 }
 
-impl fmt::Debug for Speaker {
-    /// Without the name, so that no log line or panic message can carry one.
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("Speaker")
-            .field("id", &self.id)
-            .field("from", &self.from)
-            .finish_non_exhaustive()
-    }
-}
-
-/// A meeting's speaker table. Every name in it has been cleaned, and no two
-/// speakers share an id.
+/// A meeting's speaker table. No two speakers share an id.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(from = "Vec<Speaker>")]
+#[serde(from = "Vec<serde_json::Value>")]
 pub struct Speakers(Vec<Speaker>);
 
 impl Speakers {
@@ -80,8 +179,8 @@ impl Speakers {
         self.0.is_empty()
     }
 
-    /// Names a new speaker and returns the id their lines carry, or `None`
-    /// when cleaning leaves nothing usable of `name`.
+    /// Names a new speaker and returns the id their lines carry: the
+    /// lowest number nobody in this meeting holds.
     #[cfg_attr(
         not(test),
         expect(
@@ -89,72 +188,68 @@ impl Speakers {
             reason = "nothing names a speaker until the resolver is wired in"
         )
     )]
-    pub fn add(&mut self, name: &str, from: NameSource) -> Option<SpeakerId> {
-        let id = (1_usize..)
-            .map(|number| SpeakerId(format!("s{number}")))
-            .find(|id| self.name(id).is_none())?;
-        self.insert(id.clone(), name, from).then_some(id)
+    pub fn add(&mut self, name: SpeakerName, from: NameSource) -> SpeakerId {
+        let id = (1..)
+            .filter_map(SpeakerId::numbered)
+            .find(|id| self.name(id).is_none())
+            .expect("a meeting has fewer speakers than there are ids");
+        self.0.push(Speaker {
+            id: id.clone(),
+            name,
+            from,
+        });
+        id
     }
 
     /// The name `id` goes by in this meeting, if the table knows it.
-    pub fn name(&self, id: &SpeakerId) -> Option<&str> {
+    pub fn name(&self, id: &SpeakerId) -> Option<&SpeakerName> {
         self.0
             .iter()
             .find(|speaker| speaker.id == *id)
-            .map(|speaker| speaker.name.as_str())
+            .map(|speaker| &speaker.name)
     }
 
     /// Every name, in the order the speakers were added.
     fn names(&self) -> impl Iterator<Item = &str> {
         self.0.iter().map(|speaker| speaker.name.as_str())
     }
-
-    fn insert(&mut self, id: SpeakerId, name: &str, from: NameSource) -> bool {
-        let Some(name) = clean_name(name).filter(|_| self.name(&id).is_none()) else {
-            return false;
-        };
-        self.0.push(Speaker { id, name, from });
-        true
-    }
 }
 
-impl From<Vec<Speaker>> for Speakers {
-    /// A table read from disk is held to the same rules as one built here:
-    /// the file may have been edited, or written by something else. A row
-    /// that breaks them is dropped, and its lines fall back to `Them`.
-    fn from(stored: Vec<Speaker>) -> Self {
+impl From<Vec<serde_json::Value>> for Speakers {
+    /// A table read from disk is parsed row by row into the same types as
+    /// one built here: the file may have been edited, or written by
+    /// something else. A row whose id, name or origin does not parse, or
+    /// whose id is taken, is dropped, and its lines fall back to `Them`;
+    /// the manifest still opens.
+    fn from(saved: Vec<serde_json::Value>) -> Self {
+        #[derive(Deserialize)]
+        struct Saved {
+            id: String,
+            name: SpeakerName,
+            from: NameSource,
+        }
         let mut speakers = Self::default();
-        for speaker in stored {
-            speakers.insert(speaker.id, &speaker.name, speaker.from);
+        for row in saved {
+            let Ok(row) = serde_json::from_value::<Saved>(row) else {
+                continue;
+            };
+            let Some(id) = SpeakerId::parse(&row.id).filter(|id| speakers.name(id).is_none())
+            else {
+                continue;
+            };
+            let (name, from) = (row.name, row.from);
+            speakers.0.push(Speaker { id, name, from });
         }
         speakers
     }
 }
 
-/// A display name made safe to show and to hand to a language model: one
-/// line, single spaces, nothing invisible, no [`MARKUP`], at most
-/// [`NAME_CHARS`] characters. `None` when nothing is left, or when what is
-/// left is one of Hex's own labels, so that nobody on a call can make their
-/// words read as `You`.
-fn clean_name(name: &str) -> Option<String> {
-    let visible = name
-        .chars()
-        .map(|character| {
-            if character.is_whitespace() {
-                ' '
-            } else {
-                character
-            }
-        })
-        .filter(|character| !character.is_control() && !is_invisible(*character))
-        .filter(|character| !MARKUP.contains(character))
-        .collect::<String>();
-    let spaced = visible.split_whitespace().collect::<Vec<_>>().join(" ");
-    let name = spaced.chars().take(NAME_CHARS).collect::<String>();
-    let name = name.trim_end();
-    let own = ["You", "Them", "Speaker", "Notes"];
-    (!name.is_empty() && !own.iter().any(|label| name.eq_ignore_ascii_case(label)))
-        .then(|| name.to_owned())
+/// How a recording's tracks are called when nobody is named: a call has
+/// `You` and `Them`, and an imported audio file has one track, `Speaker`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Tracks {
+    Call,
+    Imported,
 }
 
 /// Characters that draw nothing but can hide or reorder text: zero-width
@@ -185,7 +280,7 @@ pub enum Label<'a> {
     /// The single track of an imported audio file.
     Speaker,
     /// A remote speaker, by a name from the meeting's table.
-    Named(&'a str),
+    Named(&'a SpeakerName),
 }
 
 impl<'a> Label<'a> {
@@ -193,23 +288,24 @@ impl<'a> Label<'a> {
     /// one; everything else is called what its track is called, and an
     /// imported file's one track is `Speaker`. The microphone is always the
     /// local user, whatever a line claims.
-    pub fn of(source: MeetingSource, name: Option<&'a str>, imported: bool) -> Self {
-        match (source, name) {
-            (MeetingSource::System, Some(name)) => Self::Named(name),
-            _ if imported => Self::Speaker,
-            (MeetingSource::Microphone, _) => Self::You,
-            (MeetingSource::System, None) => Self::Them,
+    pub fn of(source: MeetingSource, name: Option<&'a SpeakerName>, tracks: Tracks) -> Self {
+        match (source, name, tracks) {
+            (MeetingSource::System, Some(name), _) => Self::Named(name),
+            (_, _, Tracks::Imported) => Self::Speaker,
+            (MeetingSource::Microphone, _, Tracks::Call) => Self::You,
+            (MeetingSource::System, None, Tracks::Call) => Self::Them,
         }
     }
 
-    /// Reads back a label Hex rendered, such as a Markdown turn heading.
+    /// The track a rendered label, such as a Markdown turn heading, was
+    /// heard on: `You` is the microphone, and everything else, a name
+    /// included, is remote speech.
     #[cfg(any(debug_assertions, test))]
-    pub fn parse(text: &'a str) -> Self {
-        match text {
-            "You" => Self::You,
-            "Them" => Self::Them,
-            "Speaker" => Self::Speaker,
-            name => Self::Named(name),
+    pub fn heard_on(rendered: &str) -> MeetingSource {
+        if rendered == Self::You.as_str() {
+            MeetingSource::Microphone
+        } else {
+            MeetingSource::System
         }
     }
 
@@ -218,24 +314,15 @@ impl<'a> Label<'a> {
             Self::You => "You",
             Self::Them => "Them",
             Self::Speaker => "Speaker",
-            Self::Named(name) => name,
+            Self::Named(name) => name.as_str(),
         }
     }
 
     /// The speaker's name, when the line has one.
-    pub fn name(self) -> Option<&'a str> {
+    pub fn name(self) -> Option<&'a SpeakerName> {
         match self {
             Self::Named(name) => Some(name),
             Self::You | Self::Them | Self::Speaker => None,
-        }
-    }
-
-    /// The track a line with this label was heard on.
-    #[cfg(any(debug_assertions, test))]
-    pub fn source(self) -> MeetingSource {
-        match self {
-            Self::You => MeetingSource::Microphone,
-            Self::Them | Self::Speaker | Self::Named(_) => MeetingSource::System,
         }
     }
 }
@@ -251,7 +338,7 @@ impl fmt::Display for Label<'_> {
 #[derive(Clone, Copy, Debug)]
 pub struct Labels<'a> {
     speakers: &'a Speakers,
-    imported: bool,
+    tracks: Tracks,
 }
 
 impl<'a> Labels<'a> {
@@ -261,7 +348,7 @@ impl<'a> Labels<'a> {
     pub fn by_track(speakers: &'a Speakers) -> Self {
         Self {
             speakers,
-            imported: false,
+            tracks: Tracks::Call,
         }
     }
 
@@ -269,27 +356,26 @@ impl<'a> Labels<'a> {
     pub fn imported(speakers: &'a Speakers) -> Self {
         Self {
             speakers,
-            imported: true,
+            tracks: Tracks::Imported,
         }
     }
 
     pub fn of(self, entry: &TranscriptEntry) -> Label<'a> {
         let name = entry.speaker.as_ref().and_then(|id| self.speakers.name(id));
-        Label::of(entry.source, name, self.imported)
+        Label::of(entry.source, name, self.tracks)
     }
 
     /// What a track's lines are called when nobody is named for them.
     pub fn track(self, source: MeetingSource) -> Label<'a> {
-        Label::of(source, None, self.imported)
+        Label::of(source, None, self.tracks)
     }
 
     /// Every label a reader of this meeting can meet: the tracks', then each
     /// named speaker.
     pub fn everyone(self) -> impl Iterator<Item = &'a str> {
-        let tracks: &[Label<'a>] = if self.imported {
-            &[Label::Speaker]
-        } else {
-            &[Label::You, Label::Them]
+        let tracks: &[Label<'a>] = match self.tracks {
+            Tracks::Imported => &[Label::Speaker],
+            Tracks::Call => &[Label::You, Label::Them],
         };
         let tracks = tracks.iter().map(|label| label.as_str());
         tracks.chain(self.speakers.names())

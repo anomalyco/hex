@@ -128,7 +128,7 @@ pub(super) fn entries_from_markdown(markdown: &str) -> Vec<TranscriptEntry> {
                 let (minutes, seconds) = clock.trim().split_once(':')?;
                 let start_ms =
                     (minutes.parse::<u64>().ok()? * 60 + seconds.parse::<u64>().ok()?) * 1_000;
-                Some((Label::parse(label).source(), start_ms))
+                Some((Label::heard_on(label), start_ms))
             });
         if let Some((source, start_ms)) = header {
             entries.push(TranscriptEntry::new(source, start_ms, start_ms, ""));
