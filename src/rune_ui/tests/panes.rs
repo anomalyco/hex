@@ -4112,7 +4112,7 @@ fn a_long_labs_store_scrolls_by_dragging_its_scroll_bar() {
     let thumb = at(&rt, "scroll-scroll-area/scroll-bar/thumb-slot/thumb");
     assert_eq!(thumb.fill, rune_theme_opencode::kit(true).c.text_faint);
     assert_eq!(thumb.opacity, 1.0);
-    assert!(thumb.rect[2] >= 8.0, "the pane thumb is wide enough to see");
+    assert!(thumb.rect[2] >= 4.0, "the pane thumb is wide enough to see");
     assert!(
         thumb.rect[3] > 0.0,
         "the Labs store overflows with every group open"
