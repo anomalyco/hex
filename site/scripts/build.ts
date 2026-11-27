@@ -15,4 +15,4 @@ await $`bun scripts/prerender.ts --mode ${mode}`
 await $`bun scripts/labs.ts --mode ${mode}`
 await $`bun scripts/iphone.ts --mode ${mode}`
 await $`bun scripts/changelog.ts --mode ${mode}`
-await $`bun scripts/meetings.ts --mode ${mode}`
+await $`bun scripts/meetings/build.ts --mode ${mode}`

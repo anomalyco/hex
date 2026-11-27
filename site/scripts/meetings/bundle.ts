@@ -9,7 +9,7 @@ import { dirname, join, normalize } from "node:path"
 
 // The folder in the built site, served at MEETINGS_PATH + "/" (src/base.ts).
 export const MEETINGS_DIR = "meetings"
-// Drawn by scripts/generate-og-meetings.ts, kept across imports.
+// Drawn by scripts/generate/og-meetings.ts, kept across imports.
 export const MEETINGS_CARD = "og-meetings.png"
 
 const FOLLOW = /\.(html|css|js|json)$/
@@ -41,7 +41,7 @@ function referencesIn(file: string, text: string): Ref[] {
 }
 
 // Session ids and the bundle's own social and canonical tags, which the build
-// writes instead (scripts/meetings.ts).
+// writes instead (scripts/meetings/build.ts).
 export function stripHead(html: string): string {
   return html.replace(/^[ \t]*<(?:meta (?:name="opencode-session"|property="og:|name="twitter:)|link rel="canonical")[^>]*>[ \t]*\r?\n?/gm, "")
 }

@@ -1,18 +1,18 @@
 #!/usr/bin/env bun
 // Replaces the Meetings showcase in public/meetings/ with a new cut of the
-// standalone page, copying only the files it loads (scripts/meetings-bundle.ts)
+// standalone page, copying only the files it loads (scripts/meetings/bundle.ts)
 // and keeping the social card. Build tools, shader sources, reports, and raw
 // audio stay behind. The page's social tags come from the build
-// (scripts/meetings.ts), so the bundle's own are dropped here.
+// (scripts/meetings/build.ts), so the bundle's own are dropped here.
 //
 //   bun run import:meetings ~/code/home/artifacts/<date>-hex-meetings-v15
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
-import { MEETINGS_CARD, runtimeFiles, stripHead } from "./meetings-bundle"
+import { MEETINGS_CARD, runtimeFiles, stripHead } from "./bundle"
 
 const source = process.argv[2]
 if (!source || !existsSync(join(source, "index.html"))) throw new Error("usage: bun run import:meetings <bundle folder with index.html>")
-const dest = resolve(import.meta.dirname, "../public/meetings")
+const dest = resolve(import.meta.dirname, "../../public/meetings")
 
 const bundle = runtimeFiles(source)
 if (bundle.missing.length) {

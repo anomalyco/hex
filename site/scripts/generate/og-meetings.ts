@@ -6,7 +6,7 @@ import { chromium } from "playwright"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 
-const font = readFileSync(new URL("../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2", import.meta.url)).toString("base64")
+const font = readFileSync(new URL("../../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2", import.meta.url)).toString("base64")
 
 const mark = (size: number, stroke: string) => `<svg width="${size}" height="${size}" viewBox="0 0 36 36" fill="none" stroke="${stroke}" stroke-linejoin="round">
   <path stroke-width="2.4" d="M18 3.1 30.9 10.55v14.9L18 32.9 5.1 25.45v-14.9Z"/>
@@ -58,7 +58,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1200, height: 630 }, deviceScaleFactor: 1 })
   await page.setContent(html)
   await page.evaluate(() => document.fonts.ready)
-  await page.screenshot({ path: fileURLToPath(new URL("../public/meetings/og-meetings.png", import.meta.url)) })
+  await page.screenshot({ path: fileURLToPath(new URL("../../public/meetings/og-meetings.png", import.meta.url)) })
 } finally {
   await browser.close()
 }
