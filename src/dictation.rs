@@ -61,6 +61,7 @@ use rubato::{Fft, FixedSync, Indexing, Resampler, WindowFunction};
 use crate::audio::CaptureInstant;
 use crate::transcription::engine::{LiveStream, Partial, TranscriptionEngine};
 
+#[cfg(any(target_os = "macos", test))]
 pub use release_tail::ReleaseTail;
 #[cfg(not(target_os = "macos"))]
 pub use release_tail::ReleaseWait;
