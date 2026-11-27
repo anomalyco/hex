@@ -52,7 +52,10 @@ final class SwipeTyping {
     /// Nats more a rare reading the dictionary knows only with a capital costs, unless it is
     /// one of your own words: the model's lowercase list holds names and abbreviations ("gs",
     /// "ut", "kent") that a loose swipe of a common word could read as, and they would go in
-    /// capitalised mid-sentence. Common ones ("john", "york", "english") cost nothing more.
+    /// capitalised mid-sentence. Common ones ("john", "york", "english") cost nothing more, and
+    /// nor does any in English, whose model holds SCOWL's names at their own counts: there the
+    /// 4 nats let "clause" beat a swiped "Claude" half the time to save 9 of the benchmark's
+    /// 12,515 typical swipes (`android/benchmark/typing/README.md` › Swipe typing).
     var nameCost = 4.0
     /// The model's cost (-ln p) past which such a word counts as rare: about its 2,500th word.
     static let commonNameCost = 10.0
@@ -225,7 +228,7 @@ final class SwipeTyping {
     func ranked(_ candidates: [SwipeDecoder.Candidate]) -> [String] {
         let model = decoder.model
         func rareName(_ text: String) -> Bool {
-            guard engine.swipeReadsAsName(text) else { return false }
+            guard model.language != KeyboardLanguage.english.rawValue, engine.swipeReadsAsName(text) else { return false }
             return model.index(of: text).map { model.unigramCost($0) > Self.commonNameCost } ?? true
         }
         return candidates

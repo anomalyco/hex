@@ -20,6 +20,12 @@ The app shows these under Settings › Acknowledgements (`HEXMobile/Acknowledgem
   "as is" without express or implied warranty. SCOWL's inflections come from WordNet 1.6,
   Copyright 1997 by Princeton University, all rights reserved, provided "as is" without
   warranties (the full notice is in the app); its other sources are public domain.
+- **Leipzig Corpora Collection:** English words newer than the books and their spellings
+  ("ChatGPT", "TikTok") come from the [Leipzig Corpora Collection](https://wortschatz-leipzig.de/en/download)'s
+  English news downloads for 2023, 2024 and 2025, Leipzig University and the Saxon Academy
+  of Sciences and Humanities in Leipzig (D. Goldhahn, T. Eckart and U. Quasthoff, LREC 2012),
+  licensed under [Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/).
+  Hex keeps only word counts, how many sites use each word and its spellings.
 - **LDNOOBW:** The keyboard's suggestion filter uses the
   [List of Dirty, Naughty, Obscene, and Otherwise Bad Words](https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/tree/5faf2ba42d7b1c0977169ec3611df25a3c08eb13)
   (LDNOOBW), © 2012–2020 Shutterstock, Inc., and contributors: its English, Spanish,

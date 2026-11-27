@@ -4,8 +4,8 @@ import kotlin.math.sqrt
 
 /** Faster English dictation's model sometimes runs two sentences together ("back of the bus We should", "Wednesday My
  * brother") while still capitalising the second one's first word. Where that word is one English writes in lowercase
- * (in the English typing model and not on its capitals list, so not a name, and not "I") and the speaker paused before
- * it, the first sentence gets its period back. Only the faster engine's text goes through this, before Hex's shared
+ * (in the English typing model and not on its capitals or spellings list, so not a name, and not "I") and the speaker
+ * paused before it, the first sentence gets its period back. Only the faster engine's text goes through this, before Hex's shared
  * formatting; the dictation's last period stays Polished's job.
  *
  * On every English clip of the benchmark (README › Faster English dictation) this restored 9 of the 10 sentence ends

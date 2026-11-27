@@ -632,11 +632,13 @@ internal class SwipeReader(private val spatial: SpatialDecoder) {
 
     /** The readings best first once a rare name or abbreviation costs [NAME_COST] more (iPhone's `SwipeTyping.ranked`):
      * the model's lowercase list holds names ("kent", "ut") a loose swipe of a common word could read as, and they
-     * would go in capitalised mid-sentence. Common ones ("john", "york") and your own words cost nothing more. */
+     * would go in capitalised mid-sentence. Common ones ("john", "york") and your own words cost nothing more, and nor
+     * does any in English, whose model holds SCOWL's names at their own counts (benchmark/typing/README.md › Swipe typing). */
     fun ranked(candidates: List<SwipeDecoder.Candidate>): List<String> {
         fun rareName(text: String): Boolean {
-            // German's capitals list marks its nouns, not names: they cost nothing more.
-            if (model.language == "de" || text != text.lowercase() || text.length < 2 || (model.capitals?.percent(text) ?: -1) < 95) return false
+            // German's capitals list marks its nouns, not names, and English's names are words at their own counts.
+            if (model.language == "de" || model.language == "en") return false
+            if (text != text.lowercase() || text.length < 2 || (model.capitals?.percent(text) ?: -1) < 95) return false
             if (spatial.personal?.owns(text) == true) return false
             val i = model.index(text)
             return i < 0 || model.unigramCost(i) > COMMON_NAME_COST

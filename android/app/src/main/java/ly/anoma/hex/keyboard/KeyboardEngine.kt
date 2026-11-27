@@ -756,10 +756,13 @@ internal class KeyboardEngine(
         val shaped = if (!joinable) text else {
             // The keyboard's own word list for that language, when loaded, knows far more ordinary words than
             // the speech side's short list: a word it has in lowercase and the books rarely capitalise
-            // loses Whisper's capital; a name keeps it (iOS asks UITextChecker the same).
+            // loses Whisper's capital; a name, or a word with a spelling of its own ("ChatGPT"), keeps it (iOS asks
+            // UITextChecker the same).
             val model = models[if (language == "no") "nb" else language]?.model
             if (model == null) SpokenText.continuing(text, before, language)
-            else SpokenText.continuing(text, before, language) { model.index(it) >= 0 && (model.capitals?.percent(it) ?: -1) < 50 }
+            else SpokenText.continuing(text, before, language) {
+                model.index(it) >= 0 && (model.capitals?.percent(it) ?: -1) < 50 && model.spellings?.of(it) == null
+            }
         }
         // Spacing is decided on the straight quotes, as it always was, so a dictation's spacing is
         // unchanged: the same smart quotes as the keys and the strip then go in with their spacing.

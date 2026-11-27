@@ -2,7 +2,8 @@
 # by its developers: ours, not copied from any corpus, dictionary or other keyboard.
 # Each line: word<TAB>tier. Tier 1 costs 10 nats (about the model's 2,000th word), tier 2
 # 12, tier 3 13.5; a word the books already have only gets commoner. Lowercase a-z and '
-# only, no brand or product names (the model is lowercase; their capitals come from elsewhere).
+# only, no names: names come from SCOWL, and newer ones from the 2023-2025 news, with their
+# spellings ("ChatGPT") in en.spellings (build-typing-model.py); these stay lowercase.
 ok	1
 lol	1
 haha	1
