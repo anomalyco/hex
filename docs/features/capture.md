@@ -55,11 +55,14 @@ Draw                                     // capture.draw (capture_host::drawing)
 ├── Esc while drawing -> stops drawing, never the recording (recognition.rs
 │   on macOS; the Escape grab on X11 (Wayland binds no Escape); the keyboard
 │   hook on Windows, when no dictation records; and the overlay's own key
-│   handler where it gets the keyboard)
+│   handler where it gets the keyboard, never on Windows or XWayland)
 ├── macOS and Windows -> Shift held alone still draws, as in Scrawl
 ├── While drawing -> the ink overlay takes the pointer with a pen cursor, so
 │   clicks never reach the app; the capsule stays clickable above it (macOS:
-│   its level; Linux: the overlay leaves a hole over the capsule's pill).
+│   its level; Linux: the overlay leaves a hole over the capsule's pill;
+│   Windows: its level, kept because the overlay never asks for the keyboard,
+│   whose activation raised it over the capsule and ate the pen's second
+│   click, #2955).
 │   Every move draws ink; there are no pins and no undo
 ├── `hex annotate draw` (Linux) -> the pen on or off, for desktops without
 │   the portal (it starts a recording drawing)
