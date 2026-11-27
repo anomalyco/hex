@@ -388,8 +388,14 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[test]
     fn caps_lock_survives_save_and_load_with_the_special_keys_lab_off() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
+        let sequence = crate::app_settings::SETTINGS_TEMP_SEQUENCE
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "hex-caps-lock-settings-{}-{sequence}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
         for name in ["capslock", "insert", "home", "end", "pageup", "pagedown"] {
             let binding = HotkeyBinding {
                 modifiers: Default::default(),
@@ -408,6 +414,7 @@ mod tests {
                 assert_eq!(loaded.dictation_hotkey, HotkeyBinding::default(), "{name}");
             }
         }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
