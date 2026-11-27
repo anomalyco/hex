@@ -46,6 +46,7 @@ import ly.anoma.hex.keyboard.KeyColor
 import ly.anoma.hex.keyboard.ClipboardHistory
 import ly.anoma.hex.keyboard.hexClip
 import ly.anoma.hex.keyboard.VoiceOnly
+import ly.anoma.hex.keyboard.HoldDelay
 import ly.anoma.hex.keyboard.KeyboardHeight
 import ly.anoma.hex.speech.*
 import ly.anoma.hex.typing.AdaptiveTouchModel
@@ -65,9 +66,10 @@ private enum class Page(val title: Int) {
     Styles(R.string.settings_style),
     Policy(R.string.settings_privacy_policy), Licences(R.string.settings_licences), Licence(R.string.settings_licences),
     Feedback(R.string.feedback_send_feedback), Diagnostics(R.string.diagnostics),
-    Replacements(R.string.words_replacements), WordsFile(R.string.words_file), KeyColors(R.string.key_color);
+    Replacements(R.string.words_replacements), WordsFile(R.string.words_file), KeyColors(R.string.key_color),
+    HoldDelays(R.string.hold_delay);
     val parent get() = when (this) {
-        Diagnostics, KeyColors -> Labs
+        Diagnostics, KeyColors, HoldDelays -> Labs
         Language, Styles, Replacements, WordsFile -> Dictation
         Layout, Height -> Keyboard
         Policy, Licences -> Privacy
@@ -93,6 +95,13 @@ internal val KeyboardHeight.label get() = when (this) {
     KeyboardHeight.MidTall -> R.string.keyboard_height_mid_tall
     KeyboardHeight.Tall -> R.string.keyboard_height_tall
     KeyboardHeight.ExtraTall -> R.string.keyboard_height_extra_tall
+}
+
+/** A Labs › Keyboard › Hold delay step's name. */
+internal val HoldDelay.label get() = when (this) {
+    HoldDelay.Short -> R.string.hold_delay_short
+    HoldDelay.Default -> R.string.hold_delay_default
+    HoldDelay.Long -> R.string.hold_delay_long
 }
 
 /** Faster English dictation's download problem, on its Labs row and the Dictation page's line. */
@@ -189,6 +198,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     var quickDictation by remember { mutableStateOf(QuickDictation.enabled(context)) }
     val keyColors = remember(revision) { typing.keyColors }
     val keyColor = remember(revision) { typing.keyColor }
+    val holdDelay = remember(revision) { typing.holdDelay }
     val testOnHome = remember(revision) { typing.testKeyboardOnHome }
     // A hidden field or leaving Labs shows the saved line again, never an unsaved draft.
     LaunchedEffect(page, signature) { if (page != Page.Labs || !signature) signatureDraft = speech.signatureText }
@@ -586,6 +596,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 Toggle(stringResource(R.string.swipe_delete_letters), stringResource(R.string.swipe_delete_letters_detail),
                                     swipeDeleteLetters) { typing.swipeDeleteLetters = it }
                                 Rule()
+                                // Labs › Keyboard › Hold delay: Default is today's timing, so it is the lab off.
+                                Entry(stringResource(R.string.hold_delay), stringResource(R.string.hold_delay_detail),
+                                    value = stringResource(holdDelay.label), action = { open(Page.HoldDelays) })
+                                Rule()
                                 ImportedWordsRows(typing, revision)
                                 Rule()
                                 Toggle(stringResource(R.string.marks_take_fix_space), stringResource(R.string.marks_take_fix_space_detail),
@@ -677,6 +691,13 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                         KeyColor.entries.forEachIndexed { i, it ->
                             if (i != 0) Rule()
                             Entry(stringResource(it.label), value = if (it == keyColor) "✓" else "", action = { typing.keyColor = it; open(Page.Labs) })
+                        }
+                    }
+                    Page.HoldDelays -> Card {
+                        HoldDelay.entries.forEachIndexed { i, it ->
+                            if (i != 0) Rule()
+                            Entry(stringResource(it.label), stringResource(R.string.hold_delay_millis, it.millis),
+                                value = if (it == holdDelay) "✓" else "", action = { typing.holdDelay = it; open(Page.Labs) })
                         }
                     }
                     Page.Styles -> Card {

@@ -2,6 +2,7 @@ package ly.anoma.hex.typing
 
 import android.content.Context
 import java.security.MessageDigest
+import ly.anoma.hex.keyboard.HoldDelay
 import ly.anoma.hex.keyboard.KeyboardHeight
 import ly.anoma.hex.keyboard.KeyColor
 import ly.anoma.hex.speech.Spoken
@@ -114,6 +115,10 @@ internal class TypingPreferences(context: Context) {
     var height: KeyboardHeight
         get() = KeyboardHeight.of(prefs.getString(HEIGHT, null))
         set(value) { prefs.edit().putString(HEIGHT, value.key).apply() }
+    /** Labs › Keyboard › Hold delay: Default (today's timing) until another step is chosen. */
+    var holdDelay: HoldDelay
+        get() = HoldDelay.of(prefs.getString(HOLD_DELAY, null))
+        set(value) { prefs.edit().putString(HOLD_DELAY, value.key).apply() }
     /** Labs › Keyboard › Key colors: the keys in [keyColor]'s colours, off by default. */
     var keyColors: Boolean
         get() = prefs.getBoolean(KEY_COLORS, false)
@@ -163,6 +168,7 @@ internal class TypingPreferences(context: Context) {
         const val VOICE_ONLY = "voiceOnly"
         const val VOICE_BAR_FROM_MENU = "voiceBarFromMenu"
         const val HEIGHT = "keyboardHeight"
+        const val HOLD_DELAY = "holdDelay"
         const val HEX_KEY_LEFT = "hexKeyLeft"
         const val VOLUME_IN_MENU = "volumeInMenu"
         const val KEY_COLORS = "keyColors"

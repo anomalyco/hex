@@ -207,6 +207,12 @@
     <string name="smart_quotes_detail">Types ’ ‘ “ ” for \' and \"</string>
     <string name="swipe_delete_letters">Delete swiped words letter by letter</string>
     <string name="swipe_delete_letters_detail">Delete after a swipe removes one letter, not the word</string>
+    <string name="hold_delay">Hold delay</string>
+    <string name="hold_delay_detail">How long to hold a key before its accents and symbols, or the space bar’s hold, kick in</string>
+    <string name="hold_delay_short">Short</string>
+    <string name="hold_delay_default">Default</string>
+    <string name="hold_delay_long">Long</string>
+    <string name="hold_delay_millis">%d ms</string>
     <string name="imported_words">SwiftKey words</string>
     <string name="imported_words_detail">Suggests the words SwiftKey learned from you, from its export. Stays on this phone.</string>
     <string name="imported_words_import">Import words…</string>

@@ -3330,6 +3330,15 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 │   FLAG_SHOW_UI)`, `TypingPreferences.volumeInMenu`); Android picks the stream as a volume key does,
 │   and the row changes no volume. Off, the menu is unchanged. Checks: none automated; it was not
 │   compiled here (no Android SDK) and nothing was tried on a device or emulator.
+├── Labs › Keyboard › Hold delay (Default) -> how long a key is held before its accents or symbols
+│   show (`HoldDelay`, `TypingPreferences.holdDelay`): Short 200 ms, Default 300 ms
+│   (`KeyboardMetrics.HOLD_MS`, today's), Long 500 ms, inside Gboard's Key long press delay slider
+│   (100 to 700 ms, 300 by default). The space bar's hold keeps Android's touch-and-hold delay at
+│   Default and is scaled by the same share otherwise (400 ms -> 266 or 666 ms). Pop-ups, haptics and
+│   Delete's repeat are unchanged. Checks: `holdDelayDefaultKeepsTodaysTimingAndTheSpaceBarScales` in
+│   InsertionTest.kt; `:app:testDebugUnitTest` (400 tests) and the release build's R8 step passed; on an
+│   API 36 emulator a held e showed its accents at 240 ms only with Short and at 350 ms with Default but
+│   not Long, and a 520 ms space hold opened the language menu with Short and Default but not Long.
 ├── Symbol pages -> Gboard's ?123 and =< pages (Pixel 8 emulator, API 36), the same on every
 │   layout: ?123 draws 1–0, then @ # $ _ & - + ( ) /, then * " ' : ; ! ? between the page switch
 │   and delete, and =< draws ~ ` | • √ π ÷ × § Δ, then £ ¢ € ¥ ^ ° = { } \, then % © ® ™ ✓ [ ]
