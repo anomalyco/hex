@@ -293,10 +293,15 @@ fn the_handwritten_sentences_clean_up_as_they_do_on_ios() {
                 &case.p_delete
             };
             ios += usize::from(guarded(Policy::IOS, &words, p_delete, &[]).1 == case.target);
-            desktop +=
-                usize::from(guarded(Policy::DESKTOP, &words, p_delete, &[]).1 == case.target);
+            let output = guarded(Policy::DESKTOP, &words, p_delete, &[]).1;
+            if case.id == 39 {
+                // The old target drops the noun before "the green one".
+                // Desktop deliberately keeps this unresolved correction.
+                assert_eq!(output, case.input);
+            }
+            desktop += usize::from(output == case.target);
         }
-        assert_eq!((ios, desktop), (on_target, on_target));
+        assert_eq!((ios, desktop), (on_target, on_target - 1));
     }
 }
 

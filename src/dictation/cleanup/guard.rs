@@ -30,12 +30,14 @@
 //!
 //! [`Policy::IOS`] is the iOS `CleanupGuard` ported rule for rule, and the
 //! two are held together by `fixtures/guard-reference.json`, which the Swift
-//! guard writes. [`Policy::DESKTOP`] adds four rules that only ever keep
+//! guard writes. [`Policy::DESKTOP`] adds rules that only ever keep
 //! more, each named at its switch in [`Policy`].
 //!
 //! Words are compared by Unicode scalar after composing them (NFC), where
 //! Swift compares whole characters. One known difference: Swift counts a
 //! Han numeral such as 三 as a digit, and this does not.
+
+mod context;
 
 use std::collections::HashSet;
 use std::ops::Range;
@@ -148,6 +150,9 @@ pub(crate) struct Policy {
     /// Edits that would leave no word are all refused. iOS makes this check
     /// after rendering and inserts the transcript as heard.
     something_left: bool,
+    /// Preserve comparative clauses, parallel items, anaphoric nouns, and
+    /// the polarity of a correction as a unit.
+    structural_context: bool,
 }
 
 impl Policy {
@@ -160,15 +165,17 @@ impl Policy {
         mentioned_fillers: false,
         negations: false,
         something_left: false,
+        structural_context: false,
     };
 
-    /// What desktop dictation uses: the iOS guard, and four more reasons to
+    /// What desktop dictation uses: the iOS guard, with additional reasons to
     /// keep a word.
     pub(crate) const DESKTOP: Self = Self {
         emphatic_repeats: true,
         mentioned_fillers: true,
         negations: true,
         something_left: true,
+        structural_context: true,
         ..Self::IOS
     };
 }
@@ -225,6 +232,8 @@ pub(crate) enum Reason {
     Mentioned,
     /// Removing everything admitted would leave no word.
     LeavesNothing,
+    /// A deletion would lose a clause relationship, list item, noun, or polarity.
+    Context,
 }
 
 /// Neighbouring words the guard kept for one reason.
@@ -333,6 +342,17 @@ impl CleanupGuard<'_> {
                 repair = surest > self.policy.repair_floor;
             }
         }
+        if self.policy.structural_context
+            && (context::parallel_items(heard, &run)
+                || (repair
+                    && (context::anaphoric_repair(heard, &run)
+                        || context::stranded_polarity(heard, &run))))
+        {
+            for index in run {
+                verdicts[index] = Some(Verdict::Refused(Reason::Context));
+            }
+            return;
+        }
         if repair {
             admit_all(Disfluency::Correction);
             return;
@@ -420,6 +440,12 @@ impl CleanupGuard<'_> {
             "like" => {
                 let next = bares.get(index + 1).map_or("", String::as_str);
                 let commas = words[index].ends_with(',') || previous.ends_with(',');
+                if self.policy.structural_context
+                    && !commas
+                    && context::comparative_clause(heard, index)
+                {
+                    return None;
+                }
                 commas
                     || (BE.contains(&previous_bare)
                         && !NOUN_STARTS.contains(&next)

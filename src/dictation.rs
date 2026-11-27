@@ -64,6 +64,7 @@ use crate::transcription::engine::{LiveStream, Partial, TranscriptionEngine};
 pub use release_tail::ReleaseTail;
 #[cfg(not(target_os = "macos"))]
 pub use release_tail::ReleaseWait;
+use release_tail::VoiceTrack;
 
 #[cfg(target_os = "macos")]
 use crate::audio::recording_environment::RecordingEnvironmentController;
@@ -144,7 +145,7 @@ pub const HOLD_THROUGH_KEYS_AFTER: Duration = Duration::from_secs(1);
 pub fn holds_through_joining_keys(enabled: bool, toggle: bool, held_for: Duration) -> bool {
     enabled && !toggle && held_for >= HOLD_THROUGH_KEYS_AFTER
 }
-/// Audio kept after a shortcut release that finishes a capture, because a
+/// Base audio kept after a shortcut release that finishes a capture, because a
 /// release often lands while the last word is still sounding.
 pub const POST_RELEASE_TAIL: Duration = Duration::from_millis(200);
 /// The longest a release tail grows while speech carries on past
@@ -212,96 +213,6 @@ const STREAM_FEED_SAMPLES: usize = 2_560;
 pub enum Finish {
     Discard,
     Transcribe(DictationClip),
-}
-
-/// Speech flags of a recording's 16 kHz audio, one per 20 ms frame, against
-/// the meeting detector's adaptive noise floor. Only recent frames are kept.
-#[derive(Default)]
-struct VoiceTrack {
-    speech: crate::transcription::pause_segmenter::SpeechFrames,
-    frame: Vec<f32>,
-    /// Clip samples classified or waiting in `frame`.
-    consumed: usize,
-    flags: VecDeque<bool>,
-    /// The frame index of `flags[0]`.
-    first: usize,
-}
-
-impl VoiceTrack {
-    const FRAME: usize = crate::transcription::pause_segmenter::FRAME_SAMPLES;
-
-    fn extend(&mut self, mut samples: &[f32]) {
-        self.consumed += samples.len();
-        while !samples.is_empty() {
-            let take = samples.len().min(Self::FRAME - self.frame.len());
-            self.frame.extend_from_slice(&samples[..take]);
-            samples = &samples[take..];
-            if self.frame.len() == Self::FRAME {
-                self.flags.push_back(self.speech.is_speech(&self.frame));
-                self.frame.clear();
-                if self.flags.len() > VOICE_HISTORY_FRAMES {
-                    self.flags.pop_front();
-                    self.first += 1;
-                }
-            }
-        }
-    }
-
-    /// Frames classified so far.
-    fn frames(&self) -> usize {
-        self.first + self.flags.len()
-    }
-
-    fn is_speech(&self, frame: usize) -> bool {
-        frame
-            .checked_sub(self.first)
-            .and_then(|index| self.flags.get(index))
-            .copied()
-            .unwrap_or(false)
-    }
-
-    /// Whether speech runs up to frame `end` (exclusive): its last speech
-    /// frame is within a syllable gap of `end`, and at least
-    /// [`TAIL_SPEECH_FRAMES`] speech frames, none before `from`, lead up to
-    /// it with no gap longer than a syllable's.
-    fn talking_until(&self, end: usize, from: usize) -> bool {
-        let mut speech = 0;
-        let mut gap = 0;
-        let mut frame = end;
-        while frame > from.max(self.first) {
-            frame -= 1;
-            if self.is_speech(frame) {
-                speech += 1;
-                gap = 0;
-                if speech >= TAIL_SPEECH_FRAMES {
-                    return true;
-                }
-            } else {
-                gap += 1;
-                if gap > TAIL_SPEECH_GAP_FRAMES {
-                    return false;
-                }
-            }
-        }
-        false
-    }
-
-    /// The first frame at or after `from`, before `end`, that ends
-    /// [`TAIL_QUIET_FRAMES`] quiet frames in a row.
-    fn quiet_end(&self, from: usize, end: usize) -> Option<usize> {
-        let mut quiet = 0;
-        for frame in from..end {
-            if self.is_speech(frame) {
-                quiet = 0;
-            } else {
-                quiet += 1;
-                if quiet == TAIL_QUIET_FRAMES {
-                    return Some(frame + 1);
-                }
-            }
-        }
-        None
-    }
 }
 
 /// How the dictation shortcut controls a capture.
@@ -1448,7 +1359,7 @@ impl DictationCapture {
     }
 
     /// Caps the live stream at the audio this finish keeps: everything through
-    /// `ended_at + tail`, in final-clip coordinates. A grown tail, and audio
+    /// the shortest possible tail, in final-clip coordinates. A longer tail, and audio
     /// captured while the tail decides, arrive from the finished clip instead,
     /// so the stream is never fed past the clip from here on. What it heard
     /// before the finish can still sit past the clip's end, which the engine's
@@ -1457,62 +1368,10 @@ impl DictationCapture {
         let Some(recording) = &mut self.recording else {
             return;
         };
-        let through = recording.pre_press + ended_at.duration_since(recording.started_at) + tail;
+        let through = recording.pre_press
+            + ended_at.duration_since(recording.started_at)
+            + tail.min(release_tail::MIN_RELEASE_TAIL);
         recording.feed_limit = Some(samples_for(through, PARAKEET_SAMPLE_RATE));
-    }
-
-    /// The tail a shortcut finish at `ended_at` keeps, judged on the audio
-    /// recorded so far: [`POST_RELEASE_TAIL`], or, while speech carries on
-    /// past it, until [`TAIL_QUIET_FRAMES`] of quiet or [`MAX_RELEASE_TAIL`].
-    /// Only sustained speech grows it, never a key click, and never the
-    /// stop tone of `tone` length that sounds from the release: speech must
-    /// also be heard after the tone could have reached the microphone.
-    pub fn release_tail(&self, ended_at: CaptureInstant, tone: Duration) -> ReleaseTail {
-        let Some(recording) = &self.recording else {
-            return ReleaseTail::Through(POST_RELEASE_TAIL);
-        };
-        let through = recording.recorded_through.unwrap_or(ended_at);
-        if through < ended_at + POST_RELEASE_TAIL {
-            return ReleaseTail::Waiting { growing: false };
-        }
-        let voice = &recording.voice;
-        let heard = voice.frames();
-        let capped = through >= ended_at + MAX_RELEASE_TAIL;
-        let base = recording.frame_at(ended_at + POST_RELEASE_TAIL).min(heard);
-        if !voice.talking_until(base, 0) {
-            return ReleaseTail::Through(POST_RELEASE_TAIL);
-        }
-        // What runs into the base tail's end may be the tone; speech must
-        // carry on once it is over.
-        let after_tone = if tone.is_zero() {
-            0
-        } else {
-            recording.frame_at(ended_at + tone + STOP_TONE_MARGIN)
-        };
-        let decision = base.max(after_tone + TAIL_SPEECH_FRAMES);
-        if decision > recording.frame_at(ended_at + MAX_RELEASE_TAIL) {
-            return ReleaseTail::Through(POST_RELEASE_TAIL);
-        }
-        if heard < decision {
-            return if capped {
-                ReleaseTail::Through(POST_RELEASE_TAIL)
-            } else {
-                ReleaseTail::Waiting { growing: true }
-            };
-        }
-        if !voice.talking_until(decision, after_tone) {
-            return ReleaseTail::Through(POST_RELEASE_TAIL);
-        }
-        let tail = |frame| {
-            recording
-                .after(ended_at, frame)
-                .clamp(POST_RELEASE_TAIL, MAX_RELEASE_TAIL)
-        };
-        match voice.quiet_end(decision, heard) {
-            Some(end) => ReleaseTail::Through(tail(end)),
-            None if capped => ReleaseTail::Through(MAX_RELEASE_TAIL),
-            None => ReleaseTail::Waiting { growing: true },
-        }
     }
 
     /// Finishes at the exact `ended_at` event, keeping audio through
@@ -2266,6 +2125,155 @@ mod tests {
         assert_eq!(tail, POST_RELEASE_TAIL);
         assert_eq!(waited, POST_RELEASE_TAIL);
         assert_eq!(clip.duration_ms(), 1_650);
+    }
+
+    #[test]
+    fn a_quiet_release_saves_at_least_120_ms_of_tail_wait() {
+        let (tail, waited, clip) = release_tail_for(voice(-800.0, -220.0), Duration::ZERO);
+        assert_eq!(tail, Duration::from_millis(40));
+        assert!(waited <= Duration::from_millis(80), "{waited:?}");
+        assert_eq!(clip.duration_ms(), 1_490);
+        // The last voiced samples remain in the finished clip.
+        assert!(
+            clip.samples[(450 + 760) * 16..(450 + 780) * 16]
+                .iter()
+                .any(|sample| sample.abs() > 0.1)
+        );
+    }
+
+    /// Deterministic latency benchmark: elapsed microphone time, not build
+    /// time or scheduler jitter. End-to-end paste latency is a separate bench.
+    #[test]
+    fn release_tail_latency_budget() {
+        let mut waits = Vec::new();
+        for pause_ms in [180.0, 200.0, 220.0, 250.0, 300.0] {
+            let (tail, waited, _) = release_tail_for(voice(-800.0, -pause_ms), Duration::ZERO);
+            assert_eq!(tail, Duration::from_millis(40));
+            waits.push(waited);
+        }
+        waits.sort();
+        assert!(waits[waits.len() / 2] <= Duration::from_millis(80));
+        assert!(POST_RELEASE_TAIL - waits[waits.len() - 1] >= Duration::from_millis(120));
+    }
+
+    #[test]
+    fn a_short_release_tail_never_feeds_the_stream_past_the_clip() {
+        let (engine, commands) = TranscriptionEngine::for_test();
+        let origin = capture_time();
+        let released = origin + Duration::from_secs(1);
+        let mut capture = DictationCapture::new(16_000);
+        capture.ingest(&vec![0.0; 16_000], origin);
+        capture.start_at(origin);
+        for chunk in 1..=50_u64 {
+            let samples: Vec<_> = ((chunk - 1) * 320..chunk * 320)
+                .map(|index| voice(-800.0, -220.0)(index as f64 / 16.0 - 1_000.0))
+                .collect();
+            capture.ingest(&samples, origin + Duration::from_millis(chunk * 20));
+        }
+        assert!(capture.become_intentional(origin + MINIMUM_HOLD_DURATION));
+        capture.begin_stream(&engine);
+        capture.limit_stream_to(released, POST_RELEASE_TAIL);
+        // A whole 200 ms callback arrives at once. The stream must stop
+        // at the shortest possible tail even before the decision is made.
+        capture.ingest(&[0.0; 3_200], released + POST_RELEASE_TAIL);
+        let ReleaseTail::Through(tail) = capture.release_tail(released, Duration::ZERO) else {
+            panic!("quiet tail should be decided");
+        };
+        assert_eq!(tail, Duration::from_millis(40));
+        let Finish::Transcribe(clip) = capture.finish_with_tail(released, tail) else {
+            panic!("expected transcription");
+        };
+        let (fed, begun, _) = stream_traffic(&commands);
+        assert_eq!(begun, 1);
+        assert!(fed.len() <= clip.samples.len());
+        assert_eq!(clip.duration_ms(), 1_490);
+    }
+
+    #[test]
+    fn a_short_pause_only_receives_its_measured_silence_credit() {
+        let (tail, waited, _) = release_tail_for(voice(-800.0, -120.0), Duration::ZERO);
+        assert!((Duration::from_millis(80)..=Duration::from_millis(120)).contains(&tail));
+        assert!(waited >= tail && waited <= tail + Duration::from_millis(40));
+    }
+
+    #[test]
+    fn renewed_energy_after_key_up_cancels_the_short_tail() {
+        let (tail, _, clip) = release_tail_for(
+            |ms| voice(-800.0, -220.0)(ms) + voice(20.0, 170.0)(ms),
+            Duration::ZERO,
+        );
+        assert!(tail >= POST_RELEASE_TAIL);
+        assert!(
+            clip.samples[(450 + 1_140) * 16..(450 + 1_160) * 16]
+                .iter()
+                .any(|sample| sample.abs() > 0.1)
+        );
+    }
+
+    #[test]
+    fn low_snr_trailing_consonants_are_not_treated_as_quiet() {
+        // Room at -78 dBFS, trailing energy at -67 dBFS: below the speech
+        // cutoff, but clearly above the stricter quiet threshold.
+        let oscillation = |ms: f64, db: f64, hz: f64| {
+            (10_f64.powf(db / 20.0)
+                * 2_f64.sqrt()
+                * (2.0 * std::f64::consts::PI * hz * ms / 1_000.0).sin()) as f32
+        };
+        for onset in [-80.0, 0.0, 20.0] {
+            let (tail, waited, clip) = release_tail_for(
+                |ms| {
+                    oscillation(ms, -78.0, 90.0)
+                        + voice(-800.0, -220.0)(ms)
+                        + if (onset..170.0).contains(&ms) {
+                            oscillation(ms, -67.0, 2_400.0)
+                        } else {
+                            0.0
+                        }
+                },
+                Duration::ZERO,
+            );
+            assert_eq!(tail, POST_RELEASE_TAIL, "onset {onset}");
+            assert!(waited >= POST_RELEASE_TAIL);
+            assert!(
+                clip.samples[(450 + 1_140) * 16..(450 + 1_160) * 16]
+                    .iter()
+                    .any(|sample| sample.abs() > 0.0004)
+            );
+        }
+    }
+
+    #[test]
+    fn quiet_tail_waits_for_classified_audio_at_every_input_rate() {
+        for rate in [8_000, 16_000, 44_100, 48_000] {
+            let mut capture = DictationCapture::new(rate);
+            let origin = capture_time();
+            capture.start_at(origin);
+            let released = origin + Duration::from_secs(1);
+            let mut decided = None;
+            for chunk in 1..=65_u64 {
+                let frames = rate as u64 / 50;
+                let samples: Vec<_> = ((chunk - 1) * frames..chunk * frames)
+                    .map(|index| {
+                        voice(-800.0, -220.0)(index as f64 * 1_000.0 / rate as f64 - 1_000.0)
+                    })
+                    .collect();
+                let through = origin + Duration::from_millis(chunk * 20);
+                capture.ingest(&samples, through);
+                if through >= released
+                    && let ReleaseTail::Through(tail) =
+                        capture.release_tail(released, Duration::ZERO)
+                {
+                    decided = Some((tail, through.duration_since(released)));
+                    break;
+                }
+            }
+            let (tail, waited) = decided.expect("resampled quiet audio settles");
+            assert_eq!(tail, Duration::from_millis(40), "rate {rate}");
+            assert!(
+                waited <= Duration::from_millis(160),
+                "rate {rate}: {waited:?}"
+            );
+        }
     }
 
     #[test]

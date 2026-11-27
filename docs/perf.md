@@ -185,6 +185,16 @@ Only bench builds that have `HEX_AUDIO_FIXTURE`. An older build ignores it
 and opens the real microphone; setup then refuses the block, but only
 after the microphone was open.
 
+### Release-tail latency budget
+
+`scripts/check release_tail_latency_budget` runs a deterministic capture
+benchmark over five synthetic utterances ending 180–300 ms before key-up.
+It measures microphone time until `DictationCapture::release_tail` settles,
+including frame alignment, and requires at least 120 ms saved versus the
+fixed 200 ms tail. It opens no audio device and loads no model. Companion
+tests cover resampling, low-SNR endings, resumed speech, and stream bounds.
+This isolates the tail's latency; it does not measure decoding or paste.
+
 ## Interaction cases
 
 `perf/interaction.bench.ts` uses the Settings window the way a person does.
