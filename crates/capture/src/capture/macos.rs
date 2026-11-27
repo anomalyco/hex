@@ -721,25 +721,28 @@ pub fn screen_capture_usable(probe: bool) -> bool {
 /// `SCScreenshotManager`. Returns the image size. Asks for Screen Recording if it was never
 /// decided, so only call it once it's known to be granted (or from `scrawl sck-probe`).
 pub fn screen_capture_probe() -> Result<(u32, u32), String> {
-    let content = SCShareableContent::get().map_err(|e| format!("SCShareableContent: {e:?}"))?;
-    let display = content
-        .displays()
-        .into_iter()
-        .next()
-        .ok_or("SCShareableContent: no displays")?;
-    let filter = SCContentFilter::create()
-        .with_display(&display)
-        .with_excluding_windows(&[] as &[&SCWindow])
-        .build()
-        .map_err(|e| format!("SCContentFilter: {e:?}"))?;
-    let config = SCStreamConfiguration::new().with_width(64).with_height(40);
-    let image = SCScreenshotManager::capture_image(&filter, &config)
-        .map_err(|e| format!("SCScreenshotManager: {e:?}"))?;
-    let (w, h) = (image.width() as u32, image.height() as u32);
-    if w == 0 || h == 0 {
-        return Err("SCScreenshotManager: empty image".into());
-    }
-    Ok((w, h))
+    objc2::rc::autoreleasepool(|_| {
+        let content =
+            SCShareableContent::get().map_err(|e| format!("SCShareableContent: {e:?}"))?;
+        let display = content
+            .displays()
+            .into_iter()
+            .next()
+            .ok_or("SCShareableContent: no displays")?;
+        let filter = SCContentFilter::create()
+            .with_display(&display)
+            .with_excluding_windows(&[] as &[&SCWindow])
+            .build()
+            .map_err(|e| format!("SCContentFilter: {e:?}"))?;
+        let config = SCStreamConfiguration::new().with_width(64).with_height(40);
+        let image = SCScreenshotManager::capture_image(&filter, &config)
+            .map_err(|e| format!("SCScreenshotManager: {e:?}"))?;
+        let (w, h) = (image.width() as u32, image.height() as u32);
+        if w == 0 || h == 0 {
+            return Err("SCScreenshotManager: empty image".into());
+        }
+        Ok((w, h))
+    })
 }
 
 /// The system prompt for Screen Recording (once; later calls do nothing).
@@ -868,107 +871,109 @@ pub fn discover_target(window_query: Option<&str>) -> TargetInfo {
 
 /// Like `discover_target`, recording the display under `point` (see `pick_display`).
 pub fn discover_target_at(window_query: Option<&str>, point: Option<[f64; 2]>) -> TargetInfo {
-    let frontmost = frontmost_app_info();
-    let screens = crate::screens::displays();
-    if let Ok(content) = SCShareableContent::get() {
-        if let Some(query) = window_query {
-            let q = query.to_lowercase();
-            // Normal windows only: the host's own count (Hex's Settings), its overlays don't.
-            if let Some(win) = content.windows().into_iter().find(|w| {
-                w.is_on_screen()
-                    && w.window_layer() == 0
-                    && (w
-                        .title()
-                        .as_deref()
-                        .is_some_and(|t| t.to_lowercase().contains(&q))
-                        || w.owning_application()
-                            .as_ref()
-                            .is_some_and(|a| a.application_name().to_lowercase().contains(&q)))
-            }) {
-                let f = win.frame();
+    objc2::rc::autoreleasepool(|_| {
+        let frontmost = frontmost_app_info();
+        let screens = crate::screens::displays();
+        if let Ok(content) = SCShareableContent::get() {
+            if let Some(query) = window_query {
+                let q = query.to_lowercase();
+                // Normal windows only: the host's own count (Hex's Settings), its overlays don't.
+                if let Some(win) = content.windows().into_iter().find(|w| {
+                    w.is_on_screen()
+                        && w.window_layer() == 0
+                        && (w
+                            .title()
+                            .as_deref()
+                            .is_some_and(|t| t.to_lowercase().contains(&q))
+                            || w.owning_application()
+                                .as_ref()
+                                .is_some_and(|a| a.application_name().to_lowercase().contains(&q)))
+                }) {
+                    let f = win.frame();
+                    let rect = [f.origin.x, f.origin.y, f.size.width, f.size.height];
+                    let owner = win.owning_application();
+                    let (display_id, scale) = display_of(&screens, rect);
+                    return TargetInfo {
+                        mode: CaptureMode::Window,
+                        app: owner.as_ref().map(|a| a.application_name()),
+                        bundle_id: owner.as_ref().map(|a| a.bundle_identifier()),
+                        window_title: win.title(),
+                        window_id: Some(win.window_id()),
+                        display_id,
+                        frame: crate::screens::with_scale(rect, scale),
+                    };
+                }
+            }
+
+            let displays = content.displays();
+            // Its first normal window, else (a launcher's panel) its first floating one.
+            let front_window = frontmost.as_ref().and_then(|(pid, _, _)| {
+                let own: Vec<_> = content
+                    .windows()
+                    .into_iter()
+                    .filter(|w| {
+                        w.is_on_screen()
+                            && (0..=101).contains(&w.window_layer())
+                            && w.owning_application()
+                                .as_ref()
+                                .is_some_and(|a| a.process_id() == *pid)
+                    })
+                    .collect();
+                let first = own.iter().position(|w| w.window_layer() == 0).unwrap_or(0);
+                own.into_iter().nth(first)
+            });
+            let rects: Vec<[f64; 4]> = displays
+                .iter()
+                .map(|d| {
+                    let f = d.frame();
+                    [f.origin.x, f.origin.y, f.size.width, f.size.height]
+                })
+                .collect();
+            let focused = front_window.as_ref().map(|w| {
+                let f = w.frame();
+                [f.origin.x, f.origin.y, f.size.width, f.size.height]
+            });
+            if let Some(display) = displays.get(pick_display(&rects, point, focused)) {
+                let f = display.frame();
                 let rect = [f.origin.x, f.origin.y, f.size.width, f.size.height];
-                let owner = win.owning_application();
-                let (display_id, scale) = display_of(&screens, rect);
+                let window_title = front_window.as_ref().and_then(|w| w.title());
+                let scale = screens
+                    .iter()
+                    .find(|s| s.id == display.display_id())
+                    .map_or_else(|| display_of(&screens, rect).1, |s| s.scale);
                 return TargetInfo {
-                    mode: CaptureMode::Window,
-                    app: owner.as_ref().map(|a| a.application_name()),
-                    bundle_id: owner.as_ref().map(|a| a.bundle_identifier()),
-                    window_title: win.title(),
-                    window_id: Some(win.window_id()),
-                    display_id,
+                    mode: CaptureMode::Display,
+                    app: frontmost.as_ref().map(|(_, name, _)| name.clone()),
+                    bundle_id: frontmost.and_then(|(_, _, bid)| bid),
+                    window_title,
+                    window_id: None,
+                    display_id: display.display_id(),
                     frame: crate::screens::with_scale(rect, scale),
                 };
             }
         }
 
-        let displays = content.displays();
-        // Its first normal window, else (a launcher's panel) its first floating one.
-        let front_window = frontmost.as_ref().and_then(|(pid, _, _)| {
-            let own: Vec<_> = content
-                .windows()
-                .into_iter()
-                .filter(|w| {
-                    w.is_on_screen()
-                        && (0..=101).contains(&w.window_layer())
-                        && w.owning_application()
-                            .as_ref()
-                            .is_some_and(|a| a.process_id() == *pid)
-                })
-                .collect();
-            let first = own.iter().position(|w| w.window_layer() == 0).unwrap_or(0);
-            own.into_iter().nth(first)
-        });
-        let rects: Vec<[f64; 4]> = displays
-            .iter()
-            .map(|d| {
-                let f = d.frame();
-                [f.origin.x, f.origin.y, f.size.width, f.size.height]
-            })
-            .collect();
-        let focused = front_window.as_ref().map(|w| {
-            let f = w.frame();
-            [f.origin.x, f.origin.y, f.size.width, f.size.height]
-        });
-        if let Some(display) = displays.get(pick_display(&rects, point, focused)) {
-            let f = display.frame();
-            let rect = [f.origin.x, f.origin.y, f.size.width, f.size.height];
-            let window_title = front_window.as_ref().and_then(|w| w.title());
-            let scale = screens
-                .iter()
-                .find(|s| s.id == display.display_id())
-                .map_or_else(|| display_of(&screens, rect).1, |s| s.scale);
-            return TargetInfo {
-                mode: CaptureMode::Display,
-                app: frontmost.as_ref().map(|(_, name, _)| name.clone()),
-                bundle_id: frontmost.and_then(|(_, _, bid)| bid),
-                window_title,
-                window_id: None,
-                display_id: display.display_id(),
-                frame: crate::screens::with_scale(rect, scale),
-            };
+        // No ScreenCaptureKit: the display under `point` from CoreGraphics.
+        let rects: Vec<[f64; 4]> = screens.iter().map(|s| s.frame).collect();
+        let (display_id, frame) = screens.get(pick_display(&rects, point, None)).map_or_else(
+            || {
+                let id = unsafe { CGMainDisplayID() };
+                let w = (unsafe { CGDisplayPixelsWide(id) } as f64).max(1440.0);
+                let h = (unsafe { CGDisplayPixelsHigh(id) } as f64).max(900.0);
+                (id, crate::screens::with_scale([0.0, 0.0, w, h], 2.0))
+            },
+            |s| (s.id, crate::screens::with_scale(s.frame, s.scale)),
+        );
+        TargetInfo {
+            mode: CaptureMode::Display,
+            app: frontmost.as_ref().map(|(_, name, _)| name.clone()),
+            bundle_id: frontmost.and_then(|(_, _, bid)| bid),
+            window_title: None,
+            window_id: None,
+            display_id,
+            frame,
         }
-    }
-
-    // No ScreenCaptureKit: the display under `point` from CoreGraphics.
-    let rects: Vec<[f64; 4]> = screens.iter().map(|s| s.frame).collect();
-    let (display_id, frame) = screens.get(pick_display(&rects, point, None)).map_or_else(
-        || {
-            let id = unsafe { CGMainDisplayID() };
-            let w = (unsafe { CGDisplayPixelsWide(id) } as f64).max(1440.0);
-            let h = (unsafe { CGDisplayPixelsHigh(id) } as f64).max(900.0);
-            (id, crate::screens::with_scale([0.0, 0.0, w, h], 2.0))
-        },
-        |s| (s.id, crate::screens::with_scale(s.frame, s.scale)),
-    );
-    TargetInfo {
-        mode: CaptureMode::Display,
-        app: frontmost.as_ref().map(|(_, name, _)| name.clone()),
-        bundle_id: frontmost.and_then(|(_, _, bid)| bid),
-        window_title: None,
-        window_id: None,
-        display_id,
-        frame,
-    }
+    })
 }
 
 /// The display a global rect is on (its centre, else most of it) and that display's scale.
@@ -983,92 +988,97 @@ fn display_of(screens: &[crate::screens::Screen], rect: [f64; 4]) -> (u32, f64) 
 /// Window picker, the host's own among them (Hex's Settings); its overlays and panels sit above
 /// the normal level.
 pub fn list_selectable_windows() -> Vec<TargetInfo> {
-    let Ok(content) = SCShareableContent::get() else {
-        return Vec::new();
-    };
-    let screens = crate::screens::displays();
+    objc2::rc::autoreleasepool(|_| {
+        let Ok(content) = SCShareableContent::get() else {
+            return Vec::new();
+        };
+        let screens = crate::screens::displays();
 
-    content
-        .windows()
-        .into_iter()
-        .filter(|w| {
-            let f = w.frame();
-            w.is_on_screen()
-                && w.window_layer() == 0
-                && f.size.width >= 80.0
-                && f.size.height >= 80.0
-                && w.owning_application().is_some()
-        })
-        .map(|w| {
-            let f = w.frame();
-            let rect = [f.origin.x, f.origin.y, f.size.width, f.size.height];
-            let (display_id, scale) = display_of(&screens, rect);
-            let owner = w.owning_application();
-            TargetInfo {
-                mode: CaptureMode::Window,
-                app: owner
-                    .as_ref()
-                    .map(|a| clean_label(&a.application_name()))
-                    .filter(|s| !s.is_empty()),
-                bundle_id: owner.as_ref().map(|a| a.bundle_identifier()),
-                window_title: w.title().map(|t| clean_label(&t)).filter(|t| !t.is_empty()),
-                window_id: Some(w.window_id()),
-                display_id,
-                frame: crate::screens::with_scale(rect, scale),
-            }
-        })
-        .collect()
+        content
+            .windows()
+            .into_iter()
+            .filter(|w| {
+                let f = w.frame();
+                w.is_on_screen()
+                    && w.window_layer() == 0
+                    && f.size.width >= 80.0
+                    && f.size.height >= 80.0
+                    && w.owning_application().is_some()
+            })
+            .map(|w| {
+                let f = w.frame();
+                let rect = [f.origin.x, f.origin.y, f.size.width, f.size.height];
+                let (display_id, scale) = display_of(&screens, rect);
+                let owner = w.owning_application();
+                TargetInfo {
+                    mode: CaptureMode::Window,
+                    app: owner
+                        .as_ref()
+                        .map(|a| clean_label(&a.application_name()))
+                        .filter(|s| !s.is_empty()),
+                    bundle_id: owner.as_ref().map(|a| a.bundle_identifier()),
+                    window_title: w.title().map(|t| clean_label(&t)).filter(|t| !t.is_empty()),
+                    window_id: Some(w.window_id()),
+                    display_id,
+                    frame: crate::screens::with_scale(rect, scale),
+                }
+            })
+            .collect()
+    })
 }
 
 static LAST_EXTERNAL_APP_PID: AtomicI32 = AtomicI32::new(0);
 
 pub fn record_external_frontmost_app() {
-    use objc2_app_kit::NSWorkspace;
-    let workspace = NSWorkspace::sharedWorkspace();
-    if let Some(app) = workspace.frontmostApplication() {
-        let pid = app.processIdentifier();
-        if pid > 0 && pid != std::process::id() as i32 {
-            LAST_EXTERNAL_APP_PID.store(pid, Ordering::Release);
+    objc2::rc::autoreleasepool(|_| {
+        use objc2_app_kit::NSWorkspace;
+        let workspace = NSWorkspace::sharedWorkspace();
+        if let Some(app) = workspace.frontmostApplication() {
+            let pid = app.processIdentifier();
+            if pid > 0 && pid != std::process::id() as i32 {
+                LAST_EXTERNAL_APP_PID.store(pid, Ordering::Release);
+            }
         }
-    }
+    })
 }
 
 pub fn ensure_external_app_active() {
-    use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication, NSWorkspace};
-    let our_pid = std::process::id() as i32;
-    let workspace = NSWorkspace::sharedWorkspace();
-    let front_pid = workspace
-        .frontmostApplication()
-        .map_or(0, |a| a.processIdentifier());
-    let Some(target_pid) = paste_app(
-        front_pid,
-        our_pid,
-        LAST_EXTERNAL_APP_PID.load(Ordering::Acquire),
-    ) else {
-        return;
-    };
-    if target_pid == front_pid {
-        LAST_EXTERNAL_APP_PID.store(front_pid, Ordering::Release);
-        return;
-    }
-    if let Some(target_app) =
-        NSRunningApplication::runningApplicationWithProcessIdentifier(target_pid)
-    {
-        #[allow(deprecated)]
-        let _ = target_app
-            .activateWithOptions(NSApplicationActivationOptions::ActivateIgnoringOtherApps);
-        let deadline = Instant::now() + Duration::from_millis(220);
-        while Instant::now() < deadline {
-            if workspace
-                .frontmostApplication()
-                .is_some_and(|a| a.processIdentifier() == target_pid)
-            {
-                break;
-            }
-            thread::sleep(Duration::from_millis(10));
+    objc2::rc::autoreleasepool(|_| {
+        use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication, NSWorkspace};
+        let our_pid = std::process::id() as i32;
+        let workspace = NSWorkspace::sharedWorkspace();
+        let front_pid = workspace
+            .frontmostApplication()
+            .map_or(0, |a| a.processIdentifier());
+        let Some(target_pid) = paste_app(
+            front_pid,
+            our_pid,
+            LAST_EXTERNAL_APP_PID.load(Ordering::Acquire),
+        ) else {
+            return;
+        };
+        if target_pid == front_pid {
+            LAST_EXTERNAL_APP_PID.store(front_pid, Ordering::Release);
+            return;
         }
-        thread::sleep(Duration::from_millis(25));
-    }
+        if let Some(target_app) =
+            NSRunningApplication::runningApplicationWithProcessIdentifier(target_pid)
+        {
+            #[allow(deprecated)]
+            let _ = target_app
+                .activateWithOptions(NSApplicationActivationOptions::ActivateIgnoringOtherApps);
+            let deadline = Instant::now() + Duration::from_millis(220);
+            while Instant::now() < deadline {
+                if objc2::rc::autoreleasepool(|_| workspace.frontmostApplication())
+                    .is_some_and(|a| a.processIdentifier() == target_pid)
+                {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+    })
 }
 
 /// The app a paste goes to: the active app unless it's the host, else the last external one.
@@ -1084,7 +1094,7 @@ fn paste_app(front_pid: i32, our_pid: i32, last_external: i32) -> Option<i32> {
 /// like Invoke), from Accessibility and the window list.
 fn key_panel_pid(front: i32) -> Option<i32> {
     let focused = crate::ax::focused_app_pid().filter(|pid| *pid != front)?;
-    let raw = objc2::rc::autoreleasepool(|_| crate::windows::raw_windows());
+    let raw = raw_windows_now();
     crate::windows::panel_front(&raw, Some(front), Some(focused), std::process::id() as i32)
 }
 
@@ -1093,56 +1103,55 @@ fn key_panel_pid(front: i32) -> Option<i32> {
 /// (a click on the capsule), the host isn't what a capture is about. For what a capture is
 /// about only: output handed to an app goes elsewhere ([`paste_app`]).
 fn counts_as_front(pid: i32, our_pid: i32) -> bool {
-    pid > 0
-        && (pid != our_pid
-            || crate::windows::own_window_in_front(
-                &objc2::rc::autoreleasepool(|_| crate::windows::raw_windows()),
-                our_pid,
-            ))
+    pid > 0 && (pid != our_pid || crate::windows::own_window_in_front(&raw_windows_now(), our_pid))
 }
 
 /// The frontmost app's pid (an app whose floating panel has the keys counts), or the last
 /// external one while the host is in front without a window of its own.
 pub fn frontmost_external_pid() -> Option<i32> {
-    use objc2_app_kit::NSWorkspace;
-    let our_pid = std::process::id() as i32;
-    let pid = NSWorkspace::sharedWorkspace()
-        .frontmostApplication()
-        .map_or(0, |a| a.processIdentifier());
-    if counts_as_front(pid, our_pid) {
-        return Some(key_panel_pid(pid).unwrap_or(pid));
-    }
-    let fallback = LAST_EXTERNAL_APP_PID.load(Ordering::Acquire);
-    (fallback > 0 && fallback != our_pid).then_some(fallback)
+    objc2::rc::autoreleasepool(|_| {
+        use objc2_app_kit::NSWorkspace;
+        let our_pid = std::process::id() as i32;
+        let pid = NSWorkspace::sharedWorkspace()
+            .frontmostApplication()
+            .map_or(0, |a| a.processIdentifier());
+        if counts_as_front(pid, our_pid) {
+            return Some(key_panel_pid(pid).unwrap_or(pid));
+        }
+        let fallback = LAST_EXTERNAL_APP_PID.load(Ordering::Acquire);
+        (fallback > 0 && fallback != our_pid).then_some(fallback)
+    })
 }
 
 pub fn frontmost_app_info() -> Option<(i32, String, Option<String>)> {
-    use objc2_app_kit::{NSRunningApplication, NSWorkspace};
-    let our_pid = std::process::id() as i32;
-    let workspace = NSWorkspace::sharedWorkspace();
-    if let Some(app) = workspace.frontmostApplication() {
-        let pid = app.processIdentifier();
-        if counts_as_front(pid, our_pid) {
-            if pid != our_pid {
-                LAST_EXTERNAL_APP_PID.store(pid, Ordering::Release);
-            }
-            let app = key_panel_pid(pid)
-                .and_then(NSRunningApplication::runningApplicationWithProcessIdentifier)
-                .unwrap_or(app);
+    objc2::rc::autoreleasepool(|_| {
+        use objc2_app_kit::{NSRunningApplication, NSWorkspace};
+        let our_pid = std::process::id() as i32;
+        let workspace = NSWorkspace::sharedWorkspace();
+        if let Some(app) = workspace.frontmostApplication() {
             let pid = app.processIdentifier();
+            if counts_as_front(pid, our_pid) {
+                if pid != our_pid {
+                    LAST_EXTERNAL_APP_PID.store(pid, Ordering::Release);
+                }
+                let app = key_panel_pid(pid)
+                    .and_then(NSRunningApplication::runningApplicationWithProcessIdentifier)
+                    .unwrap_or(app);
+                let pid = app.processIdentifier();
+                let name = app.localizedName()?.to_string();
+                let bundle_id = app.bundleIdentifier().map(|b| b.to_string());
+                return Some((pid, name, bundle_id));
+            }
+        }
+        let fallback_pid = LAST_EXTERNAL_APP_PID.load(Ordering::Acquire);
+        if fallback_pid > 0 && fallback_pid != our_pid {
+            let app = NSRunningApplication::runningApplicationWithProcessIdentifier(fallback_pid)?;
             let name = app.localizedName()?.to_string();
             let bundle_id = app.bundleIdentifier().map(|b| b.to_string());
-            return Some((pid, name, bundle_id));
+            return Some((fallback_pid, name, bundle_id));
         }
-    }
-    let fallback_pid = LAST_EXTERNAL_APP_PID.load(Ordering::Acquire);
-    if fallback_pid > 0 && fallback_pid != our_pid {
-        let app = NSRunningApplication::runningApplicationWithProcessIdentifier(fallback_pid)?;
-        let name = app.localizedName()?.to_string();
-        let bundle_id = app.bundleIdentifier().map(|b| b.to_string());
-        return Some((fallback_pid, name, bundle_id));
-    }
-    None
+        None
+    })
 }
 
 /// The ScreenCaptureKit sampler: `capture_core` records `recording.mp4` while candidate
@@ -1177,101 +1186,108 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<super::Movie> {
     let initial_excluded = hidden(last_shown);
     // Keep ScreenCaptureKit setup, capture and stop on the owning worker.
     // stop() joins even if it arrives while setup is still in progress.
-    let content = shareable_content();
-    let recording = content
-        .as_ref()
-        .zip(video_output_path)
-        .and_then(|(content, path)| {
-            let exclude = exclusions(content, &initial_excluded, !last_shown);
-            start_recording(content, &sampler_target, path, exclude, movie_quality)
-        });
-    crate::log::start_metric("sck_ready_ms", started_at);
-    let shot_edge = if recording.is_some() {
-        CANDIDATE_EDGE
-    } else {
-        CANDIDATE_EDGE_NO_VIDEO
-    };
-    let mut filter_and_config = content
-        .as_ref()
-        .and_then(|content| {
-            screenshot_filter(content, &sampler_target, &initial_excluded, !last_shown)
-        })
-        .map(|filter| (filter, sck_config(&sampler_target, shot_edge)));
-    drop(content);
+    let (recording, mut filter_and_config, shot_edge) = objc2::rc::autoreleasepool(|_| {
+        let content = shareable_content();
+        let recording = content
+            .as_ref()
+            .zip(video_output_path)
+            .and_then(|(content, path)| {
+                let exclude = exclusions(content, &initial_excluded, !last_shown);
+                start_recording(content, &sampler_target, path, exclude, movie_quality)
+            });
+        crate::log::start_metric("sck_ready_ms", started_at);
+        let shot_edge = if recording.is_some() {
+            CANDIDATE_EDGE
+        } else {
+            CANDIDATE_EDGE_NO_VIDEO
+        };
+        let filter_and_config = content
+            .as_ref()
+            .and_then(|content| {
+                screenshot_filter(content, &sampler_target, &initial_excluded, !last_shown)
+            })
+            .map(|filter| (filter, sck_config(&sampler_target, shot_edge)));
+        (recording, filter_and_config, shot_edge)
+    });
     let mut last_sample = Instant::now()
         .checked_sub(FRAME_SAMPLE_INTERVAL)
         .unwrap_or_else(Instant::now);
     let mut last_excluded = initial_excluded.clone();
     let mut prompts = SystemPrompts::new(&sampler_target);
     while !thread_stopping.load(Ordering::Acquire) {
-        let shown = own_windows_recorded.load(Ordering::Acquire);
-        let mut cur_excluded = hidden(shown);
-        if prompts.check(started_at) {
-            // Frames since the last look may show the prompt.
-            thread_frames
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .drop_since(prompts.clear_until_ms);
-        }
-        cur_excluded.extend(&prompts.ids);
-        if cur_excluded != last_excluded || shown != last_shown {
-            last_excluded.clone_from(&cur_excluded);
-            last_shown = shown;
-            prompts.hidden = sck_lists_windows(&prompts.ids);
-            if let Some(content) = shareable_content()
-                && let Some(new_filter) =
-                    screenshot_filter(&content, &sampler_target, &cur_excluded, !shown)
-            {
-                // The recording must hide the same windows as the candidates, or
-                // keyframes decoded from it could show Scrawl's own overlays.
-                if let Some((ref recording, _)) = recording
-                    && let Err(error) =
-                        recording.set_exclusions(&exclusions(&content, &cur_excluded, !shown))
-                {
-                    scrawl_log(format!("Recording filter update failed: {error}"));
-                }
-                filter_and_config = Some((new_filter, sck_config(&sampler_target, shot_edge)));
-            }
-        }
-        let urgent = thread_urgent.swap(false, Ordering::AcqRel);
-        let interval = thread_frames
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .interval();
-        // A system prompt ScreenCaptureKit can't leave out: no candidates until
-        // it's answered.
-        if prompts.showing() {
-            thread::park_timeout(Duration::from_millis(30));
-            continue;
-        }
-        if urgent || last_sample.elapsed() >= interval {
-            last_sample = Instant::now();
-            let t_ms = started_at.elapsed().as_millis() as u64;
-            // No screen (Screen Recording off, or a failed shot): no frame. A made-up one
-            // would reach agents as if it were the screen.
-            let frame = filter_and_config
-                .as_ref()
-                .and_then(|(filter, config)| capture_sck_frame(filter, config, t_ms));
-            if let Some(frame) = frame {
+        // Drain native screenshot/filter temporaries every tick, including skipped shots.
+        objc2::rc::autoreleasepool(|_| {
+            let shown = own_windows_recorded.load(Ordering::Acquire);
+            let mut cur_excluded = hidden(shown);
+            if prompts.check(started_at) {
+                // Frames since the last look may show the prompt.
                 thread_frames
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .push(frame, urgent);
+                    .drop_since(prompts.clear_until_ms);
             }
-        }
+            cur_excluded.extend(&prompts.ids);
+            if cur_excluded != last_excluded || shown != last_shown {
+                last_excluded.clone_from(&cur_excluded);
+                last_shown = shown;
+                prompts.hidden = sck_lists_windows(&prompts.ids);
+                if let Some(content) = shareable_content()
+                    && let Some(new_filter) =
+                        screenshot_filter(&content, &sampler_target, &cur_excluded, !shown)
+                {
+                    // The recording must hide the same windows as the candidates, or
+                    // keyframes decoded from it could show Scrawl's own overlays.
+                    if let Some((ref recording, _)) = recording
+                        && let Err(error) =
+                            recording.set_exclusions(&exclusions(&content, &cur_excluded, !shown))
+                    {
+                        scrawl_log(format!("Recording filter update failed: {error}"));
+                    }
+                    filter_and_config = Some((new_filter, sck_config(&sampler_target, shot_edge)));
+                }
+            }
+            let urgent = thread_urgent.swap(false, Ordering::AcqRel);
+            let interval = thread_frames
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .interval();
+            // A system prompt ScreenCaptureKit can't leave out: no candidates until
+            // it's answered.
+            if prompts.showing() {
+                return;
+            }
+            if urgent || last_sample.elapsed() >= interval {
+                last_sample = Instant::now();
+                let t_ms = started_at.elapsed().as_millis() as u64;
+                // No screen (Screen Recording off, or a failed shot): no frame. A made-up one
+                // would reach agents as if it were the screen.
+                let frame = filter_and_config
+                    .as_ref()
+                    .and_then(|(filter, config)| capture_sck_frame(filter, config, t_ms));
+                if let Some(frame) = frame {
+                    thread_frames
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .push(frame, urgent);
+                }
+            }
+        });
         thread::park_timeout(Duration::from_millis(30));
     }
     // The core detaches the movie before it stops the stream, and finishes it on its own thread.
-    recording.map(|(recording, path)| {
-        let hint_ms = offset_ms(started_host, recording.anchor().as_nanos());
-        super::Movie::finishing(
-            path,
-            FinishingMovie {
-                finishing: recording.stop(),
-                started_host,
-                hint_ms,
-            },
-        )
+    objc2::rc::autoreleasepool(|_| {
+        drop(filter_and_config);
+        recording.map(|(recording, path)| {
+            let hint_ms = offset_ms(started_host, recording.anchor().as_nanos());
+            super::Movie::finishing(
+                path,
+                FinishingMovie {
+                    finishing: recording.stop(),
+                    started_host,
+                    hint_ms,
+                },
+            )
+        })
     })
 }
 
@@ -2013,60 +2029,64 @@ fn run_global_hid_poller(telemetry: Arc<SharedCaptureTelemetry>) {
     let mut last_tap_check: Option<Instant> = None;
     loop {
         thread::sleep(Duration::from_millis(8));
-        if last_tap_check.is_none_or(|t| t.elapsed() >= Duration::from_millis(500)) {
-            check_key_tap(&telemetry);
-            last_tap_check = Some(Instant::now());
-        }
+        objc2::rc::autoreleasepool(|_| {
+            if last_tap_check.is_none_or(|t| t.elapsed() >= Duration::from_millis(500)) {
+                check_key_tap(&telemetry);
+                last_tap_check = Some(Instant::now());
+            }
 
-        // Combine COMBINED_SESSION_STATE (0, includes Karabiner virtual HID) and HID_SYSTEM_STATE (1).
-        let flags = unsafe { CGEventSourceFlagsState(0) | CGEventSourceFlagsState(1) };
-        let cmd = (flags & FLAG_COMMAND) != 0;
-        let ctrl = (flags & FLAG_CONTROL) != 0;
-        let alt = (flags & FLAG_ALTERNATE) != 0;
-        let shift = (flags & FLAG_SHIFT) != 0;
-        let pure_shift = pure_shift_state(shift, cmd || ctrl || alt, &mut await_shift_release);
-        let mod_mask =
-            (u8::from(cmd) << 3) | (u8::from(ctrl) << 2) | (u8::from(alt) << 1) | u8::from(shift);
-        if mod_mask != prev_mod_mask {
-            scrawl_log(format!(
-                "hid_poller: cmd={cmd} ctrl={ctrl} alt={alt} shift={shift}"
-            ));
-            prev_mod_mask = mod_mask;
-        }
+            // Combine COMBINED_SESSION_STATE (0, includes Karabiner virtual HID) and HID_SYSTEM_STATE (1).
+            let flags = unsafe { CGEventSourceFlagsState(0) | CGEventSourceFlagsState(1) };
+            let cmd = (flags & FLAG_COMMAND) != 0;
+            let ctrl = (flags & FLAG_CONTROL) != 0;
+            let alt = (flags & FLAG_ALTERNATE) != 0;
+            let shift = (flags & FLAG_SHIFT) != 0;
+            let pure_shift = pure_shift_state(shift, cmd || ctrl || alt, &mut await_shift_release);
+            let mod_mask = (u8::from(cmd) << 3)
+                | (u8::from(ctrl) << 2)
+                | (u8::from(alt) << 1)
+                | u8::from(shift);
+            if mod_mask != prev_mod_mask {
+                scrawl_log(format!(
+                    "hid_poller: cmd={cmd} ctrl={ctrl} alt={alt} shift={shift}"
+                ));
+                prev_mod_mask = mod_mask;
+            }
 
-        let buttons = unsafe {
-            [
-                CGEventSourceButtonState(1, 0) || CGEventSourceButtonState(0, 0),
-                CGEventSourceButtonState(1, 1) || CGEventSourceButtonState(0, 1),
-            ]
-        };
-        if !telemetry.active.load(Ordering::Acquire) {
-            prev_shift_ink = false;
-            prev_buttons = buttons;
-            continue;
-        }
+            let buttons = unsafe {
+                [
+                    CGEventSourceButtonState(1, 0) || CGEventSourceButtonState(0, 0),
+                    CGEventSourceButtonState(1, 1) || CGEventSourceButtonState(0, 1),
+                ]
+            };
+            if !telemetry.active.load(Ordering::Acquire) {
+                prev_shift_ink = false;
+                prev_buttons = buttons;
+                return;
+            }
 
-        let Some(loc) = current_mouse_location() else {
-            continue;
-        };
-        *telemetry
-            .pointer_screen
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = [loc.x as f32, loc.y as f32];
+            let Some(loc) = current_mouse_location() else {
+                return;
+            };
+            *telemetry
+                .pointer_screen
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = [loc.x as f32, loc.y as f32];
 
-        poll_clicks(
-            &telemetry,
-            &mut prev_buttons,
-            buttons,
-            (loc.x, loc.y),
-            shift && !cmd && !ctrl && !alt,
-            |x, y| telemetry.on_scrawl_window(x, y),
-        );
+            poll_clicks(
+                &telemetry,
+                &mut prev_buttons,
+                buttons,
+                (loc.x, loc.y),
+                shift && !cmd && !ctrl && !alt,
+                |x, y| telemetry.on_scrawl_window(x, y),
+            );
 
-        // Hold Shift + move cursor inside the capture target = draw a persistent stroke.
-        track_shift_ink(&telemetry, (loc.x, loc.y), pure_shift, prev_shift_ink);
+            // Hold Shift + move cursor inside the capture target = draw a persistent stroke.
+            track_shift_ink(&telemetry, (loc.x, loc.y), pure_shift, prev_shift_ink);
 
-        prev_shift_ink = pure_shift;
+            prev_shift_ink = pure_shift;
+        });
     }
 }
 

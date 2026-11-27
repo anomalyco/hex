@@ -19,6 +19,15 @@ overlays. A capture's `summary.md` and the text pasted into an agent start
 with `[hex-annotate <clock> · <target> · <folder>]`; older captures say
 `[scrawl …]`.
 
+On macOS, the screenshot sampler drains native temporary objects after every
+tick (including filter refreshes and skipped shots), and separately at setup
+and stop. Window/cursor polling, frontmost-app queries, HID polling, and each
+Accessibility lookup also drain their own autorelease pools. The macOS unit
+test `the_prober_drains_autoreleased_objects_between_lookups` checks that an
+autoreleased object's weak reference clears before the next worker job, without
+screen or Accessibility permissions. A multi-minute live-recording memory soak
+is still needed to verify the reported OOM end to end.
+
 ```ts
 Turn it on                               // capture.gate
 ├── On by default in every macOS, Linux, and Windows build, stable included
