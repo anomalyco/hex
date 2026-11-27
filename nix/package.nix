@@ -129,6 +129,9 @@ rustPlatform.buildRustPackage (finalAttrs: {
       ../ios/HEXMobileTests/Fixtures/cleanup-reconstruct.json
       ../ios/HEXMobileTests/Fixtures/cleanup-tagger-handwritten.json
       ../ios/HEXMobileTests/Fixtures/cleanup-tokenizer.json
+      # The iOS cleanup model download script: a Rust test checks the desktop
+      # model pin names the same release asset.
+      ../ios/scripts/fetch-cleanup-model.sh
       # The Labs registry's published copy: a Rust test compares it to the registry.
       ../site/src/labs.json
       ../macos/HexMicrophoneDriver/Info.plist
