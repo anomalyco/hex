@@ -17,7 +17,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::generator::{self, GeneratedNotes, GenerationError, NotesWriter};
 use super::{
-    MeetingManifest, MeetingStatus, TranscriptEntry, TranscriptReader, coalesce_transcript,
+    Labels, MeetingManifest, MeetingStatus, TranscriptEntry, TranscriptReader, coalesce_transcript,
     format_duration, read_manifest, root, sync_directory, write_manifest,
 };
 use crate::desktop::events::now_ms;
@@ -134,13 +134,13 @@ pub(super) fn excerpt_budget(context_tokens: usize, cap: usize) -> usize {
 
 /// Coalesced turns as `[mm:ss] You: text` lines, split at word boundaries
 /// so no line exceeds `LINE_CHARS`.
-fn transcript_lines(entries: &[TranscriptEntry]) -> Vec<String> {
+fn transcript_lines(entries: &[TranscriptEntry], labels: Labels<'_>) -> Vec<String> {
     let mut lines = Vec::new();
     for turn in coalesce_transcript(entries.iter().cloned()) {
         let prefix = format!(
             "[{}] {}: ",
             format_duration(turn.start_ms),
-            turn.source.label()
+            labels.of(&turn)
         );
         let mut line = prefix.clone();
         for word in turn.text.split_whitespace() {
@@ -168,8 +168,12 @@ pub(super) struct Excerpt {
 /// The whole transcript when it fits in `max_chars`; otherwise the opening,
 /// evenly spaced passages from the middle, and the ending, with `[…]` where
 /// lines were skipped.
-pub(super) fn excerpt(entries: &[TranscriptEntry], max_chars: usize) -> Excerpt {
-    let lines = transcript_lines(entries);
+pub(super) fn excerpt(
+    entries: &[TranscriptEntry],
+    labels: Labels<'_>,
+    max_chars: usize,
+) -> Excerpt {
+    let lines = transcript_lines(entries, labels);
     let size = |range: std::ops::Range<usize>| -> usize {
         lines[range.clone()].iter().map(String::len).sum::<usize>() + range.len().saturating_sub(1)
     };
@@ -253,7 +257,15 @@ pub(super) fn summarize_entries(
     deadline: Instant,
     generate: impl FnMut(&str, &str, Duration) -> Result<GeneratedNotes, GenerationError>,
 ) -> Result<Option<Summary>> {
-    summarize_with_calendar(entries, None, &[], max_chars, deadline, generate)
+    summarize_with_calendar(
+        entries,
+        Labels::default(),
+        None,
+        &[],
+        max_chars,
+        deadline,
+        generate,
+    )
 }
 
 /// The published lines a summary is generated from, read fresh so an edit
@@ -299,11 +311,12 @@ fn calendar_preamble(calendar: Option<&super::MeetingCalendar>) -> String {
     preamble
 }
 
-/// [`summarize_entries`] with the vocabulary's `terms` (empty leaves them
-/// out) and the calendar event as
+/// [`summarize_entries`] under the meeting's own `labels`, with the
+/// vocabulary's `terms` (empty leaves them out) and the calendar event as
 /// context. Both count against the excerpt budget.
 pub(super) fn summarize_with_calendar(
     entries: &[TranscriptEntry],
+    labels: Labels<'_>,
     calendar: Option<&super::MeetingCalendar>,
     terms: &[String],
     max_chars: usize,
@@ -318,7 +331,7 @@ pub(super) fn summarize_with_calendar(
     let mut max_chars = max_chars.saturating_sub(preamble.len()).max(1);
     let mut calls = 0;
     loop {
-        let excerpt = excerpt(entries, max_chars);
+        let excerpt = excerpt(entries, labels, max_chars);
         if excerpt.text.is_empty() {
             return Ok(None);
         }
@@ -656,7 +669,7 @@ pub(super) fn provisional_title(
     timeout: Duration,
     generate: impl FnOnce(&str, &str, Duration) -> Result<String, GenerationError>,
 ) -> Result<String> {
-    let excerpt = excerpt(entries, max_chars);
+    let excerpt = excerpt(entries, Labels::default(), max_chars);
     if excerpt.text.is_empty() {
         return Err(eyre!("the transcript has no speech yet"));
     }
@@ -963,6 +976,7 @@ fn summarize_with(
     let started = Instant::now();
     let result = summarize_with_calendar(
         &entries,
+        Labels::by_track(&manifest.speakers),
         manifest.calendar.as_ref(),
         &terms,
         excerpt_budget(generator::context_tokens(), FINAL_EXCERPT_CHARS),
@@ -1017,64 +1031,6 @@ fn summarize_with(
     }
 }
 
-/// Parses the turns of an exported meeting Markdown file (`**You** · 01:02`
-/// followed by the turn's text).
-#[cfg(any(debug_assertions, test))]
-pub(super) fn entries_from_markdown(markdown: &str) -> Vec<TranscriptEntry> {
-    let mut entries: Vec<TranscriptEntry> = Vec::new();
-    let mut in_turn = false;
-    for line in markdown.lines() {
-        let header = line
-            .strip_prefix("**")
-            .and_then(|rest| rest.split_once("** · "))
-            .and_then(|(label, clock)| {
-                let source = match label {
-                    "You" => super::MeetingSource::Microphone,
-                    "Them" => super::MeetingSource::System,
-                    _ => return None,
-                };
-                let (minutes, seconds) = clock.trim().split_once(':')?;
-                let start_ms =
-                    (minutes.parse::<u64>().ok()? * 60 + seconds.parse::<u64>().ok()?) * 1_000;
-                Some((source, start_ms))
-            });
-        if let Some((source, start_ms)) = header {
-            entries.push(TranscriptEntry {
-                source,
-                start_ms,
-                end_ms: start_ms,
-                text: String::new(),
-            });
-            in_turn = true;
-        } else if line.starts_with('#') || line.starts_with(NOTES_START) {
-            in_turn = false;
-        } else if in_turn
-            && !line.trim().is_empty()
-            && let Some(entry) = entries.last_mut()
-        {
-            if !entry.text.is_empty() {
-                entry.text.push(' ');
-            }
-            entry.text.push_str(line.trim());
-        }
-    }
-    entries.retain(|entry| !entry.text.is_empty());
-    // Markdown has start times only: a turn lasts until the next one, or
-    // about 150 words a minute for the last.
-    let starts = entries
-        .iter()
-        .skip(1)
-        .map(|entry| entry.start_ms)
-        .collect::<Vec<_>>();
-    for (index, entry) in entries.iter_mut().enumerate() {
-        let spoken = entry.start_ms + entry.text.split_whitespace().count() as u64 * 400;
-        entry.end_ms = starts
-            .get(index)
-            .map_or(spoken, |next| (*next).max(entry.start_ms));
-    }
-    entries
-}
-
 /// Runs the real model on a transcript file without recording anything:
 /// first the provisional title at the point a recording would ask for it,
 /// then the final title and summary. Debug CLI: `hex meeting summarize <path>`.
@@ -1083,7 +1039,7 @@ pub fn summarize_file(path: &Path, excerpt_chars: Option<usize>) -> Result<Strin
     generator::available().map_err(|reason| eyre!("{reason}"))?;
     let text =
         fs::read_to_string(path).wrap_err_with(|| format!("could not read {}", path.display()))?;
-    let entries = entries_from_markdown(&text);
+    let entries = super::markdown::entries_from_markdown(&text);
     let context = generator::context_tokens();
     let mut report = String::new();
 
@@ -1165,12 +1121,7 @@ mod tests {
     use crate::meeting::MeetingSource;
 
     fn entry(source: MeetingSource, start_ms: u64, text: &str) -> TranscriptEntry {
-        TranscriptEntry {
-            source,
-            start_ms,
-            end_ms: start_ms + 1_000,
-            text: text.into(),
-        }
+        TranscriptEntry::new(source, start_ms, start_ms + 1_000, text)
     }
 
     fn conversation(turns: usize) -> Vec<TranscriptEntry> {
@@ -1275,6 +1226,7 @@ mod tests {
         let mut prompts = Vec::new();
         summarize_with_calendar(
             &conversation(2),
+            Labels::default(),
             Some(&calendar),
             &[],
             FINAL_EXCERPT_CHARS,
@@ -1301,6 +1253,7 @@ mod tests {
         let mut prompts = Vec::new();
         summarize_with_calendar(
             &conversation(2),
+            Labels::default(),
             Some(&calendar),
             &terms,
             FINAL_EXCERPT_CHARS,
@@ -1320,6 +1273,7 @@ mod tests {
         let mut without = Vec::new();
         summarize_with_calendar(
             &conversation(2),
+            Labels::default(),
             None,
             &[],
             FINAL_EXCERPT_CHARS,
@@ -1341,6 +1295,7 @@ mod tests {
         for terms in [&[][..], &terms[..]] {
             let summary = summarize_with_calendar(
                 &entries,
+                Labels::default(),
                 None,
                 terms,
                 budget,
@@ -1358,7 +1313,7 @@ mod tests {
     #[test]
     fn long_meetings_are_excerpted_from_the_opening_middle_and_ending() {
         let entries = conversation(400);
-        let excerpt = excerpt(&entries, 12_000);
+        let excerpt = excerpt(&entries, Labels::default(), 12_000);
         assert!(excerpt.text.len() < excerpt.transcript_chars);
         assert!(excerpt.text.len() <= 12_000, "{}", excerpt.text.len());
         let lines = excerpt.text.lines().collect::<Vec<_>>();
@@ -1379,7 +1334,7 @@ mod tests {
         assert!(turns.iter().any(|turn| (200..300).contains(turn)));
         assert!(lines.iter().filter(|line| **line == GAP_MARKER).count() >= 3);
 
-        let whole = super::excerpt(&entries[..3], 4_000);
+        let whole = super::excerpt(&entries[..3], Labels::default(), 4_000);
         assert_eq!(whole.text.len(), whole.transcript_chars);
         assert_eq!(whole.text.lines().count(), 3);
     }
@@ -1390,7 +1345,7 @@ mod tests {
             entry(MeetingSource::Microphone, 0, "Hello there."),
             entry(MeetingSource::System, 5_000, &"word ".repeat(400)),
         ];
-        let lines = transcript_lines(&entries);
+        let lines = transcript_lines(&entries, Labels::default());
         assert_eq!(lines[0], "[00:00] You: Hello there.");
         assert!(lines.len() > 2);
         assert!(lines.iter().all(|line| line.len() <= LINE_CHARS));
@@ -1743,30 +1698,6 @@ mod tests {
             "# Launch review\n\nText\n# Zoom call — 2:30 PM\n"
         );
         assert_eq!(apply_title(markdown, "Other", "Launch review"), markdown);
-    }
-
-    #[test]
-    fn exported_markdown_parses_back_into_turns() {
-        let block = render_notes_block(&meeting_notes());
-        let markdown = apply_notes(EXPORT, "Zoom call — 2:30 PM", "Launch", &block);
-        let entries = entries_from_markdown(&markdown);
-        assert_eq!(
-            entries,
-            [
-                TranscriptEntry {
-                    source: MeetingSource::Microphone,
-                    start_ms: 1_000,
-                    end_ms: 4_000,
-                    text: "Hi.".into()
-                },
-                TranscriptEntry {
-                    source: MeetingSource::System,
-                    start_ms: 4_000,
-                    end_ms: 4_400,
-                    text: "Hello.".into()
-                },
-            ]
-        );
     }
 
     #[test]

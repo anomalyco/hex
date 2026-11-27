@@ -2324,7 +2324,8 @@ Final publication                                   // meetings.output
 │   // a_meeting_with_speech_or_a_failure_is_never_discarded,
 │   // a_meeting_that_dropped_echo_is_kept_even_with_no_entries
 └── Markdown copy -> <folder>/<YYYY-MM-DD HHMM> <title>.md
-    ├── Title, date, duration, app, You / Them turns
+    ├── Title, date, duration, app, You / Them turns (a named remote
+    │   speaker's turn carries the name; see [Speaker names](#speaker-names))
     ├── Never overwrites; adds " (2)"
     ├── Export › Descriptive meeting file names on (off by default;
     │   meetings.export.descriptive_filenames) -> applying notes, refining chapters, or a rename renames it in place to
@@ -2588,7 +2589,8 @@ Final publication complete                               // meetings.notes
      │   may appear: …" (≤30 vocabulary terms, read at each generation,
      │   Regenerate included) ahead of the calendar context; its length comes
      │   out of the budget. No vocabulary -> no line
-     ├── Lines "[mm:ss] You|Them: text" (long turns split at 600 chars)
+     ├── Lines "[mm:ss] You|Them: text" (long turns split at 600 chars); a
+     │   named remote speaker's lines carry the name instead of Them
      ├── Whole transcript when it fits; otherwise opening 30 %, up to six
      │   evenly spaced middle passages, ending 20 %, "[…]" between them
      ├── Budget = min(12,000 chars, (context − 1,000 tokens) × 3 chars)
@@ -2802,6 +2804,72 @@ The second change landed at 11:02 in 3 runs and one line late (11:24) in 2; the
 first at 05:32 in 2 runs and stayed at the live 06:38 in 3. The model's
 same-topic flag was close to random ("same" for unrelated names, "new" for the
 current one), which is why Rust's name overlap decides.
+
+### Speaker Names
+
+Implemented: the data model and every reader of it. Not implemented: anything
+that names a speaker. No build writes a `speaker` or a `speakers` table yet,
+so every remote line is still `Them` and every saved file, prompt, and JSON
+response is what it was before.
+
+```ts
+manifest.json -> speakers?: [{ id, name, from }]     // omitted when empty
+├── id: per meeting, short and opaque ("s1", "s2"); a call app's own user id
+│   is never an id and never reaches the disk
+├── name: the display name, cleaned (below)
+└── from: "call_app" | "calendar" | "user"
+transcript.ndjson, transcript.rolling.ndjson -> speaker?: "s1"
+└── An id in that table; omitted when Hex is not sure, which is every line
+    today. The schema versions stay 1: both fields are additive
+What a line is called -> one rule (src/meeting/speakers.rs, Labels::of)
+├── A remote line whose speaker the table knows -> the name
+├── Otherwise exactly as before: You, Them, or Speaker where an imported
+│   file's one track already said Speaker
+├── A microphone line is always You, whatever its speaker field says
+└── An id the table does not know -> the track's label
+Turns -> adjacent lines join only on the same track and the same speaker; a
+         named line never merges into an unnamed one
+Readers that show the name
+├── Exported Markdown, Copy transcript, Copy section, the folder's own
+│   transcript.md
+├── Notes prompt lines "[mm:ss] Priya Nair: …"
+├── hex meetings show (Markdown; --json meeting.speakers and
+│   entries[].speaker; --srt and --vtt cues), list --json (meeting.speakers)
+├── MCP: get_transcript turns, search_transcripts speakers and context
+│   lines, list_meetings participants "You, Them, Priya Nair (Zoom)"
+└── Meetings pane turns (a name is shown as is, never translated)
+Readers that stay You / Them
+├── Chapter prompts: where a topic changes does not depend on who speaks,
+│   so no name goes to that model
+├── The provisional-title prompt and the recording capsule: a recording
+│   under way has no names
+└── get_transcript's speaker filter (you | them | all)
+Names are untrusted: other people choose them, and models and agents read them
+├── Cleaned on the way into the table, and again when a manifest is read:
+│   one line, single spaces, no control characters, zero-width spaces,
+│   direction overrides or Unicode tags, none of * ` [ ] < > \, 64 characters
+├── Refused: nothing left, or You / Them / Speaker / Notes in any case, so
+│   nobody on a call can make their words read as You. The line stays Them
+└── Never logged: a table prints its ids and origins, not its names
+Debug Markdown parser (hex meeting summarize|chapters <path>) -> any turn
+    heading is a turn; You is the microphone, a name or Speaker is remote
+```
+
+Checks: `an_old_manifest_and_transcript_round_trip_byte_for_byte`,
+`speakers_are_saved_as_a_table_and_an_id_on_each_named_line`,
+`a_hostile_name_comes_out_clean`,
+`a_name_can_never_be_one_of_hexs_own_labels_or_nothing`,
+`a_table_read_from_disk_is_cleaned_like_one_built_here`,
+`printing_a_table_for_a_log_never_prints_a_name`,
+`a_line_is_called_by_its_speakers_name_or_else_what_it_always_was`,
+`a_turn_splits_where_the_speaker_changes`,
+`markdown_shows_the_name_in_the_export_a_section_and_the_folders_own_file`,
+`the_notes_prompt_gives_each_line_its_speaker`,
+`agents_and_the_cli_read_the_name_in_transcripts_search_and_the_list`,
+`a_named_speaker_shows_in_meeting_json_and_subtitles`,
+`a_named_speaker_gets_their_own_turn_under_their_name`, and
+`meeting_json_contract_snapshot` (unnamed JSON is unchanged). All run on
+hand-built tables; no recorded meeting has a named speaker.
 
 ### Agent Access (MCP)
 

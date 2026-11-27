@@ -21,9 +21,9 @@ use unicode_normalization::char::is_combining_mark;
 use super::transcript::{RollingLine, RollingView};
 use super::turn::{TurnOptions, coalesce_with_options};
 use super::{
-    Chapter, MeetingManifest, MeetingSource, MeetingStatus, TranscriptEntry, chapter_entries,
-    coalesce_transcript, display_title, format_duration, notes_markdown, recovered_status,
-    section_markdown, speaker_label, transcript_markdown,
+    Chapter, Labels, MeetingManifest, MeetingSource, MeetingStatus, TranscriptEntry,
+    chapter_entries, coalesce_transcript, display_title, format_duration, notes_markdown,
+    recovered_status, section_markdown, transcript_markdown,
 };
 use crate::dictation::vocabulary::VocabularyEntry;
 
@@ -123,7 +123,7 @@ impl Meeting {
                 .map_or_else(|| self.duration_ms(now_ms), |next| next.start_ms)
                 .max(chapters[index].start_ms),
             entries: chapter_entries(&self.entries, chapters, index),
-            imported: self.manifest.imported,
+            labels: self.manifest.labels(),
         })
     }
 
@@ -144,12 +144,10 @@ impl Meeting {
     }
 
     fn participants(&self) -> String {
-        if self.manifest.imported {
-            return "Speaker".into();
-        }
+        let people = self.manifest.labels().everyone().collect::<Vec<_>>();
         match self.manifest.app.as_deref() {
-            Some(app) => format!("You, Them ({app})"),
-            None => "You, Them".into(),
+            Some(app) if !self.manifest.imported => format!("{} ({app})", people.join(", ")),
+            _ => people.join(", "),
         }
     }
 
@@ -170,7 +168,7 @@ pub struct ChapterView<'a> {
     pub chapter: &'a Chapter,
     pub end_ms: u64,
     pub entries: Vec<TranscriptEntry>,
-    pub imported: bool,
+    pub labels: Labels<'a>,
 }
 
 impl ChapterView<'_> {
@@ -184,7 +182,7 @@ impl ChapterView<'_> {
 
     /// `## title`, its one line, and its turns, for copying one section.
     pub fn markdown(&self) -> String {
-        section_markdown(self.chapter, &self.entries, self.imported)
+        section_markdown(self.chapter, &self.entries, self.labels)
     }
 }
 
@@ -199,9 +197,9 @@ fn status_name(status: MeetingStatus) -> &'static str {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PassageKind {
-    Speech(MeetingSource),
+    /// Speech, with what its speaker is called.
+    Speech(String),
     Notes,
 }
 
@@ -235,9 +233,9 @@ impl Passage {
         }
     }
 
-    fn speaker(&self, imported: bool) -> &'static str {
-        match self.kind {
-            PassageKind::Speech(source) => speaker_label(source, imported),
+    fn speaker(&self) -> &str {
+        match &self.kind {
+            PassageKind::Speech(label) => label,
             PassageKind::Notes => "Notes",
         }
     }
@@ -820,6 +818,8 @@ fn file_name(path: &Path) -> String {
 }
 
 fn passages(manifest: &MeetingManifest, entries: &[TranscriptEntry]) -> Vec<Passage> {
+    let speech =
+        |turn: &TranscriptEntry| PassageKind::Speech(manifest.labels().of(turn).to_string());
     let mut passages = coalesce_with_options(
         entries.iter().cloned(),
         TurnOptions {
@@ -829,7 +829,7 @@ fn passages(manifest: &MeetingManifest, entries: &[TranscriptEntry]) -> Vec<Pass
     )
     .turns
     .into_iter()
-    .map(|turn| Passage::new(PassageKind::Speech(turn.source), turn.start_ms, turn.text))
+    .map(|turn| Passage::new(speech(&turn), turn.start_ms, turn.text))
     .collect::<Vec<_>>();
     if let Some(notes) = &manifest.notes {
         let text = format!("{}. {}", notes.title.trim(), notes.summary.trim());
@@ -1747,7 +1747,7 @@ fn render_search(
             rank + 1,
             meeting.id,
             meeting.title(),
-            passage.speaker(meeting.manifest.imported),
+            passage.speaker(),
             hit.score,
             hit.labels.join(", ")
         );
@@ -1757,7 +1757,7 @@ fn render_search(
             let _ = writeln!(
                 output,
                 "    before ({} {}): {}",
-                previous.speaker(meeting.manifest.imported),
+                previous.speaker(),
                 format_duration(previous.start_ms),
                 tail(&previous.text, CONTEXT_CHARS)
             );
@@ -1769,7 +1769,7 @@ fn render_search(
             let _ = writeln!(
                 output,
                 "    after ({} {}): {}",
-                next.speaker(meeting.manifest.imported),
+                next.speaker(),
                 format_duration(next.start_ms),
                 head(&next.text, CONTEXT_CHARS)
             );
@@ -1954,7 +1954,7 @@ fn render_transcript(meeting: &Meeting, window: TranscriptWindow, now_ms: u64) -
         format_duration(turns.first().map_or(0, |turn| turn.start_ms)),
         format_duration(shown_end),
         match window.speaker {
-            Some(source) => format!(" ({} only)", meeting.manifest.speaker_label(source)),
+            Some(source) => format!(" ({} only)", meeting.manifest.labels().track(source)),
             None => String::new(),
         }
     );
@@ -1964,7 +1964,7 @@ fn render_transcript(meeting: &Meeting, window: TranscriptWindow, now_ms: u64) -
             "[{} · {}] {}: {}",
             format_duration(turn.start_ms),
             clock_seconds(meeting.start_ms() + turn.start_ms),
-            meeting.manifest.speaker_label(turn.source),
+            meeting.manifest.labels().of(turn),
             turn.text
         );
     }

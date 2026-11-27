@@ -255,7 +255,8 @@ pub(super) fn turn_row(p: Paint, index: usize, turn: &Turn, imported: bool, sele
     let mut line = row()
         .key(format!("select-turn{index}"))
         .role("checkbox")
-        .label(if turn.mine { tr("You") } else { tr("Them") })
+        // This row has always been named by track, an import's included.
+        .label(turn.speaker(false))
         .description(turn.text.clone())
         .checked(selected)
         .gap(8.0)

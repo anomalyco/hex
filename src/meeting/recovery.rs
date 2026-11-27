@@ -625,6 +625,7 @@ mod tests {
             notes_export_removed: false,
             audio_removed_at_ms: None,
             imported: false,
+            speakers: Default::default(),
         }
     }
 

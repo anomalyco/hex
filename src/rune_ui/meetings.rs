@@ -63,6 +63,8 @@ impl Status {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Turn {
     pub(super) mine: bool,
+    /// The remote speaker's name, when the meeting could name them.
+    pub(super) name: Option<String>,
     pub(super) start_ms: u64,
     pub(super) text: String,
     /// A silence of 30 s or more before this turn.
@@ -235,15 +237,9 @@ pub(super) fn length(milliseconds: u64) -> String {
 /// Speaker turns as Markdown, delegating to the canonical meeting renderer.
 fn transcript_markdown(turns: &[Turn], imported: bool) -> String {
     crate::meeting::render_turns_markdown(
-        turns.iter().map(|turn| {
-            let source = if turn.mine {
-                crate::meeting::MeetingSource::Microphone
-            } else {
-                crate::meeting::MeetingSource::System
-            };
-            (source, turn.start_ms, turn.text.as_str())
-        }),
-        imported,
+        turns
+            .iter()
+            .map(|turn| (turn.label(imported), turn.start_ms, turn.text.as_str())),
     )
 }
 
@@ -1107,6 +1103,7 @@ mod tests {
     fn an_imported_meeting_labels_its_one_track_speaker() {
         let turn = |mine| Turn {
             mine,
+            name: None,
             start_ms: 1_000,
             text: "Hi.".into(),
             pause_before_ms: None,

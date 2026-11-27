@@ -920,6 +920,7 @@ fn imported_meetings_render_speaker_consistently_across_export_query_chapters_an
         retention_applies: false,
         audio_removed_at_ms: None,
         imported: true,
+        speakers: Default::default(),
     };
     let entries = vec![
         TranscriptEntry {
@@ -927,18 +928,21 @@ fn imported_meetings_render_speaker_consistently_across_export_query_chapters_an
             start_ms: 1_000,
             end_ms: 2_000,
             text: "  Hello   ".into(),
+            speaker: None,
         },
         TranscriptEntry {
             source: MeetingSource::System,
             start_ms: 3_000,
             end_ms: 4_000,
             text: ", welcome to the podcast.".into(),
+            speaker: None,
         },
         TranscriptEntry {
             source: MeetingSource::Microphone,
             start_ms: 10_000,
             end_ms: 12_000,
             text: "Thanks for having me on the roadmap episode.".into(),
+            speaker: None,
         },
     ];
     fs::write(

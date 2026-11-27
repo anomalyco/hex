@@ -305,23 +305,15 @@ impl TrackTranscript {
                     let text = segment.text.trim().to_string();
                     let start = (segment.start_ms.max(0) as u64).min(duration_ms);
                     let end = (segment.end_ms.max(0) as u64).min(duration_ms);
-                    (!text.is_empty() && end > start).then(|| TranscriptEntry {
-                        source: self.source,
-                        start_ms: chunk_ms + start,
-                        end_ms: chunk_ms + end,
-                        text,
+                    (!text.is_empty() && end > start).then(|| {
+                        TranscriptEntry::new(self.source, chunk_ms + start, chunk_ms + end, text)
                     })
                 })
                 .collect()
         } else {
             let text = text.trim();
             (!text.is_empty())
-                .then(|| TranscriptEntry {
-                    source: self.source,
-                    start_ms: chunk_ms,
-                    end_ms: chunk_ms + duration_ms,
-                    text: text.into(),
-                })
+                .then(|| TranscriptEntry::new(self.source, chunk_ms, chunk_ms + duration_ms, text))
                 .into_iter()
                 .collect()
         };
@@ -428,20 +420,18 @@ impl TrackTranscript {
         let mut words = self.words.drain(..end).collect::<Vec<_>>();
         for group in groups.into_iter().take(published) {
             let group = words.drain(..group.len()).collect::<Vec<_>>();
-            self.entries.push(TranscriptEntry {
-                source: self.source,
-                start_ms: group[0].start_ms as u64,
-                end_ms: group
-                    .iter()
-                    .map(|word| word.end_ms)
-                    .max()
-                    .unwrap_or_default() as u64,
-                text: group
-                    .iter()
-                    .map(|word| word.text.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            });
+            let end_ms = group.iter().map(|word| word.end_ms).max();
+            let text = group
+                .iter()
+                .map(|word| word.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            self.entries.push(TranscriptEntry::new(
+                self.source,
+                group[0].start_ms as u64,
+                end_ms.unwrap_or_default() as u64,
+                text,
+            ));
         }
     }
 }
@@ -1778,7 +1768,7 @@ pub(super) fn echo_report(
                 "  {} {:>6} {:<5} {:<6} {}",
                 if kept { "KEEP" } else { "drop" },
                 entry.start_ms,
-                entry.source.label(),
+                super::Labels::default().of(&entry),
                 match signal {
                     Some(Some(Signal::Bleed)) => "bleed",
                     Some(Some(Signal::Local)) => "local",
@@ -2029,12 +2019,7 @@ mod tests {
     use super::*;
 
     fn entry(source: MeetingSource, start_ms: u64, end_ms: u64, text: &str) -> TranscriptEntry {
-        TranscriptEntry {
-            source,
-            start_ms,
-            end_ms,
-            text: text.into(),
-        }
+        TranscriptEntry::new(source, start_ms, end_ms, text)
     }
 
     fn speech(seconds: usize) -> Vec<f32> {
