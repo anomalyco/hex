@@ -2560,7 +2560,7 @@ fn hud_lab_picks_dot_scope_processing_placement_and_level() {
 
 #[test]
 fn labs_lists_every_toggle_off_by_default() {
-    let mut rt = runtime("mac-production", true, (980.0, 2200.0));
+    let mut rt = runtime("mac-production", true, (980.0, 2600.0));
     rt.state.settings.experimental.hex_microphone = false;
     rt.state.platform.hex_microphone = None;
     refresh(&mut rt);
@@ -2627,7 +2627,7 @@ fn labs_lists_every_toggle_off_by_default() {
 
     // Windows lists Terminal paste in Labs, not General. Labs is tall enough
     // that its last row needs the macOS half's height to be on screen.
-    let mut rt = runtime("windows-settings", true, (980.0, 2200.0));
+    let mut rt = runtime("windows-settings", true, (980.0, 2600.0));
     assert!(rt.find("terminal-paste").is_none());
     open_labs(&mut rt);
     assert!(rt.find("lab-return-to-app").is_none(), "macOS only");
