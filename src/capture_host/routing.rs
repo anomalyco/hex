@@ -1496,6 +1496,7 @@ fn now_ms() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use super::super::CaptureEnd;
     use super::*;
 
     fn candidate(id: &str, title: &str, updated_ms: u64) -> smart::Candidate {
@@ -2147,7 +2148,7 @@ mod tests {
                 let outcomes = SharedOutcomes::default();
                 let mut worker = worker(outcomes.clone());
                 let bundle = written("com.example.board");
-                lock(&outcomes).fail(bundle.clone(), "test".into());
+                lock(&outcomes).settle(bundle.clone(), CaptureEnd::Failed("test".into()));
                 let started = Instant::now();
                 worker.written(bundle, look);
                 assert!(started.elapsed() < Duration::from_millis(200));
@@ -2213,7 +2214,7 @@ mod tests {
                         let mut worker = worker(outcomes.clone());
                         worker.forward = post;
                         let bundle = written("com.example.browser");
-                        lock(&outcomes).fail(bundle.clone(), "test".into());
+                        lock(&outcomes).settle(bundle.clone(), CaptureEnd::Failed("test".into()));
                         worker.written(bundle.clone(), look);
                         assert!(worker.current.as_ref().unwrap().sent_session().is_none());
                         worker.hold(true);
@@ -2271,7 +2272,7 @@ mod tests {
             let outcomes = SharedOutcomes::default();
             let mut worker = worker(outcomes.clone());
             let bundle = written("com.example.board");
-            lock(&outcomes).fail(bundle.clone(), "test".into());
+            lock(&outcomes).settle(bundle.clone(), CaptureEnd::Failed("test".into()));
             worker.written(bundle.clone(), look);
             // The local read saw nothing, so the rule's send is due at once.
             worker
@@ -2322,7 +2323,7 @@ mod tests {
             let outcomes = SharedOutcomes::default();
             let mut worker = worker(outcomes.clone());
             let bundle = written("com.example.board");
-            lock(&outcomes).fail(bundle.clone(), "test".into());
+            lock(&outcomes).settle(bundle.clone(), CaptureEnd::Failed("test".into()));
             worker.written(bundle.clone(), look);
             // As if the local read found no rule yet, and its hold ran out
             // while the capsule still said nothing.
@@ -2374,7 +2375,7 @@ mod tests {
             let mut worker = worker(outcomes.clone());
             worker.forward = post;
             let bundle = written("com.example.board");
-            lock(&outcomes).fail(bundle.clone(), "test".into());
+            lock(&outcomes).settle(bundle.clone(), CaptureEnd::Failed("test".into()));
             worker.written(bundle.clone(), look);
             worker.hold(true);
             // Its window ran out while the pointer was on the capsule.
@@ -2429,10 +2430,10 @@ mod tests {
             let mut worker = worker(outcomes.clone());
             worker.forward = post;
             let first = written("com.example.board");
-            lock(&outcomes).fail(first.clone(), "test".into());
+            lock(&outcomes).settle(first.clone(), CaptureEnd::Failed("test".into()));
             worker.written(first.clone(), look);
             let second = written("com.example.other");
-            lock(&outcomes).fail(second.clone(), "test".into());
+            lock(&outcomes).settle(second.clone(), CaptureEnd::Failed("test".into()));
             let (look, later) = held_look(router_with(|_| {}), look::Live::default());
             worker.written(second.clone(), look);
             assert_eq!(worker.older.len(), 1);
@@ -2465,7 +2466,7 @@ mod tests {
             let outcomes = SharedOutcomes::default();
             let mut worker = worker(outcomes.clone());
             let bundle = written("com.example.board");
-            lock(&outcomes).fail(bundle.clone(), "test".into());
+            lock(&outcomes).settle(bundle.clone(), CaptureEnd::Failed("test".into()));
             worker.written(bundle.clone(), look);
             let (updates, pending) = preparation::fed();
             worker.pending = Some(pending);
@@ -2541,7 +2542,7 @@ mod tests {
             let outcomes = SharedOutcomes::default();
             let mut worker = worker(outcomes.clone());
             let bundle = written("com.example.board");
-            lock(&outcomes).fail(bundle.clone(), "test".into());
+            lock(&outcomes).settle(bundle.clone(), CaptureEnd::Failed("test".into()));
             worker.written(bundle.clone(), look);
             worker.chosen("ses_home", false);
             let _ = found.send(Some(look::Live::default()));
@@ -2929,7 +2930,10 @@ mod tests {
             let a = written("com.brave.Browser");
             let look = look_with(context, router_with(|_| {}), senses(dev_tab)).unwrap();
             // B, started while A was looked at, is written first.
-            lock(&outcomes).fail(written("com.example.board"), "test".into());
+            lock(&outcomes).settle(
+                written("com.example.board"),
+                CaptureEnd::Failed("test".into()),
+            );
             worker.written(a.clone(), look);
             settle(&mut worker);
             assert!(worker.resolve("BOARD").is_none(), "the capsule shows B");
@@ -2954,7 +2958,7 @@ mod tests {
             let outcomes = SharedOutcomes::default();
             let mut worker = worker(outcomes.clone());
             let bundle = written("com.brave.Browser");
-            lock(&outcomes).fail(bundle.clone(), "test".into());
+            lock(&outcomes).settle(bundle.clone(), CaptureEnd::Failed("test".into()));
             let look = look_with(context, router_with(|_| {}), senses(dev_tab)).unwrap();
             worker.written(bundle, look);
             settle(&mut worker);
@@ -3051,7 +3055,7 @@ mod tests {
                 let outcomes = SharedOutcomes::default();
                 let mut worker = worker(outcomes.clone());
                 let bundle = written("com.example.board");
-                lock(&outcomes).fail(bundle.clone(), "test".into());
+                lock(&outcomes).settle(bundle.clone(), CaptureEnd::Failed("test".into()));
                 worker.written(bundle.clone(), look);
                 found.send(Some(live)).unwrap();
                 settle(&mut worker);
@@ -3095,7 +3099,7 @@ mod tests {
             let mut worker = worker(outcomes.clone());
             worker.forward = offline;
             let bundle = written("com.brave.Browser");
-            lock(&outcomes).fail(bundle.clone(), "test".into());
+            lock(&outcomes).settle(bundle.clone(), CaptureEnd::Failed("test".into()));
             let look = look_with(context, router_with(|_| {}), senses(dev_tab)).unwrap();
             worker.written(bundle.clone(), look);
             settle(&mut worker);
@@ -3154,7 +3158,7 @@ mod tests {
             let mut worker = worker(outcomes.clone());
             worker.forward = offline;
             let bundle = written("com.brave.Browser");
-            lock(&outcomes).fail(bundle.clone(), "test".into());
+            lock(&outcomes).settle(bundle.clone(), CaptureEnd::Failed("test".into()));
             let look = look_with(context, router_with(|_| {}), senses(dev_tab)).unwrap();
             worker.written(bundle.clone(), look);
             settle(&mut worker);
@@ -3198,7 +3202,7 @@ mod tests {
             let outcomes = SharedOutcomes::default();
             let mut worker = worker(outcomes.clone());
             worker.forward = offline;
-            lock(&outcomes).fail(dir.clone(), "test".into());
+            lock(&outcomes).settle(dir.clone(), CaptureEnd::Failed("test".into()));
             let (look, found) = held_look(router, look::Live::default());
             let _ = found.try_send(Some(look::Live::default()));
             worker.written(dir.clone(), look);

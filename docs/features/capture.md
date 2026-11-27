@@ -1383,6 +1383,7 @@ Checks:
   `controls_are_idempotent_and_stop_writes_a_scrawl_bundle`,
   `an_engine_that_cannot_start_leaves_nothing_behind`,
   `a_screen_source_that_gives_up_ends_the_capture`,
+  `a_finisher_failure_reaches_the_capsule_with_its_reason`,
   `scrawls_engine_claims_nothing_machine_wide`,
   `the_timeline_resamples_pads_gaps_and_ends_at_the_stop`,
   `a_pending_gap_and_a_stalled_tail_come_back_from_the_closed_sink`,

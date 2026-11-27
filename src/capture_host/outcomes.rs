@@ -67,7 +67,7 @@ pub struct SettledCapture {
     /// Where a written capture's audio stops, when Hex had to stop keeping it.
     pub audio_stopped_at_ms: Option<u64>,
     pub missing_transcript: Option<String>,
-    /// Why a capture failed, when Hex knows.
+    /// Why a capture failed.
     pub error: Option<String>,
     /// Why a written capture's summary didn't reach the clipboard; `None`
     /// once it did (or for a capture that isn't copied).
@@ -77,7 +77,64 @@ pub struct SettledCapture {
     pub route: Option<CaptureRoute>,
 }
 
+/// How a capture ended when settled into [`Outcomes`].
+#[expect(
+    clippy::large_enum_variant,
+    reason = "passed directly into Outcomes::settle and never stored"
+)]
+pub(super) enum CaptureEnd {
+    Written {
+        audio: Written,
+        copy_error: Option<String>,
+        route: Option<CaptureRoute>,
+    },
+    Failed(String),
+    Cancelled,
+}
+
 impl SettledCapture {
+    fn from_end(bundle: PathBuf, end: CaptureEnd) -> Self {
+        match end {
+            CaptureEnd::Written {
+                audio,
+                copy_error,
+                route,
+            } => Self {
+                bundle,
+                stage: Stage::Done,
+                words: Some(audio.words),
+                gaps: Some(audio.gaps),
+                audio_stopped_at_ms: audio.audio_stopped_at_ms,
+                missing_transcript: audio.missing_transcript,
+                error: None,
+                copy_error,
+                route,
+            },
+            CaptureEnd::Failed(error) => Self {
+                bundle,
+                stage: Stage::Failed,
+                words: None,
+                gaps: None,
+                audio_stopped_at_ms: None,
+                missing_transcript: None,
+                error: Some(error),
+                copy_error: None,
+                route: None,
+            },
+            CaptureEnd::Cancelled => Self {
+                bundle,
+                stage: Stage::Cancelled,
+                words: None,
+                gaps: None,
+                audio_stopped_at_ms: None,
+                missing_transcript: None,
+                error: None,
+                copy_error: None,
+                route: None,
+            },
+        }
+    }
+
     pub(super) fn outcome(&self) -> ScrawlCaptureOutcome {
         ScrawlCaptureOutcome {
             bundle: self.bundle.clone(),
@@ -348,28 +405,22 @@ impl Outcomes {
         self.publish();
     }
 
-    pub(super) fn settle(&mut self, bundle: PathBuf, stage: Stage, written: Option<Written>) {
-        self.settle_with(bundle, stage, written, None, None, None);
-    }
-
-    pub(super) fn fail(&mut self, bundle: PathBuf, error: String) {
-        self.settle_with(bundle, Stage::Failed, None, Some(error), None, None);
+    pub(super) fn settle(&mut self, bundle: PathBuf, end: CaptureEnd) {
+        let discarded = self
+            .find(&bundle)
+            .is_some_and(|unfinished| matches!(unfinished.phase, UnfinishedPhase::Discarded));
+        self.unfinished
+            .retain(|unfinished| unfinished.bundle != bundle);
+        if !discarded {
+            self.last = Some(SettledCapture::from_end(bundle, end));
+        }
+        self.publish();
     }
 
     /// A switch discarded `bundle` and then could not start: its outcome,
     /// since the discard settles none.
     pub(super) fn fail_switch(&mut self, bundle: PathBuf, error: String) {
-        self.last = Some(SettledCapture {
-            bundle,
-            stage: Stage::Failed,
-            words: None,
-            gaps: None,
-            audio_stopped_at_ms: None,
-            missing_transcript: None,
-            error: Some(error),
-            copy_error: None,
-            route: None,
-        });
+        self.last = Some(SettledCapture::from_end(bundle, CaptureEnd::Failed(error)));
         self.publish();
     }
 
@@ -399,38 +450,6 @@ impl Outcomes {
         {
             self.publish();
         }
-    }
-
-    pub(super) fn settle_with(
-        &mut self,
-        bundle: PathBuf,
-        stage: Stage,
-        written: Option<Written>,
-        error: Option<String>,
-        copy_error: Option<String>,
-        route: Option<CaptureRoute>,
-    ) {
-        let discarded = self
-            .find(&bundle)
-            .is_some_and(|unfinished| matches!(unfinished.phase, UnfinishedPhase::Discarded));
-        self.unfinished
-            .retain(|unfinished| unfinished.bundle != bundle);
-        if !discarded {
-            self.last = Some(SettledCapture {
-                bundle,
-                stage,
-                words: written.as_ref().map(|written| written.words),
-                gaps: written.as_ref().map(|written| written.gaps),
-                audio_stopped_at_ms: written
-                    .as_ref()
-                    .and_then(|written| written.audio_stopped_at_ms),
-                missing_transcript: written.and_then(|written| written.missing_transcript),
-                error,
-                copy_error,
-                route,
-            });
-        }
-        self.publish();
     }
 
     fn find(&mut self, bundle: &Path) -> Option<&mut Unfinished> {
