@@ -719,14 +719,9 @@ pub(crate) mod files {
         }
     }
 
+    /// The file selected in Finder or Explorer, or its folder on Linux.
     pub(super) fn reveal(path: &Path) {
-        if let Err(error) = std::process::Command::new("open")
-            .arg("-R")
-            .arg(path)
-            .spawn()
-        {
-            tracing::warn!(%error, "could not show the capture in Finder");
-        }
+        crate::meeting::reveal(path);
     }
 
     pub(crate) fn trash(path: PathBuf) {
@@ -743,7 +738,17 @@ pub(crate) mod files {
                 }
             }
             #[cfg(not(target_os = "macos"))]
-            let _ = path;
+            match crate::meeting::move_to_trash(&path) {
+                Ok(()) => {
+                    crate::history::captures::forget(&path);
+                    #[cfg(hex_capture)]
+                    crate::history::annotations::forget(&path);
+                }
+                Err(error) => {
+                    tracing::warn!(%error, path = %path.display(), "could not trash the capture");
+                    crate::feedback::play(crate::feedback::Tone::Error);
+                }
+            }
         });
     }
 

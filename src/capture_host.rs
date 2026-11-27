@@ -2841,7 +2841,7 @@ pub(crate) fn with_linux_paster(
 /// Copies a written capture to the clipboard, as Scrawl does: its summary,
 /// ready to paste into an agent. The capsule says "Summary copied" only
 /// once this is `Ok`.
-fn copy_to_clipboard(bundle: &Path) -> anyhow::Result<()> {
+pub(crate) fn copy_to_clipboard(bundle: &Path) -> anyhow::Result<()> {
     if cfg!(test) {
         return Ok(());
     }
