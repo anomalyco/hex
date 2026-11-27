@@ -211,6 +211,24 @@ class InsertionTest {
         assertEquals(2, space.move(580f, 50f, 340))
         assertEquals(false, space.up())
     }
+    // Labs › Keyboard › Hold space to move the cursor: a hold is a trackpad from where the finger is, and types no space.
+    @Test fun aHeldSpaceBarMovesTheCursorFromWhereItWasHeldAndTypesNothing() {
+        val space = SpaceGesture(start = 45f, step = 33f, stillSlop = 21f)
+        space.down(500f, 50f, 0)
+        assertEquals(null, space.move(510f, 50f, 200))
+        space.hold()
+        assertEquals(true, space.held)
+        assertEquals(0, space.move(530f, 50f, 600))
+        assertEquals(1, space.move(543f, 50f, 610))
+        assertEquals(-2, space.move(444f, 50f, 620))
+        assertEquals(false, space.up())
+        val still = SpaceGesture(start = 45f, step = 33f, stillSlop = 21f)
+        still.down(500f, 50f, 0); still.hold()
+        assertEquals(false, still.up())
+        still.down(500f, 50f, 1000)
+        assertEquals(false, still.held)
+        assertEquals(true, still.up())
+    }
     @Test fun aCursorSlideStepsOverWholeCharacters() {
         val moves = ArrayList<Int>()
         val text = "ab\uD83D\uDC4D\uD83C\uDFFDcd"

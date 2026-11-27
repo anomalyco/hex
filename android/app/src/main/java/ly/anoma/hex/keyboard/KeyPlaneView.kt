@@ -136,8 +136,12 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private var shiftIcon: ImageView? = null
     // The Labs letter-symbol setting the keys were drawn with, so a change draws them when next shown.
     private var letterSymbolsDrawn = false
-    private val switchLanguage = Runnable {
-        if (spaceKey.isPressed && spaceGesture.still) { spaceKey.isPressed = false; spaceKey.performLongClick() }
+    /** The space bar held still: the dictation-language menu, or with Labs › Keyboard › Hold space to move the cursor
+     * a trackpad, with a click to say so (the menu's long click had one too); TalkBack's long click still opens the menu. */
+    private val holdSpace = Runnable {
+        if (!spaceKey.isPressed || !spaceGesture.still) return@Runnable
+        if (ime.feedback.spaceHoldCursor) { spaceGesture.hold(); tap(context, ime.feedback.haptics, Tap.Press) }
+        else { spaceKey.isPressed = false; spaceKey.performLongClick() }
     }
     private val deleteGesture = DeleteGesture(KeyboardMetrics.DELETE_START * density, KeyboardMetrics.DELETE_STEP * density,
         KeyboardMetrics.DELETE_CANCEL * density, slop.toFloat())
@@ -200,32 +204,33 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         spaceKey.label?.setTextColor(quiet)
         spaceKey.setOnLongClickListener { host.openLanguageMenu(); true }
         // A press that leaves the key still types its space on lifting: a quick tap that drifts must
-        // never lose it. Only a slide that moved the cursor, or the long press's menu, types none.
+        // never lose it. Only a slide that moved the cursor, the long press's menu, or a hold (Labs), types none.
         spaceKey.setOnTouchListener { v, e ->
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     // Another key going down while space is held types the space first, unless it moved the cursor.
                     roll.down(v) {
-                        removeCallbacks(switchLanguage); val typing = v.isPressed && cursorSlide == null
+                        removeCallbacks(holdSpace); val typing = v.isPressed && cursorSlide == null && !spaceGesture.held
                         v.isPressed = false; cursorSlide = null
                         if (typing) v.performClick()
                     }
                     v.isPressed = true; cursorSlide = null; spaceGesture.down(e.x, e.y, e.eventTime)
                     spacePoint = KeyPoint((v.left + e.x).toDouble(), (bottom.top - rows.top + e.y).toDouble())
-                    postDelayed(switchLanguage, ViewConfiguration.getLongPressTimeout().toLong())
+                    postDelayed(holdSpace, ViewConfiguration.getLongPressTimeout().toLong())
                 }
                 MotionEvent.ACTION_MOVE -> if (v.isPressed) {
                     val characters = spaceGesture.move(e.x, e.y, e.eventTime)
-                    if (!spaceGesture.still) removeCallbacks(switchLanguage)
-                    if (characters != null) (cursorSlide ?: ime.engine.cursorSlide().also { cursorSlide = it }).moveTo(characters)
+                    if (!spaceGesture.still) removeCallbacks(holdSpace)
+                    // After a hold the trackpad starts at the first whole character, not on a drift under one.
+                    if (characters != null && (characters != 0 || cursorSlide != null)) (cursorSlide ?: ime.engine.cursorSlide().also { cursorSlide = it }).moveTo(characters)
                 }
                 MotionEvent.ACTION_UP -> if (roll.up(v)) {
-                    removeCallbacks(switchLanguage); val pressed = v.isPressed; v.isPressed = false
+                    removeCallbacks(holdSpace); val pressed = v.isPressed; v.isPressed = false
                     if (pressed && spaceGesture.up()) v.performClick()
                     if (pressed) spaceKey.typedOnLift()
                     cursorSlide = null
                 }
-                MotionEvent.ACTION_CANCEL -> { roll.up(v); removeCallbacks(switchLanguage); v.isPressed = false; cursorSlide = null }
+                MotionEvent.ACTION_CANCEL -> { roll.up(v); removeCallbacks(holdSpace); v.isPressed = false; cursorSlide = null }
             }
             true
         }
@@ -948,7 +953,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     fun cancelGestures() {
         cancelSwipe()
         clearCallout(); endSlide(); roll.clear()
-        removeCallbacks(repeatDelete); removeCallbacks(switchLanguage)
+        removeCallbacks(repeatDelete); removeCallbacks(holdSpace)
         spaceKey.isPressed = false
         deleting = false
         deleteKey?.isPressed = false

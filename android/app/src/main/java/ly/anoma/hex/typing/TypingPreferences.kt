@@ -65,6 +65,11 @@ internal class TypingPreferences(context: Context) {
     var swipeDeleteLetters: Boolean
         get() = prefs.getBoolean(SWIPE_DELETE_LETTERS, false)
         set(value) { prefs.edit().putBoolean(SWIPE_DELETE_LETTERS, value).apply() }
+    /** Labs › Keyboard › Hold space to move the cursor: the space bar held still becomes a trackpad instead of opening the
+     * dictation-language menu, which stays in the Hex menu. Off by default. */
+    var spaceHoldCursor: Boolean
+        get() = prefs.getBoolean(SPACE_HOLD_CURSOR, false)
+        set(value) { prefs.edit().putBoolean(SPACE_HOLD_CURSOR, value).apply() }
     /** Labs › Keyboard › SwiftKey words: the words imported from another keyboard's export ([ImportedWords])
      * join your own words in suggestions. Off by default; the imported list stays on the phone while off. */
     var importedWords: Boolean
@@ -151,6 +156,7 @@ internal class TypingPreferences(context: Context) {
         const val KEYBOARD_TOOLS = "keyboardTools"
         const val SMART_QUOTES = "smartQuotes"
         const val SWIPE_DELETE_LETTERS = "swipeDeleteLetters"
+        const val SPACE_HOLD_CURSOR = "spaceHoldCursor"
         const val MARKS_TAKE_FIX_SPACE = "marksTakeFixSpace"
         const val ADAPTIVE_TOUCH = "adaptiveTouch"
         const val USE_IMPORTED_WORDS = "importedWords"
