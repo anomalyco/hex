@@ -211,6 +211,18 @@ class InsertionTest {
         assertEquals(2, space.move(580f, 50f, 340))
         assertEquals(false, space.up())
     }
+    // Labs › Keyboard › Hold delay: Default is exactly today's timing; the other steps scale the space bar's too.
+    @Test fun holdDelayDefaultKeepsTodaysTimingAndTheSpaceBarScales() {
+        assertEquals(HoldDelay.Default, HoldDelay.of(null))
+        assertEquals(HoldDelay.Default, HoldDelay.of("unknown"))
+        assertEquals(KeyboardMetrics.HOLD_MS, HoldDelay.Default.millis)
+        for (system in listOf(400L, 1000L, 1500L)) assertEquals(system, HoldDelay.Default.space(system))
+        assertEquals(listOf(200L, 300L, 500L), HoldDelay.entries.map { it.millis })
+        assertEquals(266L, HoldDelay.Short.space(400))
+        assertEquals(666L, HoldDelay.Long.space(400))
+        for (step in HoldDelay.entries) assertEquals(step, HoldDelay.of(step.key))
+        for (step in HoldDelay.entries) assertTrue(step.space(400) > step.millis)
+    }
     @Test fun aCursorSlideStepsOverWholeCharacters() {
         val moves = ArrayList<Int>()
         val text = "ab\uD83D\uDC4D\uD83C\uDFFDcd"

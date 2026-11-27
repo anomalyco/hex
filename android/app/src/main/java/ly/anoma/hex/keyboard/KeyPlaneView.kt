@@ -212,7 +212,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                     }
                     v.isPressed = true; cursorSlide = null; spaceGesture.down(e.x, e.y, e.eventTime)
                     spacePoint = KeyPoint((v.left + e.x).toDouble(), (bottom.top - rows.top + e.y).toDouble())
-                    postDelayed(switchLanguage, ViewConfiguration.getLongPressTimeout().toLong())
+                    postDelayed(switchLanguage, ime.feedback.holdDelay.space(ViewConfiguration.getLongPressTimeout().toLong()))
                 }
                 MotionEvent.ACTION_MOVE -> if (v.isPressed) {
                     val characters = spaceGesture.move(e.x, e.y, e.eventTime)
@@ -649,7 +649,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         item?.performClick()
     }
 
-    /** Touches for a key that types as it lifts: pressed, its pop-up, after [KeyboardMetrics.HOLD_MS] its held
+    /** Touches for a key that types as it lifts: pressed, its pop-up, after Labs › Keyboard › Hold delay ([HoldDelay]) its held
      * options to slide over, and on lifting (or when another key goes down first) [type] with the option
      * chosen, or null for the key's own. */
     private fun typesOnLift(k: KeyCap, preview: () -> String?, holds: () -> List<List<String>>, default: () -> Int = { 0 },
@@ -679,7 +679,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                     val options = holds()
                     if (options.firstOrNull().isNullOrEmpty().not()) {
                         pendingAccents = Runnable { if (v.isPressed) feedback.hold(k.face, options, default()) }
-                        postDelayed(pendingAccents!!, KeyboardMetrics.HOLD_MS)
+                        postDelayed(pendingAccents!!, ime.feedback.holdDelay.millis)
                     }
                 }
                 MotionEvent.ACTION_MOVE -> {
