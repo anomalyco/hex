@@ -31,6 +31,16 @@ use super::{MeetingManifest, MeetingSource, TranscriptEntry};
 // is not a test build expects them to be unused. The expectation fails the
 // build the moment one of them is fully in use, so it cannot outlive its
 // reason.
+//
+// The reader and what it reads through are macOS only: they take the
+// snapshot Hex's Accessibility client makes, and Windows and Linux Hex have
+// no such client yet.
+#[cfg(target_os = "macos")]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "no call app has an adapter yet")
+)]
+mod adapter;
 #[cfg_attr(not(test), expect(dead_code, reason = "no reader writes evidence yet"))]
 mod calibrate;
 #[cfg_attr(not(test), expect(dead_code, reason = "no reader writes evidence yet"))]
@@ -39,6 +49,18 @@ mod evidence;
 mod floor;
 #[cfg_attr(not(test), expect(dead_code, reason = "no reader writes evidence yet"))]
 mod names;
+#[cfg(target_os = "macos")]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "no recording starts a reader yet")
+)]
+mod reader;
+#[cfg(target_os = "macos")]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "no call app has an adapter yet")
+)]
+mod registry;
 #[cfg_attr(not(test), expect(dead_code, reason = "no reader writes evidence yet"))]
 mod resolve;
 

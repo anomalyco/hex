@@ -20,14 +20,14 @@ use std::ops::Range;
 
 use super::calibrate::{Calibration, Timing};
 use super::evidence::{Correction, Evidence, Interval, ParticipantKey, Untrusted};
-use super::floor::{Blind, Floor, Roster, State};
+use super::floor::{Blind, Floor, POLL_MS, Roster, State};
 
 /// A pause this long in the remote track ends a span. A change of floor
 /// that falls in such a pause is clean: the words either side are kept.
 const SPAN_GAP_MS: u64 = 300;
 /// One of the reader's looks: how far the end of a hold, or its start, can
 /// be from the truth.
-const LOOK_MS: u64 = 500;
+const LOOK_MS: u64 = POLL_MS;
 /// Under [`Strictness::SteadyWindow`], how far a word must be from a change
 /// of floor inside continuous speech to keep its name.
 const STEADY_MARGIN_MS: u64 = 750;

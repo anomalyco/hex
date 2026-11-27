@@ -14,9 +14,12 @@
 
 use super::evidence::{Evidence, Interval, Participant, ParticipantKey, Untrusted};
 
+/// How often the reader looks at the call window.
+pub(super) const POLL_MS: u64 = 500;
+
 /// How long one look vouches for: one and a half of the reader's half
 /// seconds. Two looks further apart than this have a hole between them.
-pub(super) const POLL_REACH_MS: u64 = 750;
+pub(super) const POLL_REACH_MS: u64 = POLL_MS + POLL_MS / 2;
 
 /// Everyone the call app showed on the call.
 pub(super) struct Roster<'a>(Vec<&'a Participant>);
