@@ -37,7 +37,7 @@ impl AttachedTap {
         }
         let source = unsafe { CFMachPortCreateRunLoopSource(ptr::null(), tap, 0) };
         if source.is_null() {
-            unsafe { CFRelease(tap.cast_const()) };
+            unsafe { release_tap_port(tap) };
             return Err("could not create input run-loop sources");
         }
         slot.store(tap, Ordering::Release);
@@ -53,13 +53,28 @@ impl AttachedTap {
     }
 }
 
+/// Unregisters and releases a tap's Mach port. Releasing the port alone
+/// leaves the tap registered with the window server, disabled but counted: a
+/// tap recreated every health check piled up thousands and made the pointer
+/// stutter (#2968). Invalidating it unregisters it.
+///
+/// # Safety
+/// `tap` must be a CFMachPort from `CGEventTapCreate` that the caller owns
+/// and no longer uses.
+unsafe fn release_tap_port(tap: *mut c_void) {
+    unsafe {
+        CFMachPortInvalidate(tap);
+        CFRelease(tap.cast_const());
+    }
+}
+
 impl Drop for AttachedTap {
     fn drop(&mut self) {
         unsafe {
             CGEventTapEnable(self.tap, false);
             CFRunLoopRemoveSource(self.run_loop, self.source, kCFRunLoopCommonModes);
             CFRelease(self.source.cast_const());
-            CFRelease(self.tap.cast_const());
+            release_tap_port(self.tap);
         }
     }
 }
@@ -215,6 +230,8 @@ pub(super) fn run_event_tap(
             kind,
             attached: None,
             failing: false,
+            stuck: 0,
+            wait: 0,
         }),
     });
     for tap in &mut taps.taps {
@@ -265,6 +282,18 @@ pub(super) fn run_event_tap(
 /// or invalidate a tap without delivering a disable event (after sleep,
 /// secure input, or an Accessibility change), which leaves the shortcut dead.
 pub(super) const TAP_HEALTH_INTERVAL_SECONDS: f64 = 5.0;
+
+/// The most health checks skipped before recreating a tap macOS keeps
+/// disabled: 11 skipped checks of 5 s retry once a minute.
+pub(super) const MAX_DISABLED_RETRY_SKIPS: u32 = 11;
+
+/// How many health checks to skip before recreating a tap that stayed
+/// disabled after `stuck` recreations in a row: retries come 5, 10, 20, 40,
+/// then every 60 s apart, so a tap macOS will not run is not rebuilt every
+/// five seconds (#2968).
+pub(super) fn disabled_retry_skips(stuck: u32) -> u32 {
+    ((1_u32 << stuck.min(4)) - 1).min(MAX_DISABLED_RETRY_SKIPS)
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum TapKind {
@@ -321,6 +350,10 @@ pub(super) struct ManagedTap {
     pub(super) attached: Option<AttachedTap>,
     /// Creation failed and was logged; log again only once it recovers.
     pub(super) failing: bool,
+    /// Recreations in a row whose replacement macOS also left disabled.
+    pub(super) stuck: u32,
+    /// Health checks left before the next recreation of a disabled tap.
+    pub(super) wait: u32,
 }
 
 impl ManagedTap {
@@ -463,15 +496,37 @@ impl TapSet {
                     unsafe { CGEventTapEnable(attached.tap, true) };
                     // SAFETY: as above.
                     let enabled = unsafe { CGEventTapIsEnabled(attached.tap) };
-                    tracing::warn!(
-                        tap = kind,
-                        reenabled = enabled,
-                        "event tap was disabled without notice; re-enabled it"
-                    );
-                    interrupted |= tap.kind.tracks_shortcuts();
-                    !enabled
+                    if enabled {
+                        tracing::warn!(
+                            tap = kind,
+                            "event tap was disabled without notice; re-enabled it"
+                        );
+                        tap.stuck = 0;
+                        tap.wait = 0;
+                        interrupted |= tap.kind.tracks_shortcuts();
+                        false
+                    } else if tap.wait > 0 {
+                        // Still disabled: wait out the backoff rather than
+                        // rebuilding a tap macOS will not run.
+                        tap.wait -= 1;
+                        false
+                    } else {
+                        tracing::warn!(
+                            tap = kind,
+                            attempt = tap.stuck.saturating_add(1),
+                            "event tap stayed disabled; recreating it"
+                        );
+                        interrupted |= tap.kind.tracks_shortcuts();
+                        tap.wait = disabled_retry_skips(tap.stuck);
+                        tap.stuck = tap.stuck.saturating_add(1);
+                        true
+                    }
                 }
-                Some(_) => false,
+                Some(_) => {
+                    tap.stuck = 0;
+                    tap.wait = 0;
+                    false
+                }
             };
             if !recreate {
                 continue;

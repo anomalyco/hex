@@ -146,6 +146,7 @@ unsafe extern "C" {
     fn CFRunLoopTimerInvalidate(timer: *mut c_void);
     fn CFAbsoluteTimeGetCurrent() -> f64;
     fn CFMachPortIsValid(port: *mut c_void) -> u8;
+    fn CFMachPortInvalidate(port: *mut c_void);
     fn CFRelease(value: *const c_void);
     static kCFRunLoopCommonModes: *const c_void;
 }

@@ -543,6 +543,16 @@ fn mouse_hotkeys() -> RuntimeHotkeys {
 }
 
 #[test]
+fn a_tap_macos_keeps_disabled_is_rebuilt_less_often_up_to_once_a_minute() {
+    // A tap rebuilt every health check piled up registrations (#2968).
+    let seconds: Vec<f64> = (0..7)
+        .map(|stuck| f64::from(disabled_retry_skips(stuck) + 1) * TAP_HEALTH_INTERVAL_SECONDS)
+        .collect();
+    assert_eq!(seconds, [5.0, 10.0, 20.0, 40.0, 60.0, 60.0, 60.0]);
+    assert_eq!(disabled_retry_skips(u32::MAX), MAX_DISABLED_RETRY_SKIPS);
+}
+
+#[test]
 fn mouse_events_reach_the_filtering_tap_only_while_a_mouse_shortcut_is_bound() {
     // Idle clicks and drags on a filtering tap broke dragging windows
     // between displays and Spaces (#1215).
