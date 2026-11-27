@@ -216,7 +216,7 @@ impl AppSettings {
         settings.repair_bare_primary_clicks();
         #[cfg(target_os = "macos")]
         settings.repair_mouse_shortcuts();
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
         settings.repair_special_keys();
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         settings.repair_section_key();

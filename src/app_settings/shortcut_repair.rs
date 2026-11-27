@@ -1,7 +1,7 @@
 //! Shortcut keys a Labs feature allows, and the repair that puts a saved
 //! shortcut on one back while the feature is off: mouse buttons (Labs ›
 //! Mouse shortcuts, macOS), Menu, Pause, or Scroll Lock (Labs › Special
-//! keys alone, Linux), Caps Lock or a navigation key alone (the same Lab,
+//! keys alone, Linux), a navigation key alone (the same Lab,
 //! Windows), the ISO section key (Labs › § key alone, Linux
 //! and macOS), the microphone key (Labs › Microphone key alone, macOS),
 //! shortcuts without a key (Labs › Double-tap Option, Command, or
@@ -65,13 +65,6 @@ impl HotkeyKey {
         )
     }
 
-    /// Caps Lock, which Labs › Special keys alone lets a Windows shortcut
-    /// use alone. Hex keeps the press, so the lock never flips.
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    pub fn is_caps_lock(&self) -> bool {
-        !self.is_mouse() && Self::caps_lock_name(&self.label)
-    }
-
     /// Whether `name` names Caps Lock: `capslock`, `caps_lock`, or
     /// `Caps Lock`.
     pub fn caps_lock_name(name: &str) -> bool {
@@ -96,14 +89,6 @@ impl HotkeyBinding {
         self.modifiers.is_empty() && self.key.as_ref().is_some_and(HotkeyKey::is_navigation)
     }
 
-    /// Caps Lock or a navigation key alone: the keys a Windows shortcut may
-    /// use by themselves only with Labs › Special keys alone.
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    pub fn is_lone_windows_special_key(&self) -> bool {
-        self.is_lone_navigation_key()
-            || (self.modifiers.is_empty() && self.key.as_ref().is_some_and(HotkeyKey::is_caps_lock))
-    }
-
     /// The § key alone (`HotkeyKey::is_section`).
     pub fn is_lone_section_key(&self) -> bool {
         self.modifiers.is_empty() && self.key.as_ref().is_some_and(HotkeyKey::is_section)
@@ -126,7 +111,7 @@ pub(super) fn is_scroll_lock(name: &str) -> bool {
 impl AppSettings {
     /// Whether Labs › Special keys alone is on: on Linux a shortcut may use
     /// Menu, Pause, or Scroll Lock; on Windows, which takes those anyway,
-    /// Caps Lock or a navigation key alone.
+    /// a navigation key alone.
     pub fn special_keys_allowed(&self) -> bool {
         cfg!(any(target_os = "linux", target_os = "windows"))
             && self.labs.standalone_special_keys
@@ -232,12 +217,12 @@ impl AppSettings {
                 "reset Menu, Pause, and Scroll Lock shortcuts: Labs › Special keys alone is off"
             );
         }
-        // Windows: Caps Lock or a navigation key alone needs the toggle.
+        // Windows: a navigation key alone needs the toggle.
         if cfg!(target_os = "windows")
-            && self.reset_shortcuts(HotkeyBinding::is_lone_windows_special_key)
+            && self.reset_shortcuts(HotkeyBinding::is_lone_navigation_key)
         {
             tracing::info!(
-                "reset Caps Lock and navigation-key shortcuts without a modifier: Labs › Special keys alone is off"
+                "reset navigation-key shortcuts without a modifier: Labs › Special keys alone is off"
             );
         }
     }
@@ -358,23 +343,78 @@ mod tests {
     }
 
     #[test]
-    fn caps_lock_is_named_in_any_spelling_and_alone_is_a_windows_special_key() {
+    fn caps_lock_names_are_not_labs_gated_special_or_navigation_keys() {
         for name in ["capslock", "caps_lock", "Caps Lock", " caps lock "] {
             assert!(HotkeyKey::caps_lock_name(name), "{name}");
-            assert_eq!(HotkeyKey::named(name).label, "Caps Lock");
+            let key = HotkeyKey::named(name);
+            assert_eq!(key.label, "Caps Lock");
+            assert!(!key.is_special());
+            assert!(!key.is_navigation());
         }
         assert!(!HotkeyKey::caps_lock_name("scroll lock"));
-        let caps_lock = |modifiers: HotkeyModifiers| HotkeyBinding {
-            modifiers,
-            key: Some(HotkeyKey::named("capslock")),
-        };
-        assert!(caps_lock(Default::default()).is_lone_windows_special_key());
-        let with_control = HotkeyModifiers {
-            control: Some(crate::app_settings::ModifierSide::Either),
-            ..Default::default()
-        };
-        assert!(!caps_lock(with_control).is_lone_windows_special_key());
-        assert!(!menu().is_lone_windows_special_key());
+    }
+
+    #[test]
+    fn special_keys_lab_off_keeps_caps_lock_and_repairs_only_windows_navigation() {
+        for name in ["capslock", "insert", "home", "end", "pageup", "pagedown"] {
+            let binding = HotkeyBinding {
+                modifiers: Default::default(),
+                key: Some(HotkeyKey::named(name)),
+            };
+            let mut settings = AppSettings {
+                dictation_hotkey: binding.clone(),
+                raw_dictation_hotkey: Some(binding.clone()),
+                ..Default::default()
+            };
+            settings.labs.standalone_special_keys = true;
+            settings.repair_special_keys();
+            assert_eq!(settings.dictation_hotkey, binding);
+            crate::labs::Feature::StandaloneSpecialKeys.set(&mut settings, false);
+            settings.repair_special_keys();
+            if cfg!(target_os = "windows") && name != "capslock" {
+                assert_eq!(
+                    settings.dictation_hotkey,
+                    HotkeyBinding::default(),
+                    "{name}"
+                );
+                assert_eq!(settings.raw_dictation_hotkey, None, "{name}");
+            } else {
+                assert_eq!(settings.dictation_hotkey, binding, "{name}");
+                assert_eq!(settings.raw_dictation_hotkey, Some(binding), "{name}");
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn caps_lock_survives_save_and_load_with_the_special_keys_lab_off() {
+        let sequence = crate::app_settings::SETTINGS_TEMP_SEQUENCE
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "hex-caps-lock-settings-{}-{sequence}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        for name in ["capslock", "insert", "home", "end", "pageup", "pagedown"] {
+            let binding = HotkeyBinding {
+                modifiers: Default::default(),
+                key: Some(HotkeyKey::named(name)),
+            };
+            let settings = AppSettings {
+                dictation_hotkey: binding.clone(),
+                ..Default::default()
+            };
+            settings.write_to(&path).unwrap();
+            let loaded = AppSettings::load_from(&path).unwrap();
+            assert!(!loaded.labs.standalone_special_keys);
+            if name == "capslock" {
+                assert_eq!(loaded.dictation_hotkey, binding);
+            } else {
+                assert_eq!(loaded.dictation_hotkey, HotkeyBinding::default(), "{name}");
+            }
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

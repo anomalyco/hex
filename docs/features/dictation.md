@@ -124,19 +124,26 @@ recorder refuses them, and a saved shortcut on one goes back to its default
 when settings load or the toggle turns off. On, the window's recorder takes
 them too (#1187). Details and checks in [labs.md](labs.md).
 
-Windows with the same toggle on: Caps Lock may be a shortcut's key alone, as
-Insert, Home, End, Page Up, and Page Down may (`hex settings set
+Windows: Caps Lock may be a shortcut's key alone out of the box, with
+Labs › Special keys alone off (`hex settings set
 dictation_hotkey capslock`, or press it in the window's recorder). The
 listener keeps every Caps Lock press the shortcut fires on, and the recorder's
 own hook keeps a press made in Hex's window, so the lock never flips; with
-other modifiers held, Caps Lock still reaches Windows. Off, the recorder
-shows "Add a modifier", `hex settings` refuses it, and a saved one goes back
-to its default. Caps Lock with a modifier needs no toggle. Implemented
+other modifiers held, Caps Lock still reaches Windows unless that chord is
+bound too. Saving, loading, or turning the Lab off keeps a Caps Lock shortcut.
+Insert, Home, End, Page Up, and Page Down alone still need the Lab: off, the
+recorder shows "Add a modifier", `hex settings` refuses them, and a saved
+one goes back to its default. Implemented
 November 26, 2026 from a user report; not yet run on a Windows keyboard.
 Checks: `the_recorder_keeps_a_whole_caps_lock_press_made_in_hexs_window`
 (`windows/input/chord.rs`) and
 `pause_and_scroll_lock_stand_alone_but_numpad_keys_need_a_modifier`
-(`windows/input.rs`).
+(`windows/input.rs`). Labs-off acceptance and repair checks:
+`recorder_accepts_caps_lock_without_the_special_keys_lab` (`rune_ui/settings.rs`),
+`caps_lock_alone_needs_no_lab_on_windows_but_navigation_still_does`
+(`control/settings.rs`), and
+`caps_lock_survives_save_and_load_with_the_special_keys_lab_off`
+(`app_settings/shortcut_repair.rs`).
 
 Linux and macOS with Labs › § key alone on (`labs.section_key_alone`,
 off by default; issue 1050): the ISO section key, left of 1, may be a

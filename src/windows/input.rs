@@ -152,8 +152,8 @@ impl WindowsHotkey {
             .and_then(|number| number.parse::<u8>().ok())
             .is_some_and(|number| (1..=24).contains(&number));
         // Keys that type nothing may stand alone: function keys, mouse
-        // buttons, Menu, Pause, and Scroll Lock, and Caps Lock and the
-        // navigation keys, which Settings allow alone only with Labs ›
+        // buttons, Menu, Pause, Scroll Lock, and Caps Lock. Navigation keys
+        // may also stand alone, but Settings gates those behind Labs ›
         // Special keys alone.
         let types_nothing = function_key
             || HotkeyKey::mouse_number(key).is_some()
@@ -1608,9 +1608,9 @@ mod tests {
         assert!(alone("pause").validate().is_ok());
         assert!(alone("scroll lock").validate().is_ok());
         assert!(alone("menu").validate().is_ok());
-        // Settings gate these behind Labs › Special keys alone.
-        assert!(alone("home").validate().is_ok());
         assert!(alone("caps lock").validate().is_ok());
+        // Settings gate navigation keys behind Labs › Special keys alone.
+        assert!(alone("home").validate().is_ok());
         assert!(alone("num 5").validate().is_err());
         let control = WindowsHotkey {
             control: Some(ModifierSide::Either),
