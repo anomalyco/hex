@@ -2,10 +2,11 @@
 //!
 //! A call is known the way meeting detection knows it: a desktop app by its
 //! canonical bundle id, a call on a web page by the page's host. Reading
-//! another app is one line in [`ADAPTERS`]. There are none yet: each app's
-//! adapter is written against a live read of that app's own windows.
+//! another app is one line in [`ADAPTERS`]. Each app's adapter is written
+//! against a live read of that app's own windows, and Slack's is the first.
 
 use super::adapter::CallAppAdapter;
+use super::slack;
 
 /// A call app, by the key meeting detection gives its calls.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -14,12 +15,17 @@ pub enum CallApp<'a> {
     Bundle(&'a str),
     /// A call on a web page, in whichever browser, by the page's host as a
     /// site key: lowercase, without `www.` (`meet.google.com`).
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "no call on a web page has an adapter yet")
+    )]
     Site(&'a str),
 }
 
 /// Every call app Hex can read. An app known by several keys, as a desktop
 /// app and as a page, is listed under each.
-const ADAPTERS: &[(CallApp<'static>, &dyn CallAppAdapter)] = &[];
+const ADAPTERS: &[(CallApp<'static>, &dyn CallAppAdapter)] =
+    &[(CallApp::Bundle(slack::BUNDLE_ID), &slack::ADAPTER)];
 
 /// The adapter that reads `app`, when Hex can read it at all.
 pub fn adapter_for(app: CallApp<'_>) -> Option<&'static dyn CallAppAdapter> {

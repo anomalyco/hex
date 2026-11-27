@@ -625,6 +625,21 @@ mod tests {
     }
 
     #[test]
+    fn the_speaker_names_lab_is_a_macos_meetings_lab_off_by_default() {
+        let feature = Feature::MeetingSpeakerNames;
+        assert_eq!(feature.name(), "speaker-names");
+        assert_eq!(feature.settings_key(), "labs.meeting_speaker_names");
+        assert_eq!(feature.title(), "Speaker names");
+        assert_eq!(feature.group(), Group::Meetings);
+        assert_eq!(feature.audience(), Audience::Everyone);
+        assert_eq!(feature.oses(), &[Os::Macos]);
+        assert_eq!(feature.added(), 20261127);
+        assert!(!feature.on(&AppSettings::default()));
+        assert_eq!(feature.on_this_os(), cfg!(target_os = "macos"));
+        assert_eq!(Feature::from_name("speaker-names"), Some(feature));
+    }
+
+    #[test]
     fn the_meeting_microphone_mute_lab_is_a_macos_meetings_lab_off_by_default() {
         let feature = Feature::MeetingMicrophoneMute;
         assert_eq!(feature.name(), "meeting-microphone-mute");

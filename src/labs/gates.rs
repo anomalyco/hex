@@ -51,6 +51,16 @@ pub fn meeting_microphone_mute() -> bool {
     feature_on(Feature::MeetingMicrophoneMute)
 }
 
+/// Labs › Speaker names: while a meeting records a call in an app Hex can
+/// read (Slack huddles), a reader saves who the app shows speaking, and the
+/// transcript's remote lines take those names (macOS; read where a
+/// recording would start its speaker reader and at each of the reader's
+/// looks, so nothing is read through Accessibility with the lab off, and
+/// each time a transcript is named, in the call and after it).
+pub fn meeting_speaker_names() -> bool {
+    feature_on(Feature::MeetingSpeakerNames)
+}
+
 /// Labs › Indicator on any display: a released meeting capsule lands in
 /// the corner of the display under the pointer, and the capsules show on the
 /// display they were dragged to instead of only the primary display (macOS

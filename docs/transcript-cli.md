@@ -121,7 +121,7 @@ not by word timings: SRT numbers its cues, uses `HH:MM:SS,mmm` times, and
 prefixes the text `You:` or `Them:`; VTT starts with `WEBVTT`, uses
 `HH:MM:SS.mmm` times and `<v You>`/`<v Them>` voice tags, and escapes `&`, `<`,
 and `>`. A remote entry whose speaker the meeting has named carries that name
-in place of `Them` (no build names a speaker yet; see
+in place of `Them` (macOS, Labs › Speaker names, Slack huddles; see
 [Speaker names](features/meetings.md#speaker-names)). An end before its start is clamped to the start, entries with no text
 are skipped, and blank lines and `-->` are removed from the text so a cue
 can't break.

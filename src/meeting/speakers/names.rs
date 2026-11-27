@@ -9,7 +9,7 @@
 use super::evidence::{Correction, Evidence, ParticipantKey};
 use super::floor::Roster;
 use super::resolve::{Attribution, Said};
-use super::{NameSource, SpeakerId, SpeakerName, Speakers};
+use super::{NameSource, Speaker, SpeakerId, SpeakerName, Speakers};
 use crate::meeting::{MeetingSource, TranscriptEntry};
 
 /// A transcript with its speakers named: the table for the manifest, and
@@ -18,6 +18,59 @@ use crate::meeting::{MeetingSource, TranscriptEntry};
 pub struct Named {
     pub speakers: Speakers,
     pub entries: Vec<TranscriptEntry>,
+}
+
+impl Named {
+    /// The same names under the ids `known` already gave them.
+    ///
+    /// [`name_lines`] numbers people afresh every time, in the order they
+    /// first speak, so working a meeting out again can hand an id to someone
+    /// else. A meeting's table and its lines are two files, written one
+    /// after the other, and a reader that catches them between writes must
+    /// never read one person's line under another's name. So within one
+    /// meeting an id keeps its meaning: whoever `known` holds keeps their
+    /// id, anyone new takes one `known` has never given, and `known` learns
+    /// them. A line whose id the other file does not have yet is `Them`.
+    pub fn keeping_ids(self, known: &mut Speakers) -> Self {
+        let mut taken = vec![false; known.0.len()];
+        let mut ids: Vec<(SpeakerId, SpeakerId)> = Vec::new();
+        let mut speakers = Speakers::default();
+        for Speaker { id, name, from } in self.speakers.0 {
+            // Two people of one name each keep an id of their own.
+            let before = known.0.iter().enumerate().find(|(index, before)| {
+                !taken[*index] && before.name == name && before.from == from
+            });
+            let kept = match before {
+                Some((index, before)) => {
+                    taken[index] = true;
+                    before.id.clone()
+                }
+                None => {
+                    taken.push(true);
+                    known.add(name.clone(), from)
+                }
+            };
+            ids.push((id, kept.clone()));
+            speakers.0.push(Speaker {
+                id: kept,
+                name,
+                from,
+            });
+        }
+        let kept = |id: SpeakerId| {
+            let (_, kept) = ids.iter().find(|(fresh, _)| *fresh == id)?;
+            Some(kept.clone())
+        };
+        let entries = self
+            .entries
+            .into_iter()
+            .map(|entry| TranscriptEntry {
+                speaker: entry.speaker.and_then(kept),
+                ..entry
+            })
+            .collect();
+        Self { speakers, entries }
+    }
 }
 
 /// Names `entries` from `attributions`.
@@ -249,6 +302,67 @@ mod tests {
             name_lines(&named.entries, &[by(3, 3_000, 4_000)], &call()),
             named
         );
+    }
+
+    #[test]
+    fn a_meeting_worked_out_again_keeps_the_ids_it_gave() {
+        // The user, in a huddle with Alice, Bob and Carol.
+        let huddle = vec![
+            person(1, "", true),
+            person(2, "Alice", false),
+            person(3, "Bob", false),
+            person(4, "Carol", false),
+        ];
+        let ids = |named: &Named| serde_json::to_value(&named.speakers).unwrap();
+        let mut known = Speakers::default();
+
+        // Only Bob has a named line so far.
+        let one = [them(5_000, 5_900, "Two.")];
+        let first = name_lines(&one, &[by(3, 5_000, 5_900)], &huddle).keeping_ids(&mut known);
+        assert_eq!(labels(&first), ["Bob"]);
+
+        // Worked out again with an earlier line of Alice's, numbering
+        // afresh would hand Bob's id to her.
+        let both = [them(0, 900, "One."), them(5_000, 5_900, "Two.")];
+        let attributions = [by(2, 0, 900), by(3, 5_000, 5_900)];
+        let afresh = name_lines(&both, &attributions, &huddle);
+        assert_eq!(afresh.entries[0].speaker, first.entries[0].speaker);
+        let again = afresh.keeping_ids(&mut known);
+        assert_eq!(labels(&again), ["Alice", "Bob"]);
+        assert_eq!(again.entries[1].speaker, first.entries[0].speaker);
+        assert_eq!(
+            ids(&again),
+            serde_json::json!([
+                {"id": "s2", "name": "Alice", "from": "call_app"},
+                {"id": "s1", "name": "Bob", "from": "call_app"},
+            ])
+        );
+        // So either table reads either set of lines without a wrong name.
+        let stale = Labels::by_track(&first.speakers);
+        let read = |entry: &TranscriptEntry| stale.of(entry).as_str();
+        assert_eq!(
+            again.entries.iter().map(read).collect::<Vec<_>>(),
+            ["Them", "Bob"]
+        );
+
+        // Someone who is on no line now leaves the table and keeps their id:
+        // a newcomer never takes it, and they have it back when they return.
+        let newcomer = name_lines(&one, &[by(4, 5_000, 5_900)], &huddle).keeping_ids(&mut known);
+        assert_eq!(
+            ids(&newcomer),
+            serde_json::json!([{"id": "s3", "name": "Carol", "from": "call_app"}])
+        );
+        let back = name_lines(&both, &attributions, &huddle).keeping_ids(&mut known);
+        assert_eq!(back, again);
+
+        // Two people the call shows under one name each keep their own id.
+        let mut twins = huddle.clone();
+        twins.push(person(5, "Alice", false));
+        let attributions = [by(5, 0, 900), by(2, 5_000, 5_900)];
+        let pair = name_lines(&both, &attributions, &twins).keeping_ids(&mut known);
+        assert_eq!(labels(&pair), ["Alice", "Alice"]);
+        assert_ne!(pair.entries[0].speaker, pair.entries[1].speaker);
+        assert_eq!(pair.entries[0].speaker, again.entries[0].speaker);
     }
 
     #[test]

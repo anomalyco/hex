@@ -16,8 +16,13 @@
 //! business. Everything else holds a [`SpeakerId`] or a [`SpeakerName`]
 //! and asks [`Labels`].
 //!
-//! Nothing produces a speaker yet. Until something does, every table is
-//! empty and every line is called what it was always called.
+//! A speaker comes from one place: what a call app showed while the
+//! meeting recorded (Labs › Speaker names; macOS, Slack huddles). A reader
+//! beside the recording saves what it sees ([`SpeakerReader`]), and the
+//! names are worked out from that, while the meeting records
+//! ([`LiveNames`]) and again when it is over ([`name_transcript`]). With
+//! the lab off, or in any other call, every table is empty and every line
+//! is called what it was always called.
 
 use std::fmt;
 use std::num::NonZeroU32;
@@ -26,43 +31,32 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::{MeetingManifest, MeetingSource, TranscriptEntry};
 
-// Naming speakers from what a call app shows. Each piece is complete and
-// tested, and nothing reads a call app or calls these yet, so a build that
-// is not a test build expects them to be unused. The expectation fails the
-// build the moment one of them is fully in use, so it cannot outlive its
-// reason.
+// Naming speakers from what a call app shows.
 //
 // The reader and what it reads through are macOS only: they take the
 // snapshot Hex's Accessibility client makes, and Windows and Linux Hex have
-// no such client yet.
+// no such client yet. The rules that name a transcript from saved evidence
+// are every OS's.
 #[cfg(target_os = "macos")]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "no call app has an adapter yet")
-)]
 mod adapter;
-#[cfg_attr(not(test), expect(dead_code, reason = "no reader writes evidence yet"))]
 mod calibrate;
-#[cfg_attr(not(test), expect(dead_code, reason = "no reader writes evidence yet"))]
 mod evidence;
-#[cfg_attr(not(test), expect(dead_code, reason = "no reader writes evidence yet"))]
 mod floor;
-#[cfg_attr(not(test), expect(dead_code, reason = "no reader writes evidence yet"))]
 mod names;
+mod naming;
 #[cfg(target_os = "macos")]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "no recording starts a reader yet")
-)]
 mod reader;
 #[cfg(target_os = "macos")]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "no call app has an adapter yet")
-)]
 mod registry;
-#[cfg_attr(not(test), expect(dead_code, reason = "no reader writes evidence yet"))]
 mod resolve;
+#[cfg(target_os = "macos")]
+mod slack;
+#[cfg(target_os = "macos")]
+mod watch;
+
+pub(super) use naming::{LiveNames, LiveTable, name_transcript};
+#[cfg(target_os = "macos")]
+pub(super) use watch::SpeakerReader;
 
 /// The longest name the table keeps, in characters.
 const NAME_CHARS: usize = 64;
@@ -219,13 +213,6 @@ impl Speakers {
 
     /// Names a new speaker and returns the id their lines carry: the
     /// lowest number nobody in this meeting holds.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "nothing names a speaker until the resolver is wired in"
-        )
-    )]
     pub fn add(&mut self, name: SpeakerName, from: NameSource) -> SpeakerId {
         let id = (1..)
             .filter_map(SpeakerId::numbered)

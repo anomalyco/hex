@@ -710,6 +710,8 @@ fn rows(ui: &Ui) -> Vec<Row> {
         // macOS's menu bar, capsule, and Meetings pane offer the switch.
         if cfg!(target_os = "macos") {
             rows.push(row(Feature::MeetingMicrophoneMute, None));
+            // macOS's Accessibility client reads the call app's window.
+            rows.push(row(Feature::MeetingSpeakerNames, None));
         }
         // macOS's status item lists them, from the meeting controller's own
         // calendar read.
@@ -1140,6 +1142,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::MeetingIndicatorDisplay => "lab-meeting-indicator-display",
         Feature::MeetingAudioSource => "lab-meeting-audio-source",
         Feature::MiddleMouseDictation => "lab-middle-mouse-dictation",
+        Feature::MeetingSpeakerNames => "lab-meeting-speaker-names",
     }
 }
 

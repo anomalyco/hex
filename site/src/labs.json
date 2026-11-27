@@ -1035,6 +1035,17 @@
       ],
       "summary": "Hold the middle mouse button for half a second to start dictating hands-free, and again to finish. Escape cancels",
       "title": "Middle mouse dictation"
+    },
+    {
+      "added": "2026-11-27",
+      "group": "meetings",
+      "groupTitle": "Meetings",
+      "id": "speaker-names",
+      "oses": [
+        "macos"
+      ],
+      "summary": "Read who is speaking from Slack huddles to name remote speakers in meeting transcripts",
+      "title": "Speaker names"
     }
   ]
 }

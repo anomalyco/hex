@@ -43,6 +43,10 @@ const SEGMENT_MS: u64 = 10_000;
 pub enum Strictness {
     /// Each word takes the name the call app showed for it, moved back by
     /// the mark's lag.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "every transcript is named on the default")
+    )]
     AsSeen,
     /// A span is named when one person alone held the floor across it.
     /// Where the floor changes inside continuous speech, the words beside
@@ -52,6 +56,10 @@ pub enum Strictness {
     /// A whole segment of speech is named, or none of it: one person on at
     /// least four words in five, and anyone else or no view of the floor on
     /// at most one in ten.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "every transcript is named on the default")
+    )]
     WholeSegment,
 }
 
@@ -169,7 +177,7 @@ pub(super) fn each_word(
 fn by_floor(
     words: &[Interval],
     evidence: &[Evidence],
-    roster: &Roster<'_>,
+    roster: &Roster,
     timing: Timing,
     strictness: Strictness,
 ) -> Vec<Said> {
@@ -216,7 +224,7 @@ fn by_floor(
 }
 
 /// A word by the floor at its own moment and nothing else.
-fn as_seen(state: State, roster: &Roster<'_>) -> Said {
+fn as_seen(state: State, roster: &Roster) -> Said {
     match state {
         State::Held(who) if roster.is_remote(who) => Said::By(who, Why::HeldFloor),
         State::Held(_) => Said::ByNobody(WhyNot::LocalHeldFloor),
@@ -234,13 +242,7 @@ fn as_seen(state: State, roster: &Roster<'_>) -> Said {
 /// said while the mark was coming on or passing over are theirs too, and
 /// so is the half second before it came on. When anything else shows, a
 /// word keeps its name only clear of all of it.
-fn steady(
-    floor: &Floor,
-    roster: &Roster<'_>,
-    words: &[Interval],
-    states: &[State],
-    said: &mut [Said],
-) {
+fn steady(floor: &Floor, roster: &Roster, words: &[Interval], states: &[State], said: &mut [Said]) {
     let from_ms = words[0].start_ms();
     let to_ms = words
         .iter()
@@ -296,7 +298,7 @@ fn steady(
 }
 
 /// One segment, or ten seconds of one, under [`Strictness::WholeSegment`].
-fn whole(roster: &Roster<'_>, states: &[State], said: &mut [Said]) {
+fn whole(roster: &Roster, states: &[State], said: &mut [Said]) {
     let share =
         |counts: &dyn Fn(State) -> bool| states.iter().filter(|state| counts(**state)).count();
     let holder = states.iter().find_map(|state| match state {

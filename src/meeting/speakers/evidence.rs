@@ -97,6 +97,10 @@ pub struct ParticipantKey(NonZeroU32);
 impl ParticipantKey {
     /// The key for someone `evidence` has not met: one past the highest it
     /// holds.
+    #[cfg_attr(
+        not(target_os = "macos"),
+        allow(dead_code, reason = "the reader is macOS only")
+    )]
     pub fn next(evidence: &[Evidence]) -> Self {
         let highest = evidence.iter().filter_map(|line| match line {
             Evidence::Participant(participant) => Some(participant.key),
@@ -106,6 +110,10 @@ impl ParticipantKey {
     }
 
     /// The key after this one, for the next person met.
+    #[cfg_attr(
+        not(target_os = "macos"),
+        allow(dead_code, reason = "the reader is macOS only")
+    )]
     pub fn following(self) -> Self {
         Self(self.0.saturating_add(1))
     }
@@ -206,6 +214,10 @@ pub enum Correction {
 
 impl Correction {
     /// Whether this correction leaves nothing of an `earlier` one standing.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "nothing records a correction yet")
+    )]
     fn replaces(&self, earlier: &Self) -> bool {
         match (self, earlier) {
             (
@@ -251,6 +263,10 @@ pub fn read(directory: &Path) -> Result<Vec<Evidence>> {
 
 /// Adds what the reader saw to the end of the file, creating it for its
 /// owner only.
+#[cfg_attr(
+    not(target_os = "macos"),
+    allow(dead_code, reason = "the reader is macOS only")
+)]
 pub fn append(directory: &Path, evidence: &[Evidence]) -> Result<()> {
     let path = directory.join(FILE);
     let mut file = OpenOptions::new()
@@ -284,6 +300,10 @@ pub fn append(directory: &Path, evidence: &[Evidence]) -> Result<()> {
 /// replaces. The file is rewritten whole under a temporary name and renamed
 /// into place, so a crash leaves either the old evidence or the new. Lines
 /// this build cannot read are carried over untouched.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "nothing records a correction yet")
+)]
 pub fn correct(directory: &Path, correction: Correction) -> Result<()> {
     let existing = stored(directory)?;
     let temporary = directory.join(format!("{FILE}.tmp"));

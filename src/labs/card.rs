@@ -103,6 +103,7 @@ impl Feature {
             Self::MeetingIndicatorDisplay => "Indicator on any display",
             Self::MeetingAudioSource => "Choose meeting audio",
             Self::MiddleMouseDictation => "Middle mouse dictation",
+            Self::MeetingSpeakerNames => "Speaker names",
         }
     }
 
@@ -382,6 +383,9 @@ impl Feature {
             }
             Self::MiddleMouseDictation => {
                 "Hold the middle mouse button for half a second to start dictating hands-free, and again to finish. Escape cancels"
+            }
+            Self::MeetingSpeakerNames => {
+                "Read who is speaking from Slack huddles to name remote speakers in meeting transcripts"
             }
         }
     }

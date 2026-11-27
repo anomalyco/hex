@@ -1332,7 +1332,10 @@ fn writer_fills_a_capture_gap_with_silence_and_records_it() {
         sender.send(packet_at(source, arrival_ms, 1_600)).unwrap();
     }
     drop(sender);
-    let stats = write_tracks(&directory, receiver, None).unwrap();
+    let first_audio = AtomicU64::new(NO_AUDIO_YET);
+    let stats = write_tracks(&directory, receiver, None, &first_audio).unwrap();
+    // The transcript's lines, and the speaker reader, count from here.
+    assert_eq!(first_audio.load(Ordering::Relaxed), 100_000);
     assert_eq!(stats.microphone.samples, 4_800);
     assert!(stats.microphone.gaps.is_empty());
     assert_eq!(stats.system.gaps.len(), 1);

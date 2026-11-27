@@ -275,6 +275,10 @@ pub struct LabsSettings {
     /// the call's own audio keeps recording and transcribing (macOS; Labs ›
     /// Mute the microphone while recording).
     pub meeting_microphone_mute: bool,
+    /// A meeting recording of a Slack huddle reads who Slack shows speaking
+    /// and names remote speakers in the transcript (macOS; Labs › Speaker
+    /// names).
+    pub meeting_speaker_names: bool,
     /// The meeting recording indicator stays on the display it was dragged
     /// to, instead of only the primary display (macOS and Windows).
     pub meeting_indicator_display: bool,
@@ -613,6 +617,7 @@ impl Default for LabsSettings {
             transcript_edits: false,
             stop_any_call_recording: false,
             meeting_microphone_mute: false,
+            meeting_speaker_names: false,
             meeting_indicator_display: false,
             meeting_audio_source: false,
             meeting_audio_source_choice: crate::meeting::audio_source::SourceChoice::All,

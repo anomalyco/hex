@@ -730,6 +730,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: while a meeting records, Mute microphone leaves Hex's microphone out of the recording and Unmute microphone puts it back; the call's own audio keeps recording and transcribing (macOS)",
     ),
     key(
+        "labs.meeting_speaker_names",
+        Kind::Bool,
+        "Labs: while a meeting records a Slack huddle, Hex reads who Slack shows speaking, through Accessibility, and names remote speakers in the transcript, in the call and in the saved copy; what it saw is kept in the meeting's folder (macOS)",
+    ),
+    key(
         "labs.meeting_indicator_display",
         Kind::Bool,
         "Labs: the meeting recording indicator stays on the display it was dragged to, in the corner nearest where it was let go, instead of only the primary display (macOS and Windows)",
@@ -1155,6 +1160,7 @@ pub(super) const NEEDS: &[(&str, &str)] = &[
     ("labs.live_chapters", "meetings"),
     ("labs.stop_any_call_recording", "meetings"),
     ("labs.meeting_microphone_mute", "meetings"),
+    ("labs.meeting_speaker_names", "meetings"),
     ("labs.meeting_indicator_display", "meetings"),
     ("experimental.hex_microphone", "fun"),
     ("typed_text_hotkey", "typed_text"),
