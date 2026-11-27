@@ -97,9 +97,9 @@ const REPLAYS: &[Replay] = &[
         enters: false,
         cues: &[
             (12, Cue::Move(432., 23.)),
-            (20, Cue::Leave),
-            (27, Cue::Move(432., 23.)),
-            (33, Cue::Leave),
+            (17, Cue::Leave),
+            (22, Cue::Move(432., 23.)),
+            (26, Cue::Leave),
             (60, Cue::Move(432., 23.)),
             (74, Cue::PressStop),
             (78, Cue::Leave),
@@ -922,33 +922,33 @@ fn an_interrupted_panel_turns_round_without_a_stop_or_a_jump() {
         .collect();
     // No frame moves the edge by more than a frame of its peak speed, and
     // no frame's travel differs from the one before by more than a launch
-    // from rest does (6.8 pt), reversals included.
+    // from rest does (15.3 pt on the 0.28 s spring), reversals included.
     for (frame, w) in sizes.windows(3).enumerate() {
         let (a, b) = (w[1].1 - w[0].1, w[2].1 - w[1].1);
-        assert!(b.abs() < 20.0 * travel(), "f{frame}: a {b} pt step");
-        assert!((b - a).abs() < 7.5 * travel(), "f{frame}: speed {a} → {b}");
+        assert!(b.abs() < 30.0 * travel(), "f{frame}: a {b} pt step");
+        assert!((b - a).abs() < 17.0 * travel(), "f{frame}: speed {a} → {b}");
     }
     // The first candidate dropped from 651 to -57 pt/s in the frame after
-    // the pointer left at 20. The speed now bends round: in that frame the
+    // the pointer left (at 20 then, 17 on the 0.28 s spring). The speed now bends round: in that frame the
     // edge still travels the way it was going, a little slower, and no frame
-    // anywhere changes its speed by more than a launch from rest (532 pt/s).
-    for at in [21, 28, 34] {
+    // anywhere changes its speed by more than a launch from rest (1,197 pt/s).
+    for at in [18, 23, 27] {
         let (before, after) = (shots[at - 1].velocity.1, shots[at].velocity.1);
         assert!(
-            before * after > 0.0 && (after - before).abs() < 350.0 * travel(),
+            before * after > 0.0 && (after - before).abs() < 790.0 * travel(),
             "f{at}: {before} → {after} pt/s"
         );
     }
     for (frame, pair) in shots.windows(2).enumerate() {
         let step = (pair[1].velocity.1 - pair[0].velocity.1).abs();
         assert!(
-            step < 540.0 * travel(),
+            step < 1215.0 * travel(),
             "f{}: the speed stepped {step} pt/s",
             frame + 1
         );
     }
-    assert!(sizes[21].1 > sizes[20].1 && sizes[20].1 > sizes[19].1);
-    assert!(sizes[26].1 < sizes[22].1);
+    assert!(sizes[18].1 > sizes[17].1 && sizes[17].1 > sizes[16].1);
+    assert!(sizes[21].1 < sizes[19].1);
     let last = shots.last().unwrap();
     assert_eq!(last.phase, "summary");
     assert_eq!((last.veil, last.velocity), ((0., 0.), (0., 0.)));

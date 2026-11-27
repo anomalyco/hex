@@ -19,9 +19,9 @@ fn leaves(shots: &[Shot], from: usize) -> usize {
     for f in from..gone {
         let (was, now) = (shots[f.saturating_sub(1)].surface, shots[f].surface);
         assert!(now <= was + 1e-4, "f{f}: it came back, {was} → {now}");
-        // The steepest frame of a 0.25 s exit is 0.15; Reduce Motion's
+        // The steepest frame of a 0.16 s exit is 0.24; Reduce Motion's
         // 0.18 s fade, 0.21.
-        assert!(was - now < 0.22, "f{f}: a pop, {was} → {now}");
+        assert!(was - now < 0.25, "f{f}: a pop, {was} → {now}");
         assert_eq!(shots[f].hidden, 0, "f{f}: hidden while still drawn");
     }
     assert!(gone - from >= 8, "gone in {} frames", gone - from);
@@ -163,7 +163,7 @@ fn a_refused_start_goes_where_it_is_without_saying_starting() {
     for (i, w) in widths.windows(3).enumerate() {
         let (a, b) = (w[1] - w[0], w[2] - w[1]);
         assert!(b <= 0.02, "f{}: the outline grew back by {b}", i + 26);
-        assert!((b - a).abs() < 8.0, "f{}: its speed stepped {a} → {b}", i + 26);
+        assert!((b - a).abs() < 18.0, "f{}: its speed stepped {a} → {b}", i + 26);
     }
     assert!(widths[5] - widths[7] > 4.0, "the outline froze when it was refused");
 
@@ -236,7 +236,8 @@ fn several_titles_in_quick_succession_show_one_at_a_time() {
             );
         } else if frame > 60 {
             assert!(
-                (now.title_shown - was.title_shown).abs() < 0.2,
+                // A 0.16 s exit's steepest frame is 0.24.
+                (now.title_shown - was.title_shown).abs() < 0.25,
                 "f{}: the title popped {} → {}",
                 frame + 1,
                 was.title_shown,
@@ -276,7 +277,7 @@ fn an_exit_interrupted_by_another_offer_turns_round_and_stays_shown() {
         assert!(low > 0.0 && dip - low < 0.25, "{name}: {dip} then {low}");
         for (frame, pair) in shots.windows(2).enumerate().skip(closed) {
             assert!(
-                (pair[1].surface - pair[0].surface).abs() < 0.2,
+                (pair[1].surface - pair[0].surface).abs() < 0.25,
                 "{name} f{}: {} → {}",
                 frame + 1,
                 pair[0].surface,
