@@ -232,33 +232,15 @@ enum DevCommand {
     /// Render offline audio through the Hex Microphone voice filter.
     VoiceFilter {
         #[command(subcommand)]
-        command: VoiceFilterCommand,
+        command: control::developer_control::VoiceFilterCommand,
     },
-}
-
-#[cfg(target_os = "macos")]
-#[derive(Subcommand)]
-enum VoiceFilterCommand {
-    /// Apply a voice-filter mode across one or more dictation spans in a WAV file.
-    Render {
-        /// Input WAV path (16-bit PCM or 32-bit float).
-        input: PathBuf,
-        /// Voice filter mode id (muffled, muted, quiet, normal, chipmunk, robot, walkie, underwater, far).
-        #[arg(long, default_value = "muffled")]
-        mode: String,
-        /// Optional JSON mode spec override (matching presets.json).
-        #[arg(long)]
-        params: Option<String>,
-        /// Dictation span(s) in milliseconds, e.g. `1000-3500`.
-        #[arg(long = "dictation")]
-        dictation: Vec<String>,
-        /// Effect strength (`0.0` to `1.0`).
-        #[arg(long, default_value_t = 1.0)]
-        strength: f64,
-        /// Output WAV path.
-        #[arg(short = 'o', long = "output")]
-        output: PathBuf,
-    },
+    /// Read a call app's windows through Accessibility and report what is there.
+    #[command(
+        name = "call-window",
+        long_about = accessibility::probe::cli::ABOUT,
+        hide = !dev_build::is_dev_build()
+    )]
+    CallWindow(accessibility::probe::cli::Args),
 }
 
 #[cfg(debug_assertions)]
@@ -370,29 +352,16 @@ fn main() -> Result<()> {
         }
         _ => {}
     }
-    if let Some(Command::Dev {
-        command:
-            DevCommand::VoiceFilter {
-                command:
-                    VoiceFilterCommand::Render {
-                        input,
-                        mode,
-                        params,
-                        dictation,
-                        strength,
-                        output,
-                    },
-            },
-    }) = &cli.command
-    {
-        return audio::voice_filter::render_wav_command(
-            input,
-            mode,
-            params.as_deref(),
-            dictation,
-            *strength,
-            output,
-        );
+    // `hex dev` commands that run here: no data folder, log, lock, or
+    // settings (call-window asks the running Hex and writes one file).
+    match &cli.command {
+        Some(Command::Dev {
+            command: DevCommand::VoiceFilter { command },
+        }) => return command.run(),
+        Some(Command::Dev {
+            command: DevCommand::CallWindow(arguments),
+        }) => return accessibility::probe::cli::run(arguments, Cli::command),
+        _ => {}
     }
     // A headless render (`hex app -- --snap …`) draws fixtures: no data
     // folder, log, lock, or settings, so it never touches the user's Hex.
@@ -472,7 +441,9 @@ fn main() -> Result<()> {
                         println!("{}", bundle.display());
                         return Ok(());
                     }
-                    DevCommand::VoiceFilter { .. } => unreachable!("handled before startup"),
+                    DevCommand::VoiceFilter { .. } | DevCommand::CallWindow(_) => {
+                        unreachable!("handled before startup")
+                    }
                 };
                 let reply = local_api::call_developer(&command)?;
                 if let DeveloperReply::Error { code, message } = &reply {
@@ -484,7 +455,9 @@ fn main() -> Result<()> {
             #[cfg(not(debug_assertions))]
             {
                 match command {
-                    DevCommand::VoiceFilter { .. } => unreachable!("handled before startup"),
+                    DevCommand::VoiceFilter { .. } | DevCommand::CallWindow(_) => {
+                        unreachable!("handled before startup")
+                    }
                 }
             }
         }

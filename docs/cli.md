@@ -365,6 +365,89 @@ the final transcript of a run Hex quit during, is refused with its own code
 works whether or not Meetings is on, so a caller should ask the person first
 and offer the same two-step confirmation the pane does.
 
+## `hex dev call-window` (dev builds, macOS)
+
+`hex dev call-window` reads another app's windows through Accessibility and
+reports what is there. It exists to measure, before Hex names speakers from a
+call app's tiles, what those tiles expose and what a read costs
+([features/accessibility.md](features/accessibility.md#reading-another-app-dev-builds-macos)).
+It is not a control command and has no `/control` wire form.
+
+Dev builds only: a stable `hex` leaves it out of `hex dev --help` and refuses
+it as an unknown command (exit 2), and a stable Hex answers its route with
+`404 accessibility-probe-unavailable`. macOS only: Windows and Linux Hex have
+no Accessibility client (UI Automation, AT-SPI) to read another app with.
+
+```ts
+hex dev call-window
+├── dump  (--app <bundle-id> | --pid <pid>) --out <file>   one snapshot of every window's tree, as JSON
+└── watch (--app <bundle-id> | --pid <pid>) --out <file>   one JSON line per read, then a summary
+    ├── --interval-ms N (250, at least 50)   --duration SECONDS (60, at most 3600)
+    ├── --id-prefix P | --class-contains S | --label REGEX   report the elements any of these match
+    └── --cue-every SECONDS                  print "Speak now" and mark the moment in the file
+both:  --enable-web-accessibility            ask a Chromium or Electron app for its web tree
+       --max-nodes N (dump 20000, watch 4000; at most 20000)
+       --max-depth N (80; at most 200)       --deadline-ms N (dump 5000, watch 1000; at most 5000)
+```
+
+- **Where the read runs.** In the running Hex, on one of its local API workers,
+  not in the `hex` command. macOS grants Accessibility to the app; a command
+  started from a terminal is judged by that terminal's grant, and one over SSH
+  has none. The command posts each read to `POST /dev/accessibility-probe`
+  with the same discovery file and bearer token as every other route, and
+  writes the reply to the file itself. Hex not running, or not allowed to use
+  Accessibility, is an error (exit 1) that says which; nothing prompts.
+- **It only reads.** It never clicks, focuses, raises or types, and it reads
+  every window the app lists, in front or not. Hex's own window is refused
+  (`own-process`).
+- **Web content is off until asked.** A Chromium or Electron app (Slack, Teams,
+  Chrome, Arc, Brave, Edge) builds its web accessibility tree only when an
+  assistive app asks. The command asks only with
+  `--enable-web-accessibility`, and only on its first read: that sets
+  `AXManualAccessibility` on the app, which changes how it behaves until it
+  quits (it keeps computing the tree, and may act as it does for a screen
+  reader). Without the flag, a read with no web content says so and names the
+  flag. With it, `dump` waits up to 3 s for the tree to appear.
+- **Privacy.** The output holds other people's names and on-screen text. It is
+  written only to `--out`, created or replaced with mode 0600; a path that is
+  a symbolic link is refused. Hex's logs get counts and timings (`pid`,
+  elements, elapsed, matches), never the tree, and no event is recorded. A
+  password field's value is never asked for, nor anything below it; a value
+  over 4,096 characters is not asked for, and other strings keep their first
+  512 UTF-16 units.
+- **Budgets.** One read asks at most `--max-nodes` elements across all windows,
+  breadth first, `--max-depth` levels below a window, for `--deadline-ms`
+  (checked between elements), with the Accessibility client's 0.25 s timeout on
+  each message. An element costs two messages: its attributes and children
+  together, then its value. One read runs at a time (`busy` otherwise).
+
+`dump` writes one JSON object: `time_ms` (Unix), `pid`, `frontmost`,
+`elapsed_ms` (the read alone, measured in Hex), `windows`, `nodes` (elements
+asked), `unreadable` (elements that did not answer), `cut_short` (the budgets
+that stopped it: `nodes`, `depth`, `deadline`; empty for a whole tree),
+`web_areas`, `web_nodes` (elements below a web area), and `tree`: each window
+as nested elements with `role`, `subrole`, `title`, `description`, `value`,
+`dom_id`, `dom_classes` and `children`, empty ones left out.
+
+`watch` writes one line per read, `{"type":"read", …}` with the same fields
+but `matches` in place of `tree`: each matching element without its children,
+and its `path` (the window's index, then each child's index on the way down,
+so an element is below another when its path starts with the other's). A read
+that fails after the first is `{"type":"error","code":…}` and is counted;
+the first read's failure ends the watch. `--cue-every` adds
+`{"type":"cue","time_ms":…}` lines. A read that overruns the interval skips
+ticks rather than queueing reads. It ends by printing reads and failures,
+median and worst elapsed milliseconds, median element count, reads cut short,
+and reads with a match. Ctrl-C ends it without the summary; the lines written
+stay.
+
+```sh
+hex dev call-window dump --app com.tinyspeck.slackmacgap --enable-web-accessibility --out ~/huddle-tree.json
+hex dev call-window watch --app com.tinyspeck.slackmacgap --out ~/huddle-watch.jsonl \
+  --duration 120 --interval-ms 100 --cue-every 15 \
+  --id-prefix huddle-grid-gridcell- --class-contains active_speaker --label "profile|audio is"
+```
+
 ## Exit codes
 
 ```ts
