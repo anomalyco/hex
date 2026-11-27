@@ -3269,6 +3269,13 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   path receives none
 └── Proof limits: unit tests only; no CI compiles the iOS targets
 Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing assistance
+├── The bar under the keys follows light and dark mode -> the keyboard theme's navigation bar
+│   colour and light-icon flag reach the IME window only when it is made, and the service usually
+│   outlives a light/dark switch, so the bar holding Android's back and switcher buttons kept the
+│   old mode under the rebuilt keys (#2943). `HexKeyboard` sets the window's navigation bar colour
+│   (`R.color.keyboard`) and `APPEARANCE_LIGHT_NAVIGATION_BARS` (`R.bool.light_bars`) again after
+│   each configuration change and each time the keys show. Checks: none automated; no test covers
+│   the bar, and nothing was tried on a device or emulator. The repo has no Android CI.
 ├── Hands-free dictation keeps the screen on -> the keyboard's window and Home's add Android's
 │   `FLAG_KEEP_SCREEN_ON` (no permission) while a dictation is opening, listening or transcribing,
 │   and clear it once idle, so the display timing out can't hide the IME, whose leave cancels the

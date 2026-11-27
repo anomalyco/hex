@@ -21,6 +21,7 @@ import android.util.Size
 import android.util.TypedValue
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsetsController
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InlineSuggestionsRequest
 import android.view.inputmethod.InlineSuggestionsResponse
@@ -217,6 +218,20 @@ class HexKeyboard : InputMethodService() {
         expireClips()
     }
     override fun onEvaluateFullscreenMode() = false
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        matchNavigationBar()
+    }
+
+    /** HexIme's navigation bar colour and icon tint reach the window once, in the light or dark mode it was made in;
+     * the keys follow a later switch, so the bar under them (Android's back and switcher) is set again to match. */
+    private fun matchNavigationBar() {
+        val w = window?.window ?: return
+        @Suppress("DEPRECATION") // Still the colour Android draws under the IME's back and switcher buttons.
+        w.navigationBarColor = getColor(R.color.keyboard)
+        val light = WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+        w.insetsController?.setSystemBarsAppearance(if (resources.getBoolean(R.bool.light_bars)) light else 0, light)
+    }
     override fun onCreateInputView(): View = inputView()
 
     /** The bar for the voice subtype with the lab on, or the collapsed bar, else the full keyboard. */
@@ -299,6 +314,7 @@ class HexKeyboard : InputMethodService() {
     }
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        matchNavigationBar()
         expireClips()
         // A subtype or lab change may have arrived while no view existed: it shows the right one.
         if (voiceOnly()) collapsed = false
