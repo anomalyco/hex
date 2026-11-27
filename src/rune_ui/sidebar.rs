@@ -214,6 +214,16 @@ pub(super) fn pane_header(p: Paint, title: &str, switch: Option<El>, actions: Ve
         .children(actions)
 }
 
+/// The hairline under the pane header, full bleed across the panel, so
+/// every pane's body starts under the same rule and a split's divider runs
+/// up to meet it.
+pub(super) fn pane_header_rule(p: Paint) -> El {
+    el().key("header-rule")
+        .h(p.hair)
+        .fill(p.k.c.border_weak)
+        .a11y_hidden()
+}
+
 pub(super) fn sidebar(ui: &Ui, p: Paint) -> El {
     let mut nav = lists::source_list(col().key("nav"));
     for pane in labs::main_panes(ui) {

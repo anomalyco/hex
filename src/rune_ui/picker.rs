@@ -586,9 +586,12 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
     // The comparison fits; the list scrolls inside the window's height.
     panel = match view {
         View::Compare => panel.child(content),
-        View::All => panel
-            .h(PANEL_HEIGHT)
-            .child(super::scroll_body(p.k, "model-scroll", content)),
+        View::All => panel.h(PANEL_HEIGHT).child(super::faded_body(
+            p.k,
+            "model-scroll",
+            content,
+            super::SHEET_FADE,
+        )),
     };
     modal_sheet(p, "picker", panel, close)
 }

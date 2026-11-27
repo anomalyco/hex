@@ -102,10 +102,11 @@ pub(in crate::rune_ui) fn modal(ui: &Ui, p: Paint, cx: &mut Cx<Ui>) -> Option<[E
             .pl(METRICS.row_px)
             .pr(METRICS.row_px - SCROLL_BAR_INSET)
             .h(room)
-            .child(super::super::scroll_body(
+            .child(super::super::faded_body(
                 p.k,
                 "history-stats-body",
                 sections,
+                super::super::SHEET_FADE,
             ))
     } else {
         // No viewport at all: no scroll bar, no fade padding, and the

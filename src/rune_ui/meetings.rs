@@ -20,7 +20,7 @@ use super::controls::{
     ButtonKind, DESCRIPTION, Paint, button, card, page, pulsing_dot, segmented_tx,
 };
 use super::list_detail::{self as ld, Item};
-use super::lists::{Tone, dismissible_error_panel, error_panel, tone_tag};
+use super::lists::{Tone, dismissible_error_panel, error_panel, status_pill};
 use super::notes_writer::NotesWriter;
 use super::platform::MeetingRequest;
 use super::{Menu, Ui};
@@ -372,9 +372,8 @@ fn copy(ui: &mut Ui, tx: &mut Tx, id: String, what: impl Into<String>, text: Str
     ui.meetings.copied = Some((id, what.into()));
 }
 
-/// The status tag; `Ready` only in the detail header, so the list stays
-/// quiet for finished meetings.
-/// The detail's status, while it is one worth a tag.
+/// The detail's status as a soft pill, while it is one worth showing; a
+/// finished meeting shows none.
 pub(super) fn status_tag(p: Paint, status: Status, stop_pending: bool) -> Option<El> {
     let (label, tone) = match status {
         Status::Recording if stop_pending => (tr("Transcribing"), Tone::Accent),
@@ -384,7 +383,7 @@ pub(super) fn status_tag(p: Paint, status: Status, stop_pending: bool) -> Option
         Status::Interrupted => (tr("Interrupted"), Tone::Neutral),
         Status::Failed => (tr("Failed"), Tone::Danger),
     };
-    Some(tone_tag(p, "status", label, tone))
+    Some(status_pill(p, "status", label, tone))
 }
 
 /// Escape in the Meetings pane: the selection's confirmation or selection

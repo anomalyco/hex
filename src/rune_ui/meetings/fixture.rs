@@ -86,12 +86,15 @@ impl MeetingsPane {
                 imported: false,
                 kept_for: Some("7 days"),
             };
+        // Clock times as real Hex shows them in the scene's language.
+        let clock = crate::desktop::i18n::clock_time;
+        let live_clock = clock(14, 5);
         let mut live = meeting(
             "preview-live",
-            "Zoom call — 14:05",
+            &format!("Zoom call — {live_clock}"),
             Status::Recording,
             "Today",
-            "14:05",
+            &live_clock,
             7,
         );
         live.app = Some("Zoom".into());
@@ -101,7 +104,7 @@ impl MeetingsPane {
             "Arcade launch plan",
             Status::Complete,
             "Today",
-            "11:12",
+            &clock(11, 12),
             38,
         );
         notes.app = Some("Zoom".into());
@@ -118,17 +121,18 @@ impl MeetingsPane {
             "Design review",
             Status::Complete,
             "Yesterday",
-            "16:30",
+            &clock(16, 30),
             24,
         );
         design.app = Some("FaceTime".into());
         design.transcript = Transcript::Loaded(conversation[2..6].to_vec());
+        let failed_clock = clock(9, 58);
         let mut failed = meeting(
             "preview-failed",
-            "Meeting — 09:58",
+            &format!("Meeting — {failed_clock}"),
             Status::Failed,
             "Yesterday",
-            "09:58",
+            &failed_clock,
             2,
         );
         failed.error = Some("ScreenCaptureKit stopped the capture.".into());
