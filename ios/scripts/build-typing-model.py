@@ -12,7 +12,11 @@ English also takes two things the books can't give it:
   a capital ("I'm") or not at all are added in lowercase.
 - en-extra-words.tsv beside this script: chat and tech words written for Hex ("app", "lol",
   "csv"), each at its tier's cost; a word the books have only gets commoner.
-Both join the vocabulary before pairs are counted, so their pairs are counted too.
+Both join the vocabulary before pairs are counted, so their pairs are counted too. So do SCOWL's
+names and other words it spells with one capital first (its upper and proper-names lists, sizes up
+to 70), three letters or more ("Monday", "Mary", "London"), in lowercase like every word, ranked by
+their counts with the rest; their capitals come from the phone's dictionary (iOS) and en.capitals
+(Android).
 
 Polish has no Google Books counts. Its words and word pairs come from the National Corpus of
 Polish's n-grams (NKJP, its 300M-word balanced subcorpus), kept only where PoliMorf lists the
@@ -53,9 +57,13 @@ SCOWL = "https://downloads.sourceforge.net/project/wordlist/SCOWL/2020.12.07/sco
 RLA_ES = "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/es/"
 RLA_ES_LOCALES = ("es_ES", "es_MX")
 FIRST_YEAR = 1980
-MAX_WORDS = {"en": 90_000, "es": 110_000, "pl": 150_000}
+MAX_WORDS = {"en": 100_000, "es": 110_000, "pl": 150_000}
 MAX_BYTES = 3_600_000      # the whole model
 MIN_PAIR = 2_000           # pairs rarer than this (1980-2019) can't make the cut
+# SCOWL's lists of names and other words it spells with a capital: their words spelled with
+# one capital first ("Monday", "Mary", "London"), three letters or more, join the English
+# vocabulary in lowercase, as the model spells every word.
+SCOWL_NAMES = tuple(f"{region}-{kind}" for region in ("english", "american", "british") for kind in ("upper", "proper-names"))
 LETTERS = {"en": "abcdefghijklmnopqrstuvwxyz'", "es": "abcdefghijklmnopqrstuvwxyzñáéíóúü",
            "pl": "abcdefghijklmnopqrstuvwxyząćęłńóśźż"}
 # Base letters NFD doesn't give: ł has no decomposition.
@@ -201,11 +209,16 @@ def word_list(lang, work):
             for m in t.getmembers():
                 name = os.path.basename(m.name)
                 kind, _, size = name.rpartition(".")
-                if kind in ("english-words", "american-words", "british-words", "english-contractions") \
-                        and size.isdigit() and int(size) <= 70:
+                if not (size.isdigit() and int(size) <= 70):
+                    continue
+                if kind in ("english-words", "american-words", "british-words", "english-contractions"):
                     for w in t.extractfile(m).read().decode("latin-1").split():
                         if w == w.lower():
                             words.add(w)
+                elif kind in SCOWL_NAMES:
+                    for w in t.extractfile(m).read().decode("latin-1").split():
+                        if w == w[:1].upper() + w[1:].lower() and len(w.replace("'", "")) >= 3:
+                            words.add(w.lower())
         return words.__contains__
     from spylls.hunspell import Dictionary
     dictionaries = []

@@ -61,19 +61,25 @@ def main():
         for lang in args.languages:
             source = paths(lang, args.noise, args.out)
             words = args.out / f'{lang}-{args.noise}-words.tsv'
+            # Held-out words an earlier model lacked, swiped and scored apart (SwipeReplay --outside).
+            listed = HERE / f'swipe-outside-{lang}.txt'
+            outside = ['--outside', listed] if listed.is_file() else []
             if args.device:
                 for side in ['hextm', 'capitals', 'valid']:
                     subprocess.run(adb + ['shell', 'rm', '-f', f'{dev}/{lang}.{side}'], check=True)
                     if (MODELS / f'{lang}.{side}').is_file():
                         subprocess.run(adb + ['push', MODELS / f'{lang}.{side}', dev], check=True, capture_output=True)
                 subprocess.run(adb + ['push', source, f'{dev}/{source.name}'], check=True, capture_output=True)
+                if outside:
+                    subprocess.run(adb + ['push', listed, f'{dev}/{listed.name}'], check=True, capture_output=True)
                 report = subprocess.check_output(adb + ['shell', f'CLASSPATH={dev}/replay.jar:{apk} app_process /system/bin '
-                                                        f'local.hex.bench.SwipeReplay {dev}/{lang}.hextm {lang} {dev}/{source.name} {dev}/words.tsv'], text=True)
+                                                        f'local.hex.bench.SwipeReplay {dev}/{lang}.hextm {lang} {dev}/{source.name} {dev}/words.tsv'
+                                                        + (f' --outside {dev}/{listed.name}' if outside else '')], text=True)
                 subprocess.run(adb + ['shell', 'rm', f'{dev}/{source.name}'], check=True)
                 subprocess.run(adb + ['pull', dev + '/words.tsv', words], check=True, capture_output=True)
             else:
                 report = subprocess.check_output([jdk / 'java', '-Xmx1g', '-Dfile.encoding=UTF-8', '-cp', str(classes) + os.pathsep + cp.read_text(),
-                                                  'local.hex.bench.SwipeReplay', MODELS / f'{lang}.hextm', lang, source, words], text=True)
+                                                  'local.hex.bench.SwipeReplay', MODELS / f'{lang}.hextm', lang, source, words] + outside, text=True)
             (args.out / f'{lang}-{args.noise}{"-device" if args.device else ""}.txt').write_text(report)
             print(report, flush=True)
 

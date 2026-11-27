@@ -7,8 +7,9 @@ extension FullKeyboardEngineTests {
     /// auto-capitalization around swipes were right (after a period, a return, a comma, a
     /// delete, a pick); the capitals came from readings: the word list's names and
     /// abbreviations, which the dictionary knows only capitalised ("kent", "gs"), and "I'm"
-    /// read after a word "I" never follows. A name now needs more evidence than a common word,
-    /// your own words don't, and a contraction follows the word before.
+    /// read after a word "I" never follows. A contraction now follows the word before; English
+    /// reads its names at their own counts (its model holds SCOWL's names), other languages'
+    /// rare names still need more evidence than a common word, and your own words don't.
     func testASwipeMidSentenceGetsNoStrayCapital() throws {
         let (field, plane) = try swipeKeyboard("Great.")
         field.autocapitalizationType = .sentences
@@ -19,9 +20,7 @@ extension FullKeyboardEngineTests {
         XCTAssertFalse(plane.engine.swipeReadsAsName("many"))
         XCTAssertFalse(plane.engine.swipeReadsAsName("Kent"), "your own spelling")
         let close = [SwipeDecoder.Candidate(text: "kent", cost: 10), SwipeDecoder.Candidate(text: "many", cost: 12)]
-        XCTAssertEqual(swipe.ranked(close), ["many", "kent"])
-        let clear = [SwipeDecoder.Candidate(text: "kent", cost: 10), SwipeDecoder.Candidate(text: "many", cost: 20)]
-        XCTAssertEqual(swipe.ranked(clear), ["kent", "many"])
+        XCTAssertEqual(swipe.ranked(close), ["kent", "many"], "English's names read at their own counts")
 
         for word in ["thanks", "for", "the", "help"] { self.swipe(word, on: plane) }
         tap(.layerSwitch(.numbers), on: plane)

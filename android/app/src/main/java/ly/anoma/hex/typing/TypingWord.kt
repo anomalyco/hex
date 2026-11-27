@@ -368,8 +368,9 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         val fix = decision().replace?.let { if (decoder.personal?.owns(it) == true) yours(it) else cased(it) } ?: return capitalised(token)
         // A missed space after English "i" ("iwant") gives "I want", as "i" alone does.
         if (model.language == "en" && ' ' in fix) return fix.split(' ').joinToString(" ") { if (it == "i") "I" else it }
-        // German's model is lowercase: a noun it corrects to takes its capital ("hsus" -> "Haus").
-        return if (model.language == "de" && ' ' !in fix) capitalised(fix) ?: fix else fix
+        // The German and English models are lowercase: a German noun or a name they correct to takes its capital
+        // ("hsus" -> "Haus", "mray" -> "Mary").
+        return if ((model.language == "de" || model.language == "en") && ' ' !in fix) capitalised(fix) ?: fix else fix
     }
 
     /** A swiped reading ([SwipeReader]'s: the model's lowercase spelling, a contraction such as "I'm", or your own

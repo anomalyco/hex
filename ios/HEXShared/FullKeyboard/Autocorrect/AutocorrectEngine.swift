@@ -1090,12 +1090,12 @@ final class AutocorrectEngine {
                 if language.usesEnglishFixes, cased.contains(" ") {
                     cased = cased.split(separator: " ").map { $0 == "i" ? "I" : String($0) }.joined(separator: " ")
                 }
-                // German spells every noun with a capital, and the German model is lowercase
-                // throughout like the English one: a corrected word the dictionary knows only
-                // capitalised, or `de.capitals` calls a noun, takes its capital ("hsus" -> "haus"
-                // -> "Haus"), as the no-replacement path does below. One word only: a split
-                // reading keeps its second word as read.
-                if addsCapitals, !cased.contains(" "), decoder?.model.language == KeyboardLanguage.german.rawValue {
+                // The German and English models are lowercase throughout: a corrected word the
+                // dictionary knows only capitalised (a name, day or place: "mray" -> "Mary"), or
+                // that `de.capitals` calls a noun ("hsus" -> "haus" -> "Haus"), takes its
+                // capital, as the no-replacement path does below. One word only: a split reading
+                // keeps its second word as read.
+                if addsCapitals, !cased.contains(" "), language == .german || language == .english {
                     cased = nounCapitalised(for: cased, typed: token) ?? cased
                 }
                 return withoutAddedCapitals(cased, typed: token)
