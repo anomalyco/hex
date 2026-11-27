@@ -26,6 +26,22 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::{MeetingManifest, MeetingSource, TranscriptEntry};
 
+// Naming speakers from what a call app shows. Each piece is complete and
+// tested, and nothing reads a call app or calls these yet, so a build that
+// is not a test build expects them to be unused. The expectation fails the
+// build the moment one of them is fully in use, so it cannot outlive its
+// reason.
+#[cfg_attr(not(test), expect(dead_code, reason = "no reader writes evidence yet"))]
+mod calibrate;
+#[cfg_attr(not(test), expect(dead_code, reason = "no reader writes evidence yet"))]
+mod evidence;
+#[cfg_attr(not(test), expect(dead_code, reason = "no reader writes evidence yet"))]
+mod floor;
+#[cfg_attr(not(test), expect(dead_code, reason = "no reader writes evidence yet"))]
+mod names;
+#[cfg_attr(not(test), expect(dead_code, reason = "no reader writes evidence yet"))]
+mod resolve;
+
 /// The longest name the table keeps, in characters.
 const NAME_CHARS: usize = 64;
 
@@ -403,5 +419,7 @@ impl MeetingManifest {
     }
 }
 
+#[cfg(test)]
+mod resolve_tests;
 #[cfg(test)]
 mod tests;
