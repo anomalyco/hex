@@ -282,6 +282,9 @@ impl Feature {
             Self::MiddleMouseDictation => {
                 "Hold the middle mouse button for half a second to start a hands-free dictation and long-press again to finish; the dictation shortcut can finish it too, and a long press finishes a hands-free dictation the shortcut started. Clicks still reach the app, and Escape cancels a hands-free dictation and stays out of the app (macOS)"
             }
+            Self::MeetingSpeakerNames => {
+                "While a meeting records a Slack huddle, Hex reads who Slack shows speaking, through Accessibility, and names their turns in the transcript as the call goes and in the saved copy. A turn is named only when one person clearly held the floor; everything else stays Them, and something said over another person can land in that person's turn. What Hex saw is kept in the meeting's folder (speakers.ndjson) and goes with it; no voice is analysed and nothing is kept across meetings (macOS)"
+            }
         }
     }
 }

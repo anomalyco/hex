@@ -15,6 +15,8 @@ use crate::desktop::events::now_ms;
 use crate::durable::{lock_contended, sync_directory, sync_file};
 
 const SAMPLE_RATE: u32 = 16_000;
+/// A recording's first-audio time before any audio has arrived.
+const NO_AUDIO_YET: u64 = u64::MAX;
 /// Beside the manifest of a meeting Hex quit while recording or during its
 /// final transcription: its audio is
 /// saved and its final transcript runs at the next launch.
@@ -519,11 +521,23 @@ pub fn record(
         let (sender, receiver) = mpsc::sync_channel::<AudioPacket>(128);
         let system_drops = Arc::new(AtomicU64::new(0));
         let microphone_drops = Arc::new(AtomicU64::new(0));
-        let mut rolling =
-            transcript::Rolling::start(meeting_dir.clone(), transcription_selection.clone());
+        // Labs › Speaker names: the in-call transcript's speaker table
+        // arrives here each time it changes, for the manifest.
+        let live_speakers = speakers::LiveTable::default();
+        let mut rolling = transcript::Rolling::start(
+            meeting_dir.clone(),
+            transcription_selection.clone(),
+            speakers::LiveNames::handing_to(live_speakers.clone()),
+        );
         let rolling_feed = rolling.feed();
         let writer_dir = meeting_dir.clone();
-        let writer = thread::spawn(move || write_tracks(&writer_dir, receiver, rolling_feed));
+        // When the first audio arrived on the capture clock, in microseconds:
+        // where the transcript's lines, and the speaker reader, count from.
+        let first_audio = Arc::new(AtomicU64::new(NO_AUDIO_YET));
+        let writer_first_audio = first_audio.clone();
+        let writer = thread::spawn(move || {
+            write_tracks(&writer_dir, receiver, rolling_feed, &writer_first_audio)
+        });
         let cleanup_failed_setup =
             |sender: SyncSender<AudioPacket>, writer: thread::JoinHandle<Result<CaptureStats>>| {
                 drop(sender);
@@ -568,6 +582,15 @@ pub fn record(
         }
 
         let started = Instant::now();
+        // Labs › Speaker names: reads who the call app shows speaking, for
+        // as long as the recording runs.
+        #[cfg(target_os = "macos")]
+        let speaker_reader = speakers::SpeakerReader::start(
+            &meeting_dir,
+            start.application.as_deref(),
+            capture_clock,
+            first_audio,
+        );
         let titles = notes::ProvisionalTitles::start(manifest.id.clone());
         let live_chapters = crate::labs::live_chapters()
             .then(|| chapters::LiveChapters::start(manifest.id.clone()));
@@ -578,6 +601,9 @@ pub fn record(
             }
             if let Some(chapters) = live_chapters.as_ref().and_then(|live| live.take()) {
                 record_chapters(&meeting_dir, manifest, chapters, updates.as_ref());
+            }
+            if let Some(speakers) = live_speakers.take() {
+                record_speakers(&meeting_dir, manifest, speakers);
             }
             // Written as soon as the microphone is warned about, so a crash
             // while recording still says it was digitally silent.
@@ -598,6 +624,8 @@ pub fn record(
         drop(microphone_capture);
         drop(sender);
         drop(sleep_prevention);
+        #[cfg(target_os = "macos")]
+        drop(speaker_reader);
 
         manifest.ended_at_ms = Some(now_ms());
         manifest.duration_ms = Some(started.elapsed().as_millis() as u64);
@@ -721,6 +749,16 @@ fn record_chapters(
     }
 }
 
+/// Saves the speaker table the in-call transcript's lines now point into
+/// (Labs › Speaker names).
+fn record_speakers(directory: &Path, manifest: &mut MeetingManifest, speakers: Speakers) {
+    keep_rename(directory, manifest);
+    manifest.speakers = speakers;
+    if let Err(error) = write_manifest(directory, manifest) {
+        tracing::warn!(%error, meeting = manifest.id, "could not record meeting speakers");
+    }
+}
+
 /// Records where the title came from, which only live chapters read; with
 /// the experiment off, a manifest that has neither stays as it was.
 fn set_title_source(manifest: &mut MeetingManifest, source: TitleSource) {
@@ -830,6 +868,7 @@ fn write_tracks(
     directory: &Path,
     receiver: Receiver<AudioPacket>,
     mut rolling: Option<transcript::RollingFeed>,
+    first_audio: &AtomicU64,
 ) -> Result<CaptureStats> {
     let mut system = None;
     let mut microphone = None;
@@ -889,6 +928,7 @@ fn write_tracks(
             track.samples += missing;
         }
         track.first_arrival_us.get_or_insert(packet.arrival_us);
+        first_audio.fetch_min(packet.arrival_us, Ordering::Relaxed);
         packet.position = track.samples;
         track.samples += packet.samples.len() as u64;
         for &sample in &packet.samples {
@@ -939,6 +979,9 @@ fn transcribe(
     let (transcript, echo_suppressed) =
         transcript::transcribe(directory, manifest, selection, rolling)?;
     manifest.echo_suppressed_utterances = echo_suppressed;
+    // Labs › Speaker names: the lines and the manifest's table, from what
+    // the speaker reader saved beside the recording.
+    let transcript = speakers::name_transcript(directory, manifest, transcript);
     // Transcription takes a while; the headings use a rename made meanwhile.
     keep_rename(directory, manifest);
     publish_transcript_files(directory, manifest, &transcript)?;

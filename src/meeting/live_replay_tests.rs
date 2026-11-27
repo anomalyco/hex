@@ -500,11 +500,17 @@ impl Pipeline {
         receiver: Receiver<AudioPacket>,
         selection: &TranscriptionSelection,
     ) -> Self {
-        let mut rolling = transcript::Rolling::start(directory.to_path_buf(), selection.clone());
+        let mut rolling = transcript::Rolling::start(
+            directory.to_path_buf(),
+            selection.clone(),
+            speakers::LiveNames::default(),
+        );
         let feed = rolling.feed();
         let writer = {
             let directory = directory.to_path_buf();
-            thread::spawn(move || write_tracks(&directory, receiver, feed))
+            thread::spawn(move || {
+                write_tracks(&directory, receiver, feed, &AtomicU64::new(NO_AUDIO_YET))
+            })
         };
         Self { writer, rolling }
     }

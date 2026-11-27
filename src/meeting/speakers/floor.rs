@@ -22,24 +22,36 @@ pub(super) const POLL_MS: u64 = 500;
 pub(super) const POLL_REACH_MS: u64 = POLL_MS + POLL_MS / 2;
 
 /// Everyone the call app showed on the call.
-pub(super) struct Roster<'a>(Vec<&'a Participant>);
+pub(super) struct Roster(Vec<Participant>);
 
-impl<'a> Roster<'a> {
-    /// The first record of each person stands.
-    pub(super) fn of(evidence: &'a [Evidence]) -> Self {
-        let mut people: Vec<&Participant> = Vec::new();
+impl Roster {
+    /// One person for each key, as the call app last showed them. The
+    /// reader writes someone again when the app shows them differently, so
+    /// the last line says whether they are the user, and the last line
+    /// with a usable name says what they are called: a name that arrives
+    /// after the tile does is theirs, and a later look that shows no name
+    /// takes none away. They joined when they were first seen.
+    pub(super) fn of(evidence: &[Evidence]) -> Self {
+        let mut people: Vec<Participant> = Vec::new();
         for line in evidence {
-            if let Evidence::Participant(participant) = line
-                && people.iter().all(|known| known.key != participant.key)
-            {
-                people.push(participant);
+            let Evidence::Participant(shown) = line else {
+                continue;
+            };
+            match people.iter_mut().find(|known| known.key == shown.key) {
+                Some(known) => {
+                    known.is_local = shown.is_local;
+                    if shown.name.is_some() {
+                        known.name.clone_from(&shown.name);
+                    }
+                }
+                None => people.push(shown.clone()),
             }
         }
         Self(people)
     }
 
-    pub(super) fn person(&self, key: ParticipantKey) -> Option<&'a Participant> {
-        self.0.iter().copied().find(|person| person.key == key)
+    pub(super) fn person(&self, key: ParticipantKey) -> Option<&Participant> {
+        self.0.iter().find(|person| person.key == key)
     }
 
     /// Whether `key` is someone on the call other than the user.
@@ -125,7 +137,7 @@ pub(super) struct Floor(Vec<(i64, State)>);
 impl Floor {
     /// The floor as the reader saw it, on the call app's own timing. A look
     /// that names someone the call app never showed is no look.
-    pub(super) fn seen(evidence: &[Evidence], roster: &Roster<'_>) -> Self {
+    pub(super) fn seen(evidence: &[Evidence], roster: &Roster) -> Self {
         let mut looks = evidence
             .iter()
             .filter_map(|line| match line {
@@ -223,4 +235,60 @@ pub fn local_floor(evidence: &[Evidence]) -> Vec<Interval> {
         .filter(|(_, _, state)| *state == State::Held(local))
         .map(|(start, end, _)| Interval::new(start.max(0) as u64, end.max(0) as u64))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::meeting::SpeakerName;
+
+    fn key(number: u32) -> ParticipantKey {
+        ParticipantKey::numbered(number)
+    }
+
+    fn shown(number: u32, name: &str, is_local: bool, at_ms: u64) -> Evidence {
+        Evidence::Participant(Participant {
+            key: key(number),
+            name: SpeakerName::parse(name),
+            is_local,
+            at_ms,
+        })
+    }
+
+    fn name_of(roster: &Roster, number: u32) -> Option<&str> {
+        let name = roster.person(key(number))?.name.as_ref()?;
+        Some(name.as_str())
+    }
+
+    #[test]
+    fn someone_written_again_keeps_the_latest_usable_name() {
+        let evidence = [
+            // The tile came before its name did.
+            shown(1, "", false, 0),
+            shown(2, "Bob", false, 0),
+            shown(3, "Carol", true, 0),
+            shown(1, "Alice", false, 500),
+            // The app comes to show another name, and then for a look none.
+            shown(2, "Bob B.", false, 1_000),
+            shown(2, "", false, 1_500),
+            // And shows someone else as the user.
+            shown(3, "Carol", false, 2_000),
+        ];
+        let roster = Roster::of(&evidence);
+        assert_eq!(name_of(&roster, 1), Some("Alice"));
+        assert_eq!(name_of(&roster, 2), Some("Bob B."));
+        assert_eq!(name_of(&roster, 3), Some("Carol"));
+        assert_eq!(name_of(&roster, 4), None);
+        // Each is one person, who joined when first seen, and is the user
+        // or not as last shown.
+        assert_eq!(roster.0.len(), 3);
+        assert_eq!(roster.person(key(1)).unwrap().at_ms, 0);
+        assert!(roster.is_remote(key(3)) && roster.local().is_none());
+        assert_eq!(roster.only_remote(), None);
+
+        // Someone never shown with a usable name stays without one.
+        let nameless = Roster::of(&[shown(1, "", false, 0), shown(1, "You", false, 500)]);
+        assert_eq!(name_of(&nameless, 1), None);
+        assert_eq!(nameless.only_remote(), Some(key(1)));
+    }
 }

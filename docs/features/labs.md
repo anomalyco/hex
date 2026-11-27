@@ -327,6 +327,12 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        stay put. Unmute microphone puts it back, and turning the lab off restores it
 │                                        at once without stopping, clearing the switch so turning it back on does not
 │                                        re-mute (see meetings.md)
+├── Speaker names   no    labs.meeting_speaker_names    (macOS)   while a Slack huddle in Slack's desktop app records, a reader
+│                                        notes through Accessibility who Slack marks as speaking (owner-only speakers.ndjson
+│                                        in the meeting folder), and a remote line said while one person held the floor
+│                                        takes their name in place of Them, in the in-call and the final transcript; off,
+│                                        nothing is read, Slack is asked for nothing, and every transcript is as before
+│                                        (see meetings.md)
 ├── Indicator on any display no labs.meeting_indicator_display (macOS, Windows) dragging the meeting recording
 │                                        capsule (or a panel capsule) and letting go over another display lands it in
 │                                        that display's nearest corner, and every capsule shows there from then on,
@@ -4618,6 +4624,47 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   ([capture.rs](../../src/meeting/capture.rs)); not observed on a real Mac call,
   and the menu bar, capsule, and pane controls are macOS-only code this Linux
   build never compiled.
+- Speaker names (macOS, with Meetings on): a recording of a Slack huddle in
+  Slack's desktop app names its remote speakers. Its toggle is
+  `labs.meeting_speaker_names` (off by default; `hex labs on speaker-names`).
+  On, a recording starts one `meeting-speakers`
+  thread (`SpeakerReader::start` in
+  [speakers/watch.rs](../../src/meeting/speakers/watch.rs)) that looks at
+  Slack's windows through Accessibility every 0.5 s and appends who Slack
+  shows and who it marks as speaking to the meeting folder's owner-only
+  `speakers.ndjson`. The in-call transcript and the final one are then named
+  from that file: a remote line takes a name only where one person alone held
+  the floor across it, and stays `Them` otherwise
+  ([Meetings › Working out names](meetings.md#working-out-names)). The gate is
+  where the thread starts: off, there is no thread, no Accessibility read, and
+  Slack is never asked for its web accessibility tree; the naming step reads
+  the same gate, so off, a meeting that has a `speakers.ndjson` from an
+  earlier recording is transcribed unnamed. Turned off while a meeting
+  records, the reader ends at its next wait and the next in-call transcript
+  is unnamed. It needs the Accessibility permission dictation context
+  already uses; without it every look is empty and nobody is named. It reads
+  only: it never clicks, focuses, raises, or types into Slack. Slack user ids
+  never leave memory, and no name or id is logged. Limits: Slack's desktop
+  app only (a huddle in a browser, and every other call app, records exactly
+  as before); a call app marks one speaker at a time, so words said over the
+  person holding the floor take that person's name; and Hex checks Slack's
+  mark on the user's own tile against the user's own microphone, so someone
+  who talks for 8 stretches of 2 s with their tile never lit (muted in Slack
+  but dictating, say) has the call judged unreadable and nobody on it named.
+  Checks:
+  `the_speaker_names_lab_is_a_macos_meetings_lab_off_by_default`
+  ([labs.rs](../../src/labs.rs)),
+  `only_a_call_app_hex_can_read_gets_a_reader` and
+  `a_reader_saves_what_it_sees_and_dropping_it_stops_and_joins_it`
+  ([speakers/watch/tests.rs](../../src/meeting/speakers/watch/tests.rs)),
+  `nothing_is_named_with_the_lab_off_or_without_evidence`
+  ([speakers/naming/tests.rs](../../src/meeting/speakers/naming/tests.rs)),
+  and the Slack adapter's tests
+  ([speakers/slack/tests.rs](../../src/meeting/speakers/slack/tests.rs)),
+  which read hand-written trees in the shape a live read of Slack gave. No
+  automated check reads a real huddle, and a hidden or minimised huddle
+  window and a huddle too large for one look's budget (4,000 nodes, 0.4 s)
+  have not been observed.
 - Indicator on any display (macOS and Windows, with Meetings on): letting go
   of a dragged meeting capsule over another display lands it in that
   display's corner nearest where the throw would come to rest, and every

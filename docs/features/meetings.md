@@ -2830,14 +2830,17 @@ current one), which is why Rust's name overlap decides.
 
 ### Speaker Names
 
-Implemented: the data model, every reader of it, the rules that work out
-names from what a call app shows, and on macOS the reader that writes down
-what a call app shows ([Working out names](#working-out-names)).
-Not implemented: an adapter for any call app, or anything that starts the
-reader, so nothing runs those rules.
-No build writes a `speaker` or a `speakers` table yet, so every remote line
-is still `Them` and every saved file, prompt, and JSON response is what it
-was before.
+Implemented on macOS behind Labs › Speaker names
+(`labs.meeting_speaker_names`, off by default): while a Slack huddle in
+Slack's desktop app records, a reader notes who Slack marks as speaking, and
+a remote line said while one person held the floor takes that person's name,
+in the in-call transcript and the final one
+([Working out names](#working-out-names)).
+With the lab off, in any other call app or a browser, and on Windows and
+Linux, nothing writes a `speaker` or a `speakers` table: every remote line
+is `Them` and every saved file, prompt, and JSON response is what it was
+before. Not implemented: an adapter for any other call app, the pane's
+corrections, any voice model.
 
 ```ts
 manifest.json -> speakers?: [{ id, name, from }]     // omitted when empty
@@ -2846,8 +2849,8 @@ manifest.json -> speakers?: [{ id, name, from }]     // omitted when empty
 ├── name: the display name, cleaned (below)
 └── from: "call_app" | "calendar" | "user"
 transcript.ndjson, transcript.rolling.ndjson -> speaker?: "s1"
-└── An id in that table; omitted when Hex is not sure, which is every line
-    today. The schema versions stay 1: both fields are additive
+└── An id in that table; omitted when Hex is not sure. The schema versions
+    stay 1: both fields are additive
 What a line is called -> one rule (src/meeting/speakers.rs, Labels::of)
 ├── A remote line whose speaker the table knows -> the name
 ├── Otherwise exactly as before: You, Them, or Speaker where an imported
@@ -2871,8 +2874,8 @@ Readers that show the name
 Readers that stay You / Them
 ├── Chapter prompts: where a topic changes does not depend on who speaks,
 │   so no name goes to that model
-├── The provisional-title prompt and the recording capsule: a recording
-│   under way has no names
+├── The provisional-title prompt and the recording capsule: they read the
+│   tracks, not the table
 └── get_transcript's speaker filter (you | them | all)
 Names are untrusted: other people choose them, and models and agents read them
 ├── A name exists in the code only as a cleaned value (SpeakerName), made
@@ -2901,20 +2904,64 @@ Checks: `an_old_manifest_and_transcript_round_trip_byte_for_byte`,
 `a_named_speaker_shows_in_meeting_json_and_subtitles`,
 `a_named_speaker_gets_their_own_turn_under_their_name`, and
 `meeting_json_contract_snapshot` (unnamed JSON is unchanged). All run on
-hand-built tables; no recorded meeting has a named speaker.
+hand-built tables.
 
 #### Working Out Names
 
-Exists (`src/meeting/speakers/`), tested, and called by nothing: the evidence
-a reader saves, a calibration, the resolver, the step that turns its answer
-into the table and ids above, and on macOS the reader itself with the seam a
-call app's adapter plugs into. Does not exist: an adapter for any call app
-(each is written against a live read of that app), anything that starts the
-reader with a recording, the wiring into the transcript worker, a Labs
-switch, the pane's corrections, any voice model. No file is written and no
-name appears.
+`src/meeting/speakers/`: the evidence a reader saves, a calibration, the
+resolver, the step that turns its answer into the table and ids above, and
+on macOS the reader, its adapter for Slack huddles, and the wiring that runs
+them beside a recording and names its transcripts, all behind Labs › Speaker
+names. Does not exist: an adapter for any other call app (each is written
+against a live read of that app), the pane's corrections (a correction line
+is read and obeyed, and nothing writes one), any voice model.
 
 ```ts
+When it runs (macOS, Labs › Speaker names on; off, none of it starts)
+├── A recording starts -> one "meeting-speakers" thread beside it when its
+│   call app is one Hex has an adapter for. A recording that names no call
+│   app (started by hand) -> the thread checks every 5 s for such an app
+│   holding the microphone. Any other call app, or a browser -> no thread
+├── The thread shares nothing with audio capture: a slow or hung look costs
+│   that look (4,000 nodes, 80 deep, 0.4 s at most), never a packet
+├── Needs the Accessibility permission dictation context uses; without it
+│   every look is empty. Slack is asked for its web accessibility tree once
+│   each time it is found running; nothing else is written to it, and it is
+│   never clicked, focused, raised or typed into
+├── Times are the transcript's: both count from the recording's first
+│   audio, and no look is made before it
+├── Recording stops, or the lab is turned off -> the thread ends at its next
+│   wait and is joined before the final transcript is worked out
+├── In-call transcript -> each time it is written, the whole transcript so
+│   far is named again from the file so far, and the table goes to
+│   manifest.json when it changed
+├── Final transcript (wherever one is made: after Stop, when a stranded
+│   meeting is finished, when a meeting is transcribed again) -> named the
+│   same way from the whole file, with the lab on and a
+│   speakers.ndjson in the folder; otherwise unnamed and the table emptied
+├── Ids hold for the meeting: s1 is whoever was first given it, however
+│   often names are worked out, and an id is never handed to someone else.
+│   A reader that catches the table and the lines between their two writes
+│   sees Them, never another person's name
+├── Early in a call -> names start with the first remote line, on the
+│   assumed timing below, until the user's own tile has lit 5 times. A line
+│   can change its name as more is seen, in the in-call transcript; the
+│   final pass decides
+└── Word times -> a line keeps its start and end, not its words', so its
+    time is shared among its words by their length before the resolver runs
+Slack huddles (com.tinyspeck.slackmacgap; a pure function of one snapshot)
+├── A person -> an AXCell with the class p-huddle_peer_tile, in the gallery
+│   or the compact view. Who: the Slack user id that ends the tile's DOM id
+│   (in memory only). The user's own tile's id starts
+│   huddle-grid-gridcell-self_
+├── Name -> the text in the tile's name overlay, else the name in the tile's
+│   label ("View Alice's profile"); cleaned like every name
+├── Speaking -> a descendant with the class
+│   p-huddle_peer_tile__overlay--active_speaker
+├── Floor -> the one person marked. Nobody or several marked, or a mark on
+│   a tile with no id -> nobody holds it
+└── Windows with tiles: none -> no call window; one -> the call; two or
+    more -> untrusted two_windows
 speakers.ndjson (meeting folder, owner-only, to the Trash with the folder)
 ├── The one record of who spoke. The manifest's table and each line's
 │   speaker are rebuilt whole from it and are never edited themselves
@@ -2958,7 +3005,8 @@ Lines -> a remote line takes a speaker only when everything it overlaps was
 Reader (macOS only: it reads accessibility::tree snapshots) -> speakers.ndjson
 ├── Adapter, one per call app (pure) -> a snapshot of the app's windows ->
 │   active { roster, floor } | no call window | untrusted(reason). Found by
-│   canonical bundle id or by the call page's host. None is listed yet
+│   canonical bundle id or by the call page's host. Listed: Slack's
+│   desktop app; no page host yet
 ├── Before any adapter is asked: a snapshot a budget cut short -> untrusted
 │   cut_short; an app with no window -> no call window
 ├── Poll state (pure) -> one look in, the lines it adds out
@@ -2979,9 +3027,19 @@ Reader (macOS only: it reads accessibility::tree snapshots) -> speakers.ndjson
     a run of failed writes, counts at the end. Never a name or an app id
 ```
 
-Not reconciled yet: when the app shows someone differently the reader writes
-a second participant line, and the resolver still takes the first line for
-each key, so a name that arrives after the tile does names nobody.
+When the app shows someone differently the reader writes a second
+participant line, and the latest line with a usable name is who they are, so
+a name that arrives after the tile does is still used.
+
+A call is judged by the user's own tile against the user's own microphone,
+so a user who talks with their Slack microphone muted (dictating during a
+huddle, say) for 8 stretches of 2 s with the tile never lit makes the call
+unhealthy, and nobody on it is named.
+
+Not observed: a huddle window that is hidden or minimised (the Slack adapter
+never reports `window_hidden`; a window with no tiles in its tree reads as
+no call window, and the time it covers as no evidence), and a huddle too
+large for one look's budget (a look cut short names nobody).
 
 The accepted limit: a call app marks one speaker at a time, so words said
 over the person holding the floor take that person's name, at every
@@ -2997,7 +3055,8 @@ words its rules ranged from 79.8% right / 11.9% wrong (as seen) to 61.3% /
 voice check on real audio: 85.1% right / 10.3% wrong against 80.8% / 8.5%,
 with 95.6% of its wrong names on overlapped words, so no voice model is
 planned here. The resolver's own constants have not been run against that
-corpus, and nothing has been measured on a real call.
+corpus, and nothing has been measured on a real call: no accuracy figure
+exists for a Slack huddle.
 
 Checks: `people_taking_turns_are_each_named_for_every_word`,
 `a_change_of_floor_in_a_pause_keeps_the_words_on_both_sides`,
@@ -3032,7 +3091,44 @@ property over random looks:
 `whatever_an_app_shows_every_key_is_introduced_before_it_is_used_and_no_id_is_written`.
 Seam: `a_snapshot_cut_short_is_never_shown_to_an_adapter`,
 `an_app_is_read_by_the_adapter_listed_under_its_key`, `no_app_is_listed_twice`.
-Nothing has read a real call app through it.
+
+Slack adapter checks (macOS; hand-written trees in the shape a live read
+of Slack's huddle gave, with invented people):
+`a_huddle_is_read_as_everyone_on_it_and_the_one_person_speaking`,
+`nobody_holds_the_floor_when_nobody_or_several_people_are_marked`,
+`the_mark_counts_on_either_overlay_and_only_inside_a_tile`,
+`someone_who_reconnects_is_still_the_same_person`,
+`a_tile_is_told_apart_by_whatever_its_id_gives`,
+`a_name_is_the_overlays_text_or_else_the_one_in_the_tiles_label`,
+`only_a_grid_cell_with_the_tile_class_is_a_tile`,
+`slack_with_no_huddle_on_screen_has_no_call_window`,
+`the_huddle_is_read_wherever_its_one_window_is_and_however_deep`,
+`two_windows_with_tiles_are_not_believed`,
+`slack_is_read_by_this_adapter_under_its_bundle_id`,
+`what_the_reader_saves_of_a_huddle_holds_names_and_never_a_slack_id`, and
+`someone_written_again_keeps_the_latest_usable_name`.
+
+Naming checks (every OS; evidence and transcripts written by hand):
+`a_call_is_named_from_its_first_remote_line_on_the_assumed_timing`,
+`once_the_users_own_tile_has_lit_enough_the_call_is_judged_by_it`,
+`a_line_said_across_a_change_of_floor_stays_them`,
+`a_meeting_with_nothing_seen_names_nobody`,
+`the_words_of_a_line_share_its_time_by_their_length`,
+`microphone_lines_that_run_on_are_one_stretch_of_talking`,
+`nothing_is_named_with_the_lab_off_or_without_evidence`,
+`the_final_transcript_and_the_manifests_table_are_named_together`,
+`the_final_pass_keeps_the_ids_the_recording_saved`,
+`the_in_call_transcript_is_named_as_it_grows_and_its_table_handed_on_when_it_changes`,
+and `a_meeting_worked_out_again_keeps_the_ids_it_gave`.
+
+Thread checks (macOS; an invented call app and a hand-built window, no real
+app): `the_clock_counts_from_the_first_audio_and_waits_for_it`,
+`the_clock_stops_with_the_recording_or_the_lab`,
+`only_a_call_app_hex_can_read_gets_a_reader`,
+`a_reader_saves_what_it_sees_and_dropping_it_stops_and_joins_it` (the real
+thread and the real owner-only file), `an_app_that_is_not_running_reads_as_no_windows`.
+
+No automated check reads a real Slack huddle or records one end to end.
 
 ### Agent Access (MCP)
 
