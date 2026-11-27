@@ -2,17 +2,17 @@
 // Vite): writes its canonical address and social tags for this mode's origin
 // into index.html, and refuses a file Workers static assets can't serve.
 //
-//   bun scripts/meetings.ts --mode dev
+//   bun scripts/meetings/build.ts --mode dev
 import { getWorkerAssetsDir } from "@cloudflare/build-output-utils"
 import { readFileSync, statSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { parseArgs } from "node:util"
-import { originForMode } from "../src/base"
-import { MEETINGS_CARD, MEETINGS_DIR, meetingsHead, runtimeFiles, stripHead } from "./meetings-bundle"
+import { originForMode } from "../../src/base"
+import { MEETINGS_CARD, MEETINGS_DIR, meetingsHead, runtimeFiles, stripHead } from "./bundle"
 
 const { values } = parseArgs({ options: { mode: { type: "string" } } })
 const origin = originForMode(values.mode)
-const dir = join(getWorkerAssetsDir(resolve(import.meta.dirname, "..")), MEETINGS_DIR)
+const dir = join(getWorkerAssetsDir(resolve(import.meta.dirname, "../..")), MEETINGS_DIR)
 
 const bundle = runtimeFiles(dir)
 if (bundle.missing.length) throw new Error(`Meetings names files it doesn't have: ${bundle.missing.map((m) => `${m.from} → ${m.ref}`).join(", ")}`)

@@ -99,9 +99,9 @@ modules, CSS, and a voice bank) built outside the site and kept in
 `public/meetings/` exactly as it loads. The landing page links it from the
 header and the footer. Swap in a new cut with
 `bun run import:meetings <bundle folder>`: it follows the page's references from
-`index.html` (`scripts/meetings-bundle.ts`) and copies only what the page loads,
+`index.html` (`scripts/meetings/bundle.ts`) and copies only what the page loads,
 leaving build scripts, shader sources, reports, and raw audio behind, and drops
-session ids and the bundle's own social tags. The build (`scripts/meetings.ts`)
+session ids and the bundle's own social tags. The build (`scripts/meetings/build.ts`)
 writes the canonical address and social tags for its origin and refuses a
 missing reference or a file over Workers' 25 MiB asset limit. The Worker
 redirects `/hex/meetings` to `/hex/meetings/` so the page's relative paths

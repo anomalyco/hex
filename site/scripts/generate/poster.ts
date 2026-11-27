@@ -9,8 +9,8 @@ import { chromium } from "playwright"
 import { fileURLToPath } from "node:url"
 
 const site = process.env.HEX_SITE_URL ?? "http://127.0.0.1:5531"
-const png = fileURLToPath(new URL("../node_modules/.cache/shout-idle.png", import.meta.url))
-const webp = fileURLToPath(new URL("../public/shout-idle.webp", import.meta.url))
+const png = fileURLToPath(new URL("../../node_modules/.cache/shout-idle.png", import.meta.url))
+const webp = fileURLToPath(new URL("../../public/shout-idle.webp", import.meta.url))
 
 const browser = await chromium.launch({ headless: true, args: ["--enable-unsafe-webgpu", "--use-angle=metal", "--mute-audio"] })
 try {

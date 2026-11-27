@@ -5,7 +5,7 @@
 import { expect, test } from "bun:test"
 import { readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
-import { MEETINGS_CARD, meetingsHead, runtimeFiles, stripHead } from "./scripts/meetings-bundle"
+import { MEETINGS_CARD, meetingsHead, runtimeFiles, stripHead } from "./scripts/meetings/bundle"
 import worker from "./worker"
 
 const dir = new URL("./public/meetings/", import.meta.url).pathname

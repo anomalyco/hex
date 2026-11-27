@@ -6,8 +6,8 @@ import { chromium } from "playwright"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 
-const icon = readFileSync(new URL("./og/hex-icon.png", import.meta.url)).toString("base64")
-const font = readFileSync(new URL("../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2", import.meta.url)).toString("base64")
+const icon = readFileSync(new URL("../og/hex-icon.png", import.meta.url)).toString("base64")
+const font = readFileSync(new URL("../../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2", import.meta.url)).toString("base64")
 
 const html = `<!doctype html>
 <style>
@@ -31,7 +31,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1200, height: 630 }, deviceScaleFactor: 1 })
   await page.setContent(html)
   await page.evaluate(() => document.fonts.ready)
-  await page.screenshot({ path: fileURLToPath(new URL("../public/og.png", import.meta.url)) })
+  await page.screenshot({ path: fileURLToPath(new URL("../../public/og.png", import.meta.url)) })
 } finally {
   await browser.close()
 }
