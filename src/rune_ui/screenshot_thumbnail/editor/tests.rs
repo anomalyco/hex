@@ -753,36 +753,11 @@ fn editor_goldens() {
             );
             let (w, h) = ((SCREEN[0] * 2.0) as u32, (SCREEN[1] * 2.0) as u32);
             let pixels = crate::rune_ui::offscreen::draw(&gpu, &mut rt, w, h);
-            if let Some(renders) = std::env::var_os("HEX_GOLDEN_RENDERS") {
-                let renders = PathBuf::from(renders);
-                std::fs::create_dir_all(&renders).unwrap();
-                rune::render::write_png(&renders.join(format!("{name}.png")), w, h, &pixels)
-                    .unwrap();
-            }
             let path = folder.join(format!("{name}.png"));
-            if std::env::var_os("HEX_UPDATE_GOLDENS").is_some() {
-                rune::render::write_png(&path, w, h, &pixels).unwrap();
-                continue;
-            }
-            let golden = path.exists().then(|| {
-                let file = std::io::BufReader::new(std::fs::File::open(&path).unwrap());
-                let mut reader = png::Decoder::new(file).read_info().unwrap();
-                let mut golden = vec![0; reader.output_buffer_size().unwrap()];
-                let info = reader.next_frame(&mut golden).unwrap();
-                ((info.width, info.height), golden)
-            });
-            let differing = match &golden {
-                Some((size, golden)) if *size == (w, h) => pixels
-                    .chunks(4)
-                    .zip(golden.chunks(4))
-                    .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 12))
-                    .count(),
-                _ => usize::MAX,
-            };
-            if differing > (w * h) as usize / 500 {
-                let actual = std::env::temp_dir().join(format!("rune-settings-{name}-actual.png"));
-                rune::render::write_png(&actual, w, h, &pixels).unwrap();
-                misses.push(format!("{name}: differs; actual at {}", actual.display()));
+            if let Err(miss) =
+                crate::rune_ui::offscreen::compare_golden(&name, &path, w, h, &pixels)
+            {
+                misses.push(miss);
             }
         }
     }

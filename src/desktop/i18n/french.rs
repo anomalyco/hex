@@ -13,6 +13,11 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
     TABLE.get_or_init(|| merged(TRANSLATIONS, Language::French))
 }
 
+#[cfg(test)]
+pub(super) fn entries() -> impl Iterator<Item = (&'static str, &'static str)> {
+    super::screenshots::entries(TRANSLATIONS, Language::French)
+}
+
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
     ("macOS isn't letting Hex paste. Add Hex in System Settings > Privacy & Security > System & App Protection Override, then restart Hex.", "macOS empêche Hex de coller. Ajoutez Hex dans Réglages Système > Confidentialité et sécurité > Dérogation à la protection du système et des apps, puis relancez Hex."),
@@ -209,30 +214,18 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Its file changed since it was imported. Check it again, import it again, or remove it.", "Son fichier a changé depuis l'importation. Vérifiez-le à nouveau, réimportez-le ou supprimez-le."),
     ("The imported model", "Le modèle importé"),
     ("{model} is missing, so Hex uses {fallback} until you import it again or choose another model", "{model} est introuvable, Hex utilise donc {fallback} jusqu'à ce que vous le réimportiez ou choisissiez un autre modèle"),
-    ("{model} changed since it was imported, so Hex uses {fallback} until you import it again or choose another model", "{model} a changé depuis l'importation, Hex utilise donc {fallback} jusqu'à ce que vous le réimportiez ou choisissiez un autre modèle"),
     ("Remove {}?", "Supprimer {} ?"),
     ("Import again…", "Réimporter…"),
     ("Choose a speech model", "Choisissez un modèle vocal"),
     ("Hex found speech models already on this computer.", "Hex a trouvé des modèles vocaux déjà présents sur cet ordinateur."),
-    ("Hex's recommended model", "Le modèle recommandé par Hex"),
-    ("Tested by Hex for quality and reliability", "Testé par Hex pour sa qualité et sa fiabilité"),
-    ("Already downloaded, no download needed", "Déjà téléchargé, aucun téléchargement nécessaire"),
-    ("Use a model already on this computer", "Utiliser un modèle déjà présent sur cet ordinateur"),
     ("Not tested by Hex", "Non testé par Hex"),
     ("Compatible doesn't mean accurate: a model that loads can still transcribe poorly.", "Compatible ne veut pas dire précis : un modèle qui se charge peut quand même mal transcrire."),
-    ("{revision} · {compression} · {source}", "{revision} · {compression} · {source}"),
     ("Found on this computer", "Trouvé sur cet ordinateur"),
     ("Model could not be used.", "Impossible d'utiliser le modèle."),
     ("It may be too big for this computer's GPU memory.", "Il est peut-être trop gros pour la mémoire GPU de cet ordinateur."),
     ("Forget", "Oublier"),
     ("Forget it?", "L'oublier ?"),
     ("Checking the model stopped.", "La vérification du modèle s'est arrêtée."),
-    ("Use the copy already on this computer", "Utiliser la copie déjà présente sur cet ordinateur"),
-    ("Download instead", "Télécharger plutôt"),
-    ("Download recommended model", "Télécharger le modèle recommandé"),
-    ("Already on this computer: {source}", "Déjà sur cet ordinateur : {source}"),
-    ("Known model", "Modèle connu"),
-    ("Not verified by Hex · Not benchmarked", "Non vérifié par Hex · Sans tests comparatifs"),
     ("Imported", "Importé"),
     ("Not benchmarked", "Sans tests comparatifs"),
     ("{} languages", "{} langues"),
@@ -377,9 +370,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Shortcuts", "Raccourcis"),
     ("Your desktop granted {}", "Votre bureau a accordé {}"),
     ("Your desktop did not grant this shortcut", "Votre bureau n'a pas accordé ce raccourci"),
-    ("Last dictation discarded: {}", "Dernière dictée ignorée : {}"),
-    ("too quiet, check your mic level", "trop faible, vérifiez le niveau du micro"),
-    ("no speech heard, check your mic level", "aucune parole entendue, vérifiez le niveau du micro"),
     ("GNOME keyboard shortcuts", "Raccourcis clavier GNOME"),
     ("Add GNOME keyboard shortcuts", "Ajouter des raccourcis clavier GNOME"),
     ("Adds dictation, paste last and Annotate to GNOME Settings › Keyboard › Custom Shortcuts with your shortcuts. GNOME runs them on the key press, so dictation toggles.", "Ajoute la dictée, le collage de la dernière dictée et Annotate dans Paramètres GNOME › Clavier › Raccourcis personnalisés avec vos raccourcis. GNOME les exécute à l'appui sur la touche, la dictée fonctionne donc en bascule."),
@@ -1497,37 +1487,3 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Indicator on any display", "Indicateur sur n’importe quel écran"),
     ("Drag the meeting recording indicator to another display and it stays there", "Faites glisser l’indicateur d’enregistrement de réunion vers un autre écran : il y reste"),
 ];
-
-#[cfg(test)]
-mod tests {
-    use super::TRANSLATIONS;
-
-    #[test]
-    fn every_interface_string_has_a_french_translation() {
-        let french = super::table();
-        let missing: Vec<&str> = super::super::all_translations()
-            .map(|(english, _)| *english)
-            .filter(|english| french.get(english).is_none_or(|text| text.is_empty()))
-            .collect();
-        assert!(missing.is_empty(), "no French for {missing:?}");
-    }
-
-    #[test]
-    fn french_keys_are_unique_and_keep_their_placeholders() {
-        let mut seen = std::collections::HashSet::new();
-        for (english, french) in TRANSLATIONS {
-            assert!(seen.insert(english), "duplicate key {english:?}");
-            let names = english
-                .split('{')
-                .skip(1)
-                .filter_map(|part| part.split_once('}'))
-                .map(|(name, _)| name);
-            for name in names {
-                assert!(
-                    french.contains(&format!("{{{name}}}")),
-                    "translation of {english:?} lost {{{name}}}: {french:?}"
-                );
-            }
-        }
-    }
-}

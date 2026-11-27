@@ -3366,42 +3366,10 @@ mod tests {
                 });
             }
             let (w, h, pixels) = render(&gpu, &mut rt, size);
-            if std::env::var_os("HEX_UPDATE_GOLDENS").is_some() {
-                rune::render::write_png(&path, w, h, &pixels).unwrap();
-                continue;
-            }
-            // Where CI's golden-actual artifact picks it up.
-            let actual = std::env::temp_dir().join(format!("rune-settings-{file}-actual.png"));
-            if !path.exists() {
-                rune::render::write_png(&actual, w, h, &pixels).unwrap();
-                misses.push(format!("{file} is missing; actual at {}", actual.display()));
-                continue;
-            }
-            let decoder =
-                png::Decoder::new(std::io::BufReader::new(std::fs::File::open(&path).unwrap()));
-            let mut reader = decoder.read_info().unwrap();
-            let mut golden = vec![0; reader.output_buffer_size().unwrap()];
-            let info = reader.next_frame(&mut golden).unwrap();
-            if (info.width, info.height) != (w, h) {
-                rune::render::write_png(&actual, w, h, &pixels).unwrap();
-                misses.push(format!(
-                    "{name}-{theme}: size changed; actual at {}",
-                    actual.display()
-                ));
-                continue;
-            }
-            // GPUs differ in the last bit of blending and glyph coverage.
-            let differing = pixels
-                .chunks(4)
-                .zip(golden.chunks(4))
-                .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 12))
-                .count();
-            if differing > (w * h) as usize / 500 {
-                rune::render::write_png(&actual, w, h, &pixels).unwrap();
-                misses.push(format!(
-                    "{name}-{theme}: {differing} pixels differ; actual at {}",
-                    actual.display()
-                ));
+            if let Err(miss) =
+                crate::rune_ui::offscreen::compare_golden(&file, &path, w, h, &pixels)
+            {
+                misses.push(miss);
             }
         }
         assert!(misses.is_empty(), "{}", misses.join("\n"));

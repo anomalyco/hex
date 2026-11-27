@@ -14,6 +14,11 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
     TABLE.get_or_init(|| merged(TRANSLATIONS, Language::Hungarian))
 }
 
+#[cfg(test)]
+pub(super) fn entries() -> impl Iterator<Item = (&'static str, &'static str)> {
+    super::screenshots::entries(TRANSLATIONS, Language::Hungarian)
+}
+
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
     ("macOS isn't letting Hex paste. Add Hex in System Settings > Privacy & Security > System & App Protection Override, then restart Hex.", "A macOS nem engedi, hogy a Hex beillesszen. Add hozzá a Hexet a Rendszerbeállítások > Adatvédelem és biztonság > Rendszer- és alkalmazásvédelem felülbírálása alatt, majd indítsd újra a Hexet."),
@@ -201,30 +206,18 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Its file changed since it was imported. Check it again, import it again, or remove it.", "A fájlja megváltozott az importálás óta. Ellenőrizze újra, importálja újra, vagy távolítsa el."),
     ("The imported model", "Az importált modell"),
     ("{model} is missing, so Hex uses {fallback} until you import it again or choose another model", "{model} hiányzik, ezért a Hex a(z) {fallback} modellt használja, amíg újra nem importálja, vagy nem választ másik modellt"),
-    ("{model} changed since it was imported, so Hex uses {fallback} until you import it again or choose another model", "{model} megváltozott az importálás óta, ezért a Hex a(z) {fallback} modellt használja, amíg újra nem importálja, vagy nem választ másik modellt"),
     ("Remove {}?", "Eltávolítja ezt: {}?"),
     ("Import again…", "Újraimportálás…"),
     ("Choose a speech model", "Beszédmodell kiválasztása"),
     ("Hex found speech models already on this computer.", "A Hex beszédmodelleket talált ezen a számítógépen."),
-    ("Hex's recommended model", "A Hex által ajánlott modell"),
-    ("Tested by Hex for quality and reliability", "A Hex minőség és megbízhatóság szempontjából tesztelte"),
-    ("Already downloaded, no download needed", "Már letöltve, nincs szükség letöltésre"),
-    ("Use a model already on this computer", "Már ezen a számítógépen lévő modell használata"),
     ("Not tested by Hex", "A Hex nem tesztelte"),
     ("Compatible doesn't mean accurate: a model that loads can still transcribe poorly.", "A kompatibilitás nem jelent pontosságot: egy betölthető modell még átírhat gyengén."),
-    ("{revision} · {compression} · {source}", "{revision} · {compression} · {source}"),
     ("Found on this computer", "Ezen a számítógépen található"),
     ("Model could not be used.", "A modellt nem sikerült használni."),
     ("It may be too big for this computer's GPU memory.", "Lehet, hogy túl nagy ehhez a számítógép GPU-memóriájához."),
     ("Forget", "Elfelejtés"),
     ("Forget it?", "Elfelejti?"),
     ("Checking the model stopped.", "A modell ellenőrzése leállt."),
-    ("Use the copy already on this computer", "A már ezen a számítógépen lévő példány használata"),
-    ("Download instead", "Inkább letöltés"),
-    ("Download recommended model", "Ajánlott modell letöltése"),
-    ("Already on this computer: {source}", "Már ezen a számítógépen: {source}"),
-    ("Known model", "Ismert modell"),
-    ("Not verified by Hex · Not benchmarked", "A Hex nem ellenőrizte · Nincs teljesítménymérés"),
     ("Imported", "Importálva"),
     ("Not benchmarked", "Nincs teljesítménymérés"),
     ("{} languages", "{} nyelv"),
@@ -369,9 +362,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Shortcuts", "Billentyűparancsok"),
     ("Your desktop granted {}", "Az asztali környezet ezt adta: {}"),
     ("Your desktop did not grant this shortcut", "Az asztali környezet nem adta meg ezt a billentyűparancsot"),
-    ("Last dictation discarded: {}", "Az utolsó diktálás elvetve: {}"),
-    ("too quiet, check your mic level", "túl halk, ellenőrizze a mikrofon szintjét"),
-    ("no speech heard, check your mic level", "nem hallható beszéd, ellenőrizze a mikrofon szintjét"),
     ("GNOME keyboard shortcuts", "GNOME billentyűparancsok"),
     ("Add GNOME keyboard shortcuts", "GNOME billentyűparancsok hozzáadása"),
     ("Adds dictation, paste last and Annotate to GNOME Settings › Keyboard › Custom Shortcuts with your shortcuts. GNOME runs them on the key press, so dictation toggles.", "Hozzáadja a diktálást, az utolsó beillesztését és az Annotálást a GNOME Beállítások › Billentyűzet › Egyéni billentyűparancsok elemhez az Ön billentyűparancsaival. A GNOME a billentyű lenyomásakor futtatja őket, így a diktálás vált."),
@@ -1486,37 +1476,3 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Indicator on any display", "Jelző bármelyik kijelzőn"),
     ("Drag the meeting recording indicator to another display and it stays there", "Húzza a megbeszélés-felvétel jelzőjét egy másik kijelzőre, és ott is marad"),
 ];
-
-#[cfg(test)]
-mod tests {
-    use super::TRANSLATIONS;
-
-    #[test]
-    fn every_interface_string_has_a_hungarian_translation() {
-        let hungarian = super::table();
-        let missing: Vec<&str> = super::super::all_translations()
-            .map(|(english, _)| *english)
-            .filter(|english| hungarian.get(english).is_none_or(|text| text.is_empty()))
-            .collect();
-        assert!(missing.is_empty(), "no Hungarian for {missing:?}");
-    }
-
-    #[test]
-    fn hungarian_keys_are_unique_and_keep_their_placeholders() {
-        let mut seen = std::collections::HashSet::new();
-        for (english, hungarian) in TRANSLATIONS {
-            assert!(seen.insert(english), "duplicate key {english:?}");
-            let names = english
-                .split('{')
-                .skip(1)
-                .filter_map(|part| part.split_once('}'))
-                .map(|(name, _)| name);
-            for name in names {
-                assert!(
-                    hungarian.contains(&format!("{{{name}}}")),
-                    "translation of {english:?} lost {{{name}}}: {hungarian:?}"
-                );
-            }
-        }
-    }
-}
