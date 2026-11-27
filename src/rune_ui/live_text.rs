@@ -275,7 +275,7 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
 /// refusal the person must act on. Nothing else tells them why their words
 /// never landed.
 fn notifies_with(lab: bool, message: &str) -> bool {
-    lab || crate::paste::refused_by_macos(message)
+    lab || crate::paste::refused_by_macos(message) || crate::paste::blocked_by_windows(message)
 }
 
 fn notifies(message: &str) -> bool {
@@ -284,8 +284,8 @@ fn notifies(message: &str) -> bool {
 
 /// Shows `message` as a one-line notice beside the HUD for
 /// [`FAILURE_VISIBLE`] (Labs › Failure notices), replacing any live words
-/// until it leaves or a new capture starts. A refused paste is shown even
-/// with that lab off.
+/// until it leaves or a new capture starts. A paste macOS refused or Windows
+/// blocked is shown even with that lab off.
 pub(crate) fn show_failure(message: &str) {
     if !notifies(message) {
         return;
@@ -525,6 +525,7 @@ mod tests {
     #[test]
     fn a_refused_paste_is_shown_with_failure_notices_off() {
         assert!(notifies_with(false, crate::paste::POST_EVENT_REFUSED));
+        assert!(notifies_with(false, crate::paste::WINDOWS_PASTE_BLOCKED));
         assert!(!notifies_with(false, "Could not open microphone"));
         assert!(notifies_with(true, "Could not open microphone"));
     }

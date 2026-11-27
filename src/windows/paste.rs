@@ -360,9 +360,13 @@ impl WindowsPaster {
             shift_paste(shift, self.paste_with_shift.load(Ordering::Relaxed)),
         );
         if let Err(error) = send_paste_shortcut(shift) {
-            if let Some(generation) = generation {
-                restore_clipboard_generation(&self.clipboard_restore, generation);
-            }
+            // Windows refused the chord, so nothing was pasted: the
+            // transcript stays on the clipboard for a manual Ctrl+V or Paste
+            // Last instead of the old clipboard coming back over it (#2975).
+            self.clipboard_restore
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .keep();
             return Err(error);
         }
         // Only a paste that reached the app is continued by the next one, and
@@ -400,9 +404,12 @@ impl WindowsPaster {
         let sent = send_inputs(&inputs);
         if sent != inputs.len() as u32 {
             send_inputs(&inputs[1..]);
-            return Err(eyre!(
-                "Windows accepted only {sent} of 2 synthetic Return events; an elevated target window may reject input"
-            ));
+            tracing::warn!(
+                sent,
+                total = inputs.len(),
+                "Windows rejected synthetic Return input; an elevated window or security software may block it"
+            );
+            return Err(eyre!("Windows blocked Hex's Return key"));
         }
         Ok(())
     }
@@ -585,10 +592,12 @@ fn send_paste_shortcut(shift: bool) -> Result<()> {
             .copied()
             .collect::<Vec<_>>();
         send_inputs(&cleanup);
-        return Err(eyre!(
-            "Windows accepted only {sent} of {} synthetic paste events; an elevated target window may reject input",
-            inputs.len()
-        ));
+        tracing::warn!(
+            sent,
+            total = inputs.len(),
+            "Windows rejected synthetic paste input; an elevated window or security software may block it"
+        );
+        return Err(eyre!(crate::paste::WINDOWS_PASTE_BLOCKED));
     }
     Ok(())
 }

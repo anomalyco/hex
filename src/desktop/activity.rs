@@ -108,6 +108,8 @@ pub(crate) fn failure_explanation(message: &str) -> String {
         crate::desktop::i18n::tr("No microphone is available. Connect a microphone.").to_owned()
     } else if crate::paste::refused_by_macos(message) {
         crate::desktop::i18n::tr(crate::paste::POST_EVENT_REFUSED).to_owned()
+    } else if crate::paste::blocked_by_windows(message) {
+        crate::desktop::i18n::tr(crate::paste::WINDOWS_PASTE_BLOCKED).to_owned()
     } else {
         message.to_owned()
     }
@@ -402,6 +404,11 @@ mod tests {
             failure_explanation(crate::paste::POST_EVENT_REFUSED),
             crate::desktop::i18n::tr(crate::paste::POST_EVENT_REFUSED),
             "a refused paste names the pane to add Hex to"
+        );
+        assert_eq!(
+            failure_explanation(crate::paste::WINDOWS_PASTE_BLOCKED),
+            crate::desktop::i18n::tr(crate::paste::WINDOWS_PASTE_BLOCKED),
+            "a blocked Windows paste says the words are on the clipboard"
         );
     }
 }

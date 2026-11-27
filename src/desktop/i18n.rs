@@ -803,6 +803,21 @@ mod tests {
         );
     }
 
+    /// The blocked Windows paste notice is looked up through a constant too.
+    #[test]
+    fn the_blocked_windows_paste_notice_has_every_language() {
+        let table: std::collections::HashMap<_, _> = all_translations().copied().collect();
+        let translations = table
+            .get(crate::paste::WINDOWS_PASTE_BLOCKED)
+            .expect("the blocked Windows paste notice is translated");
+        assert!(
+            translations
+                .iter()
+                .all(|translation| !translation.is_empty()),
+            "the blocked Windows paste notice is missing a language"
+        );
+    }
+
     /// Labs › Confirm long cancels' notice is looked up through a constant
     /// too.
     #[test]
