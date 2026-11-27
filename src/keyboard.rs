@@ -36,6 +36,11 @@ const SHORTCUT_EVENT_GAP: std::time::Duration = std::time::Duration::from_millis
 /// Pause between a paced typing's events, so a client that takes each key from
 /// its own event stream has time to forward one before the next arrives.
 const PACED_TYPING_GAP: std::time::Duration = std::time::Duration::from_millis(4);
+/// Pause before a paced typing's first event. Posted the instant typing
+/// starts, it can reach a remote desktop client before the client and the
+/// session's focused control settle, which then drop the first character, a
+/// leading Shift most often (#2942).
+const PACED_TYPING_LEAD_IN: std::time::Duration = std::time::Duration::from_millis(50);
 /// Quartz keeps at most 20 UTF-16 units of a keyboard event's Unicode string.
 const MAX_UNICODE_UNITS: usize = 20;
 const EVENT_SOURCE_USER_DATA: u32 = 42;
@@ -474,33 +479,35 @@ pub fn type_text_paced(text: &str, keep_going: impl FnMut() -> bool) -> Result<(
                 .collect::<Result<Vec<_>>>()
         })
         .collect::<Result<Vec<_>>>()?;
-    let completed = post_paced_typing(&groups, keep_going, KeyboardEvent::post, || {
-        std::thread::sleep(PACED_TYPING_GAP)
-    });
+    let completed = post_paced_typing(&groups, keep_going, KeyboardEvent::post, std::thread::sleep);
     if !completed {
         return Err(eyre!("typing stopped before the text was finished"));
     }
     Ok(())
 }
 
-/// Posts `groups` in order, every event after the first `wait` apart, and
-/// asks `keep_going` before each group. A group is one character's events, so
-/// a stop never leaves a Shift down without its up. Returns whether every
-/// group was posted.
+/// Posts `groups` in order, waiting [`PACED_TYPING_LEAD_IN`] before the first
+/// event and [`PACED_TYPING_GAP`] before every later one, and asks
+/// `keep_going` before each group, after the lead-in for the first. A group
+/// is one character's events, so a stop never leaves a Shift down without its
+/// up. Returns whether every group was posted.
 fn post_paced_typing<E>(
     groups: &[Vec<E>],
     mut keep_going: impl FnMut() -> bool,
     mut post: impl FnMut(&E),
-    mut wait: impl FnMut(),
+    mut wait: impl FnMut(std::time::Duration),
 ) -> bool {
     let mut posted = 0;
     for group in groups {
+        if posted == 0 && !group.is_empty() {
+            wait(PACED_TYPING_LEAD_IN);
+        }
         if !keep_going() {
             return false;
         }
         for event in group {
             if posted > 0 {
-                wait();
+                wait(PACED_TYPING_GAP);
             }
             posted += 1;
             post(event);
@@ -921,13 +928,17 @@ mod tests {
 
     /// Typing can take seconds, so a caller can stop it between characters:
     /// whole groups only, so a Shift down is never left without its up, and
-    /// nothing posts once the callback says stop.
+    /// nothing posts once the callback says stop. The first event waits a
+    /// lead-in so a remote desktop client has settled before it (#2942), and
+    /// the app in front is checked after that wait.
     #[test]
     fn paced_typing_stops_between_characters() {
+        const GAP: std::time::Duration = PACED_TYPING_GAP;
+        const LEAD_IN: std::time::Duration = PACED_TYPING_LEAD_IN;
         let groups = vec![vec![1_u8, 2], vec![3, 4], vec![5]];
         let typed = std::cell::Cell::new(0_usize);
         let mut posts = Vec::new();
-        let mut waits = 0;
+        let mut waits = Vec::new();
         let completed = post_paced_typing(
             &groups,
             || typed.get() < 2,
@@ -935,41 +946,47 @@ mod tests {
                 typed.set(typed.get() + 1);
                 posts.push(*event);
             },
-            || waits += 1,
+            |pause| waits.push(pause),
         );
         assert!(!completed);
         assert_eq!(posts, [1, 2], "the second character never starts");
-        assert_eq!(waits, 1, "a wait between every post after the first");
+        assert_eq!(waits, [LEAD_IN, GAP], "a lead-in, then a gap between posts");
 
-        let asked = std::cell::Cell::new(0_usize);
-        let mut posts = Vec::new();
-        let mut waits = 0;
+        let log = std::cell::RefCell::new(Vec::new());
         assert!(!post_paced_typing(
             &groups,
             || {
-                asked.set(asked.get() + 1);
+                log.borrow_mut().push("asked");
                 false
             },
-            |event| posts.push(*event),
-            || waits += 1,
+            |_| log.borrow_mut().push("posted"),
+            |_| log.borrow_mut().push("waited"),
         ));
-        assert!(
-            posts.is_empty(),
-            "a stop before the first character types nothing"
+        assert_eq!(
+            log.into_inner(),
+            ["waited", "asked"],
+            "a stop before the first character types nothing, checked after the lead-in"
         );
-        assert_eq!(asked.get(), 1, "asked once, before the first character");
-        assert_eq!(waits, 0);
 
         let mut posts = Vec::new();
-        let mut waits = 0;
+        let mut waits = Vec::new();
         assert!(post_paced_typing(
             &groups,
             || true,
             |event| posts.push(*event),
-            || waits += 1,
+            |pause| waits.push(pause),
         ));
         assert_eq!(posts, [1, 2, 3, 4, 5]);
-        assert_eq!(waits, 4);
+        assert_eq!(waits, [LEAD_IN, GAP, GAP, GAP, GAP]);
+
+        let mut waits = Vec::new();
+        assert!(post_paced_typing(
+            &Vec::<Vec<u8>>::new(),
+            || true,
+            |_| {},
+            |pause| waits.push(pause),
+        ));
+        assert!(waits.is_empty(), "nothing to type waits for nothing");
     }
 
     /// Typing resolves a character exactly as it stands: `a` and `A` are the

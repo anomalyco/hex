@@ -1253,6 +1253,8 @@ occur.
 Which insertion?                                       // paste.rs
 ├── Chromium 155/156 frontmost -> type instead (#212)
 ├── Windows App frontmost -> type one paced key at a time (#1048)
+│       // 50 ms lead-in before the first key so the session has settled
+│       // and keeps the first character (#2942)
 │       // both skip the paste; Keep dictation on clipboard still writes the
 │       // typed text to the clipboard afterwards
 └── else -> publish clipboard -> post Paste

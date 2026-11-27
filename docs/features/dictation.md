@@ -2731,8 +2731,9 @@ as flags-changed events 15 ms apart did not help. When the frontmost app has
 one of those identifiers, Hex types the dictation instead: one Unicode scalar
 per key down/up pair, each carrying the key the active layout types that
 character with, Shift as its own flags-changed events around a character that
-needs it, 4 ms between every posted event, and every line break as
-Shift-Return. Nothing is captured for a clipboard restore, so the clipboard is
+needs it, 50 ms before the first posted event so the client and the
+session's focused control have settled and keep the first character (#2942),
+4 ms between every later event, and every line break as Shift-Return. Nothing is captured for a clipboard restore, so the clipboard is
 left as it was; Labs › Keep dictation on clipboard still writes the typed text
 to it. Ordering, continuation joins, Send's trailing Return, and Paste Last
 behave as for a paste. Typing stops between characters when another app comes
