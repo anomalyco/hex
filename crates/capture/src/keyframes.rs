@@ -306,7 +306,9 @@ fn group_marks(
 fn spoken_cue(word: &str) -> Option<(&'static str, f32, bool)> {
     let word = word
         .trim_matches(|c: char| !c.is_alphanumeric())
-        .to_lowercase();
+        .to_lowercase()
+        // Turkish İ lowercases to i + a combining dot; drop the dot so "İşte" matches "işte".
+        .replace('\u{307}', "");
     SPOKEN_CUES.iter().copied().find(|(cue, _, _)| *cue == word)
 }
 
@@ -395,6 +397,24 @@ const SPOKEN_CUES: &[(&str, f32, bool)] = &[
     ("quello", 42.0, false),
     ("quella", 42.0, false),
     ("vedi", 44.0, false),
+    // Turkish: exact words, so the common inflected forms are listed.
+    ("şimdi", 58.0, true),
+    ("bak", 58.0, true),
+    ("bakın", 58.0, true),
+    ("bakalım", 58.0, true),
+    ("işte", 58.0, true),
+    ("dikkat", 58.0, true),
+    ("burada", 56.0, true),
+    ("burası", 56.0, true),
+    ("buraya", 56.0, true),
+    ("bu", 44.0, false),
+    ("bunu", 44.0, false),
+    ("burayı", 44.0, false),
+    ("orada", 44.0, false),
+    ("şurada", 44.0, false),
+    ("şurası", 44.0, false),
+    ("şu", 42.0, false),
+    ("şunu", 42.0, false),
 ];
 
 fn ends_clause(text: &str, clause_words: usize) -> bool {
@@ -1388,6 +1408,15 @@ mod tests {
         assert_eq!(spoken_cue("¿Ves?"), Some(("ves", 44.0, false)));
         assert_eq!(spoken_cue("Regarde"), Some(("regarde", 58.0, true)));
         assert_eq!(spoken_cue("lista"), None);
+    }
+
+    #[test]
+    fn turkish_spoken_cues_match_with_a_dotted_capital_i() {
+        assert_eq!(spoken_cue("İşte"), Some(("işte", 58.0, true)));
+        assert_eq!(spoken_cue("Şimdi,"), Some(("şimdi", 58.0, true)));
+        assert_eq!(spoken_cue("burası…"), Some(("burası", 56.0, true)));
+        assert_eq!(spoken_cue("şunu"), Some(("şunu", 42.0, false)));
+        assert_eq!(spoken_cue("bakış"), None);
     }
 
     #[test]
