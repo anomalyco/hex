@@ -1,8 +1,8 @@
 //! What Hex saw of who was speaking, kept beside the meeting.
 //!
 //! A call app shows who is on the call and marks who is speaking. A reader
-//! (which does not exist yet) will note what it sees while a meeting
-//! records: who is there, and at each look who holds the floor. Those notes
+//! (which nothing starts yet) notes what it sees while a meeting records:
+//! who is there, and at each look who holds the floor. Those notes
 //! are the evidence, and names are worked out from them afterwards, so a
 //! better rule or a correction from the user renames a meeting without
 //! recording it again.
@@ -99,14 +99,15 @@ impl ParticipantKey {
     /// holds.
     pub fn next(evidence: &[Evidence]) -> Self {
         let highest = evidence.iter().filter_map(|line| match line {
-            Evidence::Participant(participant) => Some(participant.key.0),
+            Evidence::Participant(participant) => Some(participant.key),
             _ => None,
         });
-        Self(
-            highest
-                .max()
-                .map_or(NonZeroU32::MIN, |key| key.saturating_add(1)),
-        )
+        highest.max().map_or(Self(NonZeroU32::MIN), Self::following)
+    }
+
+    /// The key after this one, for the next person met.
+    pub fn following(self) -> Self {
+        Self(self.0.saturating_add(1))
     }
 
     #[cfg(test)]
@@ -160,7 +161,8 @@ pub struct Participant {
     /// they never name a remote line; their tile is what the reader is
     /// checked against.
     pub is_local: bool,
-    /// When the reader first saw them.
+    /// When the reader first saw them as this line has them. Someone the
+    /// call app comes to show under another name gets another line.
     pub at_ms: u64,
 }
 
@@ -532,6 +534,7 @@ mod tests {
     #[test]
     fn keys_are_handed_out_in_the_order_people_are_first_seen() {
         assert_eq!(ParticipantKey::next(&[]), key(1));
+        assert_eq!(key(1).following(), key(2));
         let call = [person(1, "Kit", true), person(4, "Priya Nair", false)];
         assert_eq!(ParticipantKey::next(&call), key(5));
     }

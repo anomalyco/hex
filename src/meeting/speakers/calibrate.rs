@@ -9,6 +9,7 @@
 //! the reader saw is used.
 
 use super::evidence::Interval;
+use super::floor::POLL_MS;
 
 /// The mark's delays. Until a call has shown enough, Hex assumes the slow
 /// end of what call apps were described as doing: half a second to come on
@@ -64,7 +65,7 @@ const LONGEST_LAG_MS: u64 = 2_000;
 const LONGEST_TAIL_MS: u64 = 4_000;
 /// How close the end of speech may be to the mark coming on and still be
 /// what set it off: one look.
-const LOOK_MS: u64 = 500;
+const LOOK_MS: u64 = POLL_MS;
 /// The user talking this long, this many times, with the tile never
 /// lighting, is a reader that cannot see the tile.
 const UNSEEN_TURN_MS: u64 = 2_000;

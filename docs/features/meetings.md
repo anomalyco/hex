@@ -2807,9 +2807,11 @@ current one), which is why Rust's name overlap decides.
 
 ### Speaker Names
 
-Implemented: the data model, every reader of it, and the rules that work out
-names from what a call app shows ([Working out names](#working-out-names)).
-Not implemented: anything that reads a call app, so nothing runs those rules.
+Implemented: the data model, every reader of it, the rules that work out
+names from what a call app shows, and on macOS the reader that writes down
+what a call app shows ([Working out names](#working-out-names)).
+Not implemented: an adapter for any call app, or anything that starts the
+reader, so nothing runs those rules.
 No build writes a `speaker` or a `speakers` table yet, so every remote line
 is still `Them` and every saved file, prompt, and JSON response is what it
 was before.
@@ -2881,10 +2883,13 @@ hand-built tables; no recorded meeting has a named speaker.
 #### Working Out Names
 
 Exists (`src/meeting/speakers/`), tested, and called by nothing: the evidence
-a reader would save, a calibration, the resolver, and the step that turns its
-answer into the table and ids above. Does not exist: a reader of any call app,
-the wiring into the transcript worker, a Labs switch, the pane's corrections,
-any voice model. No file is written and no name appears.
+a reader saves, a calibration, the resolver, the step that turns its answer
+into the table and ids above, and on macOS the reader itself with the seam a
+call app's adapter plugs into. Does not exist: an adapter for any call app
+(each is written against a live read of that app), anything that starts the
+reader with a recording, the wiring into the transcript worker, a Labs
+switch, the pane's corrections, any voice model. No file is written and no
+name appears.
 
 ```ts
 speakers.ndjson (meeting folder, owner-only, to the Trash with the folder)
@@ -2927,7 +2932,33 @@ Resolver (pure) -> (remote words' times, evidence, calibration, strictness)
 Lines -> a remote line takes a speaker only when everything it overlaps was
     said by one person the call app showed, with a usable name; ids s1, s2
     in the order people first speak; a name the user gave is from "user"
+Reader (macOS only: it reads accessibility::tree snapshots) -> speakers.ndjson
+├── Adapter, one per call app (pure) -> a snapshot of the app's windows ->
+│   active { roster, floor } | no call window | untrusted(reason). Found by
+│   canonical bundle id or by the call page's host. None is listed yet
+├── Before any adapter is asked: a snapshot a budget cut short -> untrusted
+│   cut_short; an app with no window -> no call window
+├── Poll state (pure) -> one look in, the lines it adds out
+│   ├── The app's own id for a person never leaves memory: each gets the
+│   │   next key (p1, p2) when first seen, after any the meeting holds
+│   ├── participant: when first seen, and again when the app shows them
+│   │   differently (cleaned name, whether they are the user). Two tiles
+│   │   of one person are one person
+│   ├── floor: every look at a call read whole -> the one marked, or nobody
+│   ├── untrusted: the adapter's reason, or cut_short
+│   └── Nothing for no call window, or for a mark on someone never shown
+├── Loop -> a look every 0.5 s on the recording's clock, stamped when it
+│   starts; a look that overran -> a 0.25 s rest and one look, not the ones
+│   missed; ends with the recording, with nothing read or written after
+├── A write that fails -> those lines are lost and counted, and everyone
+│   is written again at their next look
+└── Logs -> what a look came to when that changes (debug), one warning for
+    a run of failed writes, counts at the end. Never a name or an app id
 ```
+
+Not reconciled yet: when the app shows someone differently the reader writes
+a second participant line, and the resolver still takes the first line for
+each key, so a name that arrives after the tile does names nobody.
 
 The accepted limit: a call app marks one speaker at a time, so words said
 over the person holding the floor take that person's name, at every
@@ -2960,6 +2991,25 @@ simulation's model, not a real one. File handling:
 `the_file_is_readable_by_its_owner_only_before_and_after_a_correction`,
 `a_line_cut_short_by_a_crash_spoils_only_itself`,
 `a_line_from_a_newer_build_is_skipped_and_survives_a_correction`.
+
+Reader checks (macOS; an invented call app read from hand-written snapshots,
+a clock that moves only when waited on, no real app):
+`people_are_written_once_under_keys_in_the_order_they_are_first_seen`,
+`someone_the_app_comes_to_show_differently_is_written_again_under_their_key`,
+`the_floor_is_written_at_every_look_as_it_passes_from_one_to_another`,
+`a_snapshot_cut_short_is_an_untrusted_look_and_names_nobody_new`,
+`two_call_windows_are_an_untrusted_look`,
+`a_hidden_call_window_is_an_untrusted_look_for_as_long_as_it_is_hidden`,
+`the_file_holds_keys_and_names_and_never_an_app_id` (the real file),
+`the_log_holds_counts_and_reasons_and_never_a_name_or_an_app_id` (everything
+logged at every level), `lines_that_were_not_saved_are_counted_and_everyone_is_written_again`,
+`a_slow_look_is_followed_by_a_rest_and_one_look_not_by_the_ones_it_missed`,
+`stopping_ends_the_reader_with_nothing_read_or_written_afterwards`, and one
+property over random looks:
+`whatever_an_app_shows_every_key_is_introduced_before_it_is_used_and_no_id_is_written`.
+Seam: `a_snapshot_cut_short_is_never_shown_to_an_adapter`,
+`an_app_is_read_by_the_adapter_listed_under_its_key`, `no_app_is_listed_twice`.
+Nothing has read a real call app through it.
 
 ### Agent Access (MCP)
 
