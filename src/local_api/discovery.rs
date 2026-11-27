@@ -409,11 +409,22 @@ pub(super) fn generate_token() -> Result<String> {
     Ok(token)
 }
 
-pub(super) fn prepare_discovery_path(path: &Path) -> Result<()> {
+/// Makes sure no other local API publishes at `path` before this one does.
+///
+/// `holds_instance_lock` is whether the caller holds the local API's
+/// instance lock, which sits beside the discovery file. While it is held no
+/// other Hex can publish here, so a file found there is one a Hex that
+/// stopped uncleanly left behind and is simply replaced. It is not probed:
+/// after a reboot its pid and port can both belong to unrelated programs,
+/// and the probe then read as a running Hex and stopped every launch (#2887).
+pub(super) fn prepare_discovery_path(path: &Path, holds_instance_lock: bool) -> Result<()> {
     let Some(parent) = path.parent() else {
         bail!("local API discovery path has no parent");
     };
     fs::create_dir_all(parent)?;
+    if holds_instance_lock {
+        return Ok(());
+    }
     let existing = match fs::read(path) {
         Ok(data) => serde_json::from_slice::<DiscoveryDocument>(&data).ok(),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
@@ -634,6 +645,43 @@ mod tests {
             api_version: api_version.into(),
             pid: 42,
         }
+    }
+
+    /// A discovery file left by a Hex that stopped uncleanly, whose pid and
+    /// port now belong to something else that is alive and listening: here,
+    /// this test process and a listener of its own (#2887).
+    #[test]
+    fn a_leftover_file_naming_a_live_pid_and_port_does_not_stop_the_lock_holder() {
+        let directory = std::env::temp_dir().join(format!(
+            "hex-discovery-leftover-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("local-api.json");
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let leftover = DiscoveryDocument {
+            port: listener.local_addr().unwrap().port(),
+            pid: std::process::id(),
+            ..document(super::API_VERSION, TOKEN)
+        };
+        std::fs::write(&path, serde_json::to_vec(&leftover).unwrap()).unwrap();
+        assert!(
+            super::discovery_is_live(&leftover),
+            "the probe reads it as live"
+        );
+
+        let refused = super::prepare_discovery_path(&path, false).unwrap_err();
+        assert!(
+            format!("{refused}").contains("appears to be running"),
+            "without the lock the probe has the last word: {refused}"
+        );
+        super::prepare_discovery_path(&path, true)
+            .expect("the lock holder replaces a leftover file whatever it names");
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

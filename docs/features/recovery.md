@@ -1151,6 +1151,23 @@ verification is claimed. The installed local app and its settings were not chang
 Changing layouts during a running GUI session still requires a restart to
 refresh its snapshot; live GUI layout refresh is not part of this fix.
 
+### Launch Past A Leftover Discovery File
+
+**Fixed November 26, 2026 (issue 2887):** a Hex that stopped uncleanly (a
+restart, a power loss) leaves `local-api.json` behind. Launch used to probe
+the pid and port it names and refuse to start when both answered, with
+"another local API service appears to be running". After a reboot the system
+can hand both to unrelated programs, so Hex quit about 70 ms into every
+launch, with no window, until the file was moved aside. The local API takes
+its instance lock (`local-api.lock`, beside the file) before it looks at the
+file, and while it holds that lock no other Hex can publish there, so the
+launching Hex now replaces a leftover file without probing it. A second Hex
+is still refused, by the lock. Clients that only read the file (`hex status`
+while no Hex runs) still probe the pid and port.
+Check: `a_leftover_file_naming_a_live_pid_and_port_does_not_stop_the_lock_holder`
+in [local_api/discovery.rs](../../src/local_api/discovery.rs); not reproduced
+by rebooting a Mac.
+
 ## Gaps And Constraints
 
 These five known gaps still limit recovery claims; they are not proposed features.

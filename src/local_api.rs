@@ -235,7 +235,7 @@ impl LocalApi {
         meeting_events: meeting_events::Source,
     ) -> Result<Self> {
         if let Some(path) = &discovery_path {
-            prepare_discovery_path(path)?;
+            prepare_discovery_path(path, instance.is_some())?;
         }
         let (transcription_service, transcription) =
             crate::transcription::service::TranscriptionService::start()?;
