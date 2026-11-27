@@ -165,7 +165,8 @@ pub fn accessibility_probe(
             _ => format!("Hex refused the request ({code})"),
         });
     }
-    serde_json::from_slice(&body).wrap_err("Hex sent an invalid call-window reply")
+    crate::accessibility::probe::Reply::from_json_slice(&body)
+        .wrap_err("Hex sent an invalid call-window reply")
 }
 
 #[cfg(test)]
@@ -240,5 +241,55 @@ mod tests {
 
         api.shutdown();
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn deep_call_window_replies_deserialize_without_hitting_json_recursion_limit() {
+        use crate::accessibility::probe::{DEPTH_CEILING, Reading, Reply};
+        use crate::accessibility::tree::Node;
+
+        let build = |depth: usize| {
+            let mut node = Node {
+                role: Some("AXStaticText".into()),
+                title: Some("leaf".into()),
+                ..Default::default()
+            };
+            for level in (0..depth).rev() {
+                node = Node {
+                    role: Some(if level == 0 { "AXWindow" } else { "AXGroup" }.into()),
+                    children: vec![node],
+                    ..Default::default()
+                };
+            }
+            Reply::Read(Reading {
+                pid: 42,
+                frontmost: Some(false),
+                elapsed_ms: 1.0,
+                windows: 1,
+                nodes: depth + 1,
+                unreadable: 0,
+                cut_short: Vec::new(),
+                web_areas: 0,
+                web_nodes: 0,
+                web_accessibility_requested: None,
+                matches: None,
+                tree: Some(vec![node]),
+            })
+        };
+
+        for depth in [80, DEPTH_CEILING] {
+            let reply = build(depth);
+            let json = serde_json::to_vec(&reply).unwrap();
+            assert!(
+                serde_json::from_slice::<Reply>(&json).is_err(),
+                "depth {depth} exceeds serde_json's default 128-level limit"
+            );
+            assert_eq!(Reply::from_json_slice(&json).unwrap(), reply);
+        }
+        assert!(
+            Reply::from_json_slice(br#"{"status":"error","code":"x","message":"y"} trailing"#)
+                .is_err()
+        );
     }
 }

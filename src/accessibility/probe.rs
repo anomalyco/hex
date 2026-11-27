@@ -29,7 +29,7 @@ pub(crate) mod cli;
 /// The most one read may be asked for, whatever the request says: a read
 /// holds one of the local API's four workers until it ends.
 const NODE_CEILING: usize = 20_000;
-const DEPTH_CEILING: usize = 200;
+pub(crate) const DEPTH_CEILING: usize = 200;
 const DEADLINE_CEILING: Duration = Duration::from_secs(5);
 
 /// Whether this build offers the probe: dev builds only. A stable build
@@ -142,6 +142,17 @@ impl Reply {
             code: code.into(),
             message: message.into(),
         }
+    }
+
+    /// Parses a probe reply whose tree may nest deeper than `serde_json`'s
+    /// default 128-container recursion limit (`DEPTH_CEILING` = 200 nests two
+    /// JSON containers per tree level).
+    pub(crate) fn from_json_slice(body: &[u8]) -> serde_json::Result<Self> {
+        let mut deserializer = serde_json::Deserializer::from_slice(body);
+        deserializer.disable_recursion_limit();
+        let reply = Self::deserialize(&mut deserializer)?;
+        deserializer.end()?;
+        Ok(reply)
     }
 }
 

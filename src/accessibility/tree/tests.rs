@@ -10,6 +10,12 @@ struct Fake<'a> {
 }
 
 impl Element for Fake<'_> {
+    type Id = usize;
+
+    fn id(&self) -> usize {
+        std::ptr::from_ref(self.node) as usize
+    }
+
     fn read(&self, room: usize) -> Option<Read<Self>> {
         if self.node.role.as_deref() == Some("Unreadable") {
             return None;
@@ -344,4 +350,203 @@ fn a_node_serializes_only_what_it_has() {
         serde_json::from_str::<Match>(&serde_json::to_string(&found).unwrap()).unwrap(),
         found
     );
+}
+
+struct GraphNode {
+    role: &'static str,
+    title: Option<&'static str>,
+    children: Vec<usize>,
+}
+
+struct GraphRef<'a> {
+    graph: &'a [GraphNode],
+    index: usize,
+}
+
+impl Element for GraphRef<'_> {
+    type Id = usize;
+
+    fn id(&self) -> usize {
+        self.index
+    }
+
+    fn read(&self, room: usize) -> Option<Read<Self>> {
+        let entry = &self.graph[self.index];
+        Some(Read {
+            node: Node {
+                role: Some(entry.role.into()),
+                title: entry.title.map(Into::into),
+                ..Default::default()
+            },
+            children: entry
+                .children
+                .iter()
+                .take(room)
+                .map(|&index| GraphRef {
+                    graph: self.graph,
+                    index,
+                })
+                .collect(),
+            dropped: entry.children.len().saturating_sub(room),
+        })
+    }
+
+    fn value(&self) -> Option<String> {
+        None
+    }
+}
+
+#[test]
+fn a_cyclic_graph_terminates_cleanly_without_recursing_infinitely() {
+    // 0 (AXWindow) -> [0 (self-loop), 1 (AXGroup), 2 (AXGroup)]
+    // 1 (AXGroup)  -> [0 (back-edge), 3 (shared leaf)]
+    // 2 (AXGroup)  -> [1 (cross-edge), 3 (shared leaf)]
+    // 3 (AXButton) -> [3 (self-loop)]
+    let graph = [
+        GraphNode {
+            role: "AXWindow",
+            title: Some("Call"),
+            children: vec![0, 1, 2],
+        },
+        GraphNode {
+            role: "AXGroup",
+            title: Some("A"),
+            children: vec![0, 3],
+        },
+        GraphNode {
+            role: "AXGroup",
+            title: Some("B"),
+            children: vec![1, 3],
+        },
+        GraphNode {
+            role: "AXButton",
+            title: Some("Mute"),
+            children: vec![3],
+        },
+    ];
+    let result = snapshot(
+        [
+            GraphRef {
+                graph: &graph,
+                index: 0,
+            },
+            // Duplicate root in the window list is also skipped.
+            GraphRef {
+                graph: &graph,
+                index: 0,
+            },
+        ],
+        WHOLE,
+    );
+    assert!(result.cut_short.is_empty());
+    assert_eq!(result.nodes, 4);
+    assert_eq!(count(&result.windows), 4);
+    assert_eq!(result.windows.len(), 1);
+    assert_eq!(result.windows[0].children.len(), 2);
+    assert_eq!(result.windows[0].children[0].children.len(), 1);
+    assert_eq!(
+        result.windows[0].children[0].children[0].title.as_deref(),
+        Some("Mute")
+    );
+    assert!(result.windows[0].children[1].children.is_empty());
+}
+
+#[test]
+fn application_and_menu_bar_children_are_not_recursed_into() {
+    let windows = [Node {
+        role: Some("AXWindow".into()),
+        title: Some("Main".into()),
+        children: vec![
+            Node {
+                role: Some("AXApplication".into()),
+                children: vec![Node {
+                    role: Some("AXMenuBar".into()),
+                    children: vec![Node {
+                        role: Some("AXMenuBarItem".into()),
+                        title: Some("File".into()),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            Node {
+                role: Some("AXMenuBar".into()),
+                children: vec![
+                    Node {
+                        role: Some("AXMenuBarItem".into()),
+                        title: Some("Edit".into()),
+                        ..Default::default()
+                    },
+                    Node {
+                        role: Some("AXMenuBarItem".into()),
+                        title: Some("View".into()),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            },
+            Node {
+                role: Some("AXButton".into()),
+                title: Some("Leave".into()),
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    }];
+    for budgets in [
+        WHOLE,
+        Budgets {
+            max_depth: 1,
+            ..WHOLE
+        },
+    ] {
+        let result = read(&windows, budgets);
+        // Neither AXApplication nor AXMenuBar descends, and their ignored
+        // children do not falsely report a depth cut.
+        assert!(result.cut_short.is_empty());
+        assert_eq!(result.nodes, 4);
+        assert_eq!(result.windows[0].children.len(), 3);
+        assert!(result.windows[0].children[0].children.is_empty());
+        assert!(result.windows[0].children[1].children.is_empty());
+        assert_eq!(
+            result.windows[0].children[2].title.as_deref(),
+            Some("Leave")
+        );
+    }
+}
+
+#[test]
+fn deep_reply_json_up_to_default_max_depth_deserializes_cleanly() {
+    use crate::accessibility::probe::{Reading, Reply};
+
+    let mut deep = Node {
+        role: Some("AXStaticText".into()),
+        title: Some("bottom".into()),
+        ..Default::default()
+    };
+    for level in (0..80).rev() {
+        deep = Node {
+            role: Some(if level == 0 { "AXWindow" } else { "AXGroup" }.into()),
+            children: vec![deep],
+            ..Default::default()
+        };
+    }
+    let reply = Reply::Read(Reading {
+        pid: 7,
+        frontmost: Some(true),
+        elapsed_ms: 2.5,
+        windows: 1,
+        nodes: 81,
+        unreadable: 0,
+        cut_short: Vec::new(),
+        web_areas: 0,
+        web_nodes: 0,
+        web_accessibility_requested: None,
+        matches: None,
+        tree: Some(vec![deep]),
+    });
+    let json = serde_json::to_vec(&reply).unwrap();
+    assert!(serde_json::from_slice::<Reply>(&json).is_err());
+    assert_eq!(Reply::from_json_slice(&json).unwrap(), reply);
 }

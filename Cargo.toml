@@ -90,7 +90,7 @@ rodio = { version = "0.23.0", default-features = false, features = ["playback", 
 rubato = "5.0.1"
 same-file = "1.0.6"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
+serde_json = { version = "1.0.151", features = ["unbounded_depth"] }
 serde_path_to_error = "0.1"
 sha2 = "0.11.0"
 # `hex transcribe`'s media reader. Opus decodes through `opuscule`.
