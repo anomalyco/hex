@@ -126,7 +126,9 @@ fn the_real_tagger_cleans_the_handwritten_sentences_as_the_iphone_app_does() {
         elapsed[elapsed.len() / 2],
         elapsed[elapsed.len() - 1]
     );
-    assert_eq!(on_target, 129);
+    // Desktop keeps the noun in the anaphoric repair that the old iOS
+    // target removes (case 39; also checked with recorded logits in parity_tests).
+    assert_eq!(on_target, 128);
 
     // A 400-word dictation, four model runs, well inside the budget.
     let long = vec!["so we, um, ship the build on Thursday"; 50].join(" ");

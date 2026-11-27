@@ -428,3 +428,143 @@ fn words_are_compared_bare() {
     assert_eq!(bare("\u{2014}"), "");
     assert_eq!(bare("Cafe\u{301},"), "caf\u{e9}");
 }
+
+// Synthetic regression cases: none are copied from evaluation transcripts.
+#[test]
+fn comparative_like_keeps_the_clause_relationship() {
+    for said in [
+        "Arrange the folders like we did yesterday.",
+        "It reads like I said before.",
+        "Keep it like it was yesterday.",
+        "Arrange it like Morgan does.",
+        "Arrange it like the team does.",
+    ] {
+        let case = heard(said).mark("like", SURE);
+        assert_ne!(case.clean(Policy::IOS), said);
+        assert_eq!(case.clean(Policy::DESKTOP), said);
+    }
+    assert_eq!(
+        heard("It was like unbelievably loud.")
+            .mark("like", SURE)
+            .clean(Policy::DESKTOP),
+        "It was unbelievably loud."
+    );
+    assert_eq!(
+        heard("It was, like, surprisingly bright.")
+            .mark("like,", SURE)
+            .clean(Policy::DESKTOP),
+        "It was surprisingly bright."
+    );
+}
+
+#[test]
+fn parallel_items_keep_their_distinct_content() {
+    for (said, marked) in [
+        (
+            "Pack 2 bags of green tea, 2 bags of black tea, and cups.",
+            "2 bags of green tea,",
+        ),
+        (
+            "A box of red pencils, a box of blue pencils.",
+            "A box of red pencils,",
+        ),
+        (
+            "Add a box of red pencils, a box of blue pencils.",
+            "Add a box of red pencils,",
+        ),
+    ] {
+        let case = heard(said).mark(marked, SURE);
+        assert_ne!(case.clean(Policy::IOS), said);
+        assert_eq!(case.clean(Policy::DESKTOP), said);
+    }
+    // Identical repeats and explicit repairs still go.
+    assert_eq!(
+        heard("Pack a bag of tea, a bag of tea.")
+            .mark("a bag of tea,", SURE)
+            .clean(Policy::DESKTOP),
+        "Pack a bag of tea."
+    );
+    assert_eq!(
+        heard("Pack 2 bags of green tea, sorry, 2 bags of black tea.")
+            .mark("2 bags of green tea, sorry,", SURE)
+            .clean(Policy::DESKTOP),
+        "Pack 2 bags of black tea."
+    );
+}
+
+#[test]
+fn anaphoric_repairs_keep_the_noun_they_refer_to() {
+    for (said, marked) in [
+        (
+            "Use the striped mug, sorry, the plain one beside it.",
+            "the striped mug, sorry,",
+        ),
+        (
+            "Bring the metal bowls, no, the wooden ones.",
+            "the metal bowls, no,",
+        ),
+    ] {
+        let case = heard(said).mark(marked, REPAIR);
+        assert_ne!(case.clean(Policy::IOS), said);
+        assert_eq!(case.clean(Policy::DESKTOP), said);
+    }
+    assert_eq!(
+        heard("Bring two boxes, sorry, one box.")
+            .mark("two boxes, sorry,", REPAIR)
+            .clean(Policy::DESKTOP),
+        "Bring one box."
+    );
+    assert_eq!(
+        heard("Use the striped mug, sorry, the plain mug.")
+            .mark("the striped mug, sorry,", REPAIR)
+            .clean(Policy::DESKTOP),
+        "Use the plain mug."
+    );
+}
+
+#[test]
+fn corrections_never_strand_a_contradictory_clause_initial_particle() {
+    for particle in ["Yes", "Yeah", "Sure"] {
+        let said = format!("{particle}, we should no, we should postpone.");
+        let case = heard(&said).mark("we should no,", REPAIR);
+        assert_ne!(case.clean(Policy::IOS), said);
+        assert_eq!(case.clean(Policy::DESKTOP), said);
+        // A fully proposed correction includes the particle already.
+        let marked = format!("{particle}, we should no,");
+        assert_eq!(
+            heard(&said).mark(&marked, REPAIR).clean(Policy::DESKTOP),
+            "We should postpone."
+        );
+    }
+    assert_eq!(
+        heard("Yes, Tuesday, sorry, Thursday works.")
+            .mark("Tuesday, sorry,", REPAIR)
+            .clean(Policy::DESKTOP),
+        "Yes, Thursday works."
+    );
+    // The preceding particle belongs to another sentence.
+    assert_eq!(
+        heard("Yes. We should no, we should postpone.")
+            .mark("We should no,", REPAIR)
+            .clean(Policy::DESKTOP),
+        "Yes. We should postpone."
+    );
+}
+
+#[test]
+fn structural_guards_leave_real_fillers_and_restarts_cleanable() {
+    assert_eq!(
+        heard("Um, we we should, uh, leave.")
+            .mark("Um,", SURE)
+            .mark("we", SURE)
+            .mark("uh,", SURE)
+            .clean(Policy::DESKTOP),
+        "We should leave."
+    );
+    assert_eq!(
+        heard("Can you, would you open it?")
+            .mark("Can you,", REPAIR)
+            .clean(Policy::DESKTOP),
+        "Would you open it?"
+    );
+}

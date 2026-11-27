@@ -1062,6 +1062,10 @@ impl Owner {
                     .store(captured_through.as_nanos(), Ordering::Release);
                 crate::audio::input_level::record(&samples);
                 if padding > 0 {
+                    if let Some(recording) = &mut self.capture.recording {
+                        recording.max_chunk_gap =
+                            recording.max_chunk_gap.max(gap.unwrap_or_default());
+                    }
                     let mut padded = vec![0.0; padding];
                     padded.extend_from_slice(&samples);
                     self.capture.ingest_with_pending(
@@ -2127,8 +2131,9 @@ pub(crate) mod tests {
         else {
             panic!("expected transcription");
         };
-        // Its own 450 ms pre-roll, 500 ms hold, and 200 ms tail.
-        assert_eq!(new.duration_ms(), 1_150);
+        // Its own 450 ms pre-roll, 500 ms hold, and 40 ms quiet tail.
+        // The constant input here is DC, not trailing speech.
+        assert_eq!(new.duration_ms(), 990);
     }
 
     #[test]
