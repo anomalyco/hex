@@ -18,13 +18,13 @@
   `HEX_UPDATE_GOLDENS=1 cargo test --locked --bin hex rune_ui` on Linux (from macOS,
   dispatch `check-linux.yml` on the branch and take its `golden-actual` artifact), inspect
   every changed image, and commit them with the change.
-- At the start of a work round, bump Hex's Rune pin (`rune`, `rune-kit`,
-  `rune-theme-opencode`, `rune-motion` in `Cargo.toml` and `Cargo.lock`) to `anomalyco/rune`
-  `dev` head, adapt to its `CHANGELOG.md`, update `cargoGitDependencies."rune-0.0.1"` (rev
-  and output hash) in `nix/package.nix`, keep `windows` at `0.62.2` for `gpu-allocator` in
-  `Cargo.lock`, and run `scripts/check rune_ui`. Report Rune bugs upstream rather than
-  working around them. Never run `cargo publish` (neither Hex nor Rune is published to
-  crates.io).
+- Bump Hex's Rune pin (`rune`, `rune-kit`, `rune-theme-opencode`, `rune-motion` in
+  `Cargo.toml` and `Cargo.lock`) only in a dedicated dependency PR or when a task needs a
+  Rune fix. When bumping, adapt to Rune's `CHANGELOG.md`, update
+  `cargoGitDependencies."rune-0.0.1"` (rev and output hash) in `nix/package.nix`, keep
+  `windows` at `0.62.2` for `gpu-allocator` in `Cargo.lock`, and run
+  `scripts/check rune_ui`. Report Rune bugs upstream rather than working around them. Never
+  run `cargo publish` (neither Hex nor Rune is published to crates.io).
 
 ## Product & Surface Rules
 
@@ -47,11 +47,11 @@ Support>/hex/settings.json`; deterministic personal transcript transformations l
 - **Feature map ([`docs/features/README.md`](docs/features/README.md)):** Read the index and
   relevant capability maps (`dictation.md`, `capture.md`, `meetings.md`, `labs.md`,
   `own-models.md`, `vocabulary.md`, `control-cli.md`, `transcript-cli.md`,
-  `accessibility.md`, `recovery.md`) before designing, changing, debugging, or reviewing
-  user-facing behavior, then verify against the source. Update affected maps in the same PR
-  when behavior, defaults, prerequisites, OS availability, recovery, or verification
-  coverage changes; distinguish implemented behavior, automated checks, and physical-device
-  proof limits. Keep future work in [`ROADMAP.md`](ROADMAP.md).
+  `accessibility.md`, `recovery.md`) before changing user-facing behavior, then verify
+  against the source. Update an affected map only when user-facing behavior, defaults,
+  prerequisites, OS availability, or recovery contracts change — do not narrate internal
+  refactors or paste dated test logs. Distinguish implemented behavior, automated checks,
+  and physical-device proof limits. Keep future work in [`ROADMAP.md`](ROADMAP.md).
 - **Desktop UI ([`docs/design-system.md`](docs/design-system.md)):** Read before touching
   any pane, capsule, or picker. Compose `rune-kit` components and Hex pieces
   (`src/rune_ui/controls.rs`, `src/rune_ui/lists.rs`) using `rune-theme-opencode` tokens —
@@ -106,10 +106,9 @@ Support>/hex/settings.json`; deterministic personal transcript transformations l
 ## Cross-Cutting Invariants
 
 - **Code shape (`scripts/code-shape.py`):** Keep source files under 800 non-test lines
-  (1,500 hard cap; inline `#[cfg(test)]` excluded; test files warn over 1,000), folders
-  under 40 non-test source files (60 hard cap), and prefix families (`x.rs`/`x/` + 2
-  `x_*.rs`, or 3 `x_*.rs`) inside `x/`. Ceilings in `scripts/*-exceptions.txt` only ratchet
-  down (`python3 scripts/code-shape.py --update-exceptions`).
+  (1,500 hard cap; inline `#[cfg(test)]` excluded; test files warn over 1,000). Ceilings in
+  `scripts/file-size-exceptions.txt` only ratchet down
+  (`python3 scripts/code-shape.py --update-exceptions`).
 - **Startup & platform guards:** GUI startup must call `keyboard::initialize_layout` on the
   OS main thread before settings, keyboard-using workers, or Rune start
   (`rune::prewarm_gpu()` runs on macOS app launches only, never CLI commands). macOS `main`
