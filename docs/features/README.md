@@ -2569,8 +2569,9 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │   │   the recorder runs its own keyboard hook for them (`NumpadWatch`), so
 │   │   Num Lock off records Num 8, not Up (#815)
 │   ├── Menu, Pause, Scroll Lock -> may stand alone
-│   ├── Insert, Home, End, Page Up, Page Down alone -> Labs › Special keys
-│   │   alone; off, a saved one goes back to its default
+│   ├── Caps Lock, Insert, Home, End, Page Up, Page Down alone -> Labs ›
+│   │   Special keys alone; off, a saved one goes back to its default. Hex
+│   │   keeps a Caps Lock press it records or fires on, so the lock never flips
 │   └── Any other key -> the recorder says "Unsupported key" and starts over
 ├── Left Alt -> Hold or Toggle -> Capture -> Stream (GPU) -> Paste
 ├── Toggle's cancel shortcut (Escape by default) -> Discards a toggled recording;

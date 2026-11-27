@@ -162,7 +162,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Sort and filter models no labs.picker_sort_filter   the Local transcription picker sorts by recommendation, size, or name and can show only models for the saved language (#645)
 ├── Model test details no  labs.benchmark_details        picker rows show raw WER/CER (lower is better), language, dataset, source, and conditions; incomparable "Most accurate" badges drop (#647)
 ├── Parakeet Ultra  no    labs.parakeet_ultra          the picker offers Moondream's Parakeet Ultra (pinned Q8_0, CC BY 4.0) with a details view; stays on while it dictates (#648)
-├── Special keys alone no labs.standalone_special_keys (Linux, Windows) Linux: Menu, Pause, Scroll Lock may be a shortcut's key, alone or with modifiers (#767); Windows: Insert, Home, End, Page Up, Page Down may stand alone (#794)
+├── Special keys alone no labs.standalone_special_keys (Linux, Windows) Linux: Menu, Pause, Scroll Lock may be a shortcut's key, alone or with modifiers (#767); Windows: Caps Lock, Insert, Home, End, Page Up, Page Down may stand alone (#794)
 ├── § key alone no  labs.section_key_alone       (Linux, macOS) the key left of 1 on ISO keyboards, § or a dead key such as ^, may be a shortcut with no modifier (#1050)
 ├── Microphone key alone no labs.microphone_key        (macOS) the microphone (dictation) key in a laptop keyboard's top row, always reported as Fn with key code 176, may be a shortcut with no modifier (#181)
 ├── Dictation stats no    labs.history_stats           History's Stats button opens a summary of retained dictations, with headline tiles, a typing-speed slider and time saved, the busiest-hour strip, a daily chart, app and Output bars, and Output time; an owner-only daily rollup (counts only, no text or app names) outlives retention, so the dialog also charts a 53-week heatmap and its headline totals cover all time; Clear all history deletes the rollup even with no entries; hex history stats prints it (#790)
@@ -2496,8 +2496,16 @@ hex settings set dictation_hotkey menu        // labs.special-keys
 │   └── Wayland portal -> preferred trigger Menu, Pause, Scroll_Lock
 ├── Toggle off -> "menu needs Labs › Special keys alone: hex labs on special-keys"
 ├── Windows -> Menu, Pause, Scroll Lock always allowed, alone too; the toggle
-│   instead lets Insert, Home, End, Page Up, Page Down stand alone ("home alone
-│   needs Labs › Special keys alone" while off), and off puts a saved one back
+│   instead lets Caps Lock, Insert, Home, End, Page Up, Page Down stand alone
+│   ("home alone needs Labs › Special keys alone" while off), and off puts a
+│   saved one back
+│   └── Caps Lock (`capslock`) -> the recorder's hook keeps a press made in
+│       Hex's window, and a shortcut keeps every press it fires on, so the lock
+│       never flips; Caps Lock with other modifiers held still reaches Windows.
+│       Checks: `the_recorder_keeps_a_whole_caps_lock_press_made_in_hexs_window`
+│       (`windows/input/chord.rs`),
+│       `caps_lock_is_named_in_any_spelling_and_alone_is_a_windows_special_key`
+│       (`app_settings/shortcut_repair.rs`); no run on a Windows keyboard
 ├── macOS -> no toggle; a bare one still needs a modifier, as before
 ├── Window recorder (Linux) -> records them, alone too, while on (#1187);
 │   refuses them while off ("Add a modifier")

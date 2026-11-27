@@ -634,6 +634,10 @@ support this lab.
   Off, they are refused with `invalid-value`, and turning the toggle off puts
   a shortcut on one back to its default. Elsewhere one alone still needs a
   modifier.
+- On Windows with the same toggle on, `capslock`, `insert`, `home`, `end`,
+  `pageup`, or `pagedown` may be a shortcut alone, for example
+  `hex settings set dictation_hotkey capslock`. Hex keeps the Caps Lock
+  presses the shortcut fires on, so the lock does not flip.
 - `second_dictation_hotkey` (unbound by default; `none` clears it) is a
   second shortcut that dictates exactly as `dictation_hotkey` does, such as a
   key on an external keyboard. It acts only while

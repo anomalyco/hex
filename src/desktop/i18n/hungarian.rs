@@ -1423,7 +1423,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Show each speech model's error rate, language, and how it was tested, in the model list", "A modelllistában mutatja minden beszédmodell hibaarányát, nyelvét és tesztelésének módját"),
     ("Offer Parakeet Ultra, a tuned Parakeet v3 from Moondream, in the speech model list", "A Parakeet Ultra, a Moondream által hangolt Parakeet v3 felajánlása a beszédmodell-listában"),
     ("Use Menu, Pause, or Scroll Lock as a shortcut by itself, such as Caps Lock remapped to Menu", "A Menu, Pause vagy Scroll Lock önálló billentyűparancsként használata, például a Menu-re átképezett Caps Lock"),
-    ("Use Insert, Home, End, Page Up, or Page Down as a shortcut by itself", "Az Insert, Home, End, Page Up vagy Page Down önálló billentyűparancsként használata"),
+    ("Use Caps Lock, Insert, Home, End, Page Up, or Page Down as a shortcut by itself", "A Caps Lock, Insert, Home, End, Page Up vagy Page Down önálló billentyűparancsként használata"),
     ("Shorten long pauses before the recording is turned into text, so slow computers paste sooner", "Rövidíti a hosszú szüneteket, mielőtt a felvétel szöveggé alakul, így a lassú gépek hamarabb illesztenek be"),
     ("Add your own speech model files saved in smaller formats (Q6_K, Q5_K, or Q4_K). They take less space, but Hex hasn't checked them, so accuracy may vary.", "Adjon hozzá saját, kisebb formátumban mentett beszédmodellfájlokat (Q6_K, Q5_K vagy Q4_K). Kevesebb helyet foglalnak, de a Hex nem ellenőrizte őket, így a pontosság eltérhet."),
     ("Show only downloaded speech models in the list, with the space they take", "Csak a letöltött beszédmodelleket mutatja a listában, a foglalt hellyel együtt"),

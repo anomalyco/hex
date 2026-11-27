@@ -1434,7 +1434,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Show each speech model's error rate, language, and how it was tested, in the model list", "Affichez dans la liste des modèles le taux d'erreur, la langue et la méthode de test de chaque modèle vocal"),
     ("Offer Parakeet Ultra, a tuned Parakeet v3 from Moondream, in the speech model list", "Proposez Parakeet Ultra, un Parakeet v3 ajusté par Moondream, dans la liste des modèles vocaux"),
     ("Use Menu, Pause, or Scroll Lock as a shortcut by itself, such as Caps Lock remapped to Menu", "Utilisez Menu, Pause ou Arrêt défil. seul comme raccourci, par exemple Verr. maj. réassigné à Menu"),
-    ("Use Insert, Home, End, Page Up, or Page Down as a shortcut by itself", "Utilisez Inser, Origine, Fin, Page préc. ou Page suiv. seul comme raccourci"),
+    ("Use Caps Lock, Insert, Home, End, Page Up, or Page Down as a shortcut by itself", "Utilisez Verr. maj, Inser, Origine, Fin, Page préc. ou Page suiv. seul comme raccourci"),
     ("Shorten long pauses before the recording is turned into text, so slow computers paste sooner", "Raccourcit les longues pauses avant de convertir l'enregistrement en texte, pour que les ordinateurs lents collent plus tôt"),
     ("Add your own speech model files saved in smaller formats (Q6_K, Q5_K, or Q4_K). They take less space, but Hex hasn't checked them, so accuracy may vary.", "Ajoutez vos propres fichiers de modèle vocal enregistrés dans des formats plus compacts (Q6_K, Q5_K ou Q4_K). Ils prennent moins de place, mais Hex ne les a pas vérifiés, donc la précision peut varier."),
     ("Show only downloaded speech models in the list, with the space they take", "N'affichez dans la liste que les modèles vocaux téléchargés, avec la place qu'ils occupent"),

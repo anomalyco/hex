@@ -99,7 +99,7 @@ impl Feature {
                 "Offer Parakeet Ultra, a tuned Parakeet v3 from Moondream, in the speech model list"
             }
             Self::StandaloneSpecialKeys if cfg!(target_os = "windows") => {
-                "Use Insert, Home, End, Page Up, or Page Down as a shortcut by itself"
+                "Use Caps Lock, Insert, Home, End, Page Up, or Page Down as a shortcut by itself"
             }
             Self::StandaloneSpecialKeys => {
                 "Use Menu, Pause, or Scroll Lock as a shortcut by itself, such as Caps Lock remapped to Menu"

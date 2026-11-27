@@ -1,7 +1,8 @@
 //! Shortcut keys a Labs feature allows, and the repair that puts a saved
 //! shortcut on one back while the feature is off: mouse buttons (Labs ›
 //! Mouse shortcuts, macOS), Menu, Pause, or Scroll Lock (Labs › Special
-//! keys alone, Linux), the ISO section key (Labs › § key alone, Linux
+//! keys alone, Linux), Caps Lock or a navigation key alone (the same Lab,
+//! Windows), the ISO section key (Labs › § key alone, Linux
 //! and macOS), the microphone key (Labs › Microphone key alone, macOS),
 //! shortcuts without a key (Labs › Double-tap Option, Command, or
 //! Globe, macOS), and the persisted double-tap mode those need.
@@ -64,6 +65,21 @@ impl HotkeyKey {
         )
     }
 
+    /// Caps Lock, which Labs › Special keys alone lets a Windows shortcut
+    /// use alone. Hex keeps the press, so the lock never flips.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn is_caps_lock(&self) -> bool {
+        !self.is_mouse() && Self::caps_lock_name(&self.label)
+    }
+
+    /// Whether `name` names Caps Lock: `capslock`, `caps_lock`, or
+    /// `Caps Lock`.
+    pub fn caps_lock_name(name: &str) -> bool {
+        name.trim()
+            .replace([' ', '_'], "")
+            .eq_ignore_ascii_case("capslock")
+    }
+
     /// Whether `label` names a function key (`F1`–`F20`, any case).
     pub fn is_function_name(label: &str) -> bool {
         label
@@ -78,6 +94,14 @@ impl HotkeyBinding {
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub fn is_lone_navigation_key(&self) -> bool {
         self.modifiers.is_empty() && self.key.as_ref().is_some_and(HotkeyKey::is_navigation)
+    }
+
+    /// Caps Lock or a navigation key alone: the keys a Windows shortcut may
+    /// use by themselves only with Labs › Special keys alone.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn is_lone_windows_special_key(&self) -> bool {
+        self.is_lone_navigation_key()
+            || (self.modifiers.is_empty() && self.key.as_ref().is_some_and(HotkeyKey::is_caps_lock))
     }
 
     /// The § key alone (`HotkeyKey::is_section`).
@@ -102,7 +126,7 @@ pub(super) fn is_scroll_lock(name: &str) -> bool {
 impl AppSettings {
     /// Whether Labs › Special keys alone is on: on Linux a shortcut may use
     /// Menu, Pause, or Scroll Lock; on Windows, which takes those anyway,
-    /// a navigation key alone.
+    /// Caps Lock or a navigation key alone.
     pub fn special_keys_allowed(&self) -> bool {
         cfg!(any(target_os = "linux", target_os = "windows"))
             && self.labs.standalone_special_keys
@@ -208,12 +232,12 @@ impl AppSettings {
                 "reset Menu, Pause, and Scroll Lock shortcuts: Labs › Special keys alone is off"
             );
         }
-        // Windows: a navigation key alone needs the toggle.
+        // Windows: Caps Lock or a navigation key alone needs the toggle.
         if cfg!(target_os = "windows")
-            && self.reset_shortcuts(HotkeyBinding::is_lone_navigation_key)
+            && self.reset_shortcuts(HotkeyBinding::is_lone_windows_special_key)
         {
             tracing::info!(
-                "reset navigation-key shortcuts without a modifier: Labs › Special keys alone is off"
+                "reset Caps Lock and navigation-key shortcuts without a modifier: Labs › Special keys alone is off"
             );
         }
     }
@@ -331,6 +355,26 @@ mod tests {
             crate::dictation::ShortcutMode::Hold,
             "the mode returns to Hold or double-tap"
         );
+    }
+
+    #[test]
+    fn caps_lock_is_named_in_any_spelling_and_alone_is_a_windows_special_key() {
+        for name in ["capslock", "caps_lock", "Caps Lock", " caps lock "] {
+            assert!(HotkeyKey::caps_lock_name(name), "{name}");
+            assert_eq!(HotkeyKey::named(name).label, "Caps Lock");
+        }
+        assert!(!HotkeyKey::caps_lock_name("scroll lock"));
+        let caps_lock = |modifiers: HotkeyModifiers| HotkeyBinding {
+            modifiers,
+            key: Some(HotkeyKey::named("capslock")),
+        };
+        assert!(caps_lock(Default::default()).is_lone_windows_special_key());
+        let with_control = HotkeyModifiers {
+            control: Some(crate::app_settings::ModifierSide::Either),
+            ..Default::default()
+        };
+        assert!(!caps_lock(with_control).is_lone_windows_special_key());
+        assert!(!menu().is_lone_windows_special_key());
     }
 
     #[test]
