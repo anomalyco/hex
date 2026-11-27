@@ -65,10 +65,9 @@ by a Rune overlay's compositor on every OS, hand-tuned in HUD Lab.
    in light and dark (see [Verification](#verification)).
 7. **Sizes come from `METRICS`, `MODAL`, and `CAPSULE`; a new number is a
    new token with a name.** Row heights are tokens (`min_h` + `center_y`),
-   never hand-typed vertical padding. Off-scale spacing literals, non-token
-   radii (`>= 3`), ad-hoc `TextStyle::new`, `.mono()`, and private
-   `PADDING`/`MODAL_WIDTH`/`STATS_WIDTH` constants in `src/rune_ui/` are
-   ratcheted by `scripts/code-shape.py` (`scripts/design-token-exceptions.txt`).
+   never hand-typed vertical padding. Avoid off-scale spacing literals,
+   non-token radii (`>= 3`), ad-hoc `TextStyle::new`, `.mono()`, and private
+   `PADDING`/`MODAL_WIDTH`/`STATS_WIDTH` constants in `src/rune_ui/`.
 
 ## Spatial scale (4 pt base)
 
