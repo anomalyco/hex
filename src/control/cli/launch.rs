@@ -5,6 +5,21 @@
 use super::running;
 use super::{ControlReply, Output, print};
 
+/// Only an absent discovery permits a launch. An incompatible or unreadable
+/// discovery is a refusal, including while waiting after a successful spawn.
+fn observed_start(
+    found: color_eyre::Result<crate::local_api::Discovered>,
+    launched: bool,
+) -> Option<ControlReply> {
+    use crate::local_api::Discovered;
+    match found {
+        Ok(Discovered::Absent) => None,
+        Ok(Discovered::Live(_)) if launched => Some(ControlReply::done("Started Hex")),
+        Ok(Discovered::Live(_)) => Some(ControlReply::unchanged("Hex is already running")),
+        Err(error) => Some(ControlReply::error("failed", error.to_string())),
+    }
+}
+
 /// How long `hex start` keeps watching for a Hex to answer after a launch
 /// that can't become one has exited.
 #[cfg(not(target_os = "macos"))]
@@ -20,11 +35,8 @@ const STILL_STARTING: &str = "Started Hex; it isn't answering yet (it may be loa
 pub(super) fn start(output: Output) -> u8 {
     use std::time::{Duration, Instant};
 
-    if let Some(pid) = crate::local_api::running_pid() {
-        return print(
-            ControlReply::unchanged(format!("Hex is already running (pid {pid})")),
-            output,
-        );
+    if let Some(reply) = observed_start(crate::local_api::discover(), false) {
+        return print(reply, output);
     }
     let arguments = open_arguments(
         installed_bundle().as_deref(),
@@ -45,11 +57,8 @@ pub(super) fn start(output: Output) -> u8 {
     }
     let started = Instant::now();
     while started.elapsed() < Duration::from_secs(20) {
-        if let Some(pid) = crate::local_api::running_pid() {
-            return print(
-                ControlReply::done(format!("Started Hex (pid {pid})")),
-                output,
-            );
+        if let Some(reply) = observed_start(crate::local_api::discover(), true) {
+            return print(reply, output);
         }
         std::thread::sleep(Duration::from_millis(200));
     }
@@ -106,8 +115,8 @@ pub(super) fn reopen_after_restart(old: Option<crate::local_api::ExitWatch>) -> 
 fn start_reply() -> ControlReply {
     use std::time::{Duration, Instant};
 
-    if running() {
-        return ControlReply::unchanged("Hex is already running");
+    if let Some(reply) = observed_start(crate::local_api::discover(), false) {
+        return reply;
     }
     #[cfg(target_os = "linux")]
     if crate::linux::service::instance_answers() {
@@ -156,8 +165,8 @@ fn start_reply() -> ControlReply {
     // can't become one gives up, and it gets a short grace first so the
     // successor of a Hex still finishing its drain is seen if it does arrive.
     loop {
-        if running() {
-            return ControlReply::done("Started Hex");
+        if let Some(reply) = observed_start(crate::local_api::discover(), true) {
+            return reply;
         }
         if exited.is_none()
             && let Ok(Some(status)) = child.try_wait()
@@ -281,5 +290,26 @@ mod tests {
             strings(open_arguments(None, true, [])),
             ["-b", "anomaly.hex.test"]
         );
+    }
+}
+
+#[cfg(test)]
+mod discovery_tests {
+    use super::*;
+    use crate::local_api::Discovered;
+
+    #[test]
+    fn start_only_launches_for_absent_discovery() {
+        assert!(observed_start(Ok(Discovered::Absent), false).is_none());
+        for reason in [
+            "the running Hex speaks another local API version; update Hex or quit it",
+            "the running Hex's local API token is malformed; restart Hex",
+            "couldn't read discovery file",
+        ] {
+            for launched in [false, true] {
+                let reply = observed_start(Err(color_eyre::eyre::eyre!(reason)), launched);
+                assert_eq!(reply, Some(ControlReply::error("failed", reason)));
+            }
+        }
     }
 }

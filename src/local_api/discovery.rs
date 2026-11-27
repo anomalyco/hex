@@ -99,26 +99,10 @@ pub fn call_control(
 /// The running app's process id, if its local API is live.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn running_pid() -> Option<u32> {
-    live_discovery().ok().map(|document| document.pid)
-}
-
-pub(super) fn live_discovery() -> Result<DiscoveryDocument> {
-    let path = crate::app_paths::local_api_discovery_file()?;
-    let bytes = match fs::read(&path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            bail!("Hex is not running")
-        }
-        Err(error) => {
-            return Err(error).wrap_err_with(|| format!("could not read {}", path.display()));
-        }
-    };
-    let document: DiscoveryDocument =
-        serde_json::from_slice(&bytes).wrap_err("Hex's local API discovery file is invalid")?;
-    if !valid_discovery(&document) || !discovery_is_live(&document) {
-        bail!("Hex is not running");
+    match read_discovery() {
+        Ok(found) => found.pid(),
+        Err(_) => None,
     }
-    Ok(document)
 }
 
 pub(super) fn post_json(
@@ -137,8 +121,7 @@ fn post(
     read_timeout: Duration,
     max_response: usize,
 ) -> Result<(u16, Vec<u8>)> {
-    let document = live_discovery()?;
-    Endpoint::of(&document).post(path, content_type, body, read_timeout, max_response)
+    control_endpoint(read_discovery()?)?.post(path, content_type, body, read_timeout, max_response)
 }
 
 /// Where one local API answers, and the token it takes: the running Hex's,
@@ -163,36 +146,113 @@ pub(crate) enum Discovered {
 /// token) or a discovery file that can't be read is an error, so a client
 /// never starts a second service beside a Hex that is running.
 pub(crate) fn discover() -> Result<Discovered> {
-    let path = crate::app_paths::local_api_discovery_file()?;
-    let bytes = match fs::read(&path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(Discovered::Absent);
+    select_endpoint(read_discovery()?)
+}
+
+/// One classification for control requests, process identity, embedded
+/// selection and start. A live incompatible app still owns its process.
+#[derive(Debug, Eq, PartialEq)]
+enum Discovery {
+    Absent,
+    Compatible {
+        pid: u32,
+        endpoint: Endpoint,
+    },
+    Incompatible {
+        pid: u32,
+        reason: CompatibilityError,
+    },
+}
+
+impl Discovery {
+    fn pid(&self) -> Option<u32> {
+        match self {
+            Self::Absent => None,
+            Self::Compatible { pid, .. } | Self::Incompatible { pid, .. } => Some(*pid),
         }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum CompatibilityError {
+    Version(String),
+    Token,
+}
+
+impl std::fmt::Display for CompatibilityError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Version(version) => write!(
+                f,
+                "the running Hex speaks local API version {version}, not {API_VERSION}; update Hex or quit it"
+            ),
+            Self::Token => {
+                f.write_str("the running Hex's local API token is malformed; restart Hex")
+            }
+        }
+    }
+}
+
+impl std::error::Error for CompatibilityError {}
+
+fn read_discovery() -> Result<Discovery> {
+    discover_at(
+        &crate::app_paths::local_api_discovery_file()?,
+        discovery_is_live,
+    )
+}
+
+fn discover_at(path: &Path, live: impl FnOnce(&DiscoveryDocument) -> bool) -> Result<Discovery> {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Discovery::Absent),
         Err(error) => {
             return Err(error).wrap_err_with(|| format!("couldn't read {}", path.display()));
         }
     };
     let document: DiscoveryDocument =
         serde_json::from_slice(&bytes).wrap_err("Hex's local API discovery file is invalid")?;
-    classify(&document, discovery_is_live(&document))
+    Ok(classify(&document, live(&document)))
 }
 
-fn classify(document: &DiscoveryDocument, live: bool) -> Result<Discovered> {
+fn classify(document: &DiscoveryDocument, live: bool) -> Discovery {
     if !live {
-        return Ok(Discovered::Absent);
+        return Discovery::Absent;
     }
-    if document.api_version != API_VERSION {
-        bail!(
-            "the running Hex speaks local API version {}, not {API_VERSION}; \
-             update Hex or quit it",
-            document.api_version
-        );
+    let reason = if document.api_version != API_VERSION {
+        Some(CompatibilityError::Version(document.api_version.clone()))
+    } else if !valid_token(&document.token) {
+        Some(CompatibilityError::Token)
+    } else {
+        None
+    };
+    match reason {
+        Some(reason) => Discovery::Incompatible {
+            pid: document.pid,
+            reason,
+        },
+        None => Discovery::Compatible {
+            pid: document.pid,
+            endpoint: Endpoint::of(document),
+        },
     }
-    if !valid_token(&document.token) {
-        bail!("the running Hex's local API token is malformed; restart Hex");
+}
+
+// Keep the embedded client's two-outcome interface: incompatibility is an
+// error, never permission to spawn a service.
+fn select_endpoint(discovery: Discovery) -> Result<Discovered> {
+    match discovery {
+        Discovery::Absent => Ok(Discovered::Absent),
+        Discovery::Compatible { endpoint, .. } => Ok(Discovered::Live(endpoint)),
+        Discovery::Incompatible { reason, .. } => Err(reason.into()),
     }
-    Ok(Discovered::Live(Endpoint::of(document)))
+}
+
+fn control_endpoint(discovery: Discovery) -> Result<Endpoint> {
+    match select_endpoint(discovery)? {
+        Discovered::Live(endpoint) => Ok(endpoint),
+        Discovered::Absent => bail!("Hex is not running"),
+    }
 }
 
 /// The ready line `hex service --embedded` prints on stdout.
@@ -634,7 +694,7 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    use super::{Discovered, DiscoveryDocument, Endpoint, classify, send};
+    use super::{Discovered, Discovery, DiscoveryDocument, Endpoint, classify, send};
 
     const TOKEN: &str = "hex_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -687,17 +747,85 @@ mod tests {
     #[test]
     fn only_a_stopped_hex_counts_as_absent() {
         assert_eq!(
-            classify(&document("1", "bad"), false).unwrap(),
-            Discovered::Absent,
+            classify(&document("1", "bad"), false),
+            Discovery::Absent,
             "a stale file starts a service whatever it says"
         );
         assert!(matches!(
-            classify(&document(super::API_VERSION, TOKEN), true).unwrap(),
-            Discovered::Live(_)
+            classify(&document(super::API_VERSION, TOKEN), true),
+            Discovery::Compatible { pid: 42, .. }
         ));
-        let other = classify(&document("1", TOKEN), true).unwrap_err();
+        let other = super::select_endpoint(classify(&document("1", TOKEN), true)).unwrap_err();
         assert!(format!("{other}").contains("update Hex"), "{other}");
-        assert!(classify(&document(super::API_VERSION, "hex_x"), true).is_err());
+        assert!(
+            super::select_endpoint(classify(&document(super::API_VERSION, "hex_x"), true)).is_err()
+        );
+    }
+
+    #[test]
+    fn discovery_files_preserve_absence_incompatibility_and_read_errors() {
+        let directory = std::env::temp_dir().join(format!(
+            "hex-discovery-fixtures-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                std::fs::remove_dir_all(&self.0).unwrap();
+            }
+        }
+        let _cleanup = Cleanup(directory.clone());
+        let path = directory.join("local-api.json");
+        assert_eq!(
+            super::discover_at(&path, |_| panic!("absent files aren't probed")).unwrap(),
+            Discovery::Absent
+        );
+        for (version, token, live, incompatible) in [
+            (super::API_VERSION, TOKEN, false, false),
+            ("1", "bad", false, false),
+            (super::API_VERSION, TOKEN, true, false),
+            ("1", TOKEN, true, true),
+            (super::API_VERSION, "bad", true, true),
+        ] {
+            let document = document(version, token);
+            std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+            let found = || super::discover_at(&path, |_| live).unwrap();
+            assert_eq!(found().pid(), live.then_some(42));
+            assert_eq!(
+                matches!(found(), Discovery::Incompatible { pid: 42, .. }),
+                incompatible
+            );
+            let embedded = super::select_endpoint(found());
+            let control = super::control_endpoint(found());
+            if incompatible {
+                assert_eq!(
+                    embedded.unwrap_err().to_string(),
+                    control.unwrap_err().to_string()
+                );
+            } else if live {
+                let Discovered::Live(endpoint) = embedded.unwrap() else {
+                    panic!("live endpoint")
+                };
+                assert_eq!(control.unwrap(), endpoint);
+            } else {
+                assert_eq!(embedded.unwrap(), Discovered::Absent);
+                assert_eq!(control.unwrap_err().to_string(), "Hex is not running");
+            }
+        }
+        std::fs::write(&path, b"not json").unwrap();
+        assert!(super::discover_at(&path, |_| panic!("invalid files aren't probed")).is_err());
+        // A directory at the file path deterministically fails read on every
+        // Unix runner, including root (unlike chmod 000).
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        let error =
+            super::discover_at(&path, |_| panic!("unreadable files aren't probed")).unwrap_err();
+        assert!(error.to_string().contains("couldn't read"));
     }
 
     fn ready(url: &str, pid: u32, api_version: &str, token: &str) -> Vec<u8> {

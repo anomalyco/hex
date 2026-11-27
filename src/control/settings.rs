@@ -10,14 +10,16 @@ use crate::app_settings::{
     AppSettings, HotkeyBinding, HotkeyKey, HotkeySlot, MAX_EXTRA_DICTATION_SHORTCUTS,
 };
 
+mod access;
 #[cfg(test)]
 mod choice_tests;
 mod hotkeys;
 mod registry;
+mod tones;
 
 use hotkeys::check_shortcut;
 pub use hotkeys::{format_hotkey, parse_hotkey};
-use registry::{CAPTURE_KEYS, KEYS, Key, Kind, RETIRED, needs};
+use registry::{CAPTURE_KEYS, KEYS, Key, Kind, RETIRED};
 
 /// One setting as `hex settings get` reports it.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -30,7 +32,7 @@ pub struct SettingValue {
     pub choices: Vec<String>,
     pub writable: bool,
     pub about: String,
-    /// False where this OS's Hex lacks what the setting needs ([`needs`]):
+    /// False where this OS or build lacks what the setting needs:
     /// it is kept, but does nothing here and `set` refuses it.
     #[serde(default = "available")]
     pub available: bool,
@@ -46,46 +48,13 @@ pub fn unavailable(name: &str) -> Option<ControlError> {
 }
 
 fn unavailable_under(name: &str, policy: crate::policy::Policy) -> Option<ControlError> {
-    if let Some(lock) = policy.setting_lock(name) {
-        return Some(managed(name, lock));
-    }
-    if let Some(feature) = crate::labs::Feature::for_settings_key(name)
-        && !feature.shipped()
-    {
-        return Some(ControlError::new(
-            "unsupported",
-            format!("`{name}` belongs to a Labs feature that only dev builds have"),
-        ));
-    }
-    // A `labs.` key is only its feature's switch, so off its OS it does nothing.
-    if let Some(feature) = crate::labs::Feature::for_settings_key(name)
-        && (name.starts_with("labs.") || name == "capture.replay_hotkey")
-        && !feature.on_this_os()
-    {
-        return Some(ControlError::new(
-            "unsupported",
-            format!("`{name}` belongs to a Labs feature this OS doesn't have"),
-        ));
-    }
-    if name.starts_with("screenshots.") && !cfg!(target_os = "macos") {
-        return Some(ControlError::new(
-            "unsupported",
-            format!("`{name}` belongs to Labs › Screenshots, which only macOS has"),
-        ));
-    }
-    if name == "extra_dictation_hotkeys" && !cfg!(target_os = "macos") {
-        return Some(ControlError::new(
-            "unsupported",
-            format!("`{name}` belongs to Labs › More dictation shortcuts, which only macOS has"),
-        ));
-    }
-    let capability = needs(name).filter(|capability| !crate::rune_ui::capability(capability))?;
-    Some(ControlError::new(
-        "unsupported",
-        format!(
-            "`{name}` does nothing on this OS: it needs {capability}, which Hex has only elsewhere"
-        ),
-    ))
+    let environment = access::Environment {
+        policy,
+        ..access::Environment::current()
+    };
+    keys()
+        .find(|key| key.key == name)
+        .and_then(|key| access::check_write(key, &environment).err())
 }
 
 fn managed(name: &str, lock: crate::policy::Lock) -> ControlError {
@@ -214,6 +183,11 @@ fn unknown(name: &str) -> ControlError {
 }
 
 fn value_of(key: &Key, json: &Value) -> SettingValue {
+    describe(key, json, &access::Environment::current())
+}
+
+fn describe(key: &Key, json: &Value, environment: &access::Environment<'_>) -> SettingValue {
+    let access = access::setting_access(key, environment);
     let raw = json
         .pointer(&pointer(key.key))
         .cloned()
@@ -236,12 +210,9 @@ fn value_of(key: &Key, json: &Value) -> SettingValue {
             }
             _ => Vec::new(),
         },
-        writable: key.read_only.is_none()
-            && crate::policy::Policy::current()
-                .setting_lock(key.key)
-                .is_none(),
+        writable: access.writable,
         about: key.about.into(),
-        available: needs(key.key).is_none_or(crate::rune_ui::capability),
+        available: access.supported,
     }
 }
 
@@ -278,6 +249,15 @@ pub fn apply(
         ));
     }
     let value = parse(key, raw, shortcuts)?;
+    if let Some(patch) = tones::TonePatch::single(name, &value) {
+        let mut candidate = settings.clone();
+        patch.resolve(settings)?.apply(&mut candidate);
+        return Ok(Change {
+            settings: candidate,
+            effects: Vec::new(),
+            message: format!("Set {name}"),
+        });
+    }
     let mut json = serde_json::to_value(settings)
         .map_err(|error| ControlError::new("internal", error.to_string()))?;
     // An unset optional setting is left out of the file, so give it a slot.
@@ -297,22 +277,12 @@ pub fn apply(
     let mut effects = Vec::new();
     let message = format!("Set {name}");
     match key.key {
-        "sound_effects" if candidate.sound_effects && candidate.sound_effect_volume <= 0.0 => {
-            candidate.sound_effect_volume = AppSettings::default().sound_effect_volume;
-        }
         "meetings.summaries"
             if candidate.meetings.summaries == crate::app_settings::MeetingSummaries::OpenCode
                 && crate::policy::Policy::current()
                     .locks(crate::policy::Lock::OpenCodeProcessing) =>
         {
             return Err(managed(name, crate::policy::Lock::OpenCodeProcessing));
-        }
-        "sound_effect_volume" => {
-            let volume = candidate.sound_effect_volume;
-            candidate.sound_effects = volume > 0.0;
-            if volume <= 0.0 {
-                candidate.sound_effect_volume = settings.sound_effect_volume;
-            }
         }
         "double_tap_lock" if !candidate.double_tap_lock => candidate.double_tap_only = false,
         "double_tap_only" if candidate.double_tap_only => {
@@ -458,6 +428,9 @@ pub fn apply_all(
     shortcuts: &ShortcutRules,
 ) -> Result<Change, ControlError> {
     let mut candidate = settings.clone();
+    tones::TonePatch::parse(values, shortcuts)?
+        .resolve(settings)?
+        .apply(&mut candidate);
     let model = values.get("transcription.model");
     let language = values.get("transcription.language");
     if model.is_some() || language.is_some() {
@@ -475,7 +448,10 @@ pub fn apply_all(
     for (name, value) in values {
         if matches!(
             name.as_str(),
-            "transcription.model" | "transcription.language"
+            "transcription.model"
+                | "transcription.language"
+                | "sound_effects"
+                | "sound_effect_volume"
         ) {
             continue;
         }
