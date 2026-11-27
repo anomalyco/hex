@@ -35,6 +35,15 @@ English literal validity also uses SCOWL words, proper names, uppercase forms an
 outside the frequency model, lowercased and sorted; these spellings carry no word probabilities.
 English spellings: SCOWL 2020.12.07, sizes through 70; Kevin Atkinson and contributors.
 Permission and individual source notices: scowl.txt. https://wordlist.aspell.net/
+English words newer than the books and their spellings (en.hextm, en.spellings): word counts and
+spellings from the Leipzig Corpora Collection's downloadable English news corpora (eng_news_2023_1M,
+eng_news_2024_1M and eng_news_2025_1M), Leipzig University and the Saxon Academy of Sciences and
+Humanities in Leipzig: D. Goldhahn, T. Eckart and U. Quasthoff, Building Large Monolingual
+Dictionaries at the Leipzig Corpora Collection: From 100 to 200 Languages, LREC 2012.
+https://wortschatz-leipzig.de/en/download
+Creative Commons Attribution 4.0 International: https://creativecommons.org/licenses/by/4.0/
+Full licence: cc-by-4.0.txt. Changes: counted each word, the sites using it and its spellings, and
+kept the words the books and SCOWL lack that at least 100 sites use.
 Spanish spellings: RLA-ES Hunspell dictionaries (es_ES and es_MX), coordinated by Santiago Bosio,
 used under Mozilla Public License 1.1. The frequency model filters by these spellings;
 the original dictionaries are unmodified. See mpl-1.1.txt, rla-LICENSE.md and rla-README_hunspell_es.txt.

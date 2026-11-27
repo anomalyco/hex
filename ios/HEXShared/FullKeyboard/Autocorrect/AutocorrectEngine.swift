@@ -772,14 +772,14 @@ final class AutocorrectEngine {
         if pool.count < end, token.count <= 3, let model, model.language == language.rawValue {
             let previous = Self.previousWord(beforeInput ?? "", token: token)
             predictions = model.completions(of: lower, after: previous, allowing: { mayOffer($0, after: previous) })
-                .map { Self.matchCase(of: token, onto: $0) }
+                .map { Self.matchCase(of: token, onto: stripSpelling(of: $0)) }
             if autoFix == nil, let first = predictions.first(where: { !has($0) }) { pool.append(first) }
         }
 
         // Spatial autocorrect's other readings of your taps.
         if corrects, let decision = decoderDecision(for: token) {
             for reading in decision.readings where pool.count < end && mayOffer(reading.text, replacing: token) {
-                let text = cased(reading.text, typed: token)
+                let text = cased(stripSpelling(of: reading.text), typed: token)
                 if !has(text) {
                     pool.append(text)
                 }
@@ -1091,10 +1091,10 @@ final class AutocorrectEngine {
                     cased = cased.split(separator: " ").map { $0 == "i" ? "I" : String($0) }.joined(separator: " ")
                 }
                 // The German and English models are lowercase throughout: a corrected word the
-                // dictionary knows only capitalised (a name, day or place: "mray" -> "Mary"), or
-                // that `de.capitals` calls a noun ("hsus" -> "haus" -> "Haus"), takes its
-                // capital, as the no-replacement path does below. One word only: a split reading
-                // keeps its second word as read.
+                // dictionary knows only capitalised ("mray" -> "Mary"), `de.capitals` calls a noun
+                // ("hsus" -> "Haus") or the model spells its own way ("chatgtp" -> "ChatGPT") takes
+                // it, as the no-replacement path does below. One word only: a split reading keeps
+                // its second word as read.
                 if addsCapitals, !cased.contains(" "), language == .german || language == .english {
                     cased = nounCapitalised(for: cased, typed: token) ?? cased
                 }
@@ -1259,7 +1259,7 @@ final class AutocorrectEngine {
         guard language == .german, let capitals = germanNouns,
               let capitalise = capitals.capitalises(word, after: Self.previousWord(beforeInput ?? "", token: token)),
               capitalise, let first = word.first
-        else { return properNoun(for: word) }
+        else { return modelSpelling(of: word) ?? properNoun(for: word) }
         return first.uppercased() + word.dropFirst()
     }
 

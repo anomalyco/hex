@@ -190,7 +190,7 @@ internal object SpeechModel {
     private var englishWords: TypingModel? = null
     private fun lowercaseEnglish(app: Context, word: String): Boolean {
         val model = englishWords ?: TypingModel.asset(app.assets, "en").also { englishWords = it }
-        return model.index(word) >= 0 && (model.capitals?.percent(word) ?: -1) < 0
+        return model.index(word) >= 0 && (model.capitals?.percent(word) ?: -1) < 0 && model.spellings?.of(word) == null
     }
 
     private fun decodeStandard(app: Context, pcm: ShortArray, count: Int, language: String, translate: Boolean, prompt: String?, job: Long): String? {

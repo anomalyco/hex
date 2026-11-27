@@ -49,6 +49,13 @@ nonisolated final class HexWordList: @unchecked Sendable {
         return value
     }
 
+    /// The text after `word`'s tab (a `.spellings` spelling), or nil when the list lacks the word
+    /// or its line has none.
+    func text(of word: String) -> String? {
+        guard let (end, next) = line(of: word), end < next else { return nil }
+        return String(decoding: UnsafeBufferPointer(start: base + end + 1, count: next - end - 1), as: UTF8.self)
+    }
+
     /// Where `word`'s line ends (its tab or newline) and where its newline is.
     private func line(of word: String) -> (end: Int, next: Int)? {
         var word = word

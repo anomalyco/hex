@@ -495,9 +495,9 @@ class NeverSuggestTest {
         // Entries for another language stay out; Bokmål takes Norwegian's.
         assertTrue(PersonalWords.applies(null, "en") && PersonalWords.applies("en_US", "en") && PersonalWords.applies("no_NO", "nb"))
         assertFalse(PersonalWords.applies("es_ES", "en") || PersonalWords.applies("nn_NO", "nb"))
-        // Without your words nothing of this applies.
+        // Without your words nothing of this applies: "GitHub" is only the model's own spelling (en.spellings).
         val plain = word()
-        assertEquals("zorbiz github ", plain.typed(g, "zorbiz github "))
+        assertEquals("zorbiz GitHub ", plain.typed(g, "zorbiz github "))
     }
 
     // iOS FullKeyboardEngineTests.testTheLikelyNextLetterClaimsAFewPointsOfItsNeighbour: within 5 dp of

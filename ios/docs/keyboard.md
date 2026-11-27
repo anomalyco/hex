@@ -224,7 +224,11 @@ built from Google Books Ngram v3 by `scripts/build-typing-model.py` (see
 Acknowledgements below); English's contractions count as often as the words they stand
 for ("do not"), and it adds Hex's own chat and tech words (`scripts/en-extra-words.tsv`)
 and SCOWL's names, days and places ("Monday", "Mary", "London"), which take their capital from
-the dictionary when typed in lowercase or corrected to; byte-identical to Android's `en.hextm`; `de.hextm` is the German model Android builds and ships
+the dictionary when typed in lowercase or corrected to, and words newer than the books from the
+2023-2025 news ("ChatGPT", "TikTok"); byte-identical to Android's `en.hextm`. Beside it,
+`en.spellings` (Android's too) spells the words with a capital inside or the dictionary may lack
+("iPhone", "GitHub", "OpenAI"), which they take typed in lowercase, corrected to, swiped or in the
+strip (`AutocorrectEngine+Spellings`); `de.hextm` is the German model Android builds and ships
 (`android/benchmark/typing/build-layout-model.py`), the same v3 format and, on iOS,
 off until the experiment below is turned on. `fr.hextm` is Android's French model, built
 the same way from Google Books v3's French shards (corpus spellings, with the books'

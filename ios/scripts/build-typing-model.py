@@ -13,10 +13,18 @@ English also takes two things the books can't give it:
 - en-extra-words.tsv beside this script: chat and tech words written for Hex ("app", "lol",
   "csv"), each at its tier's cost; a word the books have only gets commoner.
 Both join the vocabulary before pairs are counted, so their pairs are counted too. So do SCOWL's
-names and other words it spells with one capital first (its upper and proper-names lists, sizes up
-to 70), three letters or more ("Monday", "Mary", "London"), in lowercase like every word, ranked by
-their counts with the rest; their capitals come from the phone's dictionary (iOS) and en.capitals
-(Android).
+names and other words it spells with a capital (its upper and proper-names lists, sizes up to 70):
+those with one capital first, three letters or more ("Monday", "Mary", "London"), and those with a
+capital inside that aren't acronyms ("iPhone", "GitHub", "McDonald"), in lowercase like every word,
+ranked by their counts with the rest. The capitals of the first come from the phone's dictionary
+(iOS) and en.capitals (Android); the second are written to <output>.spellings beside the model, one
+word<TAB>spelling line each, sorted by UTF-8 bytes.
+Last, after pairs are counted (the books barely have them), words newer than the books: the 2023-2025
+English news of the Leipzig Corpora Collection (ENGLISH_NEWS, CC BY 4.0, pinned by size and
+SHA-256), each a word the vocabulary lacks that NEWS_SITES news sites use, NEWS_LETTERS letters or
+more and not an acronym ("ChatGPT", "TikTok", "Nvidia", "wellbeing"), at the count its share of the
+news stands for; its commonest spelling after a sentence's first word goes to <output>.spellings
+when it isn't lowercase.
 
 Polish has no Google Books counts. Its words and word pairs come from the National Corpus of
 Polish's n-grams (NKJP, its 300M-word balanced subcorpus), kept only where PoliMorf lists the
@@ -64,6 +72,20 @@ MIN_PAIR = 2_000           # pairs rarer than this (1980-2019) can't make the cu
 # one capital first ("Monday", "Mary", "London"), three letters or more, join the English
 # vocabulary in lowercase, as the model spells every word.
 SCOWL_NAMES = tuple(f"{region}-{kind}" for region in ("english", "american", "british") for kind in ("upper", "proper-names"))
+# English words the books (1980-2019) are too old to have, from the news of 2023-2025: the Leipzig
+# Corpora Collection's English news downloads (https://wortschatz-leipzig.de/en/download), CC BY 4.0
+# (the downloads only; the collection's website and API are CC BY-NC and never used). File in
+# <workdir>: URL, fetched, bytes, SHA-256; the build refuses any other bytes.
+ENGLISH_NEWS = {
+    "eng_news_2023_1M.tar.gz": ("https://downloads.wortschatz-leipzig.de/corpora/eng_news_2023_1M.tar.gz",
+                                "2026-11-27", 287898033, "c8a5a5e72897aa5e367b0319c1884831c02aaf29bf81342de31ca1b1cc8f3e4c"),
+    "eng_news_2024_1M.tar.gz": ("https://downloads.wortschatz-leipzig.de/corpora/eng_news_2024_1M.tar.gz",
+                                "2026-11-27", 288362970, "8f1d4d07b9771f8a7fc219ad587d5382eabf5009ef563f1bc4c12a467a8e3a97"),
+    "eng_news_2025_1M.tar.gz": ("https://downloads.wortschatz-leipzig.de/corpora/eng_news_2025_1M.tar.gz",
+                                "2026-11-27", 291283406, "7cad9136013d27b6230841558d19c5ab39b18c502dce8ccd3a821fdf74b4081b"),
+}
+NEWS_SITES = 100   # a word the vocabulary lacks joins when this many news sites use it,
+NEWS_LETTERS = 4   # and it has this many letters: three-letter names ("Eid", "Isa", "Ole") took "did" and "is a" in the gate
 LETTERS = {"en": "abcdefghijklmnopqrstuvwxyz'", "es": "abcdefghijklmnopqrstuvwxyzñáéíóúü",
            "pl": "abcdefghijklmnopqrstuvwxyząćęłńóśźż"}
 # Base letters NFD doesn't give: ł has no decomposition.
@@ -219,7 +241,7 @@ def word_list(lang, work):
                     for w in t.extractfile(m).read().decode("latin-1").split():
                         if w == w[:1].upper() + w[1:].lower() and len(w.replace("'", "")) >= 3:
                             words.add(w.lower())
-        return words.__contains__
+        return (words | set(scowl_spellings(work))).__contains__
     from spylls.hunspell import Dictionary
     dictionaries = []
     for locale in RLA_ES_LOCALES:
@@ -227,6 +249,105 @@ def word_list(lang, work):
             fetch(f"{RLA_ES}{locale}.{ext}", os.path.join(work, f"{locale}.{ext}"))
         dictionaries.append(Dictionary.from_files(os.path.join(work, locale)))
     return lambda w: any(d.lookup(w) for d in dictionaries)
+
+
+def acronym(spelling):
+    """All capitals, or all capitals but a plural s ("NASA", "CEOs"): an acronym, which the keyboard leaves as typed."""
+    return spelling.rstrip("s").isupper()
+
+
+def scowl_spellings(work):
+    """SCOWL's (sizes up to 70) spellings with a capital after the first letter, a-z only, three letters or more and
+    not acronyms ("iPhone", "GitHub", "McDonald"), by their lowercase: the first in sorted order when it has two."""
+    spellings = {}
+    with tarfile.open(os.path.join(work, "scowl.tar.gz")) as t:
+        for m in t.getmembers():
+            kind, _, size = os.path.basename(m.name).rpartition(".")
+            if kind in SCOWL_NAMES and size.isdigit() and int(size) <= 70:
+                for w in t.extractfile(m).read().decode("latin-1").split():
+                    if re.fullmatch("[A-Za-z]{3,}", w) and any(c.isupper() for c in w[1:]) and not acronym(w):
+                        spellings[w.lower()] = min(spellings.get(w.lower(), w), w)
+    return spellings
+
+
+def news_input(name, work):
+    """`name` from ENGLISH_NEWS in `work`, fetched once and checked against its size and SHA-256."""
+    import hashlib
+    url, _, size, digest = ENGLISH_NEWS[name]
+    path = os.path.join(work, name)
+    fetch(url, path)
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    if os.path.getsize(path) != size or h.hexdigest() != digest:
+        sys.exit(f"{path}: {os.path.getsize(path)} bytes, SHA-256 {h.hexdigest()}; expected {size}, {digest}")
+    return path
+
+
+def news_counts(work):
+    """ENGLISH_NEWS's words: tokens, then for each a-z word its uses, the sites (URL hosts less "www.") that use it
+    and its spellings after a sentence's first word, cached in <workdir>/news-counts.tsv. A word is a whole
+    space-separated token less its punctuation and a possessive 's: tokens with a hyphen, a slash, a digit, "@",
+    another apostrophe or a letter outside a-z, and links, are skipped."""
+    import collections, io
+    path = os.path.join(work, "news-counts.tsv")
+    if not os.path.exists(path):
+        tokens, uses = 0, collections.Counter()
+        sites, forms = collections.defaultdict(set), collections.defaultdict(collections.Counter)
+        word = re.compile(r"[^\w'’]*([A-Za-z]+)(?:['’][sS])?[^\w'’]*")
+        site_ids = {}
+        for name in ENGLISH_NEWS:
+            with tarfile.open(news_input(name, work)) as t:
+                files = {m.name.rsplit("-", 1)[-1]: m for m in t.getmembers() if m.isfile()}
+                def text(kind):
+                    return io.TextIOWrapper(t.extractfile(files[kind]), encoding="utf-8", errors="replace")
+                host = {}
+                for line in text("sources.txt"):
+                    source, url = line.split("\t")[:2]
+                    h = re.sub(r"^https?://", "", url).split("/")[0].lower()
+                    host[source] = site_ids.setdefault(h[4:] if h.startswith("www.") else h, len(site_ids))
+                site_of = {}
+                for line in text("inv_so.txt"):
+                    source, sentence = line.rstrip("\n").split("\t")
+                    site_of[sentence] = host.get(source, -1)
+                for line in text("sentences.txt"):
+                    sentence, words = line.rstrip("\n").split("\t", 1)
+                    site = site_of.get(sentence, -1)
+                    for i, token in enumerate(words.split()):
+                        tokens += 1
+                        m = word.fullmatch(token)
+                        if not m or "www." in token.lower() or ".com" in token.lower():
+                            continue
+                        w = m.group(1)
+                        uses[w.lower()] += 1
+                        sites[w.lower()].add(site)
+                        if i:
+                            forms[w.lower()][w] += 1
+        with open(path + ".part", "w", encoding="utf-8") as f:
+            f.write(f"\t{tokens}\n")
+            for w in sorted(uses):
+                if len(sites[w]) >= 10:
+                    spelled = ",".join(f"{s}:{c}" for s, c in sorted(forms[w].items(), key=lambda x: (-x[1], x[0])))
+                    f.write(f"{w}\t{uses[w]}\t{len(sites[w])}\t{spelled}\n")
+        os.replace(path + ".part", path)
+    rows = {}
+    with open(path, encoding="utf-8") as f:
+        tokens = int(f.readline().split("\t")[1])
+        for line in f:
+            w, n, s, spelled = line.rstrip("\n").split("\t")
+            forms = [(x.rsplit(":", 1)[0], int(x.rsplit(":", 1)[1])) for x in spelled.split(",") if x]
+            rows[w] = (int(n), int(s), forms[0][0] if forms else w)
+    return tokens, rows
+
+
+def news_words(work, vocab, total):
+    """The words of the news the vocabulary lacks that NEWS_SITES sites use, NEWS_LETTERS letters or more, not acronyms:
+    each with the count its share of the news stands for in the books' total, and its commonest spelling after a
+    sentence's first word."""
+    tokens, rows = news_counts(work)
+    return {w: (round(total * n / tokens), spelling) for w, (n, s, spelling) in rows.items()
+            if s >= NEWS_SITES and len(w) >= NEWS_LETTERS and w not in vocab and not acronym(spelling)}
 
 
 def check_words(args):
@@ -303,7 +424,23 @@ def main(lang, work, out_path):
     pairs = {k: c for k, c in pairs.items() if all(w.decode("utf-8") in vocab for w in k.split(b" "))}
     for w, expansion in CONTRACTIONS.get(lang, {}).items():
         vocab[w] = max(vocab[w], pairs.get(expansion.encode("utf-8"), 0))
+    spellings = {}
+    if lang == "en":
+        # Hex's own chat and tech words are lowercase words ("wifi"), as build-capitals.py holds them.
+        extra = set(extra_words(lang, total))
+        spellings = {w: s for w, s in scowl_spellings(work).items() if w in vocab and w not in extra}
+        # Words newer than the books join after pairs are counted: the books barely have them.
+        for w, (c, spelling) in news_words(work, vocab, total).items():
+            vocab[w] = max(c, counts.get(w.encode("utf-8"), 0))
+            if spelling != w:
+                spellings[w] = spelling
     write_model(lang, vocab, total, pairs, out_path)
+    if spellings:
+        # Beside the model: word<TAB>spelling, sorted by UTF-8 bytes, as the capitals lists are.
+        with open(os.path.splitext(out_path)[0] + ".spellings", "w", encoding="utf-8", newline="\n") as f:
+            for w in sorted(spellings, key=lambda w: w.encode("utf-8")):
+                f.write(f"{w}\t{spellings[w]}\n")
+        print(f"{os.path.splitext(out_path)[0]}.spellings: {len(spellings)} spellings")
 
 
 def write_model(lang, vocab, total, pairs, out_path, min_pair=MIN_PAIR):
