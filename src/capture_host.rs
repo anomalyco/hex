@@ -98,10 +98,10 @@ pub use drawing::{KeyUp, annotate_key_down, annotate_key_up, drawing, exit_drawi
 use outcomes::Feed;
 #[cfg(target_os = "macos")]
 pub use outcomes::snapshot;
+use outcomes::{CaptureEnd, LIVE_OUTCOMES, Outcomes, SharedOutcomes, lock};
 pub use outcomes::{CaptureSnapshot, SettledCapture, watch};
 #[cfg(test)]
 pub use outcomes::{FinishingCapture, RecordingCapture};
-use outcomes::{LIVE_OUTCOMES, Outcomes, SharedOutcomes, lock};
 
 #[cfg(target_os = "macos")]
 pub use own_windows::DIM_WINDOWS;
@@ -1600,12 +1600,13 @@ impl CaptureHost {
                         silent,
                     );
                 })
-                .inspect_err(|_| {
+                .inspect_err(|error| {
                     if let Some(microphone) = microphone.take() {
                         let _ = microphone.close(audio, now);
                     }
                     remove_bundle(&bundle);
-                    lock(&self.outcomes).settle(bundle.clone(), Stage::Failed, None);
+                    lock(&self.outcomes)
+                        .settle(bundle.clone(), CaptureEnd::Failed(format!("{error:#}")));
                 })?
         };
         tracing::info!(bundle = %bundle.display(), ?target, "capture started");
@@ -2668,7 +2669,14 @@ fn finish_captures(
         match finished {
             Ok(written) if clip => {
                 tracing::info!(bundle = %bundle.display(), words = written.words, "recording finished");
-                lock(outcomes).settle(bundle.clone(), Stage::Done, Some(written));
+                lock(outcomes).settle(
+                    bundle.clone(),
+                    CaptureEnd::Written {
+                        audio: written,
+                        copy_error: None,
+                        route: None,
+                    },
+                );
                 if let Some(written) = CLIP_WRITTEN.get() {
                     written(bundle);
                 }
@@ -2687,13 +2695,13 @@ fn finish_captures(
                 if let Err(error) = paste_source::mark_ready(&bundle, crate::history::now_ms()) {
                     tracing::warn!(%error, "capture written without Paste Last provenance");
                 }
-                lock(outcomes).settle_with(
+                lock(outcomes).settle(
                     bundle.clone(),
-                    Stage::Done,
-                    Some(written),
-                    None,
-                    copy_error,
-                    route,
+                    CaptureEnd::Written {
+                        audio: written,
+                        copy_error,
+                        route,
+                    },
                 );
                 if let Some(look) = look {
                     let job = routing::Job::Written {
@@ -2706,8 +2714,9 @@ fn finish_captures(
                 }
             }
             Err(error) => {
-                tracing::error!(error = format!("{error:#}"), "capture failed");
-                lock(outcomes).settle(bundle, Stage::Failed, None);
+                let error = format!("{error:#}");
+                tracing::error!(error, "capture failed");
+                lock(outcomes).settle(bundle, CaptureEnd::Failed(error));
             }
         }
     }
@@ -2883,7 +2892,7 @@ fn collect(
             tracing::error!(error, "could not start the capture");
             drop(chunks);
             remove_bundle(&bundle);
-            lock(outcomes).fail(bundle, error);
+            lock(outcomes).settle(bundle, CaptureEnd::Failed(error));
             return;
         }
     };
@@ -2922,7 +2931,7 @@ fn collect(
                 timeline.discard();
                 capture.cancel();
                 remove_bundle(&bundle);
-                lock(outcomes).fail(bundle, error);
+                lock(outcomes).settle(bundle, CaptureEnd::Failed(error));
                 return;
             }
         }
@@ -2975,7 +2984,7 @@ fn collect(
             capture.cancel();
         }
     }
-    lock(outcomes).settle(bundle, Stage::Cancelled, None);
+    lock(outcomes).settle(bundle, CaptureEnd::Cancelled);
 }
 
 /// `hex dev capture-replay`: runs a capture through [`CaptureHost`] on a
@@ -3913,6 +3922,82 @@ mod tests {
         assert!(audio.open.lock().unwrap().is_none(), "the sink is closed");
         host.shutdown(&audio);
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_finisher_failure_reaches_the_capsule_with_its_reason() {
+        use crate::rune_ui::capture_capsule::{
+            feed::Follow,
+            flow::{Failure, Input},
+        };
+
+        struct FinishFails;
+        impl CaptureEngine for FinishFails {
+            fn start(&self, start: Start) -> anyhow::Result<Box<dyn Recording>> {
+                Ok(Box::new(FailOnFinish {
+                    dir: start.bundle_dir.unwrap(),
+                }))
+            }
+
+            fn phones(&self) -> anyhow::Result<Vec<String>> {
+                Ok(Vec::new())
+            }
+        }
+        struct FailOnFinish {
+            dir: PathBuf,
+        }
+        impl Recording for FailOnFinish {
+            fn cancel(self: Box<Self>) {
+                let _ = fs::remove_dir_all(&self.dir);
+            }
+
+            fn stop(self: Box<Self>) -> Box<dyn Sealed> {
+                self
+            }
+        }
+        impl Sealed for FailOnFinish {
+            fn cancel(self: Box<Self>) {
+                let _ = fs::remove_dir_all(&self.dir);
+            }
+
+            fn finish(self: Box<Self>, _audio: Option<RecordedAudio>) -> anyhow::Result<Written> {
+                anyhow::bail!("disk full while writing bundle")
+            }
+        }
+
+        let dir = temp_dir("finish-fails");
+        let audio = FakeTimeline::default();
+        let mut host = CaptureHost::with(Arc::new(FinishFails), Some(dir.clone())).unwrap();
+        let bundle = report(host.control(ScrawlCaptureAction::Start, &audio))
+            .bundle
+            .unwrap();
+        lock(&host.outcomes).progress(&bundle, Stage::Recording);
+        let mut follow = Follow::default();
+        assert_eq!(
+            follow.next(&lock(&host.outcomes).snapshot()),
+            [Input::Stage(Stage::Recording)]
+        );
+        assert!(report(host.control(ScrawlCaptureAction::Stop, &audio)).changed);
+        let last = wait_for_last(&mut host, &audio, &bundle, true);
+        assert_eq!(last.stage, "failed");
+
+        let snapshot = lock(&host.outcomes).snapshot();
+        let settled = snapshot.last.as_ref().unwrap();
+        assert_eq!(settled.bundle, bundle);
+        assert_eq!(settled.stage, Stage::Failed);
+        assert_eq!(
+            settled.error.as_deref(),
+            Some("disk full while writing bundle")
+        );
+        assert_eq!(
+            follow.next(&snapshot),
+            [Input::Failed(
+                Failure::Save,
+                Some("disk full while writing bundle".into()),
+            )]
+        );
+        host.shutdown(&audio);
+        fs::remove_dir_all(dir).ok();
     }
 
     #[test]
@@ -5160,13 +5245,16 @@ mod tests {
         outcomes.progress(&two, Stage::Writing);
         outcomes.settle(
             one.clone(),
-            Stage::Done,
-            Some(Written {
-                words: 3,
-                gaps: 0,
-                audio_stopped_at_ms: None,
-                missing_transcript: None,
-            }),
+            CaptureEnd::Written {
+                audio: Written {
+                    words: 3,
+                    gaps: 0,
+                    audio_stopped_at_ms: None,
+                    missing_transcript: None,
+                },
+                copy_error: None,
+                route: None,
+            },
         );
         let done = watch.changed().unwrap();
         assert_eq!(
@@ -5203,11 +5291,35 @@ mod tests {
         assert_eq!(watch.changed(), None);
         assert_eq!(feed.snapshot(), done);
 
-        outcomes.settle(two.clone(), Stage::Cancelled, None);
+        outcomes.settle(two.clone(), CaptureEnd::Cancelled);
         let idle = watch.wait(Duration::from_secs(1)).unwrap();
         assert!(idle.recording.is_none() && idle.finishing.is_empty());
         assert_eq!(idle.last.unwrap().stage, Stage::Cancelled);
         assert!(outcomes.idle());
+
+        // Settling a discarded capture as Failed never replaces `last`.
+        let three = PathBuf::from("/c/three");
+        outcomes.start(three.clone(), since, TargetKind::Pointer, false);
+        outcomes.stopped(&three, End::Discard);
+        let before = watch.changed().unwrap();
+        assert_eq!(before.last.as_ref().unwrap().bundle, two);
+        outcomes.settle(three.clone(), CaptureEnd::Failed("late error".into()));
+        assert_eq!(watch.changed(), None);
+        assert!(outcomes.idle());
+        assert_eq!(feed.snapshot().last.as_ref().unwrap().bundle, two);
+
+        // Late progress after a Failed settle changes nothing.
+        let four = PathBuf::from("/c/four");
+        outcomes.start(four.clone(), since, TargetKind::Pointer, false);
+        outcomes.stopped(&four, End::Finish);
+        outcomes.settle(four.clone(), CaptureEnd::Failed("encoder exited".into()));
+        let failed = watch.changed().unwrap();
+        assert_eq!(
+            failed.last.as_ref().unwrap().error.as_deref(),
+            Some("encoder exited")
+        );
+        outcomes.progress(&four, Stage::Writing);
+        assert_eq!(watch.changed(), None);
 
         // A dropped watcher stops being woken.
         drop(watch);

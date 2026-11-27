@@ -44,8 +44,8 @@ use serde::Serialize;
 use super::{AudioTimeline, FinishJob, SharedOutcomes};
 #[cfg(target_os = "macos")]
 use super::{
-    CaptureAudio, ChosenTranscriber, End, Sealed, Stage, TargetKind, Written, hex_engine_config,
-    lock, new_bundle_dir, remove_bundle, routing,
+    CaptureAudio, CaptureEnd, ChosenTranscriber, End, Sealed, Stage, TargetKind, Written,
+    hex_engine_config, lock, new_bundle_dir, remove_bundle, routing,
 };
 use crate::audio::CaptureInstant;
 use crate::control::ControlReply;
@@ -389,7 +389,7 @@ impl Controller {
                 }
                 Err(mpsc::TrySendError::Full(job) | mpsc::TrySendError::Disconnected(job)) => {
                     job.capture.cancel();
-                    lock(outcomes).settle(bundle, Stage::Cancelled, None);
+                    lock(outcomes).settle(bundle, CaptureEnd::Cancelled);
                     Err(ControlReply::error(
                         "busy",
                         "Capture finish queue is full; try again shortly",
@@ -525,7 +525,7 @@ impl Controller {
         lock(outcomes).stopped(&active.bundle, End::Finish);
         let Some(jobs) = finisher else {
             remove_bundle(&active.bundle);
-            lock(outcomes).settle(active.bundle, Stage::Cancelled, None);
+            lock(outcomes).settle(active.bundle, CaptureEnd::Cancelled);
             return;
         };
         let sealed = Box::new(SealedReplay {
@@ -552,7 +552,7 @@ impl Controller {
             }
             Err(mpsc::TrySendError::Full(job) | mpsc::TrySendError::Disconnected(job)) => {
                 job.capture.cancel();
-                lock(outcomes).settle(active.bundle, Stage::Cancelled, None);
+                lock(outcomes).settle(active.bundle, CaptureEnd::Cancelled);
             }
         }
     }
@@ -581,7 +581,7 @@ impl Controller {
         let _ = audio.close_sink(now);
         lock(outcomes).stopped(&active.bundle, end);
         remove_bundle(&active.bundle);
-        lock(outcomes).settle(active.bundle, Stage::Cancelled, None);
+        lock(outcomes).settle(active.bundle, CaptureEnd::Cancelled);
     }
 
     #[cfg(target_os = "macos")]
