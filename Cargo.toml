@@ -108,12 +108,19 @@ url = "2.5.8"
 # name and panics on any https request without it.
 ureq = { version = "3.4.2", default-features = false, features = ["native-tls"] }
 
+[dev-dependencies]
+# The cleanup tagger's archive reader is tested on every OS; only macOS ships it.
+flate2 = "1.1.10"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 capture-core = { path = "crates/capture-core" }
 arboard = { version = "3.6.1", default-features = false }
 block2 = "0.6.2"
 core-graphics-types = "0.1.3"
 crossterm = "0.29.0"
+# Inflates the cleanup tagger's model archive (`dictation/cleanup/archive.rs`).
+# Already in Cargo.lock through `png`, so it adds no crate.
+flate2 = "1.1.10"
 objc2 = "0.6.4"
 objc2-app-kit = "0.3.2"
 objc2-core-audio = "0.3.2"

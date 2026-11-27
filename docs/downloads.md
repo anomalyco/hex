@@ -58,7 +58,8 @@ App and model downloads have different hosts. Managed networks may need to allow
 - `anoma.ly` (paths `/release/` and, for 2.3.1, `/hex/files/`) for app
   downloads and updates (`downloads.hex.kitlangton.dev` too for releases up to
   2.3.1, which reach it through a redirect).
-- GitHub release downloads and their asset delivery host for the alternative DMG.
+- GitHub release downloads and their asset delivery host for the alternative DMG
+  and, on macOS while Labs › Clean up what I say is on, its cleanup model.
 - `huggingface.co` and its model download CDN for dictation-model setup.
 
 On September 11, 2026, a HEAD request for the pinned default Parakeet Unified

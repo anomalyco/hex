@@ -64,6 +64,9 @@ impl Feature {
             Self::NeutralVoice => {
                 "Rewrite dictations in chosen modes into plain, neutral wording on this Mac, so your writing style doesn't show"
             }
+            Self::CleanupTagger => {
+                "Remove ums, repeated words, false starts, and things you correct out loud from English dictations with Hex's own small model, downloaded once (26 MB) and run on this Mac; it only removes words, and keeps names, numbers, negations, and vocabulary terms (macOS)"
+            }
             Self::ModelSwitchShortcut => {
                 "One shortcut that swaps dictation to another model and language (model_switch_other), and back"
             }

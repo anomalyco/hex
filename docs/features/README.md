@@ -52,6 +52,11 @@ byte unchanged. Its Clean up with Apple Intelligence toggle (off by default,
 macOS) gives each dictation its mode does not rewrite one short on-device pass
 that fixes clearly misheard words and spoken self-corrections, pasting the
 corrected text whenever Apple Intelligence is unavailable, slow, or refuses.
+Its Clean up what I say toggle (off by default, macOS) takes ums, repeats,
+false starts, and spoken corrections out of each English dictation with a
+small model that runs on this Mac and can only remove words; the model
+downloads the first time a dictation starts with the toggle on, and a model
+that is missing, slow, or failing pastes the words as heard.
 Its Neutral voice toggle (off by default, macOS) rewrites a chosen mode's
 dictations into plain, neutral wording on this Mac instead of that mode's
 OpenCode rewrite and the cleanup, so the neutral pass never sends the text to
@@ -1477,6 +1482,7 @@ Selected mode                            // replaces Global's rewrite and transf
   -> Speech Labs preparation              // formatting, symbols, English filler removal
   -> Global's corrections, then the mode's  // every OS
   -> Labs > Neutral voice, in a mode that opts in  // macOS; replaces the rewrite and cleanup; transformations still run
+  -> Labs > Clean up what I say          // macOS, English; a small on-device model removes ums, repeats, and spoken corrections (labs.md)
   -> Labs > Rewrite by voice's phrase          // Labs off, or no phrase, processes as before
      -> one spoken instruction replaces the rewrite, with the mode's model and deadline (labs.md)
   -> OpenCode transformation             // optional provider-backed rewrite; an unset model is Hex's ranked pick, shown Automatic

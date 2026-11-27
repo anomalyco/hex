@@ -603,9 +603,10 @@ was not compiled or run here (Linux check, Windows cross-clippy only).
 
 On macOS a raw capture never reaches the processing worker at all
 (`parakeet::run_inference_worker` queues only Paste, Copy only, and Print; the
-raw targets go straight to output), so it also skips Labs › Clean up with
-Apple Intelligence and Labs › Neutral voice ([labs.md](labs.md)); elsewhere
-that stage is macOS-only, so it never runs on the shared pipeline either.
+raw targets go straight to output), so it also skips Labs › Clean up what I
+say, Labs › Clean up with Apple Intelligence, and Labs › Neutral voice
+([labs.md](labs.md)); elsewhere those stages are macOS-only, so they never run
+on the shared pipeline either.
 
 ### Transform Typed Text (Labs, Linux)
 
@@ -686,6 +687,36 @@ text is read through `wl-paste`, which may briefly take focus. Proof limits: no
 shortcut press against a real target application was run; the flow is covered
 by unit tests only.
 
+### Clean Up What I Say (Labs, macOS)
+
+While Labs › Clean up what I say is on (`labs.cleanup_tagger`, off by
+default), each English dictation loses its ums, repeated words, false starts,
+and spoken corrections on this Mac, with the small cleanup model the iPhone
+app uses.
+
+```text
+Corrected transcript (speech Labs, then Global's and the mode's corrections)
+  -> Labs > Clean up what I say          // macOS, English only
+     ├── Not English ("auto" too), Verbatim style, numbers alone, typed text,
+     │   Neutral voice, a voice prompt   -> skipped, nothing recorded
+     ├── Words -> chunks -> tagger (Core ML, CPU only, 150 ms)
+     │   -> guard (keeps names, numbers, and vocabulary terms that were not
+     │      corrected out loud) -> render
+     ├── Model still downloading, late, or failing
+     │   -> the corrected words as heard, and History says why
+     └── Only ever removes words that were heard
+  -> Clean up with Apple Intelligence, or the mode's OpenCode rewrite
+  -> Dictation style -> Transformations -> Paste
+```
+
+The model (26 MB) is not in the app: it downloads from Hex's GitHub release
+the first time a capture starts with the lab on, is checked against a pinned
+SHA-256 before it is unpacked, and lives in `<models>/cleanup/`. With the lab
+off nothing is fetched or loaded. One copy stays loaded while the lab is on,
+and Labs › Free memory when idle frees it with the speech model. See
+[labs.md](labs.md) for the stage, the install, the fallbacks, and the checks.
+Not observed: a real dictation through the running app with the lab on.
+
 ### Rewrite With Nearby Text (Labs, macOS)
 
 While Labs › Rewrite reads nearby text is on (`labs.cursor_context`, off by
@@ -721,8 +752,8 @@ do they say Default and Use OpenCode default, because then OpenCode's own
 default answers. `live.ndjson` and History's processing observation record the
 rewrite model as `provider/id` in a `model` field, omitted when no model was
 named (OpenCode's own default answered, Hex's automatic choice failed before any
-model answered, or the on-device Apple Intelligence cleanup or Neutral voice
-pass ran). The "dictation
+model answered, or the on-device Apple Intelligence cleanup, Neutral voice
+pass, or cleanup tagger ran). The "dictation
 post-processing" and "voice prompt" completed and failed log lines name it too:
 `provider/id` for the named model that answered, or on failure the one the
 request asked for; `opencode default` when no model was named and OpenCode's

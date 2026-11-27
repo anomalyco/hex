@@ -99,6 +99,10 @@ fn main() {
         None,
     );
     println!("cargo:rustc-link-arg=-Wl,-weak_framework,FoundationModels");
+    // Labs › Clean up what I say runs Hex's cleanup tagger through Core ML,
+    // on the CPU.
+    compile_swift_bridge("cleanup_tagger", "HEXCleanupTaggerBridge", &[], None);
+    println!("cargo:rustc-link-lib=framework=CoreML");
     compile_swift_bridge("calendar", "HEXCalendarBridge", &[], None);
     println!("cargo:rustc-link-lib=framework=EventKit");
     compile_permission_guide();
