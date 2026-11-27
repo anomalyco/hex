@@ -9,6 +9,7 @@ impl MeetingsPane {
     pub(in crate::rune_ui) fn fixture() -> Self {
         let turn = |mine, seconds: u64, text: &str| Turn {
             mine,
+            name: None,
             start_ms: seconds * 1_000,
             text: text.into(),
             pause_before_ms: None,

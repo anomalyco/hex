@@ -18,8 +18,8 @@ use serde::{Deserialize, Serialize};
 
 use super::generator::{self, GeneratedChapter, GenerationError};
 use super::{
-    MeetingManifest, TranscriptEntry, TranscriptReader, coalesce_transcript, display_title,
-    format_duration, read_manifest, write_manifest,
+    Labels, MeetingManifest, TranscriptEntry, TranscriptReader, coalesce_transcript, display_title,
+    format_duration, read_manifest, section_markdown, write_manifest,
 };
 
 /// How often the worker looks at the transcript; passes are far rarer.
@@ -103,17 +103,6 @@ pub fn chapter_entries(
         .collect()
 }
 
-/// One chapter as Markdown for copying: its name, its line, and its turns.
-pub fn section_markdown(chapter: &Chapter, entries: &[TranscriptEntry], imported: bool) -> String {
-    let mut markdown = format!("## {}\n\n", chapter.title.trim());
-    if !chapter.summary.trim().is_empty() {
-        markdown.push_str(chapter.summary.trim());
-        markdown.push_str("\n\n");
-    }
-    markdown.push_str(&super::transcript_markdown_with(entries, imported));
-    markdown.trim_end().to_string()
-}
-
 /// Chapter `index` of meeting `id` as Markdown, from its current transcript
 /// (rolling while it records). For the menu bar's Copy Section.
 pub fn section_for_id(id: &str, index: usize) -> Result<String> {
@@ -126,7 +115,7 @@ pub fn section_for_id(id: &str, index: usize) -> Result<String> {
     Ok(section_markdown(
         chapter,
         &chapter_entries(&entries, &manifest.chapters, index),
-        manifest.imported,
+        manifest.labels(),
     ))
 }
 
@@ -411,7 +400,7 @@ pub(super) fn pass_window(
             format!(
                 "[{}] {}: {}",
                 format_duration(turn.start_ms),
-                turn.source.label(),
+                Labels::default().of(turn),
                 truncate_words(turn.text.trim(), max_chars)
             )
         })
@@ -706,7 +695,7 @@ fn sections(entries: &[TranscriptEntry], chapters: &[Chapter], max_chars: usize)
                         "L{} [{}] {}: {}",
                         index + 1,
                         format_duration(entry.start_ms),
-                        entry.source.label(),
+                        Labels::default().of(entry),
                         truncate_words(entry.text.trim(), REFINE_LINE_CHARS)
                     ),
                 })
@@ -999,7 +988,7 @@ pub fn chapters_file(path: &Path) -> Result<String> {
     generator::available().map_err(|reason| eyre!("{reason}"))?;
     let text = std::fs::read_to_string(path)
         .wrap_err_with(|| format!("could not read {}", path.display()))?;
-    let entries = super::notes::entries_from_markdown(&text);
+    let entries = super::markdown::entries_from_markdown(&text);
     let end_ms = entries.iter().map(|entry| entry.end_ms).max().unwrap_or(0);
     // This process never loads settings, so read the saved list directly.
     let terms = crate::app_paths::support_dir()

@@ -1,6 +1,7 @@
 use super::TranscriptEntry;
 
-/// Adjacent entries from the same speaker within this pause form one turn.
+/// Adjacent entries on the same track from the same speaker within this
+/// pause form one turn.
 pub(crate) const TURN_GAP_MS: u64 = 3_000;
 
 /// Approximate per-turn prefix overhead (`[mm:ss · HH:MM:SS] Them: `) used
@@ -57,6 +58,7 @@ pub(crate) fn coalesce_with_options(
         }
         let can_merge = turns.last().is_some_and(|turn| {
             turn.source == entry.source
+                && turn.speaker == entry.speaker
                 && entry.start_ms.saturating_sub(turn.end_ms) <= TURN_GAP_MS
                 && options
                     .max_words
@@ -116,12 +118,46 @@ mod tests {
     use crate::meeting::MeetingSource;
 
     fn entry(source: MeetingSource, start_ms: u64, end_ms: u64, text: &str) -> TranscriptEntry {
-        TranscriptEntry {
-            source,
-            start_ms,
-            end_ms,
-            text: text.into(),
-        }
+        TranscriptEntry::new(source, start_ms, end_ms, text)
+    }
+
+    /// One track carries everyone remote, so a turn ends where the speaker
+    /// changes: between two named people, and between a named person and
+    /// speech nobody was named for.
+    #[test]
+    fn a_turn_splits_where_the_speaker_changes() {
+        let mut speakers = crate::meeting::Speakers::default();
+        let from = crate::meeting::NameSource::CallApp;
+        let mut add = |name| {
+            let name = crate::meeting::SpeakerName::parse(name).unwrap();
+            Some(speakers.add(name, from))
+        };
+        let priya = add("Priya Nair");
+        let marcus = add("Marcus Webb");
+        let said = |speaker: &Option<crate::meeting::SpeakerId>, start_ms, text| TranscriptEntry {
+            speaker: speaker.clone(),
+            ..entry(MeetingSource::System, start_ms, start_ms + 900, text)
+        };
+        let turns = coalesce_transcript([
+            said(&priya, 0, "Thursday works"),
+            said(&priya, 1_000, "if the migration lands."),
+            said(&None, 2_000, "Yeah."),
+            said(&marcus, 3_000, "I can take it."),
+            said(&priya, 4_000, "Thanks."),
+        ]);
+        let heard = turns
+            .iter()
+            .map(|turn| (turn.speaker.clone(), turn.text.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            heard,
+            [
+                (priya.clone(), "Thursday works if the migration lands."),
+                (None, "Yeah."),
+                (marcus, "I can take it."),
+                (priya, "Thanks."),
+            ]
+        );
     }
 
     #[test]

@@ -4,12 +4,7 @@ use std::fs;
 use std::sync::atomic::AtomicUsize;
 
 fn entry(source: MeetingSource, start_ms: u64, text: &str) -> TranscriptEntry {
-    TranscriptEntry {
-        source,
-        start_ms,
-        end_ms: start_ms + 5_000,
-        text: text.into(),
-    }
+    TranscriptEntry::new(source, start_ms, start_ms + 5_000, text)
 }
 
 /// One line every 30 s, alternating speakers so each is its own turn: the
@@ -578,7 +573,7 @@ fn a_section_holds_its_chapters_turns_as_markdown() {
         section_markdown(
             &chapters[0],
             &chapter_entries(&entries, &chapters, 0),
-            false
+            Labels::default()
         ),
         "## Image storage\n\nWhere images live.\n\n**Them** · 00:00\nWhere do images live?\n\n**You** · 01:00\nIn the bucket."
     );
@@ -586,12 +581,16 @@ fn a_section_holds_its_chapters_turns_as_markdown() {
         section_markdown(
             &chapters[1],
             &chapter_entries(&entries, &chapters, 1),
-            false
+            Labels::default()
         ),
         "## Motion lint\n\n**Them** · 03:20\nNow the lint rules.\n\n**You** · 03:50\nThey flag snaps."
     );
     assert_eq!(
-        section_markdown(&chapters[1], &chapter_entries(&entries, &chapters, 1), true),
+        section_markdown(
+            &chapters[1],
+            &chapter_entries(&entries, &chapters, 1),
+            Labels::imported(&crate::meeting::Speakers::default())
+        ),
         "## Motion lint\n\n**Speaker** · 03:20\nNow the lint rules.\n\n**Speaker** · 03:50\nThey flag snaps."
     );
 }

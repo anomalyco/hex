@@ -712,37 +712,74 @@ fn meeting_chapters_list_and_select_a_chapter_in_json_and_markdown() {
 fn subtitles_render_speaker_turns_as_srt_and_vtt_cues() {
     use crate::meeting::{MeetingSource, TranscriptEntry};
     let entries = [
-        TranscriptEntry {
-            source: MeetingSource::Microphone,
-            start_ms: 5_500,
-            end_ms: 8_000,
-            text: "Hello <there> & welcome.".into(),
-        },
-        TranscriptEntry {
-            source: MeetingSource::System,
-            start_ms: 3_725_042,
-            end_ms: 3_725_000,
-            text: "First line\n\n  \nsecond --> line".into(),
-        },
-        TranscriptEntry {
-            source: MeetingSource::System,
-            start_ms: 3_800_000,
-            end_ms: 3_801_000,
-            text: " \n ".into(),
-        },
+        TranscriptEntry::new(
+            MeetingSource::Microphone,
+            5_500,
+            8_000,
+            "Hello <there> & welcome.",
+        ),
+        TranscriptEntry::new(
+            MeetingSource::System,
+            3_725_042,
+            3_725_000,
+            "First line\n\n  \nsecond --> line",
+        ),
+        TranscriptEntry::new(MeetingSource::System, 3_800_000, 3_801_000, " \n "),
     ];
     assert_eq!(
-        render_subtitles(&entries, SubtitleFormat::Srt),
+        render_subtitles(&entries, Labels::default(), SubtitleFormat::Srt),
         "1\n00:00:05,500 --> 00:00:08,000\nYou: Hello <there> & welcome.\n\n\
          2\n01:02:05,042 --> 01:02:05,042\nThem: First line\nsecond -> line\n\n"
     );
     assert_eq!(
-        render_subtitles(&entries, SubtitleFormat::Vtt),
+        render_subtitles(&entries, Labels::default(), SubtitleFormat::Vtt),
         "WEBVTT\n\n\
          00:00:05.500 --> 00:00:08.000\n<v You>Hello &lt;there&gt; &amp; welcome.\n\n\
          01:02:05.042 --> 01:02:05.042\n<v Them>First line\nsecond -&gt; line\n\n"
     );
-    assert_eq!(subtitle_time(360_000_000, ','), "100:00:00,000");
+    assert_eq!(subtitles::subtitle_time(360_000_000, ','), "100:00:00,000");
+}
+
+/// A meeting whose manifest names a speaker: JSON gains the table and the
+/// line's id, and subtitles carry the name. Unnamed meetings are covered by
+/// `meeting_json_contract_snapshot`, whose fixture has neither field.
+#[test]
+fn a_named_speaker_shows_in_meeting_json_and_subtitles() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/meetings");
+    let id = "1790000500000-1002";
+    let root = std::env::temp_dir().join(format!("hex-cli-speakers-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    copy_dir_all(&fixtures.join(id), &root.join(id));
+    let path = root.join(id).join("manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let speakers = serde_json::json!([{"id": "s1", "name": "Priya & Co", "from": "call_app"}]);
+    manifest["speakers"] = speakers.clone();
+    fs::write(&path, manifest.to_string()).unwrap();
+    fs::write(
+        root.join(id).join("transcript.ndjson"),
+        concat!(
+            r#"{"source":"system","start_ms":0,"end_ms":5000,"text":"Let's review.","speaker":"s1"}"#,
+            "\n",
+            r#"{"source":"microphone","start_ms":5500,"end_ms":12000,"text":"Profiling first."}"#,
+            "\n",
+        ),
+    )
+    .unwrap();
+
+    let meeting = Library::new(&root).meeting(id).unwrap();
+    let json = meeting_json(&meeting, OffsetRange::default(), NOW).unwrap();
+    assert_eq!(json["version"], 1);
+    assert_eq!(json["meeting"]["speakers"], speakers);
+    assert_eq!(json["entries"][0]["speaker"], "s1");
+    assert!(json["entries"][1].get("speaker").is_none(), "{json}");
+
+    let labels = Labels::by_track(&meeting.manifest.speakers);
+    let cues = |format| render_subtitles(meeting.entries.iter(), labels, format);
+    assert!(cues(SubtitleFormat::Srt).contains("\nPriya & Co: Let's review.\n"));
+    assert!(cues(SubtitleFormat::Srt).contains("\nYou: Profiling first.\n"));
+    assert!(cues(SubtitleFormat::Vtt).contains("\n<v Priya &amp; Co>Let's review.\n"));
+    fs::remove_dir_all(&root).unwrap();
 }
 
 #[test]
@@ -751,7 +788,11 @@ fn subtitles_follow_the_range_and_need_the_labs_toggle() {
         Library::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/meetings"));
     let meeting = library.meeting("1790000500000-1002").unwrap();
     let range = OffsetRange::parse(Some("0:06"), Some("14")).unwrap();
-    let srt = render_subtitles(meeting.entries_in(range, NOW).unwrap(), SubtitleFormat::Srt);
+    let srt = render_subtitles(
+        meeting.entries_in(range, NOW).unwrap(),
+        Labels::default(),
+        SubtitleFormat::Srt,
+    );
     assert!(srt.starts_with("1\n00:00:05,500 --> "), "{srt}");
     assert!(srt.contains("\n2\n00:00:13,000 --> "), "{srt}");
     assert!(srt.contains("You: Performance profiling"), "{srt}");

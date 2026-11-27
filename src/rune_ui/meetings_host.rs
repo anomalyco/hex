@@ -157,7 +157,7 @@ fn pane_meeting(
     let transcript = if meeting.entries.is_empty() && !meeting.warnings.is_empty() {
         Transcript::Unavailable(meeting.warnings.join("\n"))
     } else {
-        Transcript::Loaded(turns(&meeting.entries))
+        Transcript::Loaded(turns(&meeting.entries, meeting.manifest.labels()))
     };
     let folder = root.join(&meeting.id);
     Meeting {
@@ -212,8 +212,9 @@ fn pane_meeting(
 }
 
 /// Speaker turns, marking silences of 30 s or more. Each turn carries the
-/// published lines it covers so the pane can delete exactly those.
-fn turns(entries: &[crate::meeting::TranscriptEntry]) -> Vec<Turn> {
+/// published lines it covers so the pane can delete exactly those, and the
+/// remote speaker's name where `labels` has one.
+fn turns(entries: &[crate::meeting::TranscriptEntry], labels: crate::meeting::Labels) -> Vec<Turn> {
     let mut previous_end: Option<u64> = None;
     let mut cursor = 0;
     crate::meeting::coalesce_transcript(entries.iter().cloned())
@@ -228,6 +229,7 @@ fn turns(entries: &[crate::meeting::TranscriptEntry]) -> Vec<Turn> {
             let mut covered = Vec::new();
             while let Some(entry) = entries.get(cursor) {
                 if entry.source != turn.source
+                    || entry.speaker != turn.speaker
                     || entry.start_ms < turn.start_ms
                     || entry.end_ms > turn.end_ms
                 {
@@ -238,6 +240,7 @@ fn turns(entries: &[crate::meeting::TranscriptEntry]) -> Vec<Turn> {
             }
             Turn {
                 mine: turn.source == crate::meeting::MeetingSource::Microphone,
+                name: labels.of(&turn).name().cloned(),
                 start_ms: turn.start_ms,
                 text: turn.text,
                 pause_before_ms,
@@ -273,12 +276,7 @@ mod tests {
     /// transcript order, however the speakers interleave.
     #[test]
     fn turns_carry_exactly_their_own_published_lines() {
-        let line = |source, start_ms: u64, end_ms: u64, text: &str| TranscriptEntry {
-            source,
-            start_ms,
-            end_ms,
-            text: text.into(),
-        };
+        let line = TranscriptEntry::new;
         let entries = vec![
             line(MeetingSource::Microphone, 0, 4_000, "First."),
             line(MeetingSource::Microphone, 4_000, 8_000, "Second."),
@@ -293,7 +291,7 @@ mod tests {
         ];
         let keys = |turn: &Turn| turn.entries.clone();
         let of = TranscriptEntryKey::of;
-        let turns = turns(&entries);
+        let turns = turns(&entries, crate::meeting::Labels::default());
         assert_eq!(
             turns.iter().map(|turn| turn.start_ms).collect::<Vec<_>>(),
             [0, 8_000, 12_000, 20_000],
@@ -304,6 +302,32 @@ mod tests {
         assert_eq!(keys(&turns[1]), [of(&entries[2])]);
         assert_eq!(keys(&turns[2]), [of(&entries[3])]);
         assert_eq!(keys(&turns[3]), [of(&entries[4])]);
+    }
+
+    /// Remote lines share one track, so the pane's turns split where the
+    /// speaker changes, and a named turn shows the name instead of Them.
+    #[test]
+    fn a_named_speaker_gets_their_own_turn_under_their_name() {
+        let mut speakers = crate::meeting::Speakers::default();
+        let name = crate::meeting::SpeakerName::parse("Priya Nair").unwrap();
+        let priya = Some(speakers.add(name.clone(), crate::meeting::NameSource::CallApp));
+        let said = |speaker: &Option<_>, start_ms, text| TranscriptEntry {
+            speaker: speaker.clone(),
+            ..TranscriptEntry::new(MeetingSource::System, start_ms, start_ms + 900, text)
+        };
+        let entries = [
+            said(&priya, 0, "Thursday works"),
+            said(&priya, 1_000, "if the migration lands."),
+            said(&None, 2_000, "Yeah."),
+        ];
+        let turns = turns(&entries, crate::meeting::Labels::by_track(&speakers));
+        let shown = turns
+            .iter()
+            .map(|turn| (turn.speaker(false), turn.entries.len()))
+            .collect::<Vec<_>>();
+        assert_eq!(shown, [("Priya Nair", 2), ("Them", 1)]);
+        assert_eq!(turns[0].name, Some(name));
+        assert_eq!(turns[1].name, None);
     }
 
     #[test]
@@ -360,11 +384,9 @@ mod tests {
         .unwrap();
         // One speaker's two lines join into one turn across the boundary
         // at 06:30; the second line belongs to the chapter after.
-        let line = |start_ms: u64, end_ms: u64, text: &str| crate::meeting::TranscriptEntry {
-            source: crate::meeting::MeetingSource::Microphone,
-            start_ms,
-            end_ms,
-            text: text.into(),
+        let line = |start_ms: u64, end_ms: u64, text: &str| {
+            let source = crate::meeting::MeetingSource::Microphone;
+            crate::meeting::TranscriptEntry::new(source, start_ms, end_ms, text)
         };
         let entries = [
             line(181_000, 188_000, "Next, the motion lint."),
@@ -396,7 +418,7 @@ mod tests {
             let menu = crate::meeting::section_markdown(
                 &chapters[index],
                 &crate::meeting::chapter_entries(&entries, chapters, index),
-                meeting.manifest.imported,
+                meeting.manifest.labels(),
             );
             assert_eq!(chapter.markdown, menu);
             let cli = library.chapter_markdown(id, index + 1, now_ms).unwrap();

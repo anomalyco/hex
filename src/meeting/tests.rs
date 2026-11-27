@@ -38,6 +38,7 @@ fn transcript_entries_coalesce_into_source_turns_without_hiding_long_pauses() {
         start_ms,
         end_ms,
         text: text.into(),
+        speaker: None,
     };
     let turns = coalesce_transcript([
         entry(MeetingSource::Microphone, 0, 1_000, "First."),
@@ -65,6 +66,7 @@ fn final_transcript_replaces_the_rolling_transcript_atomically() {
         start_ms: 0,
         end_ms: 500,
         text: "rolling transcript".into(),
+        speaker: None,
     };
     fs::write(
         directory.join(transcript::ROLLING_FILE),
@@ -84,6 +86,7 @@ fn final_transcript_replaces_the_rolling_transcript_atomically() {
         start_ms: 0,
         end_ms: 500,
         text: "final transcript".into(),
+        speaker: None,
     };
     fs::write(
         directory.join("transcript.ndjson"),
@@ -119,6 +122,7 @@ fn reading_a_transcript_ignores_an_in_flight_trailing_write() {
         start_ms: 0,
         end_ms: 500,
         text: "complete".into(),
+        speaker: None,
     };
     fs::write(
         &path,
@@ -179,6 +183,7 @@ fn capture_failures_are_persisted_instead_of_looking_interrupted() {
         notes_export_removed: false,
         audio_removed_at_ms: None,
         imported: false,
+        speakers: Default::default(),
     };
     write_manifest(&directory, &manifest).unwrap();
 
@@ -230,6 +235,7 @@ fn mid_meeting_capture_loss_proceeds_to_transcription_when_audio_was_recorded() 
         notes_export_removed: false,
         audio_removed_at_ms: None,
         imported: false,
+        speakers: Default::default(),
     };
     let (sender, receiver) = mpsc::sync_channel(4);
 
@@ -623,6 +629,7 @@ fn a_meeting_with_speech_or_a_failure_is_never_discarded() {
             start_ms: 1_000,
             end_ms: 2_000,
             text: "Hi.".into(),
+            speaker: None,
         }],
     );
     let manifest = read_manifest(&directory).unwrap();
@@ -1090,6 +1097,7 @@ fn retention_manifest(
         notes_export_removed: false,
         audio_removed_at_ms: None,
         imported: false,
+        speakers: Default::default(),
     }
 }
 

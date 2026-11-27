@@ -160,6 +160,7 @@ mod tests {
             start_ms: 0,
             end_ms: 1_000,
             text: text.into(),
+            speaker: None,
         }
     }
 

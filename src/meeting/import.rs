@@ -129,6 +129,7 @@ pub(crate) fn import(source: &Path) -> Result<MeetingManifest> {
             notes_export_removed: false,
             audio_removed_at_ms: None,
             imported: true,
+            speakers: Default::default(),
         };
         let system_path = directory.join("system.wav");
         fs::rename(&decoded, &system_path).wrap_err("could not keep the imported audio")?;

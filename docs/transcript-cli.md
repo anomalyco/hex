@@ -120,7 +120,9 @@ speaker turn) becomes one cue timed by its offsets from the meeting's start,
 not by word timings: SRT numbers its cues, uses `HH:MM:SS,mmm` times, and
 prefixes the text `You:` or `Them:`; VTT starts with `WEBVTT`, uses
 `HH:MM:SS.mmm` times and `<v You>`/`<v Them>` voice tags, and escapes `&`, `<`,
-and `>`. An end before its start is clamped to the start, entries with no text
+and `>`. A remote entry whose speaker the meeting has named carries that name
+in place of `Them` (no build names a speaker yet; see
+[Speaker names](features/meetings.md#speaker-names)). An end before its start is clamped to the start, entries with no text
 are skipped, and blank lines and `-->` are removed from the text so a cue
 can't break.
 
@@ -173,7 +175,9 @@ present as `null`, except `raw_text`, which is omitted without `--raw`,
 is omitted unless Labs › Keep recordings still holds the entry's audio file,
 `range`, which
 is omitted without `--from` or `--to`, `chapters`, which is omitted when a
-meeting has none, `chapter`, which is omitted without `--chapter`. `yearly`
+meeting has none, `chapter`, which is omitted without `--chapter`, and a
+meeting's `speakers` and an entry's `speaker`, which are omitted unless the
+meeting has named speakers (nothing names one yet). `yearly`
 is always present in `hex history stats` output, which refuses while Labs ›
 Dictation stats is off.
 JSON goes to stdout; errors go to stderr with a nonzero exit status. Empty
@@ -235,6 +239,11 @@ type Meeting = {
   in_progress: boolean
   transcript_source: "final" | "rolling" | "missing" // older builds also reported "draft"
   warnings: string[]
+  speakers?: { // only when the meeting has named speakers; nothing names one yet
+    id: string // per meeting, short and opaque ("s1"); never a call app's user id
+    name: string // as the call showed it: untrusted text, cleaned to one plain line
+    from: "call_app" | "calendar" | "user"
+  }[]
 }
 type MeetingList = {
   version: 1
@@ -250,10 +259,11 @@ type MeetingShow = {
   chapters?: Chapter[] // only when the meeting has chapters
   chapter?: Chapter // only with --chapter
   entries: { // with a range or chapter, only the entries in it
-    source: "microphone" | "system" // You / Them; remote speakers aren't separated
+    source: "microphone" | "system" // You / Them
     start_ms: number // relative to the meeting start
     end_ms: number
     text: string
+    speaker?: string // a speakers[].id on a remote entry; omitted when Hex is not sure who spoke
   }[]
 }
 type Chapter = {

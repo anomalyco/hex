@@ -2,6 +2,7 @@
 //! chapters, the live or final transcript as turns, and the ⋯ menu.
 
 use super::*;
+use crate::meeting::{Label, MeetingSource, Tracks};
 
 pub(super) fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
     let pane = &ui.meetings;
@@ -490,6 +491,34 @@ pub(super) fn body_heading(p: Paint, key: &str, label: &str) -> El {
         .color(p.text())
 }
 
+impl Turn {
+    /// What the turn is called, by the rule every transcript reader shares.
+    pub(super) fn label(&self, imported: bool) -> Label<'_> {
+        let source = if self.mine {
+            MeetingSource::Microphone
+        } else {
+            MeetingSource::System
+        };
+        let tracks = if imported {
+            Tracks::Imported
+        } else {
+            Tracks::Call
+        };
+        Label::of(source, self.name.as_ref(), tracks)
+    }
+
+    /// The label in the interface's language. A person's name is shown as
+    /// the call showed it.
+    pub(in crate::rune_ui) fn speaker(&self, imported: bool) -> &str {
+        match self.label(imported) {
+            Label::You => tr("You"),
+            Label::Them => tr("Them"),
+            Label::Speaker => tr("Speaker"),
+            Label::Named(name) => name.as_str(),
+        }
+    }
+}
+
 /// One turn of a transcript: the pause before it, if any, then the speaker,
 /// the time, and the words. An imported meeting has one track: Speaker.
 pub(super) fn turn_line(p: Paint, index: usize, turn: &Turn, imported: bool) -> Vec<El> {
@@ -511,16 +540,10 @@ pub(super) fn turn_line(p: Paint, index: usize, turn: &Turn, imported: bool) -> 
                     .key("speaker")
                     .gap(8.0)
                     .child(
-                        text(if imported {
-                            tr("Speaker")
-                        } else if turn.mine {
-                            tr("You")
-                        } else {
-                            tr("Them")
-                        })
-                        .key("name")
-                        .font(p.k.ty.small_medium)
-                        .color(p.muted()),
+                        text(turn.speaker(imported))
+                            .key("name")
+                            .font(p.k.ty.small_medium)
+                            .color(p.muted()),
                     )
                     .child(
                         text(crate::meeting::format_duration(turn.start_ms))

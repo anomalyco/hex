@@ -175,8 +175,7 @@ pub(super) fn delete_in(
     // never notes that describe deleted lines.
     write_manifest(&directory, &manifest).map_err(EditError::Failed)?;
     remove_from_rolling(&directory, keys).map_err(EditError::Failed)?;
-    super::publish_transcript_files(&directory, &display_title(&manifest), &entries)
-        .map_err(EditError::Failed)?;
+    super::publish_transcript_files(&directory, &manifest, &entries).map_err(EditError::Failed)?;
 
     let had_export = manifest
         .export_path
@@ -392,6 +391,7 @@ mod tests {
         let mut prompts = Vec::new();
         let summary = crate::meeting::notes::summarize_with_calendar(
             &entries,
+            crate::meeting::Labels::default(),
             None,
             &[],
             12_000,
