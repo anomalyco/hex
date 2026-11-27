@@ -14,7 +14,7 @@ use super::{
     CF_NUMBER_SINT64_TYPE, CFArrayGetCount, CFArrayGetTypeID, CFArrayGetValueAtIndex, CFEqual,
     CFGetTypeID, CFNumberGetTypeID, CFNumberGetValue, CFRetain, CFStringGetTypeID, CfObject,
     CfTypeRef, Keep, MESSAGING_TIMEOUT_SECS, cf_string_literal, cf_string_lossy, copy_attribute,
-    copy_element, copy_elements, kCFBooleanTrue,
+    copy_element, copy_elements, copy_string, kCFBooleanTrue,
 };
 
 /// The longest title, description, value or DOM id kept, in UTF-16 units.
@@ -68,6 +68,7 @@ unsafe extern "C" {
     ) -> CfTypeRef;
     fn CFBooleanGetTypeID() -> usize;
     fn CFBooleanGetValue(value: CfTypeRef) -> u8;
+    fn CFHash(value: CfTypeRef) -> usize;
     fn CFNumberIsFloatType(number: CfTypeRef) -> u8;
 }
 
@@ -100,6 +101,27 @@ impl Attributes {
     }
 }
 
+/// Core Foundation identity of a live Accessibility element (`CFEqual` and
+/// `CFHash`), retained for the duration of a walk so cycles are skipped in
+/// O(1).
+pub(super) struct ElementId(CfObject);
+
+impl PartialEq for ElementId {
+    fn eq(&self, other: &Self) -> bool {
+        // SAFETY: both hold live Core Foundation objects.
+        unsafe { CFEqual(self.0.0, other.0.0) != 0 }
+    }
+}
+
+impl Eq for ElementId {}
+
+impl std::hash::Hash for ElementId {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // SAFETY: `self.0.0` is a live Core Foundation object.
+        unsafe { CFHash(self.0.0) }.hash(state);
+    }
+}
+
 /// One live element.
 pub(super) struct Live<'a> {
     element: CfObject,
@@ -120,6 +142,13 @@ impl<'a> Live<'a> {
 }
 
 impl Element for Live<'_> {
+    type Id = ElementId;
+
+    fn id(&self) -> ElementId {
+        // SAFETY: `self.element.0` is a live Core Foundation object.
+        ElementId(CfObject(unsafe { CFRetain(self.element.0) }))
+    }
+
     fn read(&self, room: usize) -> Option<Read<Self>> {
         let mut values = ptr::null();
         // SAFETY: a live element, a CFArray of CFString names, and an out
@@ -147,10 +176,15 @@ impl Element for Live<'_> {
         let at = |index: usize| unsafe { CFArrayGetValueAtIndex(values.0, index as isize) };
         self.long_value
             .set(number(at(6)).is_some_and(|characters| characters > MAX_VALUE_CHARS));
-        let (children, dropped) = self.children(at(7), room);
+        let role = text(at(0));
+        let (children, dropped) = if Node::is_shell_role(role.as_deref()) {
+            (Vec::new(), 0)
+        } else {
+            self.children(at(7), room)
+        };
         Some(Read {
             node: Node {
-                role: text(at(0)),
+                role,
                 subrole: text(at(1)),
                 title: text(at(2)),
                 description: text(at(3)),
@@ -188,7 +222,7 @@ impl<'a> Live<'a> {
                 // SAFETY: Get rule: the array owns the item, so it is
                 // retained before the array goes.
                 let item = unsafe { CFArrayGetValueAtIndex(array, index) };
-                if item.is_null() {
+                if item.is_null() || unsafe { CFEqual(self.element.0, item) } != 0 {
                     return None;
                 }
                 let item = CfObject(unsafe { CFRetain(item) });
@@ -203,7 +237,6 @@ impl<'a> Live<'a> {
 /// Every window of an app: the focused and main ones first, then the rest.
 /// A window the app lists is read whether or not it is in front.
 pub(super) fn windows<'a>(application: &CfObject, attributes: &'a Attributes) -> Vec<Live<'a>> {
-    let mut windows: Vec<CfObject> = Vec::new();
     let candidates = [
         copy_element(application, c"AXFocusedWindow"),
         copy_element(application, c"AXMainWindow"),
@@ -211,19 +244,33 @@ pub(super) fn windows<'a>(application: &CfObject, attributes: &'a Attributes) ->
     .into_iter()
     .flatten()
     .chain(copy_elements(application, c"AXWindows"));
-    for window in candidates {
-        // SAFETY: both are live AXUIElements.
-        if !windows
-            .iter()
-            .any(|known| unsafe { CFEqual(known.0, window.0) } != 0)
-        {
-            windows.push(window);
-        }
-    }
-    windows
+    filter_window_candidates(application, candidates)
         .into_iter()
         .map(|window| Live::new(window, attributes))
         .collect()
+}
+
+/// Keeps distinct window elements and skips the application itself or any
+/// shell root (`AXApplication`, `AXMenuBar`), which macOS can return from
+/// window attributes while the screen is locked.
+fn filter_window_candidates(
+    application: &CfObject,
+    candidates: impl IntoIterator<Item = CfObject>,
+) -> Vec<CfObject> {
+    let mut windows: Vec<CfObject> = Vec::new();
+    for window in candidates {
+        // SAFETY: both are live AXUIElements.
+        if unsafe { CFEqual(application.0, window.0) } != 0
+            || Node::is_shell_role(copy_string(&window, c"AXRole").as_deref())
+            || windows
+                .iter()
+                .any(|known| unsafe { CFEqual(known.0, window.0) } != 0)
+        {
+            continue;
+        }
+        windows.push(window);
+    }
+    windows
 }
 
 /// Whether the app is the one in front, when it says.
@@ -438,5 +485,27 @@ mod tests {
         assert_eq!(front, None);
         assert!(answer.is_none());
         assert_eq!(value, None);
+    }
+
+    #[test]
+    fn equal_application_handles_deduplicate_and_are_filtered_out_of_windows() {
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let pid = child.id() as i32;
+        let first = super::super::foreign_application(pid).unwrap();
+        let second = super::super::foreign_application(pid).unwrap();
+        let attributes = Attributes::new().unwrap();
+        let mut seen = std::collections::HashSet::new();
+        assert!(seen.insert(Live::new(first, &attributes).id()));
+        assert!(!seen.insert(Live::new(second, &attributes).id()));
+
+        let application = super::super::foreign_application(pid).unwrap();
+        let same_as_app = super::super::foreign_application(pid).unwrap();
+        let kept = filter_window_candidates(&application, [same_as_app]);
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(kept.is_empty());
     }
 }

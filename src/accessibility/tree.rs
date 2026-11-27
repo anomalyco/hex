@@ -8,7 +8,8 @@
 //! `AXDOMClassList`), which is where a call app's page says whose tile an
 //! element is and whether it is marked as speaking.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
+use std::hash::Hash;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -42,6 +43,18 @@ impl Node {
             .into_iter()
             .any(|name| name.as_deref() == Some("AXSecureTextField"))
     }
+
+    /// Whether a role belongs to the application shell rather than a window's
+    /// content (`AXApplication`, `AXMenuBar`): never descended into during a
+    /// window walk.
+    pub(super) fn is_shell_role(role: Option<&str>) -> bool {
+        matches!(role, Some("AXApplication" | "AXMenuBar"))
+    }
+
+    /// Whether the walk stops at this element without reading its children.
+    fn stops_descent(&self) -> bool {
+        Self::is_shell_role(self.role.as_deref())
+    }
 }
 
 /// What one element answers: its own attributes (no value, no children yet),
@@ -54,6 +67,12 @@ pub(crate) struct Read<E> {
 
 /// One element of a tree as the walk reads it.
 pub(crate) trait Element: Sized {
+    /// Identity within a single walk. Any element whose identity has already
+    /// been seen is skipped so cycles in the Accessibility graph cannot loop.
+    type Id: Eq + Hash;
+
+    /// The element's identity.
+    fn id(&self) -> Self::Id;
     /// The element's attributes and up to `room` children. `None` when the
     /// app did not answer for it.
     fn read(&self, room: usize) -> Option<Read<Self>>;
@@ -108,10 +127,13 @@ pub(crate) fn snapshot<E: Element>(
     budgets: Budgets,
 ) -> Snapshot {
     let started = Instant::now();
-    let mut queue: VecDeque<(E, Option<usize>, usize)> = windows
-        .into_iter()
-        .map(|window| (window, None, 0))
-        .collect();
+    let mut visited: HashSet<E::Id> = HashSet::new();
+    let mut queue: VecDeque<(E, Option<usize>, usize)> = VecDeque::new();
+    for window in windows {
+        if visited.insert(window.id()) {
+            queue.push_back((window, None, 0));
+        }
+    }
     // Breadth-first order: a parent always comes before its children.
     let mut read: Vec<(Node, Option<usize>)> = Vec::new();
     let mut snapshot = Snapshot::default();
@@ -145,17 +167,20 @@ pub(crate) fn snapshot<E: Element>(
             continue;
         }
         node.value = element.value();
+        if node.stops_descent() {
+            read.push((node, parent));
+            continue;
+        }
         if answer.dropped > 0 {
             snapshot.cut(if deeper { Cut::Nodes } else { Cut::Depth });
         }
         let index = read.len();
         read.push((node, parent));
-        queue.extend(
-            answer
-                .children
-                .into_iter()
-                .map(|child| (child, Some(index), depth + 1)),
-        );
+        for child in answer.children {
+            if visited.insert(child.id()) {
+                queue.push_back((child, Some(index), depth + 1));
+            }
+        }
     }
     snapshot.windows = assemble(read);
     snapshot
