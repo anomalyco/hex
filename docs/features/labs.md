@@ -3568,6 +3568,21 @@ cards
 CleanShot's ⌘S saves the capture; every Hex capture is already saved,
 so ⌘S shows it in Finder instead.
 
+The cards follow the person across Spaces, as macOS's own floating
+thumbnail does. Rune makes their panel join every Space, but a Dock icon
+(activation-policy) change can tie it to the Space it was on, and Rune
+repairs that only as a panel shows, which shown cards never do again. So
+the pump repairs it as it does the HUD's (`screenshot_thumbnail/spaces.rs`
+with `rune_hud::panel_spaces` and `rune_hud::rehome`; see the HUD's Space
+repair in [dictation.md](dictation.md)): once per Dock icon change it
+re-asserts the panel's mask (and reorders it when shown), and while cards
+show, a panel found on another Space is ordered back in with
+`MoveToActiveSpace`, then given the every-Space mask again, for at most 8
+confirmed attempts per stranding, reset when the cards hide or are seen on
+the active Space (#2950). The budget logic is unit-tested
+(`rune_hud::rehome`); the AppKit repair itself has not been observed on
+hardware.
+
 Every shot and recording the Lab saves, and every annotation and replay
 Annotate wrote to its captures folder, is also listed in the Captures
 pane ([captures.rs](../../src/rune_ui/captures.rs)), which sits under
