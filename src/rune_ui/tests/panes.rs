@@ -4175,3 +4175,44 @@ fn a_finger_pans_the_transcript_and_taps_the_sidebar() {
     settle(&mut rt);
     assert!(rt.find("lede").is_some(), "the tap opened Labs");
 }
+
+#[cfg(hex_capture)]
+#[test]
+fn routing_rules_modal_fits_and_scrolls_in_short_window() {
+    let win_h = 620.0;
+    let mut rt = runtime("mac-routing-rules", true, (980.0, win_h));
+    rt.state.settings.capture.routing.update(|config| {
+        config.sites.clear();
+        config.terminals.clear();
+        config.apps.clear();
+        for i in 0..20 {
+            config
+                .sites
+                .insert(format!("site-{i:02}.example.com"), "ses_acme".into());
+        }
+    });
+    refresh(&mut rt);
+
+    let (dialog, _) = rt.presented("routing-sheet").expect("the dialog");
+    assert!(
+        dialog[1] >= 0.0 && dialog[1] + dialog[3] <= win_h,
+        "dialog fits inside the window: {dialog:?}"
+    );
+    let title = element(&rt, "routing-sheet/title").rect;
+    let done = element(&rt, "close-routing").rect;
+    assert!(
+        title[1] >= 0.0 && title[1] + title[3] <= win_h,
+        "title stays visible: {title:?}"
+    );
+    assert!(
+        done[1] >= 0.0 && done[1] + done[3] <= dialog[1] + dialog[3],
+        "Done footer stays inside dialog: {done:?} in {dialog:?}"
+    );
+    scroll_into_view(&mut rt, "rule19", "routing-rules-body");
+    let vp = element(&rt, "routing-rules-body").rect;
+    let last = element(&rt, "rule19").rect;
+    assert!(
+        last[1] >= vp[1] && last[1] + last[3] <= vp[1] + vp[3],
+        "rule19 scrolled into view: {last:?} in {vp:?}"
+    );
+}

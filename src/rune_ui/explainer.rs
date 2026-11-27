@@ -15,7 +15,7 @@ use rune::{Color, Cx, El, LineCap, Shape, Tx, canvas, col, el, row, text};
 
 use super::controls::{
     ButtonKind, KEY_GAP, KeySize, METRICS, MODAL, ModalWidth, Paint, TRAY_PADDING, button,
-    key_tray, keycap, modal_panel, modal_sheet,
+    key_tray, keycap, modal_panel, modal_scroll_body, modal_sheet,
 };
 use super::shortcut_mode::{Trigger, pick};
 use super::{Modal, Ui};
@@ -236,7 +236,7 @@ pub(super) fn modal(ui: &Ui, cx: &Cx<Ui>, p: Paint) -> [El; 2] {
         "shortcut-mode-modal",
         tr("Shortcut mode"),
         ModalWidth::Wide,
-        vec![options],
+        vec![modal_scroll_body(p, "explainer-body", vec![options])],
         vec![
             button(
                 p,
