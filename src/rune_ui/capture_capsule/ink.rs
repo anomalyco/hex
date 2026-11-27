@@ -309,9 +309,9 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
             } else {
                 rune::OverlayInput::All
             });
-            // For Escape, where the desktop gives the overlay the keyboard.
-            // XWayland never focuses this window, so it asks for nothing.
-            if drawing && !s.xwayland {
+            // For Escape, where the desktop gives the overlay the keyboard
+            // (see `asks_for_keys`).
+            if drawing && asks_for_keys(s.xwayland) {
                 overlay.request_keys();
             }
         }
@@ -444,10 +444,10 @@ impl InkOverlay {
                 },
                 prewarm: true,
                 // Escape while drawing, asked for only then.
-                keys: if xwayland {
-                    rune::KeyPolicy::None
-                } else {
+                keys: if asks_for_keys(xwayland) {
                     rune::KeyPolicy::OnDemand
+                } else {
+                    rune::KeyPolicy::None
                 },
                 ..Default::default()
             })
@@ -483,10 +483,21 @@ impl InkOverlay {
     }
 }
 
+/// Whether the ink overlay asks for the keyboard (for Escape) while drawing.
+/// XWayland never focuses it. Windows' keyboard hook already hears Escape,
+/// and taking the keys there brings the full-screen overlay to the front:
+/// activating a topmost window raises it above the capsule, so the pen's
+/// second click landed on the ink instead of turning drawing off (#2955).
+/// Without the keys, the overlay also never activates on a click.
+fn asks_for_keys(xwayland: bool) -> bool {
+    !xwayland && cfg!(not(target_os = "windows"))
+}
+
 /// Whether this overlay can only show on XWayland (Linux Wayland without
 /// layer-shell), decided when it is made because keys and input are fixed
 /// then. Elsewhere, and on a compositor with layer-shell or X11, it is
-/// click-through until drawing and asks for the keyboard for Escape.
+/// click-through until drawing and asks for the keyboard for Escape, except
+/// on Windows ([`asks_for_keys`]).
 fn takes_xwayland_pointer() -> bool {
     #[cfg(target_os = "linux")]
     {
