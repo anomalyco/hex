@@ -8,10 +8,12 @@ import java.util.Locale
 
 internal enum class Style { Polished, Casual, Notes, Verbatim }
 /** A keyboard layout's language: its keys, accents and typing model. Dictation languages are
- * [DictationLanguage]; a language can be dictated without a layout of its own. */
-internal enum class Spoken(val code: String, val label: String) {
+ * [DictationLanguage]; a language can be dictated without a layout of its own, and a layout can have keys
+ * without a typing model of its own yet ([hasModel] false): Русский's ЙЦУКЕН types its letters as tapped. */
+internal enum class Spoken(val code: String, val label: String, val hasModel: Boolean = true) {
     English("en", "English"), Spanish("es", "Español"), German("de", "Deutsch"), Norwegian("no", "Norsk"),
-    French("fr", "Français"), Italian("it", "Italiano"), Portuguese("pt", "Português");
+    French("fr", "Français"), Italian("it", "Italiano"), Portuguese("pt", "Português"),
+    Russian("ru", "Русский", hasModel = false);
 
     // Whisper calls Bokmål "no"; the keyboard and its model use BCP 47 "nb".
     val layoutCode get() = if (this == Norwegian) "nb" else code
@@ -32,9 +34,9 @@ internal enum class DictationLanguage(val code: String, val label: String, val l
     // One entry for Brazil and Portugal: Whisper has a single "pt", and Hex has no regional rules. Its typing
     // model is Brazil's, with Portugal's spellings among its real words (benchmark/typing/README.md).
     Portuguese("pt", "Português", Spoken.Portuguese),
-    // No layouts of their own yet: Polish's letters are held on the English keys, and Russian has no
-    // Cyrillic keys, so a Russian speaker dictates here and types on another keyboard.
-    Polish("pl", "Polski", null), Russian("ru", "Русский", null);
+    // Polish has no layout of its own yet: its letters are held on the English keys. Russian has its ЙЦУКЕН
+    // keys but no typing model yet, so its letters type as tapped.
+    Polish("pl", "Polski", null), Russian("ru", "Русский", Spoken.Russian);
 
     companion object {
         fun matching(code: String?): DictationLanguage? = when (code) {
@@ -83,13 +85,21 @@ internal fun phoneLanguage(chosen: DictationLanguage?, pinned: Spoken?, system: 
 
 /** The layout whose typing model the keyboard reads: the one pinned in Keyboard › Keyboard layout, else the
  * dictation language's own. Null when the keys are only English's stand-in for a language with no layout
- * (Nederlands, Polski, Русский): English's next words and autocorrections are not that language's. */
-internal fun typingLayout(pinned: Spoken?, spoken: DictationLanguage): Spoken? = pinned ?: spoken.layout
+ * (Nederlands, Polski): English's next words and autocorrections are not that language's. Null too for a layout
+ * with no model of its own yet (Русский), whose letters type as tapped. */
+internal fun typingLayout(pinned: Spoken?, spoken: DictationLanguage): Spoken? = (pinned ?: spoken.layout)?.takeIf { it.hasModel }
 
-/** The dictation language a swipe can't be read in, named in the strip's note: no layout pinned and none of its own,
- * so English's word list only stands in for the keys and swipes stay off. Null where swipes read a typing model. */
-internal fun swipeUnreadableIn(pinned: Spoken?, spoken: DictationLanguage): DictationLanguage? =
-    spoken.takeIf { typingLayout(pinned, spoken) == null }
+/** The language a swipe can't be read in, named in the strip's note, as the space bar or Keyboard layout names it:
+ * the layout's own when it has no typing model yet (Русский), else the dictation language when no layout is pinned
+ * and it has none of its own, so English's word list only stands in for the keys. Null where swipes read a model. */
+internal fun swipeUnreadableIn(pinned: Spoken?, spoken: DictationLanguage): String? {
+    val layout = pinned ?: spoken.layout
+    return when {
+        layout == null -> spoken.label
+        !layout.hasModel -> layout.label
+        else -> null
+    }
+}
 
 internal data class SpeechOptions(val style: Style, val spoken: DictationLanguage, val clean: Boolean, val translate: Boolean,
                                    val lowercase: Boolean = false, val endWithPeriod: Boolean = true,

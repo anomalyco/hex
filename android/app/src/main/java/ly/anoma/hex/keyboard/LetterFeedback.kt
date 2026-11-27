@@ -138,6 +138,8 @@ internal class LetterFeedback(private val host: ViewGroup, private val paints: K
                     'a' -> "aáãàâäåæª"; 'e' -> "eéêèęėēë"; 'i' -> "iíîìïįī"; 'o' -> "oôóõòöœøōº"; 'u' -> "uúüùûū"
                     'c' -> "cç"; 'n' -> "nñ"; else -> null
                 }
+                // ЙЦУКЕН's two letters without keys of their own, held as on iPhone Hex.
+                "ru" -> when (lower) { 'е' -> "её"; 'ь' -> "ьъ"; else -> null }
                 else -> accents[lower]
             }
             return raw.orEmpty().map { (if (c.isUpperCase()) (if (it == 'ß') 'ẞ' else it.uppercaseChar()) else it).toString() }
