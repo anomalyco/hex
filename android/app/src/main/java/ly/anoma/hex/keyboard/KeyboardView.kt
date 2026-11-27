@@ -78,6 +78,8 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
         closeMenu(); ime.engine.clearForDictation()
         strip.visibility = GONE; keys.openEmoji(strip.stripHeight)
     }
+    /** Labs › Keyboard › Emoji search is open: Back leaves it. */
+    val searchingEmoji get() = keys.emojiOpen && keys.searching
     fun closeEmoji() {
         if (!keys.emojiOpen) return
         keys.closeEmoji(); strip.visibility = VISIBLE; strip.update()

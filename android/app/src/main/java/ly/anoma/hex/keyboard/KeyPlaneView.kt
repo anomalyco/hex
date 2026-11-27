@@ -45,6 +45,8 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private companion object {
         /** How far (key pitches) a swipe may go from where it went down and still be a tap that slid (iPhone Hex). */
         const val SLID_TAP_REACH = 1.6
+        /** The most results an emoji search shows, as iPhone Hex's. */
+        const val SEARCH_RESULTS = 60
         fun Int.isLight() = (Color.red(this) * 299 + Color.green(this) * 587 + Color.blue(this) * 114) / 1000 > 128
     }
     private val density = resources.displayMetrics.density
@@ -114,6 +116,13 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private val emojiBottom = KeyRowLayout(context, 10f, side, gap, insetTop, insetBottom + bottomExtra)
     var emojiOpen = false
         private set
+    // Labs › Keyboard › Emoji search: the bar atop the panel that opens it, and the search itself (results and field
+    // above the keys, which type into it) while it is open.
+    private var searchBar: EmojiSearchBar? = null
+    private var search: EmojiSearchView? = null
+    val searching get() = ime.engine.emojiQuery != null
+    private var searchGrow = 0
+    private var searchStrip = 0
     private val roll = Rollover()
     // A slide from ?123 or shift types the key it lifts on: the keys it can type, and the one under it.
     private val slides = HashMap<KeyCap, (KeyPoint) -> Unit>()
@@ -137,7 +146,8 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     // The Labs letter-symbol setting the keys were drawn with, so a change draws them when next shown.
     private var letterSymbolsDrawn = false
     private val switchLanguage = Runnable {
-        if (spaceKey.isPressed && spaceGesture.still) { spaceKey.isPressed = false; spaceKey.performLongClick() }
+        // Not while the emoji search is open: its keys type into the search, and a hold there is a space.
+        if (spaceKey.isPressed && spaceGesture.still && !searching) { spaceKey.isPressed = false; spaceKey.performLongClick() }
     }
     private val deleteGesture = DeleteGesture(KeyboardMetrics.DELETE_START * density, KeyboardMetrics.DELETE_STEP * density,
         KeyboardMetrics.DELETE_CANCEL * density, slop.toFloat())
@@ -217,7 +227,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                 MotionEvent.ACTION_MOVE -> if (v.isPressed) {
                     val characters = spaceGesture.move(e.x, e.y, e.eventTime)
                     if (!spaceGesture.still) removeCallbacks(switchLanguage)
-                    if (characters != null) (cursorSlide ?: ime.engine.cursorSlide().also { cursorSlide = it }).moveTo(characters)
+                    if (characters != null && !searching) (cursorSlide ?: ime.engine.cursorSlide().also { cursorSlide = it }).moveTo(characters)
                 }
                 MotionEvent.ACTION_UP -> if (roll.up(v)) {
                     removeCallbacks(switchLanguage); val pressed = v.isPressed; v.isPressed = false
@@ -298,7 +308,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
             current = page; if (!page.symbols) relabel(page); return
         }
         // Another kind of field in the same box (the app changed its type): the keys, not the emoji panel over them.
-        if (emojiOpen) host.closeEmoji()
+        if (emojiOpen && !searching) host.closeEmoji()
         current = page; letterSymbolsDrawn = letterSymbols
         clearCallout(); endSlide(); cancelSwipe(); grid = null; letters.clear(); caseKeys.clear(); slides.clear(); shiftIcon = null
         rows.removeAllViews()
@@ -601,6 +611,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
      * collected (its emoji are drawn into bitmaps, about 5 MB a panel). Each opening hands it the recents
      * again, which redraws its Recently used row, and starts it at the top, as a new picker did. */
     fun openEmoji(extra: Int) {
+        if (searching) { endSearch(); return }
         cancelGestures()
         val keyboard = height + extra // the keys' and the strip's height as they are
         // Turned, the screen is short: the panel may take up to two thirds of it, with smaller cells.
@@ -608,6 +619,12 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         val grow = minOf(px(KeyboardMetrics.EMOJI_GROW), (resources.displayMetrics.heightPixels * share).toInt() - keyboard).coerceAtLeast(0)
         // With the number row on, the panel takes its place too, so the keyboard keeps its height.
         val height = upperHeight(current) + reach + extra + grow
+        searchGrow = grow; searchStrip = extra
+        // Labs › Keyboard › Emoji search: its bar takes the top of the panel, the grid the rest.
+        val bar = if (ime.feedback.emojiSearch) px(EmojiSearchBar.HEIGHT) else 0
+        val bars = searchBar ?: if (bar > 0) EmojiSearchBar(context, quiet, caps.key) { beginSearch() }.also { searchBar = it; addView(it, 0, LayoutParams(LayoutParams.MATCH_PARENT, bar)) } else null
+        bars?.visibility = if (bar > 0) VISIBLE else GONE
+        val gridHeight = height - bar
         val p = picker?.also { it.setRecentEmojiProvider(recents); it.post { it.toTop() } } ?: EmojiPickerView(ContextThemeWrapper(context, R.style.HexEmoji)).also { p ->
             p.setRecentEmojiProvider(recents)
             p.setOnEmojiPickedListener { item ->
@@ -615,17 +632,17 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                 tap(context, ime.feedback.haptics, Tap.Press)
                 ime.engine.type(item.emoji)
             }
-            picker = p; addView(p, 0, LayoutParams(LayoutParams.MATCH_PARENT, height))
+            picker = p; addView(p, if (searchBar != null) 1 else 0, LayoutParams(LayoutParams.MATCH_PARENT, gridHeight))
         }
-        if (pickerSized != height) {
+        if (pickerSized != gridHeight) {
             // Square cells about Gboard's size: nine across in portrait, more when turned. The picker sizes its rows
             // from what its grid has left after two category titles.
             val cell = if (landscape) KeyboardMetrics.EMOJI_CELL_LANDSCAPE else KeyboardMetrics.EMOJI_CELL
             val columns = maxOf(9, (resources.displayMetrics.widthPixels / (cell * density)).toInt())
             p.emojiGridColumns = columns
-            p.emojiGridRows = ((height - (KeyboardMetrics.EMOJI_HEADER + 2 * KeyboardMetrics.EMOJI_TITLE) * density) /
+            p.emojiGridRows = ((gridHeight - (KeyboardMetrics.EMOJI_HEADER + 2 * KeyboardMetrics.EMOJI_TITLE) * density) /
                 (resources.displayMetrics.widthPixels.toFloat() / columns)).coerceAtLeast(1f)
-            p.layoutParams.height = height; p.requestLayout(); pickerSized = height
+            p.layoutParams.height = gridHeight; p.requestLayout(); pickerSized = gridHeight
         }
         rows.visibility = GONE; bottom.visibility = GONE
         p.visibility = VISIBLE; emojiBottom.visibility = VISIBLE
@@ -633,12 +650,59 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     }
     fun closeEmoji() {
         if (!emojiOpen) return
+        if (searching) endSearch()
         cancelGestures()
-        picker?.visibility = GONE; emojiBottom.visibility = GONE
+        picker?.visibility = GONE; emojiBottom.visibility = GONE; searchBar?.visibility = GONE
         rows.visibility = VISIBLE; bottom.visibility = VISIBLE
         emojiOpen = false
     }
     private val recents by lazy { RecentEmoji(context) { ime.engine.learnsTyping } }
+
+    /** Labs › Keyboard › Emoji search opens from the panel's bar: the keys come back under its field and type into it,
+     * the results take the panel's extra height above it, so the keyboard keeps its height. */
+    private fun beginSearch() {
+        if (!emojiOpen || searching) return
+        cancelGestures()
+        val view = search ?: EmojiSearchView(context, ink, quiet, caps.key, pick = { emoji ->
+            tap(context, ime.feedback.haptics, Tap.Press)
+            ime.engine.typeIntoField(emoji)
+            recents.recordSelection(emoji)
+        }, close = ::endSearch).also { search = it; addView(it, 0, LayoutParams(LayoutParams.MATCH_PARENT, 0)) }
+        view.size(maxOf(searchGrow, px(KeyboardMetrics.EMOJI_CELL)), searchStrip)
+        ime.engine.searchEmoji(EmojiQuery(changed = { refreshSearch() }, done = ::endSearch))
+        ime.emojiSearchOpen(true)
+        picker?.visibility = GONE; emojiBottom.visibility = GONE; searchBar?.visibility = GONE
+        view.visibility = VISIBLE; rows.visibility = VISIBLE; bottom.visibility = if (current?.pad == null) VISIBLE else GONE
+        refreshSearch()
+        ime.emojiSearchIndex.load { post { refreshSearch() } }
+    }
+
+    /** The search's ✕, Return or the emoji key: back to the panel, the keys typing into the app's field again. */
+    private fun endSearch() {
+        if (!searching) return
+        cancelGestures()
+        ime.engine.searchEmoji(null)
+        ime.emojiSearchOpen(false)
+        search?.visibility = GONE; rows.visibility = GONE; bottom.visibility = GONE
+        // The panel's Recently used row again, with what the search picked.
+        picker?.setRecentEmojiProvider(recents)
+        picker?.visibility = VISIBLE; emojiBottom.visibility = VISIBLE; searchBar?.visibility = VISIBLE
+    }
+
+    /** The results for the query as typed: your recent emoji first while it is empty, else the index's best matches,
+     * your recent ones lifted among equals. */
+    private fun refreshSearch() {
+        val view = search ?: return
+        val text = ime.engine.emojiQuery?.text ?: return
+        val index = ime.emojiSearchIndex.index
+        val recent = recents.recent()
+        val emoji = when {
+            index == null -> emptyList()
+            text.isBlank() -> emojiStarters(recent, index, SEARCH_RESULTS)
+            else -> index.search(text, SEARCH_RESULTS, searchBoost(recent))
+        }
+        view.show(text, emoji) { index?.name(it) }
+    }
     private var pickerSized = 0
     /** The picker back at Recently used: its tab for them (the icon's clickable item), tapped. */
     private fun EmojiPickerView.toTop() {

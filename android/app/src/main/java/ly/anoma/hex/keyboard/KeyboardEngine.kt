@@ -266,7 +266,7 @@ internal class KeyboardEngine(
         if (!feedback.autoCapitalize) return false
         val mask = (editor?.inputType ?: 0) and
             (InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS or InputType.TYPE_TEXT_FLAG_CAP_WORDS or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES)
-        return !secure && mask != 0 && target.capsMode(mask) != 0
+        return emojiQuery == null && !secure && mask != 0 && target.capsMode(mask) != 0
     }
     private fun refreshCaps(force: Boolean = false) {
         val was = shift.uppercase
@@ -451,11 +451,38 @@ internal class KeyboardEngine(
      * while autocorrect is on in a word field on the letters page, never in a URL field, and never with caps lock. */
     fun likelierLetter(hit: Char, near: Map<Char, Double>, keys: Collection<Char>): Char {
         val w = word ?: return hit
-        if (w.standIn || exactField || near.isEmpty() || symbols || shift.locked || !feedback.autocorrect || !target.connected) return hit
+        if (emojiQuery != null || w.standIn || exactField || near.isEmpty() || symbols || shift.locked || !feedback.autocorrect || !target.connected) return hit
         return w.likelierKey(before(), hit, near, keys)
     }
     /** Shift as the keys show it: letters type capitals while it is on or held. */
     val uppercase get() = shift.uppercase
+
+    /** Labs › Keyboard › Emoji search's query while its field is open: every key types into it instead of the app's
+     * field, and nothing typed there is suggested, corrected, learned or remembered ([searchEmoji]). */
+    var emojiQuery: EmojiQuery? = null
+        private set
+
+    /** The emoji search opened ([query]) or closed (null): the word in progress ends, and shift follows the search
+     * (no capital to start it) or the field again. */
+    fun searchEmoji(query: EmojiQuery?) {
+        emojiQuery = query
+        adaptive?.forget(); resetTyping(); clearSpaces(); surface?.suggestions(emptyList())
+        refreshCaps(force = true)
+    }
+
+    /** A pick from the emoji search goes into the app's field, as a pick from the panel does. */
+    fun typeIntoField(value: String) {
+        val query = emojiQuery
+        emojiQuery = null
+        try { type(value) } finally { emojiQuery = query }
+    }
+
+    /** While the emoji search is open, [text] goes into its query: true when it did. */
+    private fun searched(text: String): Boolean {
+        val query = emojiQuery ?: return false
+        query.type(text); inputDone()
+        return true
+    }
 
     /** Whether the keys' emoji key is there to open the panel: on the letters page only, never on the
      * symbol pages or a number, phone or date pad, where it is the pad key or absent. */
@@ -464,6 +491,7 @@ internal class KeyboardEngine(
     /** A letter key typed [text] at (x, y) on [grid]'s keys; [explicit] when it was a held option, [aimed] false when the
      * touch slid onto the key, so where it went down says nothing of where you aim. */
     fun letter(text: String, x: Double, y: Double, grid: KeyGrid, explicit: Boolean = false, aimed: Boolean = true) {
+        if (searched(text)) return
         if (!target.connected) return
         edited()
         val w = word
@@ -549,6 +577,7 @@ internal class KeyboardEngine(
 
     /** The space bar, tapped at [point] in [grid]'s coordinates (null off the letters page). */
     fun space(point: KeyPoint? = null, grid: KeyGrid? = null) {
+        if (searched(" ")) return
         if (!target.connected) return
         edited()
         val now = clock()
@@ -597,12 +626,14 @@ internal class KeyboardEngine(
      * URL field, it is exactly the key's character. The keys' long-press alternates never come here:
      * they type what they show. */
     fun quote(value: Char) {
+        if (searched(value.toString())) return
         if (!target.connected) return
         val placed = if (smartQuotesHere()) SmartQuotes.typed(value, before().lastOrNull()) else value
         type(placed.toString())
     }
 
     fun type(value: String) {
+        if (searched(value)) return
         if (!target.connected) return
         edited()
         if (value == " ") { space(); return }
@@ -639,6 +670,7 @@ internal class KeyboardEngine(
         inputDone()
     }
     fun delete() {
+        emojiQuery?.let { it.delete(); return }
         if (!target.connected) return
         // Hex's own Delete is the person removing text, so a field that then empties was cleared by them.
         tracker.keyboardRemoved()
@@ -682,6 +714,7 @@ internal class KeyboardEngine(
     fun pasted() { edited(); adaptive?.forget(); resetTyping(); clearSpaces(); surface?.suggestions(emptyList()) }
 
     fun enter() {
+        emojiQuery?.let { it.enter(); return }
         edited(); adaptive?.forget()
         // A text replacement that ends the text goes in before the line break or the editor's action.
         word?.takeIf { canEndWord() }?.textReplacement(before())?.let { replace(it.original, smartWord(it.replacement)) }
@@ -712,13 +745,13 @@ internal class KeyboardEngine(
     /** A slide left from delete: null where it can't run (a password or TYPE_NULL field, a selection, no known
      * cursor). */
     fun deleteSlide(): DeleteSlide? {
-        if (secure || keyEventEditor || selStart < 0 || selStart != selEnd || !target.connected) return null
+        if (emojiQuery != null || secure || keyEventEditor || selStart < 0 || selStart != selEnd || !target.connected) return null
         adaptive?.forget(); resetTyping(); clearSpaces(); surface?.suggestions(emptyList())
         return DeleteSlide(target, selStart, target.before(2000).orEmpty())
     }
     /** The delete slide lifted with words selected: they go. */
     fun deleteSelection() {
-        if (!target.connected) return
+        if (emojiQuery != null || !target.connected) return
         tracker.keyboardRemoved()
         edited(); adaptive?.forget()
         target.commit(""); resetTyping(); surface?.suggestions(emptyList())
@@ -846,10 +879,10 @@ internal class KeyboardEngine(
     /** Whether a letter touch may become a swipe now: the setting on, on the letters page of a word field
      * (not a password, email address or number, where Hex reads no words), with its typing model loaded and not
      * English's list standing in for a language without one. */
-    val swipes get() = feedback.swipe && !secure && word?.standIn == false && !symbols && pad == null && target.connected
+    val swipes get() = emojiQuery == null && feedback.swipe && !secure && word?.standIn == false && !symbols && pad == null && target.connected
     /** Where [swipes] would be but English's list only stands in for the dictation language's words, or the layout has
      * no model yet: a swipe types nothing, as before, and the strip says so ([swipeUnavailable]). */
-    val swipeUnreadable get() = feedback.swipe && !secure && (word?.standIn == true || (wordField && literalLayout)) &&
+    val swipeUnreadable get() = emojiQuery == null && feedback.swipe && !secure && (word?.standIn == true || (wordField && literalLayout)) &&
         !symbols && pad == null && target.connected
     /** The layout has keys but no typing model yet (Русский): no word is read, so taps type as tapped. */
     private var literalLayout = false

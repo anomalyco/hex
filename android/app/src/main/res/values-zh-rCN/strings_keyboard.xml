@@ -40,6 +40,9 @@
     <string name="keyboard_numbers">数字和符号</string>
     <string name="keyboard_letters">字母</string>
     <string name="keyboard_emoji">表情符号</string>
+    <string name="emoji_search_hint">搜索表情符号</string>
+    <string name="emoji_search_none">没有表情符号</string>
+    <string name="emoji_search_close">关闭搜索</string>
     <string name="keyboard_tool_paste">粘贴</string>
     <string name="keyboard_tool_settings">键盘设置</string>
     <string name="keyboard_tool_undo">撤销自动更正</string>

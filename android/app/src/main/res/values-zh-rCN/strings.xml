@@ -183,6 +183,8 @@
     <string name="smart_quotes_detail">用 ’ ‘ “ ” 代替 \' 和 \"</string>
     <string name="swipe_delete_letters">逐个字母删除滑行输入的单词</string>
     <string name="swipe_delete_letters_detail">滑行输入后按删除键只删除一个字母，而不是整个单词</string>
+    <string name="emoji_search">表情符号搜索</string>
+    <string name="emoji_search_detail">在表情符号面板中添加搜索栏：输入英文单词（例如“laugh”）即可查找表情符号</string>
     <string name="imported_words">SwiftKey 词语</string>
     <string name="imported_words_detail">从 SwiftKey 的导出文件中读取它从你这里学到的词语并用于建议。仅保存在这台手机上。</string>
     <string name="imported_words_import">导入词语…</string>

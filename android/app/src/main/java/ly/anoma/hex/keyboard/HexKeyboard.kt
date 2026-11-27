@@ -11,6 +11,7 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.database.ContentObserver
 import android.graphics.drawable.Icon
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -19,6 +20,7 @@ import java.util.concurrent.Executors
 import android.inputmethodservice.InputMethodService
 import android.util.Size
 import android.util.TypedValue
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsetsController
@@ -131,6 +133,8 @@ class HexKeyboard : InputMethodService() {
             adaptiveTouch = { if (feedback.adaptiveTouch) AdaptiveTouchStore.get(this) else null },
             swipeUnavailable = ::swipeUnavailable)
     }
+    /** Labs › Keyboard › Emoji search's index, read the first time a search opens. */
+    internal val emojiSearchIndex by lazy { EmojiSearchIndex(assets, words) }
     private val typingChanged = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == TypingPreferences.SUGGEST_SWEAR_WORDS) engine.swearWordsChanged()
         if (key == TypingPreferences.KEY_COLORS || key == TypingPreferences.KEY_COLOR) recolor()
@@ -637,6 +641,30 @@ class HexKeyboard : InputMethodService() {
         clearInline(); view?.reset(); view?.cancelGestures(); engine.leave(); nextEnglish = null
         if (fieldGone) capture.leave() else finishSpeech()
         if (kept?.offered == true) { dropKept(); view?.notice(null) }
+    }
+    // Labs › Keyboard › Emoji search: Back while it is open leaves the search and the panel for the letters, typing into
+    // the field again, instead of hiding the keyboard. Android 13 and later deliver Back to the keyboard's window as a
+    // back callback, held only while the search is open; Android 12 sends the key.
+    private fun leaveEmojiSearch() { view?.closeEmoji(); engine.letters() }
+    private val searchBack: Any? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+        android.window.OnBackInvokedCallback { leaveEmojiSearch() } else null
+    internal fun emojiSearchOpen(open: Boolean) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val callback = searchBack as android.window.OnBackInvokedCallback
+        val dispatcher = window?.onBackInvokedDispatcher ?: return
+        if (open) dispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_OVERLAY, callback)
+        else dispatcher.unregisterOnBackInvokedCallback(callback)
+    }
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK && view?.searchingEmoji == true) { event.startTracking(); return true }
+        return super.onKeyDown(keyCode, event)
+    }
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK && view?.searchingEmoji == true) {
+            if (event.isTracking && !event.isCanceled) leaveEmojiSearch()
+            return true
+        }
+        return super.onKeyUp(keyCode, event)
     }
     override fun onFinishInputView(finishingInput: Boolean) { leaveEditor(finishingInput); super.onFinishInputView(finishingInput) }
     override fun onFinishInput() { field.finished(); leaveEditor(fieldGone = true); inField = false; super.onFinishInput() }
