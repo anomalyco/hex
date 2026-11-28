@@ -81,6 +81,11 @@ internal class TypingPreferences(context: Context) {
     var marksKeepSpace: Boolean
         get() = prefs.getBoolean(MARKS_KEEP_SPACE, false)
         set(value) { prefs.edit().putBoolean(MARKS_KEEP_SPACE, value).apply() }
+    /** Labs › Keyboard › Click when a hold opens: with Haptics on, a held key plays a key press's click the moment its
+     * symbols or accents open (#3006). Off by default. */
+    var holdClick: Boolean
+        get() = prefs.getBoolean(HOLD_CLICK, false)
+        set(value) { prefs.edit().putBoolean(HOLD_CLICK, value).apply() }
     /** Labs › Keyboard › Adaptive touch: the decoder reads taps with your own key centres once it has learned them
      * ([AdaptiveTouch], kept by [AdaptiveTouchStore]). Off by default. */
     var adaptiveTouch: Boolean
@@ -159,6 +164,7 @@ internal class TypingPreferences(context: Context) {
         const val SWIPE_DELETE_LETTERS = "swipeDeleteLetters"
         const val MARKS_TAKE_FIX_SPACE = "marksTakeFixSpace"
         const val MARKS_KEEP_SPACE = "marksKeepSpace"
+        const val HOLD_CLICK = "holdClick"
         const val ADAPTIVE_TOUCH = "adaptiveTouch"
         const val USE_IMPORTED_WORDS = "importedWords"
         /** A counter [ImportedWords] bumps whenever the imported list changes, so the keyboard reads it again. */
