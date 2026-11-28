@@ -191,6 +191,8 @@
     <string name="labs_keyboard">Keyboard</string>
     <string name="emoji_suggestions">Emoji suggestions</string>
     <string name="emoji_suggestions_detail">Show an emoji for the English word you type, such as 😊 for “smile”</string>
+    <string name="emoji_shortcodes">Emoji shortcodes</string>
+    <string name="emoji_shortcodes_detail">Type a colon and a name, such as “:fire”, to pick its emoji 🔥, or end it with “:” to type it</string>
     <string name="signature">Signature</string>
     <string name="signature_detail">Add a line to the end of each dictation, such as “Sent from Hex”</string>
     <string name="signature_one_line">Use one line</string>

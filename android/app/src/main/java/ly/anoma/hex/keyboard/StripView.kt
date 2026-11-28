@@ -298,7 +298,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
             val s = slot?.text.orEmpty()
             val typed = slot?.kind == Suggestion.Kind.Typed
             val fix = slot?.kind == Suggestion.Kind.Fix
-            val emoji = slot?.kind == Suggestion.Kind.Emoji
+            val emoji = slot?.kind == Suggestion.Kind.Emoji || slot?.kind == Suggestion.Kind.Shortcode
             if (fix) chip = i
             this.words[i].text = if (typed) context.getString(R.string.keyboard_literal, s) else s
             this.words[i].background = if (fix) shape(key, dp(15).toFloat()) else null

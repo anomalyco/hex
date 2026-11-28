@@ -167,6 +167,8 @@
     <string name="labs_keyboard">键盘</string>
     <string name="emoji_suggestions">表情符号建议</string>
     <string name="emoji_suggestions_detail">为输入的英文单词显示表情符号，例如输入“smile”显示 😊</string>
+    <string name="emoji_shortcodes">表情符号短代码</string>
+    <string name="emoji_shortcodes_detail">输入冒号和名称（例如“:fire”）即可选择对应表情符号 🔥，或以“:”结尾直接输入</string>
     <string name="signature">签名</string>
     <string name="signature_detail">在每次听写末尾添加一行，例如“Sent from Hex”</string>
     <string name="signature_one_line">请使用一行</string>

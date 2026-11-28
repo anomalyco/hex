@@ -8,9 +8,10 @@ internal data class Correction(val original: String, val replacement: String)
 /** One slot of the suggestion strip. [Kind.Typed] keeps what was typed as typed; [Kind.Fix] is what
  * space will put in its place (shown highlighted); [Kind.Word] a completion or another reading;
  * [Kind.Next] a word that may follow, offered after a space; [Kind.Emoji] the word's own emoji
- * (Labs › Keyboard › Emoji suggestions), kept in the last slot. */
+ * (Labs › Keyboard › Emoji suggestions), kept in the last slot; [Kind.Shortcode] an emoji the ":name"
+ * before the cursor names (Labs › Keyboard › Emoji shortcodes), placed as words are, the best in the middle. */
 internal data class Suggestion(val text: String, val kind: Kind) {
-    enum class Kind { Typed, Fix, Word, Next, Emoji }
+    enum class Kind { Typed, Fix, Word, Next, Emoji, Shortcode }
 
     companion object {
         /** The strip shows three slots. */

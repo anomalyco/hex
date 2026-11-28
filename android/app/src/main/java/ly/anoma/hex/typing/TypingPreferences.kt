@@ -52,6 +52,10 @@ internal class TypingPreferences(context: Context) {
     var emojiSuggestions: Boolean
         get() = prefs.getBoolean(EMOJI_SUGGESTIONS, false)
         set(value) { prefs.edit().putBoolean(EMOJI_SUGGESTIONS, value).apply() }
+    /** Labs › Keyboard › Emoji shortcodes: ":fire" offers 🔥 in the strip and ":fire:" types it, off by default. */
+    var emojiShortcodes: Boolean
+        get() = prefs.getBoolean(EMOJI_SHORTCODES, false)
+        set(value) { prefs.edit().putBoolean(EMOJI_SHORTCODES, value).apply() }
     /** Labs › Keyboard › Keyboard tools: emoji, paste, settings and undo in the strip, off by default. */
     var keyboardTools: Boolean
         get() = prefs.getBoolean(KEYBOARD_TOOLS, false)
@@ -181,6 +185,7 @@ internal class TypingPreferences(context: Context) {
         const val NUMBER_ROW = "numberRow"
         const val LOCAL_CURRENCY = "localCurrency"
         const val EMOJI_SUGGESTIONS = "emojiSuggestions"
+        const val EMOJI_SHORTCODES = "emojiShortcodes"
         const val KEYBOARD_TOOLS = "keyboardTools"
         const val SMART_QUOTES = "smartQuotes"
         const val SWIPE_DELETE_LETTERS = "swipeDeleteLetters"

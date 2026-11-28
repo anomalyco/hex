@@ -127,6 +127,7 @@ class HexKeyboard : InputMethodService() {
             readPersonal = { PersonalWords.read(contentResolver, it, if (feedback.importedWords) ImportedWords.read(this) else emptyList()) },
             background = words,
             emoji = EmojiWords(assets, words),
+            shortcodes = EmojiShortcodes(assets, words),
             learned = { if (preferences.learnFixes) fixes.record(it) },
             adaptiveTouch = { if (feedback.adaptiveTouch) AdaptiveTouchStore.get(this) else null },
             swipeUnavailable = ::swipeUnavailable)
@@ -137,6 +138,7 @@ class HexKeyboard : InputMethodService() {
         if (key == TypingPreferences.NUMBER_ROW) engine.numberRowChanged()
         if (key == TypingPreferences.LOCAL_CURRENCY) engine.localCurrencyChanged()
         if (key == TypingPreferences.EMOJI_SUGGESTIONS) engine.emojiSuggestionsChanged()
+        if (key == TypingPreferences.EMOJI_SHORTCODES) engine.emojiShortcodesChanged()
         if (key == TypingPreferences.KEYBOARD_TOOLS) { engine.keyboardToolsChanged(); watchClipboard() }
         if (key == TypingPreferences.VOICE_ONLY) modeChanged()
         if (key == TypingPreferences.VOICE_BAR_FROM_MENU) { collapsed = false; modeChanged(keepDictation = true) }
