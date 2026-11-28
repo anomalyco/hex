@@ -2524,28 +2524,41 @@ mod tests {
 
     #[test]
     fn only_model_unavailability_is_retried() {
-        for names_model in [false, true] {
-            assert!(retryable_generation_error(
-                "Model unavailable: example/rewrite-model",
-                names_model
-            ));
-            assert!(!retryable_generation_error(
-                "Provider request failed",
-                names_model
-            ));
-            assert!(!retryable_generation_error(
-                "processor returned empty text",
-                names_model
-            ));
-        }
-        assert!(retryable_generation_error(
-            "Model not found: example/rewrite-model",
-            true
-        ));
-        assert!(!retryable_generation_error(
-            "Model not found: example/rewrite-model",
-            false
-        ));
+        assert!(retryable_generation_error("Model unavailable: example/rewrite-model"));
+        assert!(retryable_generation_error("Model not found: example/rewrite-model"));
+        assert!(!retryable_generation_error("Provider request failed"));
+        assert!(!retryable_generation_error("processor returned empty text"));
+    }
+
+    /// A request naming no model is asked once more when OpenCode's own
+    /// default is briefly missing while an idle workspace boots (#3048).
+    #[test]
+    fn opencode_default_model_not_found_at_startup_is_retried_once() {
+        let mut posts = 0;
+        let text = generate_single_model(
+            "Rewrite.",
+            None,
+            Instant::now(),
+            Duration::from_secs(5),
+            &AtomicBool::new(false),
+            |_, _, _| {
+                posts += 1;
+                Ok(if posts == 1 {
+                    Response::Error {
+                        message: "Model not found: opencode-go/claude-haiku-5-5".into(),
+                    }
+                } else {
+                    Response::Success {
+                        data: ResponseData {
+                            text: "rewritten".into(),
+                        },
+                    }
+                })
+            },
+        )
+        .unwrap();
+        assert_eq!(text, "rewritten");
+        assert_eq!(posts, 2);
     }
 
     /// A chosen model OpenCode reports missing while its provider still loads
@@ -2711,24 +2724,32 @@ mod tests {
     }
 
     #[test]
-    fn generation_falls_back_to_the_legacy_route_only_when_the_new_one_is_missing() {
+    fn generation_falls_back_to_legacy_routes_only_when_newer_ones_are_missing() {
         let success = r#"{"data":{"text":"fixture result"}}"#;
         let unavailable = r#"{"_tag":"InvalidRequestError","message":"Model unavailable: x"}"#;
         for (routes, expected) in [
             (
                 vec![
+                    ("/api/experimental/generate/text", 404, ""),
                     ("/api/experimental/generate", 404, ""),
                     ("/api/generate", 200, success),
                 ],
                 Ok("fixture result"),
             ),
             (
-                vec![("/api/experimental/generate", 400, unavailable)],
+                vec![
+                    ("/api/experimental/generate/text", 404, ""),
+                    ("/api/experimental/generate", 200, success),
+                ],
+                Ok("fixture result"),
+            ),
+            (
+                vec![("/api/experimental/generate/text", 400, unavailable)],
                 Err("Model unavailable: x"),
             ),
             (
                 vec![(
-                    "/api/experimental/generate",
+                    "/api/experimental/generate/text",
                     404,
                     r#"{"_tag":"NotFoundError","message":"Model not found: github-copilot/gpt-5.4-nano"}"#,
                 )],
@@ -2737,10 +2758,11 @@ mod tests {
             (
                 vec![
                     (
-                        "/api/experimental/generate",
+                        "/api/experimental/generate/text",
                         404,
                         r#"{"error":"Not Found"}"#,
                     ),
+                    ("/api/experimental/generate", 404, ""),
                     ("/api/generate", 404, ""),
                 ],
                 Err("does not serve a generation route"),
@@ -2975,12 +2997,12 @@ mod tests {
         ];
         let (service, server) = generation_server(vec![
             (
-                "/api/experimental/generate",
+                "/api/experimental/generate/text",
                 400,
                 r#"{"message":"Model unavailable: google/gemini-3.1-flash-lite"}"#,
             ),
             (
-                "/api/experimental/generate",
+                "/api/experimental/generate/text",
                 200,
                 r#"{"data":{"text":"resolved from second ranked model"}}"#,
             ),
@@ -3177,7 +3199,7 @@ mod tests {
     #[test]
     fn a_meeting_generation_posts_one_request_naming_no_model() {
         let (service, server) = generation_server(vec![(
-            "/api/experimental/generate",
+            "/api/experimental/generate/text",
             200,
             r#"{"data":{"text":"from OpenCode's default"}}"#,
         )]);
