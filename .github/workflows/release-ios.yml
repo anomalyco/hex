@@ -38,7 +38,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           previous=$(git describe --tags --match 'ios-beta-*' --abbrev=0 HEAD 2>/dev/null || :)
-          if [[ -n "$previous" ]] && git diff --quiet "$previous" HEAD -- ios app/AppIcon.icon tests/fixtures/vocabulary/audio/term-hex-1.wav; then
+          if [[ -n "$previous" ]] && git diff --quiet "$previous" HEAD -- ios crates/keyboard app/AppIcon.icon tests/fixtures/vocabulary/audio/term-hex-1.wav; then
             echo "No mobile changes since $previous." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
