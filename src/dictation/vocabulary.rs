@@ -104,8 +104,8 @@ impl VocabularyBoost {
     fn nats(self) -> f32 {
         match self {
             Self::Off => 0.0,
-            Self::Light => 2.0,
-            Self::Normal => 2.5,
+            Self::Light => 1.0,
+            Self::Normal => 1.5,
             Self::Strong => 4.0,
         }
     }
@@ -1086,7 +1086,10 @@ mod tests {
             serde_json::to_value(VocabularyBoost::Strong).unwrap(),
             serde_json::json!("strong")
         );
-        assert_eq!(VocabularyBoost::default().nats(), 2.5);
+        assert_eq!(VocabularyBoost::default().nats(), 1.5);
+        assert!(VocabularyBoost::Off.nats() < VocabularyBoost::Light.nats());
+        assert!(VocabularyBoost::Light.nats() < VocabularyBoost::Normal.nats());
+        assert!(VocabularyBoost::Normal.nats() < VocabularyBoost::Strong.nats());
     }
 
     #[test]
