@@ -74,6 +74,8 @@ pub(super) struct Metrics {
     pub(super) fact_label_w: f32,
     /// Centred empty-state and option copy width.
     pub(super) copy_w: f32,
+    /// The Meetings setup column: its header, card, and action.
+    pub(super) setup_w: f32,
 }
 
 pub(super) const METRICS: Metrics = Metrics {
@@ -93,6 +95,7 @@ pub(super) const METRICS: Metrics = Metrics {
     detail_pad: 24.0,
     fact_label_w: 120.0,
     copy_w: 280.0,
+    setup_w: 480.0,
 };
 
 /// Standard modal sheet widths. A modal is a small page and reuses the page's

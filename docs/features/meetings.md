@@ -26,7 +26,8 @@ Checks: `retention_expires_meetings_by_when_they_ended_and_skips_active_ones`,
 
 ```ts
 Labs > Meetings switch (macOS)                       // meetings.opt-in; off by default
-├── Off -> only the Labs switch -> Turn on -> meetings.enabled = true
+├── Off -> the Labs switch (Turn on -> meetings.enabled = true), or the pane's
+│   setup screen Turn on Meetings; off, the pane shows that setup screen
 ├── On -> Meetings joins the sidebar; header switch Recordings | Settings;
 │   menu-bar items, call detection
 │   Settings view: When a call starts, After a meeting, Export, Advanced ▸
@@ -2421,13 +2422,24 @@ Detail (a raised card beside the list)
     empty Complete meeting, or one whose automatic Trash move failed (a lock
     race or a Trash error leaves it listed)
 Under "Summary" and "Transcript" headings; the list's icons keep one column
-Empty: "No meetings yet" with a one-line hint, Start recording, and a note
-that meetings are kept in Hex on this Mac for 7 days before moving to the
-Trash while exported Markdown stays; "No meetings match." while searching
+Empty: "No meetings yet" with a hint from the default answer (Ask each time
+offers to record, Record automatically starts, Don't offer asks for a call),
+Start recording, and a note that transcripts stay in Hex on this Mac for 7
+days before moving to the Trash while exported Markdown stays; "No meetings
+match." while searching
 System Audio Recording not allowed -> a warning above the list ("Hex can't
 hear the other participants") with Open System Settings
-Meetings off (macOS) -> the sidebar still lists Meetings; its pane is
-"Record your calls" with Turn on Meetings (unless a policy locks it)
+Meetings off (macOS) -> the sidebar still lists Meetings; its pane is one
+setup screen: "Transcribe your meetings", "Records your mic and call audio
+locally. No bots join your calls.", Turn on Meetings, and where transcripts
+are kept
+├── System audio -> Allow where the OS asks for it; Allowed once granted
+│   (macOS only, where the tour asks for the permission)
+├── When a call starts -> the same Ask each time / Record automatically /
+│   Don't offer answer Settings › Calls edits // meetings.default_policy
+├── Calendar -> Connect / Connected, then Remind me before meetings; each
+│   acts in place, so nothing waits for a second screen // meetings.calendar
+└── A policy that locks Meetings shows the switch card instead
 
 Rename -> inline field; Enter or Save          // meetings.rename
   -> manifest title; Markdown heading only while it reads the old title
