@@ -20,8 +20,8 @@ const PEEK_PY: f32 = 8.0;
 const FADE: f32 = LINE;
 /// The lines and the padding round them.
 const PEEK_HEIGHT: f32 = LINES as f32 * LINE + 2.0 * PEEK_PY;
-/// The plain link: as tall as the header at the panel's other end.
-const LINK_HEIGHT: f32 = HEADER_HEIGHT;
+/// The plain link: one more 32 pt action row.
+const LINK_HEIGHT: f32 = ROW_HEIGHT;
 /// The plain link and the gap over it.
 pub(in crate::rune_ui::meeting_capsules) const LINK_FOOT: f32 = ROW_GAP + LINK_HEIGHT;
 /// The transcript's last lines and the gap over them.
@@ -61,11 +61,13 @@ pub(super) fn height(capsule: &Capsule) -> f32 {
 /// The foot: the transcript's last lines, or "Open in Hex", as one link.
 pub(super) fn foot(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
     let presence = capsule.action_presence(ROW).opacity;
-    let cue = icon(&icons::OUTLINE_ARROW_UP_RIGHT, 14.0)
-        .key("open-cue")
-        .color(p.muted())
-        .group_opacity(0.6, 1.0)
-        .a11y_hidden();
+    let cue = || {
+        icon(&icons::OUTLINE_ARROW_UP_RIGHT, 14.0)
+            .key("open-cue")
+            .color(p.muted())
+            .group_opacity(0.6, 1.0)
+            .a11y_hidden()
+    };
     let link = row()
         .key("open-live")
         .px(ROW_PX)
@@ -103,15 +105,25 @@ pub(super) fn foot(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
             .py(PEEK_PY)
             .items_end()
             .child(words)
-            .child(cue.mb(1.0))
+            .child(cue().mb(1.0))
     } else {
+        // An action row like the copies above it: its glyph on the icon
+        // spine, its words on the label rail, and the cue after them.
         let label = text(tr("Open in Hex").to_owned())
             .key("label")
-            .font(p.row_title())
+            .font(p.k.ty.ui)
             .color(p.muted())
             .truncate()
             .a11y_hidden();
-        link.h(LINK_HEIGHT).center_y().child(label).child(cue)
+        let glyph = icon(&icons::OUTLINE_SQUARE_ARROW, 16.0)
+            .key("glyph")
+            .color(p.muted())
+            .a11y_hidden();
+        link.h(LINK_HEIGHT)
+            .gap(8.0)
+            .center_y()
+            .child(glyph)
+            .child(label)
     };
     pressed(link, |c, _| {
         if let (Some(open), State::Recording { recording, .. }) = (&c.open_meeting, &c.state) {

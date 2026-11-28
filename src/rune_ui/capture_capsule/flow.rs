@@ -430,6 +430,9 @@ pub(crate) struct List {
     pub(crate) always: Option<(String, bool)>,
     /// Opened from a queued send via `⌄`, so the footer also offers Cancel send.
     pub(crate) queued: bool,
+    /// How many of `rows`, from the top, are suggestions; the rest are
+    /// recent sessions, under their own header.
+    pub(crate) suggested: usize,
 }
 
 impl List {

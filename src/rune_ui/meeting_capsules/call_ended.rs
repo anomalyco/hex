@@ -44,7 +44,13 @@ const STROKE_INSET: f32 = RING_STROKE * 0.5;
 /// Centreline corner radius, concentric with the icon across `RING_GAP`.
 const STROKE_RADIUS: f32 = ICON_RADIUS + RING_GAP + STROKE_INSET;
 /// Left padding inside the 56 pt body: matches top/bottom `(56 - 36) / 2 = 10`.
-pub(super) const BODY_PL: f32 = CAPSULE.row_px;
+/// The body: a 32 pt button row on the capsules' 6 pt inset.
+pub(super) const BODY_H: f32 = 32.0 + 2.0 * CAPSULE.button_inset;
+/// The app icon's ring sits as far from the left wall as from the top and
+/// bottom, so its corners turn about the body's.
+pub(super) const BODY_PL: f32 = (BODY_H - RING_SIZE) / 2.0;
+/// Between the window's edge and the body, above and below it.
+pub(super) const BODY_PY: f32 = (super::MEETING_PANEL_HEIGHT - BODY_H) / 2.0;
 /// Points sampled along each 90° rounded corner.
 const CORNER_STEPS: usize = 20;
 
@@ -123,7 +129,7 @@ pub(super) fn view(
     };
     let actions = row()
         .key("actions")
-        .gap(8.0)
+        .gap(CAPSULE.button_inset)
         .child(button(
             p,
             "keep-recording",
@@ -183,7 +189,7 @@ pub(super) fn view(
         .w_full()
         .h_full()
         .px(CAPSULE_INSET)
-        .py(CAPSULE_INSET)
+        .py(BODY_PY)
         .child(presence::anchored(capsule, body))
 }
 
@@ -275,7 +281,7 @@ fn drain(p: Paint, countdown: &Countdown, left: Duration, reduced: bool) -> El {
 /// A `size` × `size` rounded rectangle's stroke centreline, `inset` in from
 /// the canvas edge with corner radius `stroke_radius`, from the top centre
 /// clockwise and back.
-fn rounded_rect(size: f32, inset: f32, stroke_radius: f32) -> Vec<[f32; 2]> {
+pub(super) fn rounded_rect(size: f32, inset: f32, stroke_radius: f32) -> Vec<[f32; 2]> {
     let (x0, y0, x1, y1) = (inset, inset, size - inset, size - inset);
     let r = stroke_radius
         .min((x1 - x0) * 0.5)

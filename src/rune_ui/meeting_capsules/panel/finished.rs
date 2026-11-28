@@ -27,10 +27,15 @@ pub(super) fn discard_confirm(p: Paint, top: bool, stopping: bool) -> El {
     .h(CONFIRM_BODY)
 }
 
+/// The ready title link's padding round the title and length: the title's
+/// line centres on the ✕ box beside it.
+const READY_TITLE_PY: f32 = (CLOSE_BOX - 20.0) / 2.0;
+
 /// The finished meeting: its title and length as a link that opens it in
-/// Hex, the summary when there is one, then Copy agent prompt over Copy
-/// transcript. A ring round its ✕ drains over its stay, held while the pointer
-/// is inside.
+/// Hex, then Copy agent prompt over Copy transcript, every row 32 pt on the
+/// panel's 6 pt inset. The ✕ is a 28 pt box pinned 6 pt in from the top
+/// and side, and a rounded-rect ring round it drains over its stay, held
+/// while the pointer is inside. No summary: the link opens the meeting.
 pub(in crate::rune_ui::meeting_capsules) fn ready(
     p: Paint,
     capsule: &Capsule,
@@ -48,7 +53,7 @@ pub(in crate::rune_ui::meeting_capsules) fn ready(
         .shrink()
         .min_w(0.0)
         .px(ROW_PX)
-        .py(TITLE_PY)
+        .py(READY_TITLE_PY)
         .gap(6.0)
         .center_y()
         .radius(ROW_RADIUS)
@@ -118,20 +123,11 @@ pub(in crate::rune_ui::meeting_capsules) fn ready(
     .map(|stay| close_with_ring(p, stay));
     let header = row()
         .key("ready-header")
-        .pl(PANEL_PAD)
-        .pr(SPINE - CLOSE_BOX / 2.0)
+        .px(PANEL_PAD)
         .gap(2.0)
-        .center_y()
+        .items_start()
         .child(link)
         .children(close);
-    let summary = ready_summary(manifest).map(|(summary, written)| {
-        text(summary)
-            .key("summary")
-            .font(p.description())
-            .color(if written { p.muted() } else { p.faint() })
-            .max_lines(SUMMARY_LINES)
-            .px(CAPSULE.text_rail())
-    });
     let live = &capsule.live;
     let copied = |kind| live.copied(kind).then(|| copied_hint(p));
     let rows = col()
@@ -140,9 +136,10 @@ pub(in crate::rune_ui::meeting_capsules) fn ready(
         .child(panel_row(
             p,
             "copy-prompt",
-            &icons::OUTLINE_CONSOLE,
+            &icons::PROMPT,
             tr("Copy agent prompt"),
             copied(LiveCopy::Prompt),
+            true,
             true,
             true,
             1.0,
@@ -155,23 +152,18 @@ pub(in crate::rune_ui::meeting_capsules) fn ready(
             tr("Copy transcript"),
             copied(LiveCopy::All),
             false,
+            false,
             true,
             1.0,
             |c, tx| c.copy_all(tx),
         ));
-    // The title band sits on the anchored edge; 8 pt stay clear under its
-    // hover fill, and the summary keeps 12 pt from the copies.
+    // The title band sits on the anchored edge, a row's gap from the
+    // copies, as the copies are from each other.
     let contents = col().key("panel-contents").w(PANEL_WIDTH).py(PANEL_PAD);
     let contents = if top {
-        contents
-            .child(header.mb(TITLE_CLEAR))
-            .children(summary.map(|summary| summary.mb(SUMMARY_GAP)))
-            .child(rows)
+        contents.child(header.mb(ROW_GAP)).child(rows)
     } else {
-        contents
-            .child(rows)
-            .children(summary.map(|summary| summary.mt(SUMMARY_GAP)))
-            .child(header.mt(TITLE_CLEAR))
+        contents.child(rows).child(header.mt(ROW_GAP))
     };
     // Dragged from anywhere its rows and link leave free, like the pill.
     let body = panel_body(p, &title)
@@ -187,42 +179,17 @@ pub(in crate::rune_ui::meeting_capsules) fn ready(
     in_corner(capsule, presence::anchored(capsule, body))
 }
 
-/// The ready panel's height for `manifest`: the title band, the summary
-/// while there is one, and the two copies.
-pub(super) fn ready_height(manifest: &MeetingManifest) -> f32 {
-    let band = 2.0 * TITLE_PY + 20.0 + 2.0 + 12.0;
-    let summary = if ready_summary(manifest).is_some() {
-        16.0 * SUMMARY_LINES as f32 + SUMMARY_GAP
-    } else {
-        0.0
-    };
-    2.0 * PANEL_PAD + band + TITLE_CLEAR + summary + COPIES_HEIGHT
+/// The ready panel's height: the title band and the two copies.
+pub(super) fn ready_height(_: &MeetingManifest) -> f32 {
+    let band = 2.0 * READY_TITLE_PY + 20.0 + 2.0 + 16.0;
+    2.0 * PANEL_PAD + band + ROW_GAP + COPIES_HEIGHT
 }
 
-/// The ready panel's ✕, centred on the icon spine inside the ring that
-/// drains over its stay.
+/// The ready panel's ✕: the capsules' 28 pt concentric close box, inside
+/// the rounded-rect ring that drains over its stay.
 fn close_with_ring(p: Paint, stay: &stay::Stay) -> El {
     el().key("close-slot")
         .size(CLOSE_BOX, CLOSE_BOX)
+        .child(super::super::auto_started::dismiss_button(p))
         .child(stay::ring(p, stay))
-        .child(
-            row()
-                .key("close-box")
-                .size(CLOSE_BOX, CLOSE_BOX)
-                .center()
-                .child(
-                    IconButton::new(&icons::CLOSE_SMALL)
-                        .variant(IconButtonVariant::GhostMuted)
-                        .control_size(ControlSize::Small)
-                        .label(tr("Close"))
-                        .build(p.k)
-                        .key("dismiss")
-                        .cursor(Cursor::Pointer)
-                        .no_window_drag()
-                        .on_press_tx(|c: &mut Capsule, tx| {
-                            c.close();
-                            c.stir(tx);
-                        }),
-                ),
-        )
 }

@@ -1,8 +1,8 @@
 //! The ready panel's stay: how long it waits before it closes, held while
-//! the pointer is inside, and drawn as a ring round its ✕ that drains as the
-//! time runs out. One countdown idiom with the call-ended capsule's ring.
+//! the pointer is inside, and drawn as a rounded-rect ring tracing its ✕
+//! box that drains as the time runs out. One countdown idiom with the
+//! call-ended capsule's ring and Annotate's Undo.
 
-use std::f32::consts::{FRAC_PI_2, TAU};
 use std::time::{Duration, Instant};
 
 use rune::{El, LineCap, Shape, Tween, canvas, el};
@@ -16,10 +16,12 @@ use rune::Tx;
 pub(super) const RING_SIZE: f32 = 28.0;
 /// Stroke width of the ring.
 const RING_STROKE: f32 = 1.5;
-/// From the box's edge to the stroke's centreline.
-const RING_INSET: f32 = 2.0 + RING_STROKE / 2.0;
-/// Points sampled round the circle.
-const STEPS: usize = 72;
+/// From the box's edge to the stroke's centreline: the stroke lies on the
+/// box's own edge.
+const RING_INSET: f32 = RING_STROKE / 2.0;
+/// The ✕ box's corners, concentric with the panel's across its inset.
+const BOX_RADIUS: f32 =
+    super::super::controls::CAPSULE.inner(super::super::controls::CAPSULE.button_inset);
 /// A stay this close to its end counts as over when its timer fires.
 const SLACK: Duration = Duration::from_millis(250);
 
@@ -91,7 +93,7 @@ fn held(past: f32) -> Tween<[f32; 2]> {
 
 /// The ring round the ✕: a faint track and the part of the stay left.
 pub(super) fn ring(p: Paint, stay: &Stay) -> El {
-    let path = circle();
+    let path = outline();
     let layer = |ink| {
         canvas(
             Shape::new()
@@ -110,16 +112,10 @@ pub(super) fn ring(p: Paint, stay: &Stay) -> El {
         .child(layer(p.muted()).key("line").live_trim(&stay.line))
 }
 
-/// The ring's centreline, from the top clockwise and back.
-fn circle() -> Vec<[f32; 2]> {
-    let centre = RING_SIZE / 2.0;
-    let radius = centre - RING_INSET;
-    (0..=STEPS)
-        .map(|step| {
-            let a = -FRAC_PI_2 + TAU * step as f32 / STEPS as f32;
-            [centre + radius * a.cos(), centre + radius * a.sin()]
-        })
-        .collect()
+/// The ring's centreline round the ✕ box, from the top centre clockwise
+/// and back.
+fn outline() -> Vec<[f32; 2]> {
+    super::call_ended::rounded_rect(RING_SIZE, RING_INSET, BOX_RADIUS - RING_INSET)
 }
 
 /// The ready panel's closing, timed by its stay.
@@ -188,7 +184,7 @@ mod tests {
 
     #[test]
     fn the_ring_stays_inside_the_close_box() {
-        assert!(circle().iter().all(|[x, y]| {
+        assert!(outline().iter().all(|[x, y]| {
             (RING_INSET - 0.01..=RING_SIZE - RING_INSET + 0.01).contains(x)
                 && (RING_INSET - 0.01..=RING_SIZE - RING_INSET + 0.01).contains(y)
         }));

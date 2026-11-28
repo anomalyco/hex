@@ -1194,6 +1194,8 @@ fn button(
         })
         .build_push(p.k)
         .key(key)
+        // Concentric with the capsule across its 6 pt inset.
+        .radius(CAPSULE.inner(CAPSULE.button_inset))
         // The capsule's body drags; its buttons are buttons.
         .cursor(Cursor::Pointer)
         // The surface answers in the frame of the press.

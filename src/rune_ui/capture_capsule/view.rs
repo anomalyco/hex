@@ -168,11 +168,11 @@ pub(super) fn capsule(
         .on_pointer_move_local(|s: &mut CapsuleState, _, tx| s.pointer_moved(tx));
     root = root.child(clip.child(inner.child(content)));
     if let Pres::Done(Done {
-        open: Some((_, list)),
+        open: Some((typed, list)),
         ..
     }) = &surface.pres
     {
-        root = root.child(list_view(p, list, x, w, reduced));
+        root = root.child(list_view(p, list, typed, x, w, reduced));
     }
     if let Pres::Done(Done {
         always_popover: Some(config),
@@ -473,8 +473,8 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             .hit()
             .on_press_tx(press(id))
         }
-        // Unified destination split chip: one fill, no vertical divider,
-        // each half its own clickable target.
+        // Unified destination split chip: one fill, a hairline between
+        // quick-send and the picker, each half its own clickable target.
         Id::Split => {
             let queued = shown.active;
             let help = match &surface.pres {
@@ -512,13 +512,19 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             if let Some(tip) = help {
                 left = left.help(tip);
             }
-            let more = row()
+            // Open, the picker half stays pressed while its list hangs under it.
+            let open = matches!(&surface.pres, Pres::Done(Done { open: Some(_), .. }));
+            let mut more = row()
                 .key("more")
                 .size(surface::CHEVRON_W, BUTTON_H)
                 .center()
                 .radius(ICON_BUTTON_RADIUS)
                 .hover(c.hover)
-                .press(c.pressed)
+                .press(c.pressed);
+            if open {
+                more = more.fill(c.pressed);
+            }
+            let more = more
                 .role("button")
                 .label(tr("Send to…"))
                 .help(tr("Choose another session"))
@@ -527,6 +533,13 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 .child(
                     rune::icon(&rune_theme_opencode::icons::CHEVRON_DOWN, 14.0).color(p.muted()),
                 );
+            let hairline = el()
+                .key("split-rule")
+                .absolute(send_w, SPLIT_RULE_INSET)
+                .size(p.hair * 2.0, BUTTON_H - 2.0 * SPLIT_RULE_INSET)
+                .fill(c.border_base)
+                .inert()
+                .a11y_hidden();
             base.child(
                 row()
                     .key("split-fill")
@@ -534,7 +547,9 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                     .radius(ICON_BUTTON_RADIUS)
                     .fill(c.layer_02)
                     .child(left)
-                    .child(more),
+                    .child(more)
+                    // The pressed ⌄ half marks the split itself while open.
+                    .children((!open).then_some(hairline)),
             )
         }
         // Post-send `Always…` button beside Undo: quiet at rest, filled while open.
@@ -572,31 +587,27 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             .hit()
             .on_press_tx(press(id))
         }
-        // A permission helper's Capture action retains its keycaps.
+        // A permission helper's Annotate action: a filled button, as Allow
+        // is, its keycaps inside it.
         Id::Ask
             if matches!(
                 &surface.pres,
                 Pres::Done(Done { ask: Some(ask), ask_keys: true, .. }) if *ask == shown.ident
             ) =>
         {
-            base.justify_start()
-                .pl(CHIP_PX)
-                .pr(surface::keycaps_inset())
-                .gap(surface::KEYCAPS_GAP)
-                .radius(surface::CHIP_RADIUS)
-                .hover(c.hover)
-                .press(c.pressed)
-                .child(label(&shown.ident, medium(), p.muted()))
-                .child(el().grow(1.0))
-                .child(super::super::controls::keycaps(
-                    p,
-                    "ask-keys",
-                    &surface::shortcut_keycaps(),
-                ))
-                .role("button")
-                .label(shown.ident.clone())
-                .hit()
-                .on_press_tx(press(id))
+            let bw = shown.rect[2] - 2.0 * surface::BUTTON_INSET;
+            let keys = chord(&surface::shortcut_keycaps());
+            base.child(
+                button_box(p, bw)
+                    .gap(HINT_GAP)
+                    .fill(c.layer_02)
+                    .child(label(&shown.ident, medium(), p.text()))
+                    .child(quiet(p, &keys, medium()).key("ask-keys")),
+            )
+            .role("button")
+            .label(shown.ident.clone())
+            .hit()
+            .on_press_tx(press(id))
         }
         Id::Ask if shown.active => base
             .child(
@@ -805,6 +816,8 @@ pub(super) const CHECK: f32 = 16.0;
 /// The finished line's buttons (Paste, Search, Inspect, ✕) are 28 pt tall,
 /// 6 pt in from the walls, their corners concentric with the shell's.
 pub(super) const BUTTON_H: f32 = CHIP_H - 2.0 * surface::BUTTON_INSET;
+/// The split chip's hairline stops this far short of its fill's top and bottom.
+pub(super) const SPLIT_RULE_INSET: f32 = 7.0;
 pub(super) const ICON_BUTTON_RADIUS: f32 = surface::CHIP_RADIUS - 2.0;
 
 /// One of those buttons, `w` wide, its content centred.

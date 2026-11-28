@@ -51,8 +51,8 @@ use rune_kit::TextInput;
 use self::flow::{Action, Cue, Done, Flow, Footer, Input, Lead, List, Mode, Pres};
 use self::list_view::*;
 use self::surface::{
-    CHIP_H, CHIP_PX, HEADER_H, HINT_GAP, Id, LEAD_TEXT_X, LEVEL_GAP, LEVEL_W, LIST_PAD, LIST_Y,
-    PANEL_H, PANEL_W, PROCESSING_TEXT_X, ROW_H, SEG_ICON, SEG_ICON_GAP, Shown, Surface, THUMB_H,
+    CHIP_H, HEADER_H, HINT_GAP, Id, LEAD_TEXT_X, LEVEL_GAP, LEVEL_W, LIST_PAD, LIST_Y, PANEL_H,
+    PANEL_W, PROCESSING_TEXT_X, ROW_H, SEG_ICON, SEG_ICON_GAP, Shown, Surface, THUMB_H,
     THUMB_RADIUS, THUMB_W, THUMB_X, chord, clock_width, corner, done_style, done_text_x, ellipsize,
     measure, medium, processing, small,
 };

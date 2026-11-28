@@ -5,10 +5,9 @@
 //! drains to an automatic stop.
 
 use rune::{Cursor, El, el, row, text};
-use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
 use super::super::controls::{CAPSULE, Paint};
-use super::call_ended::{BODY_PL, ICON_SIZE, RING_SIZE, app_icon};
+use super::call_ended::{BODY_PL, BODY_PY, ICON_SIZE, RING_SIZE, app_icon};
 use super::{CAPSULE_INSET, Capsule, REC_DOT, button, panel_radius, presence};
 use crate::desktop::i18n::tr;
 use crate::meeting::watcher::ControllerCommand;
@@ -67,7 +66,7 @@ pub(super) fn view(
         }));
     let actions = row()
         .key("actions")
-        .gap(8.0)
+        .gap(CAPSULE.button_inset)
         .center_y()
         .child(button(p, "stop", tr("Stop"), true, |c| {
             if c.send(ControllerCommand::Stop) {
@@ -83,8 +82,8 @@ pub(super) fn view(
         .h_full()
         .center_y()
         .pl(BODY_PL)
-        // The ✕ is centred on the icon spine, like every capsule's.
-        .pr(CAPSULE.icon_spine() - CAPSULE.close / 2.0)
+        // The ✕ box sits on the capsules' 6 pt inset, like every one.
+        .pr(CAPSULE.button_inset)
         .gap(12.0)
         .radius(panel_radius(p))
         .fill(c.bg_base)
@@ -100,31 +99,39 @@ pub(super) fn view(
         .w_full()
         .h_full()
         .px(CAPSULE_INSET)
-        .py(CAPSULE_INSET)
+        .py(BODY_PY)
         .child(presence::anchored(capsule, body))
 }
 
 /// The ✕ that closes a capsule whose actions have no way to, in every
 /// capsule's 28 pt close box. It only hides the capsule: nothing is sent to
 /// the controller (#996).
+/// The box rounds 8 pt, concentric with the capsule across its 6 pt inset.
 pub(super) fn dismiss_button(p: Paint) -> El {
-    let close = IconButton::new(&rune_theme_opencode::icons::CLOSE_SMALL)
-        .variant(IconButtonVariant::GhostMuted)
-        .control_size(ControlSize::Small)
-        .label(tr("Close"))
-        .build(p.k)
-        .key("dismiss")
-        .cursor(Cursor::Pointer)
-        .no_window_drag()
-        .on_press_tx(|c: &mut Capsule, tx| {
-            c.close();
-            c.stir(tx);
-        });
     row()
         .key("close-box")
         .size(CAPSULE.close, CAPSULE.close)
         .center()
-        .child(close)
+        .radius(CAPSULE.inner(CAPSULE.button_inset))
+        .hover(p.k.c.hover)
+        .press(p.k.c.pressed)
+        .role("button")
+        .label(tr("Close"))
+        .focusable(true)
+        .focus_ring(2., -2., p.k.c.border_focus)
+        .cursor(Cursor::Pointer)
+        .no_window_drag()
+        .hit()
+        .on_press_tx(|c: &mut Capsule, tx| {
+            c.close();
+            c.stir(tx);
+        })
+        .child(
+            rune::icon(&rune_theme_opencode::icons::CLOSE_SMALL, 16.0)
+                .key("dismiss")
+                .color(p.muted())
+                .a11y_hidden(),
+        )
 }
 
 /// The recording dot on the icon's bottom-right corner, ringed by the

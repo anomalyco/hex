@@ -138,7 +138,12 @@ pub(super) fn list_for(route: &Route, open: &Open, queued: bool) -> List {
     };
     let always = site.map(|site| (site, open.shift));
     let every = || suggested.iter().chain(recent);
-    let rows = matching(every(), &open.query.text);
+    // Suggestions first, then recent sessions, each in its own section.
+    let (mut rows, rest): (Vec<_>, Vec<_>) = matching(every(), &open.query.text)
+        .into_iter()
+        .partition(|row| suggested.iter().any(|s| s.name == row.name));
+    let suggested_rows = rows.len();
+    rows.extend(rest);
     let target = open
         .pointed
         .or(open.typing.then_some(open.selected))
@@ -168,6 +173,7 @@ pub(super) fn list_for(route: &Route, open: &Open, queued: bool) -> List {
         },
         always,
         queued,
+        suggested: suggested_rows,
     };
     // Shift down, the target row is where the rule would send it.
     if list.always.as_ref().is_some_and(|(_, shift)| *shift)
@@ -428,6 +434,9 @@ pub(super) fn routed_done(routed: &Routed, now: f64) -> Done {
         Route::Rule { to, by, .. } => Done {
             strong_text: true,
             why: (!routed.delivered).then(|| tr(by.label()).into()),
+            // Jev picked it, not a rule: `Always…` turns the pick into one,
+            // as it does after a manual send.
+            always_button: matches!(by, AutoSendBy::Jev).then_some(false),
             undo: !going,
             countdown,
             window,
@@ -492,12 +501,22 @@ pub(super) fn routed_done(routed: &Routed, now: f64) -> Done {
         // The suggestions hang under a finished capsule that keeps Paste
         // and Inspect, and its note.
         Some(open) if !open.typing => offered(base, list_for(&routed.route, open, routed.queued)),
-        // Searching, the field takes the chips' place.
+        // Searching, the capsule keeps its line (`Copied [→ SEER | ⌄] ✕`)
+        // and the field opens in the list under it.
         Some(open) => Done {
             why: None,
             undo: false,
             countdown: None,
-            split: None,
+            split: match &routed.route {
+                Route::Guess { suggested, .. } if !suggested.is_empty() => {
+                    Some(SplitChip::suggest(short(&suggested[0].name)))
+                }
+                _ => None,
+            },
+            text: match &routed.route {
+                Route::Guess { suggested, .. } if !suggested.is_empty() => tr("Copied").into(),
+                _ => base.text.clone(),
+            },
             ask: None,
             open: Some((
                 *open.query.clone(),

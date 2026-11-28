@@ -64,7 +64,7 @@ pub(crate) const BUTTON_INSET: f32 = 2.0;
 /// From the finished line's words to Paste's fill.
 const PASTE_LEAD: f32 = 16.0;
 /// How far ✕ tucks into the action before it.
-const CLOSE_HUG: f32 = 6.0;
+pub(crate) const CLOSE_HUG: f32 = 6.0;
 pub(crate) const CHIP_PX: f32 = 12.0;
 /// After the lead's text, equal to the dot's 12 pt inset.
 const LEAD_TRAIL: f32 = 12.0;
@@ -84,12 +84,12 @@ pub(crate) const CHEVRON_W: f32 = 24.0;
 
 /// The open capsule is as wide as the list under it; its field takes what
 /// the rest leaves.
-pub(crate) const LIST_W: f32 = 420.0;
-const FIELD_MIN: f32 = 120.0;
+pub(crate) const LIST_W: f32 = 360.0;
 pub(crate) const LIST_Y: f32 = TOP + ISLAND_H + 6.0;
 pub(crate) const LIST_PAD: f32 = CAPSULE.row_inset;
 pub(crate) const HEADER_H: f32 = 24.0;
-pub(crate) const ROW_H: f32 = 30.0;
+/// A list row, and the search field over them: the capsules' 32 pt action row.
+pub(crate) const ROW_H: f32 = CAPSULE.row_h;
 
 /// The cursor's and the notch's card: at least this wide, a row per
 /// guess under its top line.
@@ -434,26 +434,6 @@ pub(crate) fn shortcut_keycaps() -> Vec<String> {
     crate::app_settings::capture_hotkey_keycaps()
 }
 
-/// Between a chip's label and its keycaps.
-pub(crate) const KEYCAPS_GAP: f32 = 8.0;
-
-/// The keycaps' tray sits this far inside the chip's right edge: as far
-/// as from its top, and ✕'s hug on top, since ✕ tucks into the chip.
-pub(crate) fn keycaps_inset() -> f32 {
-    (CHIP_H - super::super::controls::KeySize::Small.height()) / 2.0
-        - super::super::controls::TRAY_PADDING
-        + CLOSE_HUG
-}
-
-/// A chip's label, then the capture shortcut's keycaps.
-pub(crate) fn keycaps_chip_width(label: &str, style: TextStyle) -> f32 {
-    CHIP_PX
-        + measure(label, style)
-        + KEYCAPS_GAP
-        + super::super::controls::keycaps_width(&shortcut_keycaps(), measure)
-        + keycaps_inset()
-}
-
 /// Width of the left send/queued half inside the split destination chip.
 pub(crate) fn split_send_width(name: &str) -> f32 {
     8.0 + SEND_ICON + 4.0 + measure(name, medium()) + 4.0
@@ -531,16 +511,8 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
             false,
         ));
     }
-    let typing = done
-        .open
-        .as_ref()
-        .is_some_and(|(_, list)| !list.suggesting());
-    if typing {
-        // The search takes the rest of the capsule; its keys are in the
-        // list's footer.
-        raw.push((Id::Field, String::new(), FIELD_MIN, false));
-        return;
-    }
+    // Searching, the capsule keeps its own line (`Copied [→ SEER | ⌄] ✕`):
+    // the search field lives in the list under it.
     // One action at most, the most urgent: take a send back, paste or
     // inspect the capture (two quiet icons), or open the list. Where to
     // send it lives in the list under the capsule, never in chips beside
@@ -622,12 +594,16 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
             if listed && done.ask_keys {
                 raw.push((Id::Search, ask.clone(), CHIP_H, false));
             } else {
+                // A shortcut ask (Annotate ⌥⇧S) is a filled button, its own
+                // box beside ✕ rather than words ✕ tucks into.
                 let width = if done.ask_keys {
-                    keycaps_chip_width(ask, medium())
+                    let keys = shortcut_keycaps();
+                    let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+                    keyed_width(&keys, ask, medium()) + 2.0 * BUTTON_INSET
                 } else {
                     keyed_width(&[], ask, medium())
                 };
-                raw.push((Id::Ask, ask.clone(), width, false));
+                raw.push((Id::Ask, ask.clone(), width, done.ask_keys));
             }
         }
     }
@@ -1295,6 +1271,7 @@ mod tests {
                     footer: Footer::Search { remember: false },
                     always: None,
                     queued: false,
+                    suggested: 1,
                 },
             )),
             ..Done::plain(Lead::Check, "")

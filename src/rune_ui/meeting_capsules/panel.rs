@@ -52,11 +52,9 @@ const CLOSE_BOX: f32 = CAPSULE.close;
 /// The panel's icon spine: the centre of its rows' 16 pt glyphs, where every
 /// ✕ is centred too.
 pub(super) const SPINE: f32 = CAPSULE.icon_spine();
-/// How far the discard ✕ hangs past the header's inset, so its centre lands
-/// on the spine.
-const CLOSE_NUDGE: f32 = REST_PX + CLOSE_BOX / 2.0 - SPINE;
-/// What the discard ✕ takes from the open header's field, on its free side.
-pub(super) const DISCARD_ROOM: f32 = CLOSE_BOX - CLOSE_NUDGE;
+/// What a discard ✕ would take from the open header's field. The open
+/// header is the waveform and the time alone: no bare ✕ beside them.
+pub(super) const DISCARD_ROOM: f32 = 0.0;
 /// The panel while it asks "Discard recording?": its header, the question
 /// and its consequence, and Keep and Discard (§2.4 of the design spec).
 pub(super) const CONFIRM_HEIGHT: f32 = REST_HEIGHT + CONFIRM_BODY;
@@ -66,12 +64,6 @@ const CONFIRM_BODY: f32 = 4.0 + 20.0 + 2.0 + 16.0 + 12.0 + CONFIRM_BUTTON + CONF
 const CONFIRM_BUTTON: f32 = 28.0;
 /// Keep and Discard sit this far in from the panel's sides and its edge.
 const CONFIRM_INSET: f32 = CAPSULE.button_inset;
-/// The ready panel's title band: its link's padding round the title and length.
-const TITLE_PY: f32 = 8.0;
-/// Clear space under the title link's hover fill.
-const TITLE_CLEAR: f32 = 8.0;
-/// Between the summary and the copies.
-const SUMMARY_GAP: f32 = 12.0;
 
 pub(super) fn recording_notice(shown: &Recording) -> Option<Notice> {
     // The microphone's own switch says more than the silence warning that
@@ -147,11 +139,12 @@ fn panel_row(
     label: &str,
     hint: Option<El>,
     first: bool,
+    lead: bool,
     enabled: bool,
     presence: f32,
     press: impl Fn(&mut Capsule, &mut Tx) + 'static,
 ) -> El {
-    let (ink, font) = if first {
+    let (ink, font) = if lead {
         (p.text(), p.k.ty.ui_medium)
     } else {
         (p.muted(), p.k.ty.ui)
@@ -233,10 +226,12 @@ fn copy_rows(p: Paint, capsule: &Capsule, recording: bool) -> Vec<El> {
         panel_row(
             p,
             "copy-prompt",
-            &icons::OUTLINE_CONSOLE,
+            &icons::PROMPT,
             tr("Copy agent prompt"),
             copied(LiveCopy::Prompt),
             true,
+            // While recording, Stop leads; the copies follow it.
+            !recording,
             true,
             presence(1),
             |c, tx| c.copy_prompt(tx),
@@ -247,6 +242,7 @@ fn copy_rows(p: Paint, capsule: &Capsule, recording: bool) -> Vec<El> {
             &icons::OUTLINE_COPY,
             tr("Copy transcript"),
             copied(LiveCopy::All),
+            false,
             false,
             !recording || !live.entries.is_empty(),
             presence(2),
@@ -422,6 +418,7 @@ fn result(
             tr("Stopping…"),
             None,
             false,
+            true,
             false,
             stop.opacity,
             |_, _| {},
@@ -955,6 +952,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording, held: Op
             },
             None,
             false,
+            true,
             !stopping && open && stop.takes_input(),
             stop.opacity,
             |c, tx| {
@@ -993,41 +991,9 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording, held: Op
         });
     let header = meter_band();
     let spacer = el().key("space").grow(1.0);
-    // The ✕ keeps its place on the icon spine, over the header rather than
-    // in its row, so nothing beside it moves as it arrives; while the
-    // question is asked (or the discard is under way) it fades and takes no
-    // input.
-    let discard = (open && (!stopping || confirming)).then(|| {
-        let x = if right {
-            SPINE - CLOSE_BOX / 2.
-        } else {
-            PANEL_WIDTH - SPINE - CLOSE_BOX / 2.
-        };
-        let slot = row()
-            .key("discard-slot")
-            .size(CLOSE_BOX, CLOSE_BOX)
-            .absolute(x, (REST_HEIGHT - CLOSE_BOX) / 2.)
-            .center()
-            .child(
-                IconButton::new(&icons::CLOSE_SMALL)
-                    .variant(IconButtonVariant::GhostMuted)
-                    .control_size(ControlSize::Small)
-                    .label(tr("Discard recording"))
-                    .build(p.k)
-                    .key("discard")
-                    .cursor(Cursor::Pointer)
-                    .no_window_drag()
-                    .on_press_tx(|c: &mut Capsule, tx| {
-                        c.ask_discard();
-                        c.stir(tx);
-                    }),
-            );
-        if asking {
-            slot.opacity(0.0).inert()
-        } else {
-            slot.opacity(stop.opacity)
-        }
-    });
+    // The open header is the waveform and the time alone; Discard waits
+    // behind Stop's confirmation rather than a bare ✕ beside them.
+    let discard: Option<El> = None;
     let header = if right {
         header
             .children(discard)
