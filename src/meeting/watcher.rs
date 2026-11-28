@@ -12,14 +12,14 @@ use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, eyre};
 
-use crate::calendar::{CalendarMeeting, ReminderScheduler, ReminderUpdate};
+use crate::calendar::{CalendarMeeting, CallProvider, ReminderScheduler, ReminderUpdate};
 use crate::dictation::context::ContextSnapshot;
 use crate::meeting::detection::{
     AutoStop, BrowserPageMemory, CallPresence, CallSwitch, Detection, MeetingCandidate,
     MeetingDetector, MeetingSource, OfferId, candidate_from_microphone,
 };
 use crate::meeting::recovery::PendingFinals;
-use crate::meeting::{self, MeetingCalendar, MeetingRequest, MeetingStart, TrackWarning};
+use crate::meeting::{self, MeetingRequest, MeetingStart, TrackWarning};
 use crate::microphone_activity::{ActiveMicrophoneApplication, active_microphone_applications};
 
 use call_end::{CallEndStop, CallWatch, icon_application, stops_when_call_ends};
@@ -28,10 +28,15 @@ use call_switch::{
 };
 use import::{ImportWorker, poll_import, start_import};
 
+mod calendar_sync;
 mod call_end;
 mod call_switch;
 mod import;
 mod publication;
+
+#[cfg(test)]
+use calendar_sync::calendar_snooze;
+use calendar_sync::{calendar_context, calendar_start, snooze_calendar_call};
 
 pub(crate) enum ControllerCommand {
     Record(MeetingCandidate, Option<OfferId>),
@@ -603,62 +608,6 @@ impl Start {
     }
 }
 
-/// A recording for a calendar meeting: its title, attendees, and call app.
-fn calendar_start(meeting: &CalendarMeeting) -> Start {
-    let provider = meeting.link.as_ref().map(|link| link.provider);
-    Start {
-        meeting: MeetingStart {
-            title: Some(meeting.display_title()),
-            app: provider.map(|provider| provider.label().to_string()),
-            application: provider
-                .and_then(|provider| provider.application())
-                .map(str::to_string),
-            calendar: Some(calendar_context(meeting)),
-            title_source: meeting::TitleSource::Calendar,
-        },
-        title: meeting.display_title(),
-        app_label: provider
-            .map_or("Meeting", |provider| provider.label())
-            .into(),
-        call: None,
-        switched_from: None,
-        watched: None,
-    }
-}
-
-fn calendar_context(meeting: &CalendarMeeting) -> MeetingCalendar {
-    MeetingCalendar {
-        title: meeting.display_title(),
-        attendees: meeting.attendees.clone(),
-    }
-}
-
-/// What a calendar meeting's answered reminder covers: its call service's
-/// detected-call keys until the meeting ends. Without a call link, the next
-/// call of any service, but only around the scheduled start, so one
-/// dismissal never silences other calls for the rest of a long event.
-fn calendar_snooze(meeting: &CalendarMeeting) -> (Vec<String>, i64) {
-    match &meeting.link {
-        Some(link) => (
-            link.provider
-                .detection_keys()
-                .iter()
-                .map(|key| key.to_string())
-                .collect(),
-            meeting.end_ms,
-        ),
-        None => (
-            Vec::new(),
-            (meeting.start_ms + crate::calendar::LATE_GRACE_MS).min(meeting.end_ms),
-        ),
-    }
-}
-
-fn snooze_calendar_call(detector: &mut MeetingDetector, meeting: &CalendarMeeting) {
-    let (keys, until_ms) = calendar_snooze(meeting);
-    detector.snooze_calendar_call(keys, until_ms);
-}
-
 /// How often the reminder poll rereads the calendar without a change
 /// notification.
 const CALENDAR_REREAD_MS: i64 = 60_000;
@@ -685,17 +634,18 @@ struct Reminders {
 /// Where a successful calendar read goes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ReadSources {
-    /// The list reminders schedule from and detected calls are titled by:
-    /// only while reminders are active.
+    /// The list reminders schedule from and recordings of detected or
+    /// manual calls are titled from: while reminders are active, or while a
+    /// calendar is connected so an active call still matches its event.
     meetings: bool,
     /// Labs › Upcoming meetings in menu bar's own snapshot.
     menu: bool,
 }
 
 impl ReadSources {
-    fn new(reminders: bool, menu: bool) -> Self {
+    fn new(reminders: bool, menu: bool, matching: bool) -> Self {
         Self {
-            meetings: reminders,
+            meetings: reminders || matching,
             menu,
         }
     }
@@ -725,8 +675,12 @@ impl Reminders {
         let menu_on = crate::calendar_menu::lab_on();
         let menu = crate::calendar_menu::wanted(settings.connected);
         let reminders = settings.reminders_active();
-        let reads = ReadSources::new(reminders, menu);
-        if !enabled || !(reminders || menu) {
+        // A connected calendar titles and fills detected or manual calls
+        // even with reminders off; nothing reads while it is not connected,
+        // so Hex never asks for access for this.
+        let matching = settings.connected;
+        let reads = ReadSources::new(reminders, menu, matching);
+        if !enabled || !(reminders || menu || matching) {
             self.meetings.clear();
             self.change_count = None;
             self.read_at_ms = None;
@@ -741,11 +695,14 @@ impl Reminders {
             return;
         }
         if !reminders {
-            // The menu's list is the read's own: with reminders off the read
-            // never feeds the list recordings are titled and reminded from.
-            self.meetings.clear();
             if let Some(occurrence) = self.scheduler.clear() {
                 let _ = events.send(ControllerEvent::ReminderWithdrawn { occurrence });
+            }
+            // The menu's list is the read's own: with reminders off and no
+            // calendar to match against, nothing feeds the list recordings
+            // are titled and reminded from.
+            if !matching {
+                self.meetings.clear();
             }
         }
         let now_ms = crate::calendar::wall_clock_ms();
@@ -817,26 +774,38 @@ impl Reminders {
         self.scheduler.poll(&self.meetings, now_ms, lead_ms)
     }
 
-    /// A detected call's recording, titled from the calendar meeting it
-    /// belongs to when there is one.
+    /// A detected or manual recording, titled from the calendar meeting it
+    /// belongs to when there is exactly one. The meetings were read on an
+    /// earlier loop, so starting never waits on EventKit.
     fn start_for(&self, candidate: &MeetingCandidate) -> Start {
         let mut start = Start::from_candidate(candidate);
-        let keys = [candidate.site.as_deref(), candidate.application.as_deref()]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
-        let lead_ms = crate::app_settings::calendar_settings().lead().as_millis() as i64;
-        if let Some(meeting) = crate::calendar::current_for_call(
-            &self.meetings,
-            &keys,
-            crate::calendar::wall_clock_ms(),
-            lead_ms,
-        ) {
+        // The call service the recording knows: the app or website it was
+        // detected in, or the call app a manual recording found on the
+        // microphone. A manual recording with neither matches by time alone.
+        let provider = start
+            .meeting
+            .app
+            .as_deref()
+            .and_then(CallProvider::from_meeting_app)
+            .or_else(|| {
+                start
+                    .watched
+                    .as_ref()
+                    .and_then(|(_, label)| CallProvider::from_meeting_app(label))
+            });
+        let now_ms = crate::calendar::wall_clock_ms();
+        if let Some(meeting) =
+            crate::calendar::match_active_meeting(&self.meetings, now_ms, provider)
+        {
             start.meeting.calendar = Some(calendar_context(meeting));
-            // A title the user gave (`hex meetings record --title`) wins.
-            if !(candidate.named
-                && candidate.source == crate::meeting::detection::MeetingSource::Manual)
-            {
+            // A title the user typed (`hex meetings record --title`, a
+            // rename) and a named call's own title both win; an unnamed
+            // call's app label ("Zoom") and no title at all do not.
+            let user_titled = start.meeting.title_source == meeting::TitleSource::User
+                && start.meeting.title.is_some();
+            let named_by_call =
+                candidate.named && start.meeting.title_source == meeting::TitleSource::Call;
+            if !user_titled && !named_by_call {
                 start.meeting.title = Some(meeting.display_title());
                 start.meeting.title_source = meeting::TitleSource::Calendar;
                 start.title = meeting.display_title();
@@ -1500,15 +1469,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_reminders_keep_the_titling_and_reminder_list() {
-        let menu_only = ReadSources::new(false, true);
+    fn the_menu_alone_never_keeps_the_titling_and_reminder_list() {
+        let menu_only = ReadSources::new(false, true, false);
         assert!(!menu_only.meetings);
         assert!(menu_only.menu);
         // Reminders keep the read they always had.
-        let reminders = ReadSources::new(true, false);
+        let reminders = ReadSources::new(true, false, false);
         assert!(reminders.meetings);
         assert!(!reminders.menu);
-        let both = ReadSources::new(true, true);
+        let both = ReadSources::new(true, true, true);
         assert!(both.meetings);
         assert!(both.menu);
     }
@@ -2423,5 +2392,140 @@ mod tests {
         let (keys, until_ms) = calendar_snooze(&zoom);
         assert!(keys.iter().any(|key| key == "us.zoom.xos"), "{keys:?}");
         assert_eq!(until_ms, zoom.end_ms);
+    }
+
+    /// A meeting in progress around the wall clock `start_for` reads.
+    fn happening_now(id: &str) -> CalendarMeeting {
+        let now = crate::calendar::wall_clock_ms();
+        CalendarMeeting {
+            id: id.into(),
+            title: id.into(),
+            start_ms: now - 5 * MINUTE,
+            end_ms: now + 25 * MINUTE,
+            attendees: vec!["Ana Ruiz".into()],
+            link: None,
+        }
+    }
+
+    fn zoom_candidate() -> MeetingCandidate {
+        MeetingCandidate {
+            key: "us.zoom.xos".into(),
+            title: MeetingSource::Zoom.label().into(),
+            source: MeetingSource::Zoom,
+            application: Some("us.zoom.xos".into()),
+            named: false,
+            site: None,
+            application_name: None,
+            call: None,
+        }
+    }
+
+    #[test]
+    fn a_manual_recording_takes_the_one_active_meetings_title_and_attendees() {
+        let reminders = Reminders {
+            meetings: vec![happening_now("design sync")],
+            ..Reminders::default()
+        };
+        // Reminders need not be on: the meetings were read for matching.
+        let start = reminders.start_for(&MeetingCandidate::manual());
+        assert_eq!(start.title, "design sync");
+        assert_eq!(start.meeting.title.as_deref(), Some("design sync"));
+        assert_eq!(start.meeting.title_source, meeting::TitleSource::Calendar);
+        assert_eq!(
+            start.meeting.calendar,
+            Some(crate::meeting::MeetingCalendar {
+                title: "design sync".into(),
+                attendees: vec!["Ana Ruiz".into()],
+            })
+        );
+    }
+
+    #[test]
+    fn a_detected_call_takes_the_title_of_the_meeting_its_service_names() {
+        let mut zoom = happening_now("design sync");
+        zoom.link = Some(crate::calendar::CallLink {
+            provider: CallProvider::Zoom,
+            url: "https://zoom.us/j/1".into(),
+        });
+        let mut meet = happening_now("standup");
+        meet.link = Some(crate::calendar::CallLink {
+            provider: CallProvider::GoogleMeet,
+            url: "https://meet.google.com/abc-defg-hij".into(),
+        });
+        let reminders = Reminders {
+            meetings: vec![zoom, meet],
+            ..Reminders::default()
+        };
+        let start = reminders.start_for(&zoom_candidate());
+        assert_eq!(start.title, "design sync");
+        assert_eq!(start.meeting.calendar.unwrap().title, "design sync");
+    }
+
+    #[test]
+    fn a_call_never_takes_a_meeting_linked_to_another_service() {
+        let mut meet = happening_now("standup");
+        meet.link = Some(crate::calendar::CallLink {
+            provider: CallProvider::GoogleMeet,
+            url: "https://meet.google.com/abc-defg-hij".into(),
+        });
+        let reminders = Reminders {
+            meetings: vec![meet],
+            ..Reminders::default()
+        };
+        let start = reminders.start_for(&zoom_candidate());
+        assert_eq!(start.title, MeetingSource::Zoom.label());
+        assert_eq!(start.meeting.title_source, meeting::TitleSource::Call);
+        assert_eq!(start.meeting.calendar, None);
+    }
+
+    #[test]
+    fn two_overlapping_meetings_leave_a_recording_unnamed_by_the_calendar() {
+        let reminders = Reminders {
+            meetings: vec![happening_now("design"), happening_now("standup")],
+            ..Reminders::default()
+        };
+        let start = reminders.start_for(&MeetingCandidate::manual());
+        assert_eq!(start.meeting.calendar, None);
+        assert_eq!(start.meeting.title, None);
+        assert_eq!(start.title, MeetingSource::Manual.label());
+    }
+
+    #[test]
+    fn a_title_the_user_gave_is_kept_beside_the_calendar_context() {
+        let reminders = Reminders {
+            meetings: vec![happening_now("design sync")],
+            ..Reminders::default()
+        };
+        let start = reminders.start_for(&MeetingCandidate::manual_titled(Some(
+            "Sprint planning".into(),
+        )));
+        assert_eq!(start.title, "Sprint planning");
+        assert_eq!(start.meeting.title.as_deref(), Some("Sprint planning"));
+        assert_eq!(start.meeting.title_source, meeting::TitleSource::User);
+        assert_eq!(start.meeting.calendar.unwrap().title, "design sync");
+    }
+
+    #[test]
+    fn a_named_call_keeps_its_title_and_still_takes_the_attendees() {
+        let reminders = Reminders {
+            meetings: vec![happening_now("design sync")],
+            ..Reminders::default()
+        };
+        let mut candidate = zoom_candidate();
+        candidate.title = "Roadmap room".into();
+        candidate.named = true;
+        let start = reminders.start_for(&candidate);
+        assert_eq!(start.title, "Roadmap room");
+        assert_eq!(start.meeting.title_source, meeting::TitleSource::Call);
+        assert_eq!(start.meeting.calendar.unwrap().title, "design sync");
+    }
+
+    #[test]
+    fn a_connected_calendar_is_read_for_matching_with_reminders_off() {
+        // The read feeds titles whenever a calendar is connected, even with
+        // reminders off; with none connected nothing reads at all.
+        assert!(ReadSources::new(false, false, true).meetings);
+        assert!(!ReadSources::new(false, false, false).meetings);
+        assert!(ReadSources::new(true, false, false).meetings);
     }
 }
