@@ -6,7 +6,10 @@
 //! listener: a press opens a second capture picker, Escape closes it and
 //! Space switches it between an area and a window. What it picks is shot
 //! by ScreenCaptureKit at the display's own pixels, with Hex's overlays and
-//! the pointer left out, on its own thread.
+//! the pointer left out, on its own thread. While another app shows a menu
+//! or popup as the picker opens, an area or the full screen is cut from the
+//! display as it was then ([`frozen`]), so the menu the pick's click closes
+//! is still in the shot; otherwise it's shot live.
 //!
 //! The record shortcut (⌘⇧5) opens the recording toolbar ([`toolbar`]):
 //! an area or a window through the same picker, or a whole display, with
@@ -15,6 +18,7 @@
 //! ([`recording`]).
 
 mod dim;
+mod frozen;
 pub(crate) mod narration;
 mod picker;
 mod recording;
@@ -168,6 +172,13 @@ fn open_as(record: bool, window: bool) -> bool {
         .spawn(move || {
             let allowed =
                 crate::capture_host::permission_state(CaptureNeed::ScreenRecording, true).is_none();
+            // Only while a menu or popup is open, and before the picker
+            // shows and takes the click that would close it.
+            let frozen = if allowed && !record {
+                frozen::capture(id, &exclusions())
+            } else {
+                None
+            };
             let mut state = front();
             match state.picker_permission(id, allowed) {
                 picker::PermissionOutcome::Stale => {}
@@ -182,6 +193,9 @@ fn open_as(record: bool, window: bool) -> bool {
                     );
                 }
                 picker::PermissionOutcome::Allowed(intent) => {
+                    if let Some(frozen) = frozen {
+                        frozen::keep(frozen);
+                    }
                     if let Some(overlays) = OVERLAYS.get() {
                         overlays.picker.set_screen_label(match intent.purpose {
                             picker::Purpose::Record => {
@@ -221,6 +235,7 @@ pub(crate) fn can_restore() -> bool {
 pub(crate) fn cancel() {
     let mut state = front();
     if let Some(id) = state.cancel_picker() {
+        frozen::forget();
         show(id, None);
     }
 }
@@ -254,13 +269,13 @@ fn picked(action: Action) {
     let Action::Start(target) = action else {
         return;
     };
-    let purpose = {
+    let (purpose, frozen) = {
         let mut state = front();
         let Some((id, purpose)) = state.picker_take() else {
             return;
         };
         show(id, None);
-        purpose
+        (purpose, frozen::take(id))
     };
     if purpose == picker::Purpose::Record {
         dim::expect(target);
@@ -275,7 +290,7 @@ fn picked(action: Action) {
     }
     let spawned = std::thread::Builder::new()
         .name("hex-screenshot".into())
-        .spawn(move || shoot(target));
+        .spawn(move || shoot(target, frozen));
     if let Err(error) = spawned {
         tracing::warn!(%error, "could not start a screenshot");
     }
@@ -285,11 +300,11 @@ fn picked(action: Action) {
 pub(crate) fn shoot_display() -> anyhow::Result<std::path::PathBuf> {
     anyhow::ensure!(crate::labs::screenshots(), "Labs › Screenshots is off");
     let at = scrawl_capture::screens::pointer().unwrap_or_default();
-    take(CaptureTarget::Display { at })
+    take(CaptureTarget::Display { at }, None)
 }
 
-fn shoot(target: CaptureTarget) {
-    match take(target) {
+fn shoot(target: CaptureTarget, frozen: Option<frozen::Frozen>) {
+    match take(target, frozen) {
         Ok(path) => tracing::info!(path = %path.display(), "screenshot saved"),
         Err(error) => {
             tracing::warn!(%error, "screenshot failed");
@@ -298,10 +313,17 @@ fn shoot(target: CaptureTarget) {
     }
 }
 
-/// Shoots `target`, saves it, copies it, and shows its thumbnail.
-fn take(target: CaptureTarget) -> anyhow::Result<std::path::PathBuf> {
+/// Shoots `target`, saves it, copies it, and shows its thumbnail. An area
+/// or a display is cut from `frozen` when it holds that display.
+fn take(
+    target: CaptureTarget,
+    frozen: Option<frozen::Frozen>,
+) -> anyhow::Result<std::path::PathBuf> {
     let shot = source(target)?;
-    let image = capture_core::screenshot_with(&shot.source, &exclusions(), None, false)?;
+    let image = match frozen.and_then(|frozen| frozen.cut(&shot.source)) {
+        Some(image) => image,
+        None => capture_core::screenshot_with(&shot.source, &exclusions(), None, false)?,
+    };
     let scale = f64::from(image.width) / shot.points_wide.max(1.0);
     let png = save::encode(image.width, image.height, &image.rgba, scale)?;
     let folder = crate::app_settings::screenshot_settings().folder();
