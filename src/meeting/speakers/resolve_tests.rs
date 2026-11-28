@@ -436,6 +436,54 @@ fn looks_that_could_not_be_trusted_count_as_no_look() {
     }
 }
 
+/// The call app's mark can blink off for one look while its owner draws
+/// breath mid-sentence. That is still their hold, so none of their words
+/// before it are read as a lingering mark.
+#[test]
+fn a_mark_that_blinks_off_for_one_look_keeps_its_owners_words() {
+    let call = Call::of(4).says(1, 1_000, 9_000);
+    let (words, _) = call.words();
+    let blinked = |evidence: Vec<Evidence>, from_ms: u64, looks: u64| {
+        evidence
+            .into_iter()
+            .map(|line| match line {
+                Evidence::Floor { at_ms, .. }
+                    if (from_ms..from_ms + looks * POLL).contains(&at_ms) =>
+                {
+                    Evidence::Floor {
+                        at_ms,
+                        holder: None,
+                    }
+                }
+                line => line,
+            })
+            .collect::<Vec<_>>()
+    };
+    for phase in PHASES {
+        let evidence = blinked(call.evidence(phase), 5_000, 1);
+        let said = each_word(
+            &words,
+            &evidence,
+            Calibration::Unproven,
+            Strictness::default(),
+        );
+        assert_eq!(call.score(&said), all_right(words.len()), "{phase}");
+
+        // Two looks of nobody are a real silence: the words before it may
+        // have been said under a lingering mark.
+        let evidence = blinked(call.evidence(phase), 5_000, 2);
+        let said = each_word(
+            &words,
+            &evidence,
+            Calibration::Unproven,
+            Strictness::default(),
+        );
+        let score = call.score(&said);
+        assert_eq!(score.wrong, 0, "{phase}");
+        assert!(score.unnamed > 0, "{phase} {score:?}");
+    }
+}
+
 #[test]
 fn a_whole_segment_is_named_or_none_of_it_is() {
     // Half one person and half the next: nobody holds four words in five.

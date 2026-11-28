@@ -21,6 +21,11 @@ pub(super) const POLL_MS: u64 = 500;
 /// seconds. Two looks further apart than this have a hole between them.
 pub(super) const POLL_REACH_MS: u64 = POLL_MS + POLL_MS / 2;
 
+/// The most looks in a row showing nobody that can be a breath rather than
+/// the end of a hold: one. The mark blinks off for a look when its owner
+/// pauses mid-sentence, and any more than that is a real silence.
+const BREATH_LOOKS: usize = 1;
+
 /// Everyone the call app showed on the call.
 pub(super) struct Roster(Vec<Participant>);
 
@@ -156,6 +161,7 @@ impl Floor {
             })
             .collect::<Vec<_>>();
         looks.sort_by_key(|(at_ms, _)| *at_ms);
+        bridge_breaths(&mut looks, roster);
 
         let mut floor = Self(vec![(i64::MIN, State::Unknown(Blind::Unobserved))]);
         for (index, (at_ms, look)) in looks.iter().enumerate() {
@@ -222,6 +228,45 @@ impl Floor {
     }
 }
 
+/// Gives a breath to the person who held the floor either side of it: a
+/// run of at most [`BREATH_LOOKS`] looks showing nobody, with the same
+/// person at the look just before and the look just after, and every look
+/// within reach of the next. Without this, the blink would end the hold,
+/// and the last of the words before it would be read as a lingering mark.
+/// A run between two different people, beside a look that could not be
+/// trusted, across a hole, or longer than a breath stays as it was seen.
+/// So does the user's own tile: calibration measures it against the
+/// microphone as the call app showed it.
+fn bridge_breaths(looks: &mut [(u64, Look)], roster: &Roster) {
+    let mut index = 0;
+    while index < looks.len() {
+        let run = looks[index..]
+            .iter()
+            .take_while(|(_, look)| *look == Look::Nobody)
+            .count();
+        if run == 0 {
+            index += 1;
+            continue;
+        }
+        let (start, end) = (index, index + run);
+        index = end;
+        let (Some(before), Some(after)) = (start.checked_sub(1), looks.get(end)) else {
+            continue;
+        };
+        let (Look::Holder(was), Look::Holder(is)) = (looks[before].1, after.1) else {
+            continue;
+        };
+        let near = looks[before..=end]
+            .windows(2)
+            .all(|pair| pair[1].0 - pair[0].0 <= POLL_REACH_MS);
+        if was == is && roster.is_remote(was) && run <= BREATH_LOOKS && near {
+            for (_, look) in &mut looks[start..end] {
+                *look = Look::Holder(was);
+            }
+        }
+    }
+}
+
 /// When the user's own tile was marked as speaking, on the call app's
 /// timing: what [`calibrate`](super::calibrate::calibrate) compares with
 /// the microphone.
@@ -241,6 +286,7 @@ pub fn local_floor(evidence: &[Evidence]) -> Vec<Interval> {
 mod tests {
     use super::*;
     use crate::meeting::SpeakerName;
+    use crate::meeting::speakers::evidence::Untrusted;
 
     fn key(number: u32) -> ParticipantKey {
         ParticipantKey::numbered(number)
@@ -253,6 +299,126 @@ mod tests {
             is_local,
             at_ms,
         })
+    }
+
+    /// Ana is recording, with Ben and Cy. Each look is a holder's number,
+    /// 0 for nobody, or `None` for one that could not be trusted, every
+    /// half second from 0 unless its time is given.
+    fn floor_of(looks: &[(u64, Option<u32>)]) -> Floor {
+        let mut evidence = vec![
+            shown(1, "Ana", true, 0),
+            shown(2, "Ben", false, 0),
+            shown(3, "Cy", false, 0),
+        ];
+        evidence.extend(looks.iter().map(|(at_ms, look)| match look {
+            Some(0) => Evidence::Floor {
+                at_ms: *at_ms,
+                holder: None,
+            },
+            Some(number) => Evidence::Floor {
+                at_ms: *at_ms,
+                holder: Some(key(*number)),
+            },
+            None => Evidence::Untrusted {
+                at_ms: *at_ms,
+                reason: Untrusted::WindowHidden,
+            },
+        }));
+        Floor::seen(&evidence, &Roster::of(&evidence))
+    }
+
+    fn every_half_second(looks: &[Option<u32>]) -> Vec<(u64, Option<u32>)> {
+        let times = (0..).map(|look| look * POLL_MS);
+        times.zip(looks.iter().copied()).collect()
+    }
+
+    fn states(floor: &Floor) -> Vec<State> {
+        floor.0.iter().map(|(_, state)| *state).collect()
+    }
+
+    #[test]
+    fn one_look_of_nobody_inside_a_hold_is_a_breath() {
+        let ben = State::Held(key(2));
+        let mut looks = [Some(2); 8];
+        looks[2] = Some(0);
+        let floor = floor_of(&every_half_second(&looks));
+        let unobserved = State::Unknown(Blind::Unobserved);
+        assert_eq!(states(&floor), [unobserved, ben, unobserved]);
+        // So the words before the breath are no lingering mark: the only
+        // tail is at the end of the hold.
+        let heard = floor.heard(500, 1_500);
+        assert!(heard.within(0, 1_900).all(|state| state == ben));
+        assert_eq!(heard.at(2_100), State::Tail(key(2)));
+    }
+
+    #[test]
+    fn nobody_between_two_people_or_for_longer_than_a_breath_ends_the_hold() {
+        let unobserved = State::Unknown(Blind::Unobserved);
+        let (ben, cy) = (key(2), key(3));
+        // Ben, nobody, Cy.
+        let between = floor_of(&every_half_second(&[Some(2), Some(2), Some(0), Some(3)]));
+        assert_eq!(
+            states(&between),
+            [
+                unobserved,
+                State::Held(ben),
+                State::Tail(ben),
+                State::Onset(cy),
+                unobserved
+            ]
+        );
+        // Ben, nobody for two looks, Ben again.
+        let silence = floor_of(&every_half_second(&[
+            Some(2),
+            Some(2),
+            Some(0),
+            Some(0),
+            Some(2),
+        ]));
+        assert_eq!(
+            states(&silence),
+            [
+                unobserved,
+                State::Held(ben),
+                State::Tail(ben),
+                State::Nobody,
+                State::Onset(ben),
+                unobserved
+            ]
+        );
+    }
+
+    #[test]
+    fn nobody_beside_a_look_that_could_not_be_trusted_or_a_hole_ends_the_hold() {
+        let ben = key(2);
+        let hidden = State::Unknown(Blind::Untrusted(Untrusted::WindowHidden));
+        // An untrusted look on either side of the one that showed nobody.
+        for looks in [
+            [Some(2), Some(2), None, Some(0), Some(2)],
+            [Some(2), Some(0), None, Some(2), Some(2)],
+        ] {
+            let floor = floor_of(&every_half_second(&looks));
+            assert!(states(&floor).contains(&hidden), "{looks:?}");
+            assert!(
+                states(&floor)
+                    .iter()
+                    .any(|state| matches!(state, State::Tail(_) | State::Onset(_))),
+                "{looks:?}"
+            );
+        }
+        // The user's own tile, which calibration reads as it was shown.
+        let ana = floor_of(&every_half_second(&[Some(1), Some(1), Some(0), Some(1)]));
+        assert!(states(&ana).contains(&State::Tail(key(1))));
+        // A look missing before the one that showed nobody.
+        let hole = floor_of(&[(0, Some(2)), (1_000, Some(0)), (1_500, Some(2))]);
+        assert_eq!(
+            states(&hole),
+            [
+                State::Unknown(Blind::Unobserved),
+                State::Onset(ben),
+                State::Unknown(Blind::Unobserved),
+            ]
+        );
     }
 
     fn name_of(roster: &Roster, number: u32) -> Option<&str> {
