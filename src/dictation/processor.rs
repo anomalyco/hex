@@ -1138,9 +1138,13 @@ fn model_is_available(model: &ModelInfo) -> bool {
 static CACHED_RANKED_CANDIDATES: std::sync::Mutex<Option<(Service, Vec<Model>)>> =
     std::sync::Mutex::new(None);
 
+/// An empty list is never cached: a catalog read while OpenCode was still
+/// loading its providers lists no ranked model yet, and no candidate would
+/// ever fail to drop it (#3050). The next generation reads the catalog again.
 fn cache_ranked_candidates(service: &Service, catalog: &ModelCatalog) {
+    let candidates = catalog.ranked_candidates(None);
     if let Ok(mut guard) = CACHED_RANKED_CANDIDATES.lock() {
-        *guard = Some((service.clone(), catalog.ranked_candidates(None)));
+        *guard = (!candidates.is_empty()).then(|| (service.clone(), candidates));
     }
 }
 
@@ -2697,6 +2701,29 @@ mod tests {
                 .is_some_and(|(cached, _)| *cached == service),
             "a cancelled catalog lookup must not cache its result"
         );
+    }
+
+    /// A catalog read before OpenCode lists its providers has no ranked
+    /// model; the next generation must read the catalog again instead of
+    /// reusing that empty list until Hex restarts (#3050).
+    #[test]
+    fn an_empty_catalog_is_read_again_by_the_next_generation() {
+        let loaded = r#"{"data":[{"id":"gemini-3.1-flash-lite","providerID":"google","name":"Gemini 3.1 Flash Lite","enabled":true,"capabilities":{"output":["text"]},"variants":[]}]}"#;
+        let (url, server) = crate::desktop::opencode_service::tests::serve(vec![
+            ("GET /api/model".into(), 200, r#"{"data":[]}"#.into()),
+            ("GET /api/model".into(), 200, loaded.into()),
+        ]);
+        let service = crate::desktop::opencode_service::tests::fixture(&url);
+        let cancelled = AtomicBool::new(false);
+
+        assert!(ranked_candidates_for(&service, Duration::from_secs(5), &cancelled).is_empty());
+        let candidates = ranked_candidates_for(&service, Duration::from_secs(5), &cancelled);
+
+        assert_eq!(
+            candidates.first().map(|model| (model.provider.as_str(), model.id.as_str())),
+            Some(("google", "gemini-3.1-flash-lite"))
+        );
+        assert_eq!(server.join().unwrap().len(), 2);
     }
 
     /// The service fixture answering each `(path, status, body)` POST in order.
