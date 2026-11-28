@@ -129,6 +129,7 @@ impl Call {
             evidence.push(Evidence::Floor {
                 at_ms,
                 holder: shown.and_then(|(_, holder)| holder.map(key)),
+                local_speaking: false,
             });
             at_ms += POLL;
         }
@@ -453,6 +454,7 @@ fn a_mark_that_blinks_off_for_one_look_keeps_its_owners_words() {
                     Evidence::Floor {
                         at_ms,
                         holder: None,
+                        local_speaking: false,
                     }
                 }
                 line => line,
@@ -529,6 +531,120 @@ fn a_call_calibrates_on_the_users_own_tile_and_resolves_on_that_timing() {
         let (words, _) = call.words();
         let said = each_word(&words, &evidence, calibration, Strictness::default());
         assert_eq!(call.score(&said), all_right(words.len()), "{phase}");
+    }
+}
+
+/// Independent per-tile evidence (as Slack produces): every speaker's tile
+/// lights `D_ON` into their spurt and lingers `D_OFF` after it, so the user
+/// and a remote speaker can be marked at the same time.
+fn independent_tile_evidence(call: &Call, phase_ms: u64) -> Vec<Evidence> {
+    let mut evidence = (0..call.spurts.len())
+        .map(|person| {
+            Evidence::Participant(Participant {
+                key: key(person),
+                name: SpeakerName::parse(&format!("Person {person}")),
+                is_local: person == 0,
+                at_ms: 0,
+            })
+        })
+        .collect::<Vec<_>>();
+    let lit = |person: usize, at_ms: u64| {
+        call.spurts[person].iter().any(|(start, end)| {
+            *end >= start + D_ON && at_ms >= start + D_ON && at_ms <= end + D_OFF
+        })
+    };
+    let mut at_ms = phase_ms;
+    while at_ms <= call.end_ms() + D_OFF + 2 * POLL {
+        let local_speaking = lit(0, at_ms);
+        let remote: Vec<usize> = (1..call.spurts.len())
+            .filter(|person| lit(*person, at_ms))
+            .collect();
+        let holder = match (remote.as_slice(), local_speaking) {
+            ([only], _) => Some(key(*only)),
+            ([], true) => Some(key(0)),
+            _ => None,
+        };
+        evidence.push(Evidence::Floor {
+            at_ms,
+            holder,
+            local_speaking,
+        });
+        at_ms += POLL;
+    }
+    evidence
+}
+
+#[test]
+fn simultaneous_local_and_remote_speech_names_sole_remote_and_calibrates() {
+    // Person 0 (local) takes six turns while Person 1 backchannels inside them,
+    // Person 1 takes a long turn while local backchannels, and Person 1 + 2
+    // overlap while local also speaks.
+    let mut call = Call::of(3);
+    for turn in 0..6 {
+        let start = turn * 10_000;
+        call = call.says(0, start + 1_000, start + 6_000);
+        // Remote 1 says a short reply ("Yeah, totally") while local talks.
+        call = call.says(1, start + 2_500, start + 3_500);
+    }
+    // Remote 1 speaks a long turn while local says a quick backchannel.
+    call = call.says(1, 65_000, 72_000).says(0, 67_500, 68_200);
+    // Remote 1 stops at 80_000 (lingers to 81_500) while local talks, and
+    // Remote 2 says a tiny unlit remark at 80_700..80_900 during that linger.
+    call = call
+        .says(1, 76_000, 80_000)
+        .says(0, 79_000, 84_000)
+        .says(2, 80_700, 80_900);
+    // All three speak at once: remote 1 + 2 overlap must never be guessed.
+    call = call
+        .says(0, 90_000, 95_000)
+        .says(1, 90_500, 94_000)
+        .says(2, 90_500, 94_000);
+
+    let (words, speakers) = call.words();
+    for phase in PHASES {
+        let evidence = independent_tile_evidence(&call, phase);
+        let calibration = calibrate(&local_floor(&evidence), &call.microphone());
+        let Calibration::Healthy(timing) = calibration else {
+            panic!("{phase} {calibration:?}");
+        };
+        assert!(
+            (D_ON..D_ON + POLL).contains(&timing.onset_lag_ms),
+            "{phase} {timing:?}"
+        );
+        assert!(
+            (D_OFF - POLL..=D_OFF).contains(&timing.release_tail_ms),
+            "{phase} {timing:?}"
+        );
+
+        let said = each_word(&words, &evidence, calibration, Strictness::default());
+        // Zero wrong names anywhere: neither the unlit remark during remote 1's
+        // linger nor the two-remote overlap is ever misattributed.
+        assert_eq!(call.score(&said).wrong, 0, "{phase}");
+
+        for ((word, &speaker), &attribution) in words.iter().zip(&speakers).zip(&said) {
+            if word.start_ms() < 75_000 {
+                // Every remote-1 backchannel during local's turns AND remote 1's
+                // long turn during local's backchannel is named to Person 1.
+                assert_eq!(
+                    attribution,
+                    Said::By(key(speaker), Why::HeldFloor),
+                    "{phase} {word:?}"
+                );
+            } else if (80_500..81_500).contains(&word.start_ms()) {
+                // Person 2's tiny unlit remark during Person 1's linger stays unnamed.
+                assert_eq!(
+                    attribution,
+                    Said::ByNobody(WhyNot::NobodyHeldFloor),
+                    "{phase} {word:?}"
+                );
+            } else if word.start_ms() >= 90_000 {
+                // Local + 2 remote speakers simultaneously: never guesses!
+                assert!(
+                    matches!(attribution, Said::ByNobody(_)),
+                    "{phase} {word:?} {attribution:?}"
+                );
+            }
+        }
     }
 }
 

@@ -2993,8 +2993,11 @@ Slack huddles (com.tinyspeck.slackmacgap; a pure function of one snapshot)
 │   label ("View Alice's profile"); cleaned like every name
 ├── Speaking -> a descendant with the class
 │   p-huddle_peer_tile__overlay--active_speaker
-├── Floor -> the one person marked. Nobody or several marked, or a mark on
-│   a tile with no id -> nobody holds it
+├── Floor -> the lone remote person marked (even while the user's own tile
+│   is also marked, since the microphone is its own track), or the user when
+│   only they are marked. Nobody, two or more remote people, or a mark on a
+│   tile with no id -> nobody holds it; `local_speaking` still records the
+│   user's own tile for calibration
 └── Windows with tiles: none -> no call window; one -> the call; two or
     more -> untrusted two_windows
 speakers.ndjson (meeting folder, owner-only, to the Trash with the folder)
@@ -3003,6 +3006,8 @@ speakers.ndjson (meeting folder, owner-only, to the Trash with the folder)
 ├── participant: key ("p1", "p2": opaque, per meeting, never a call app's
 │   user id), cleaned name or none, whether they are the user, first seen
 ├── floor: one look at the call app -> who it marked as speaking, or nobody
+│   (plus optional `local_speaking` when the user's own tile is marked
+│   independently alongside remote tiles)
 ├── untrusted: one look that counts as no look -> cut_short | window_hidden
 │   | two_windows | failed_health_check
 ├── correction: the user says these words were this person's, or "not
@@ -3039,7 +3044,8 @@ Lines -> a remote line takes a speaker only when everything it overlaps was
     in the order people first speak; a name the user gave is from "user"
 Reader (macOS only: it reads accessibility::tree snapshots) -> speakers.ndjson
 ├── Adapter, one per call app (pure) -> a snapshot of the app's windows ->
-│   active { roster, floor } | no call window | untrusted(reason). Found by
+│   active { roster, floor, local_speaking } | no call window |
+│   untrusted(reason). Found by
 │   canonical bundle id or by the call page's host. Listed: Slack's
 │   desktop app; no page host yet
 ├── Before any adapter is asked: a snapshot a budget cut short -> untrusted
@@ -3130,7 +3136,8 @@ Seam: `a_snapshot_cut_short_is_never_shown_to_an_adapter`,
 Slack adapter checks (macOS; hand-written trees in the shape a live read
 of Slack's huddle gave, with invented people):
 `a_huddle_is_read_as_everyone_on_it_and_the_one_person_speaking`,
-`nobody_holds_the_floor_when_nobody_or_several_people_are_marked`,
+`nobody_holds_the_floor_when_nobody_or_several_remote_people_are_marked`,
+`the_sole_remote_speaker_holds_the_floor_when_the_user_speaks_too`,
 `the_mark_counts_on_either_overlay_and_only_inside_a_tile`,
 `someone_who_reconnects_is_still_the_same_person`,
 `a_tile_is_told_apart_by_whatever_its_id_gives`,

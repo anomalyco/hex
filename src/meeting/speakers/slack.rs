@@ -57,9 +57,14 @@ fn observe(snapshot: &Snapshot) -> Observation {
 
 /// Who the tiles of one window show, and who they mark as speaking.
 ///
-/// Someone holds the floor only when they are the one person marked. With
-/// two people marked at once, or a mark on a tile that names nobody, the
-/// floor is nobody's, and what is said then stays unnamed.
+/// Slack marks every active speaker's tile at once. Because the user's
+/// microphone is recorded on its own track, the user speaking alongside a
+/// single remote participant does not make the remote track ambiguous: that
+/// sole remote participant holds `floor` while `local_speaking` keeps the
+/// user's own tile visible to calibration. When only the user is marked,
+/// they hold `floor` as before. With two or more remote people marked at
+/// once, or a mark on a tile that names nobody, `floor` is nobody's, and
+/// what is said then stays unnamed.
 fn huddle(tiles: &[&Node]) -> Observation {
     let mut roster: Vec<ObservedParticipant> = Vec::new();
     let mut speaking: Vec<AppParticipantId> = Vec::new();
@@ -89,11 +94,36 @@ fn huddle(tiles: &[&Node]) -> Observation {
             }),
         }
     }
-    let floor = match (speaking.as_slice(), unknown_speaker) {
-        ([only], false) => Some(only.clone()),
-        _ => None,
+    // Partition after building the roster so duplicate tiles of the user
+    // have already merged `is_local`.
+    let mut local_speakers: Vec<AppParticipantId> = Vec::new();
+    let mut remote_speakers: Vec<AppParticipantId> = Vec::new();
+    for id in speaking {
+        let is_local = roster
+            .iter()
+            .find(|person| person.id == id)
+            .is_some_and(|person| person.is_local);
+        if is_local {
+            local_speakers.push(id);
+        } else {
+            remote_speakers.push(id);
+        }
+    }
+    let local_speaking = !local_speakers.is_empty();
+    let floor = if unknown_speaker {
+        None
+    } else {
+        match (remote_speakers.as_slice(), local_speakers.as_slice()) {
+            ([only], _) => Some(only.clone()),
+            ([], [only]) => Some(only.clone()),
+            _ => None,
+        }
     };
-    Observation::Active { roster, floor }
+    Observation::Active {
+        roster,
+        floor,
+        local_speaking,
+    }
 }
 
 /// Whose tile a DOM id says it is, and whether it is the user's own.

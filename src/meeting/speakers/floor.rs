@@ -94,6 +94,14 @@ enum Look {
     Blind(Blind),
 }
 
+/// One timed look at the call window.
+#[derive(Clone, Copy)]
+struct Poll {
+    at_ms: u64,
+    look: Look,
+    local_speaking: bool,
+}
+
 /// The floor over one stretch of time.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum State {
@@ -122,10 +130,28 @@ impl State {
         }
     }
 
-    fn between(before: Look, after: Look) -> Self {
-        match (before, after) {
+    fn between(before: Poll, after: Poll, roster: &Roster) -> Self {
+        match (before.look, after.look) {
             (Look::Blind(why), _) | (_, Look::Blind(why)) => Self::Unknown(why),
             (Look::Holder(from), Look::Holder(to)) if from == to => Self::Held(from),
+            // When the user's tile is tracked independently (as in Slack), a
+            // remote speaker dropping back to the already-speaking user is the
+            // remote mark lingering out rather than a handover that cut it
+            // short, and a remote speaker starting while the user already talks
+            // is an onset rather than a handover.
+            (Look::Holder(from), Look::Holder(to))
+                if before.local_speaking && roster.is_remote(from) && !roster.is_remote(to) =>
+            {
+                Self::Tail(from)
+            }
+            (Look::Holder(from), Look::Holder(to))
+                if before.local_speaking
+                    && after.local_speaking
+                    && !roster.is_remote(from)
+                    && roster.is_remote(to) =>
+            {
+                Self::Onset(to)
+            }
             (Look::Holder(from), Look::Holder(to)) => Self::Handover(from, to),
             (Look::Holder(from), Look::Nobody) => Self::Tail(from),
             (Look::Nobody, Look::Holder(to)) => Self::Onset(to),
@@ -143,35 +169,45 @@ impl Floor {
     /// The floor as the reader saw it, on the call app's own timing. A look
     /// that names someone the call app never showed is no look.
     pub(super) fn seen(evidence: &[Evidence], roster: &Roster) -> Self {
-        let mut looks = evidence
+        let mut polls = evidence
             .iter()
             .filter_map(|line| match line {
-                Evidence::Floor { at_ms, holder } => Some((
-                    *at_ms,
-                    match holder {
+                Evidence::Floor {
+                    at_ms,
+                    holder,
+                    local_speaking,
+                } => Some(Poll {
+                    at_ms: *at_ms,
+                    look: match holder {
                         Some(holder) if roster.person(*holder).is_some() => Look::Holder(*holder),
                         Some(_) => Look::Blind(Blind::Unobserved),
                         None => Look::Nobody,
                     },
-                )),
-                Evidence::Untrusted { at_ms, reason } => {
-                    Some((*at_ms, Look::Blind(Blind::Untrusted(*reason))))
-                }
+                    local_speaking: *local_speaking,
+                }),
+                Evidence::Untrusted { at_ms, reason } => Some(Poll {
+                    at_ms: *at_ms,
+                    look: Look::Blind(Blind::Untrusted(*reason)),
+                    local_speaking: false,
+                }),
                 Evidence::Participant(_) | Evidence::Correction(_) => None,
             })
             .collect::<Vec<_>>();
-        looks.sort_by_key(|(at_ms, _)| *at_ms);
-        bridge_breaths(&mut looks, roster);
+        polls.sort_by_key(|poll| poll.at_ms);
+        bridge_breaths(&mut polls, roster);
+        Self::from_polls(&polls, roster)
+    }
 
+    fn from_polls(polls: &[Poll], roster: &Roster) -> Self {
         let mut floor = Self(vec![(i64::MIN, State::Unknown(Blind::Unobserved))]);
-        for (index, (at_ms, look)) in looks.iter().enumerate() {
-            let state = match looks.get(index + 1) {
-                Some((next_ms, next)) if next_ms - at_ms <= POLL_REACH_MS => {
-                    State::between(*look, *next)
+        for (index, poll) in polls.iter().enumerate() {
+            let state = match polls.get(index + 1) {
+                Some(next) if next.at_ms - poll.at_ms <= POLL_REACH_MS => {
+                    State::between(*poll, *next, roster)
                 }
                 _ => State::Unknown(Blind::Unobserved),
             };
-            floor.push(*at_ms as i64, state);
+            floor.push(poll.at_ms as i64, state);
         }
         floor
     }
@@ -237,12 +273,12 @@ impl Floor {
 /// trusted, across a hole, or longer than a breath stays as it was seen.
 /// So does the user's own tile: calibration measures it against the
 /// microphone as the call app showed it.
-fn bridge_breaths(looks: &mut [(u64, Look)], roster: &Roster) {
+fn bridge_breaths(polls: &mut [Poll], roster: &Roster) {
     let mut index = 0;
-    while index < looks.len() {
-        let run = looks[index..]
+    while index < polls.len() {
+        let run = polls[index..]
             .iter()
-            .take_while(|(_, look)| *look == Look::Nobody)
+            .take_while(|poll| poll.look == Look::Nobody)
             .count();
         if run == 0 {
             index += 1;
@@ -250,18 +286,18 @@ fn bridge_breaths(looks: &mut [(u64, Look)], roster: &Roster) {
         }
         let (start, end) = (index, index + run);
         index = end;
-        let (Some(before), Some(after)) = (start.checked_sub(1), looks.get(end)) else {
+        let (Some(before), Some(after)) = (start.checked_sub(1), polls.get(end)) else {
             continue;
         };
-        let (Look::Holder(was), Look::Holder(is)) = (looks[before].1, after.1) else {
+        let (Look::Holder(was), Look::Holder(is)) = (polls[before].look, after.look) else {
             continue;
         };
-        let near = looks[before..=end]
+        let near = polls[before..=end]
             .windows(2)
-            .all(|pair| pair[1].0 - pair[0].0 <= POLL_REACH_MS);
+            .all(|pair| pair[1].at_ms - pair[0].at_ms <= POLL_REACH_MS);
         if was == is && roster.is_remote(was) && run <= BREATH_LOOKS && near {
-            for (_, look) in &mut looks[start..end] {
-                *look = Look::Holder(was);
+            for poll in &mut polls[start..end] {
+                poll.look = Look::Holder(was);
             }
         }
     }
@@ -275,7 +311,36 @@ pub fn local_floor(evidence: &[Evidence]) -> Vec<Interval> {
     let Some(local) = roster.local() else {
         return Vec::new();
     };
-    Floor::seen(evidence, &roster)
+    let mut polls = evidence
+        .iter()
+        .filter_map(|line| match line {
+            Evidence::Floor {
+                at_ms,
+                holder,
+                local_speaking,
+            } => Some(Poll {
+                at_ms: *at_ms,
+                look: if *local_speaking || *holder == Some(local) {
+                    Look::Holder(local)
+                } else if holder.is_some_and(|holder| roster.person(holder).is_none()) {
+                    Look::Blind(Blind::Unobserved)
+                } else {
+                    Look::Nobody
+                },
+                local_speaking: false,
+            }),
+            Evidence::Untrusted { at_ms, reason } => Some(Poll {
+                at_ms: *at_ms,
+                look: Look::Blind(Blind::Untrusted(*reason)),
+                local_speaking: false,
+            }),
+            Evidence::Participant(_) | Evidence::Correction(_) => None,
+        })
+        .collect::<Vec<_>>();
+    polls.sort_by_key(|poll| poll.at_ms);
+    // Calibration reads the user's own tile as the call app showed it, without
+    // bridging blinks.
+    Floor::from_polls(&polls, &roster)
         .stretches()
         .filter(|(_, _, state)| *state == State::Held(local))
         .map(|(start, end, _)| Interval::new(start.max(0) as u64, end.max(0) as u64))
@@ -314,10 +379,12 @@ mod tests {
             Some(0) => Evidence::Floor {
                 at_ms: *at_ms,
                 holder: None,
+                local_speaking: false,
             },
             Some(number) => Evidence::Floor {
                 at_ms: *at_ms,
                 holder: Some(key(*number)),
+                local_speaking: false,
             },
             None => Evidence::Untrusted {
                 at_ms: *at_ms,
@@ -456,5 +523,94 @@ mod tests {
         let nameless = Roster::of(&[shown(1, "", false, 0), shown(1, "You", false, 500)]);
         assert_eq!(name_of(&nameless, 1), None);
         assert_eq!(nameless.only_remote(), Some(key(1)));
+    }
+
+    #[test]
+    fn local_floor_follows_the_user_through_simultaneous_remote_speech() {
+        let mut evidence = vec![
+            shown(1, "Ana", true, 0),
+            shown(2, "Ben", false, 0),
+            shown(3, "Cy", false, 0),
+        ];
+        // Ana starts alone, Ben joins, then Cy joins too (holder becomes None),
+        // then Ben and Cy drop out while Ana keeps talking, then Ana stops.
+        let looks = [
+            (0, None, false),
+            (500, Some(1), true),
+            (1_000, Some(2), true),
+            (1_500, None, true),
+            (2_000, Some(1), true),
+            (2_500, None, false),
+            // Legacy shape: local_speaking omitted (false), holder is Ana.
+            (5_000, Some(1), false),
+            (5_500, Some(1), false),
+            (6_000, None, false),
+        ];
+        evidence.extend(
+            looks
+                .into_iter()
+                .map(|(at_ms, holder, local_speaking)| Evidence::Floor {
+                    at_ms,
+                    holder: holder.map(key),
+                    local_speaking,
+                }),
+        );
+        assert_eq!(
+            local_floor(&evidence),
+            [Interval::new(500, 2_000), Interval::new(5_000, 5_500)]
+        );
+    }
+
+    #[test]
+    fn remote_floor_trims_tail_when_dropping_back_to_already_speaking_user() {
+        let mut evidence = vec![
+            shown(1, "Ana", true, 0),
+            shown(2, "Ben", false, 0),
+            shown(3, "Cy", false, 0),
+        ];
+        // Ana speaks throughout; Ben speaks in the middle (1_000..=3_000).
+        let looks = [
+            (0, Some(1), true),
+            (500, Some(1), true),
+            (1_000, Some(2), true),
+            (1_500, Some(2), true),
+            (2_000, Some(2), true),
+            (2_500, Some(2), true),
+            (3_000, Some(2), true),
+            (3_500, Some(1), true),
+            (4_000, Some(1), true),
+        ];
+        evidence.extend(
+            looks
+                .into_iter()
+                .map(|(at_ms, holder, local_speaking)| Evidence::Floor {
+                    at_ms,
+                    holder: holder.map(key),
+                    local_speaking,
+                }),
+        );
+        let roster = Roster::of(&evidence);
+        let floor = Floor::seen(&evidence, &roster);
+        let (ana, ben) = (key(1), key(2));
+        let unobserved = State::Unknown(Blind::Unobserved);
+        // Entering Ben while Ana already speaks is an Onset (not Handover),
+        // and leaving Ben back to Ana is a Tail (not Handover).
+        assert_eq!(
+            states(&floor),
+            [
+                unobserved,
+                State::Held(ana),
+                State::Onset(ben),
+                State::Held(ben),
+                State::Tail(ben),
+                State::Held(ana),
+                unobserved,
+            ]
+        );
+        // Because Ben ended in a Tail rather than a Handover, `heard` trims
+        // Ben's lingering tail (last 1_000 ms before 3_000 -> 2_000..2_500).
+        let heard = floor.heard(500, 1_000);
+        assert_eq!(heard.at(1_500), State::Held(ben));
+        assert_eq!(heard.at(2_200), State::Tail(ben));
     }
 }

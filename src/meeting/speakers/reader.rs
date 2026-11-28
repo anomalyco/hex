@@ -149,13 +149,21 @@ impl PollState {
                 evidence.push(Evidence::Untrusted { at_ms, reason });
                 Sight::Untrusted(reason)
             }
-            Observation::Active { roster, floor } => {
+            Observation::Active {
+                roster,
+                floor,
+                local_speaking,
+            } => {
                 evidence.extend(self.meet(at_ms, roster));
                 match floor.map(|holder| self.people.get(&holder)) {
                     Some(None) => Sight::UnknownHolder,
                     holder => {
                         let holder = holder.flatten().map(|known| known.key);
-                        evidence.push(Evidence::Floor { at_ms, holder });
+                        evidence.push(Evidence::Floor {
+                            at_ms,
+                            holder,
+                            local_speaking,
+                        });
                         Sight::Floor
                     }
                 }
