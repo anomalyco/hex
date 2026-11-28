@@ -722,6 +722,85 @@ button.download:hover {
 }
 
 /* The Anomaly copyright, as on opentunnel.xyz and the OpenCode console: the signature sits faintly behind the line. */
+
+/* Below the hero: the same quiet page, in plain sections a crawler can read.
+   It sits outside .page so the TV show's canvas stays one viewport tall. */
+.details {
+  padding: 1rem 1.5rem 0;
+  background: #070707;
+}
+
+.details__inner {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 5rem 0 1rem;
+  border-top: 1px solid #1d1e21;
+}
+
+.details section + section {
+  margin-top: 3.25rem;
+}
+
+.details h2 {
+  margin: 0;
+  font-size: clamp(1.45rem, 2.4vw, 1.75rem);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+  color: #f2f2ef;
+  text-wrap: balance;
+}
+
+.details p {
+  margin: 0.9rem 0 0;
+  color: #a7a8ad;
+  font-size: 1rem;
+  line-height: 1.65;
+  text-wrap: pretty;
+}
+
+.details a {
+  color: #d6d7db;
+  text-decoration: underline;
+  text-decoration-color: #3a3b40;
+  text-underline-offset: 3px;
+}
+
+.details a:hover {
+  text-decoration-color: currentColor;
+}
+
+.details code {
+  font: 0.87em/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #d6d7db;
+  background: #141416;
+  border: 1px solid #222326;
+  border-radius: 5px;
+  padding: 0.1em 0.32em;
+}
+
+.faq h3 {
+  margin: 1.9rem 0 0;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #f2f2ef;
+}
+
+.faq p {
+  margin-top: 0.4rem;
+}
+
+@media (max-width: 39rem) {
+  .details {
+    padding: 0 1.25rem;
+  }
+
+  .details__inner {
+    padding-top: 3.5rem;
+  }
+}
+
 .site-footer {
   display: flex;
   flex-direction: column;

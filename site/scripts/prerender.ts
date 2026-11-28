@@ -1,17 +1,18 @@
 // Puts the server-rendered Mac page into the built index.html, so the copy and
 // the download button are in the HTML before JavaScript runs; main.tsx hydrates
-// it. Stamps the release version into the JSON-LD and this mode's origin into
-// every absolute URL.
+// it. Stamps the release version into the JSON-LD and production's origin into
+// every absolute URL, so a dev build's canonicals and sitemap never name the
+// preview host.
 import { getWorkerAssetsDir } from "@cloudflare/build-output-utils"
 import { readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { parseArgs } from "node:util"
 import { render } from "../dist-server/prerender.js"
-import { originForMode } from "../src/base"
+import { canonicalOriginForMode } from "../src/base"
 import data from "../src/release-data.json"
 
 const { values } = parseArgs({ options: { mode: { type: "string" } } })
-const origin = originForMode(values.mode)
+const origin = canonicalOriginForMode(values.mode)
 const root = resolve(import.meta.dirname, "..")
 const assets = getWorkerAssetsDir(root)
 

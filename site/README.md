@@ -110,6 +110,27 @@ resolve. Its card, `public/meetings/og-meetings.png`, shows the Hex mark,
 `bun run generate:og-meetings` (`CHROMIUM_PATH` names another Chromium when
 Playwright's isn't downloaded).
 
+## Search and agents
+
+The landing page keeps its TV hero and puts the crawlable copy below it:
+`src/App.tsx`'s `details` section has an `h2` per subject and a FAQ, and
+`index.html` carries the matching `FAQPage`, `SoftwareApplication`,
+`Organization`, `WebSite`, and `VideoObject` graph. `seo.test.ts` checks the
+headings, the 450 to 550-word budget, and that every visible FAQ answer matches
+its structured copy.
+
+`/hex/mcp` (`src/mcp.ts`, `scripts/mcp.ts`) is the MCP page: setup for
+OpenCode, Claude Code, Claude Desktop, and Cursor, and the five tools
+`src/meeting/mcp.rs` serves. `public/llms.txt` is the agent index,
+`public/llms-full.txt` the single-file reference, and `public/skill.md` the
+skill an agent loads. `public/sitemap.xml` lists the static routes and each
+build script adds its own pages.
+
+Canonicals, social tags, and sitemap URLs always name `anoma.ly` even in a dev
+build (`canonicalOriginForMode`). `worker.ts` puts `X-Robots-Tag: noindex,
+nofollow` on every response from another host, so `dev.anoma.ly` is never the
+indexed copy, and it sets the charset on `.md` and `.txt` routes.
+
 ## Performance
 
 `perf/hex.bench.ts` is a [strobe](https://github.com/anomalyco/strobe) bench: load to

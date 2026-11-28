@@ -111,9 +111,88 @@ export default function App() {
           <Download platform={platform} os={os} onChooseOs={setChosenOs} />
         </section>
       </main>
+      <section className="details">
+        <div className="details__inner">
+          <section aria-labelledby="dictation">
+            <h2 id="dictation">Voice dictation that stays on your machine.</h2>
+            <p>
+              Hex is free, open-source voice dictation for Mac, Windows, and Linux. Hold the shortcut,
+              say what you mean, and release: a local Parakeet or Whisper model turns the audio into
+              text and Hex pastes it wherever your cursor is. Audio never leaves the machine, and
+              there is no account, no subscription, and no word limit. Windows and Linux builds are
+              in beta; the Mac build is stable. On the Mac you can also choose Apple Speech.
+            </p>
+          </section>
+
+          <section aria-labelledby="meetings">
+            <h2 id="meetings">Meetings without a bot.</h2>
+            <p>
+              Hex Meetings records your microphone and your Mac&apos;s system audio at the same time, so
+              the other side of the call is captured without an invite, a join link, or a participant
+              that shows up in the list. It transcribes while you talk, keeps chapters as the call
+              moves, and stores a short summary when the Mac can write one. Recordings stay in a
+              folder you own, expire on a schedule you choose, and can be read from the app, the
+              CLI, or <a href={`${import.meta.env.BASE_URL}mcp`}>hex mcp</a>. Nothing is uploaded.
+            </p>
+          </section>
+
+          <section aria-labelledby="tools">
+            <h2 id="tools">Screenshots, transforms, and the command line.</h2>
+            <p>
+              Annotate captures a screen, a window, a region, or a connected iPhone and opens the
+              capture in an OpenCode session. Transforms are JavaScript in{" "}
+              <code>~/.config/hex/hex.config.ts</code> that rewrite dictated text deterministically
+              before it is pasted, from a name you always misspell to a snippet that calls a script
+              you trust. The <code>hex</code> command drives the app from a terminal: status,
+              dictation, settings, history, meetings, and <code>hex transcribe</code> for an audio
+              file. <a href={`${import.meta.env.BASE_URL}mcp`}>hex mcp</a> serves meeting
+              transcripts, search, chapters, and stored notes to AI coding agents, read-only, over
+              stdio.
+            </p>
+          </section>
+
+          <section className="faq" aria-labelledby="faq">
+            <h2 id="faq">Questions people ask.</h2>
+            <h3>Is Hex really free?</h3>
+            <p>
+              Yes. Hex is open source under the MIT license. There is no account, no subscription, and
+              no word limit.
+            </p>
+            <h3>Does Hex work offline?</h3>
+            <p>
+              Yes. Hex downloads a speech model once, then turns speech into text on your own machine.
+              Dictation and meeting transcription keep working with no internet connection.
+            </p>
+            <h3>Which speech models does Hex run?</h3>
+            <p>
+              Local Parakeet and Whisper models, plus Apple Speech on the Mac. Download a catalog model
+              or add your own GGUF model in Settings.
+            </p>
+            <h3>Does a bot join my meetings?</h3>
+            <p>
+              No. Hex records your microphone and your Mac&apos;s system audio itself, so there is no
+              participant to invite and no bot in the call. The transcript and notes are written
+              locally.
+            </p>
+            <h3>Can my coding agent read my meetings?</h3>
+            <p>
+              Yes, through <code>hex mcp</code>, a read-only MCP server over stdio. It serves
+              transcripts, search, chapters, and stored notes to OpenCode, Claude Code, Claude Desktop,
+              Cursor, and other MCP clients.
+            </p>
+            <h3>Where does my data go?</h3>
+            <p>
+              Nowhere. Audio and text stay on your machine. Hex keeps no dictation audio unless you
+              turn on Keep recordings, and meeting transcripts stay in a folder you can delete.
+            </p>
+          </section>
+        </div>
+      </section>
+
       <footer className="site-footer">
         <nav className="site-footer__links" aria-label="More about Hex">
           <a href={`${import.meta.env.BASE_URL}meetings/`}>Meetings</a>
+          <a href={`${import.meta.env.BASE_URL}mcp`}>MCP</a>
           <a href={`${import.meta.env.BASE_URL}changelog`}>Changelog</a>
         </nav>
         <div className="copyright">

@@ -8,12 +8,12 @@ import { getWorkerAssetsDir } from "@cloudflare/build-output-utils"
 import { readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { parseArgs } from "node:util"
-import { originForMode } from "../src/base"
+import { canonicalOriginForMode } from "../src/base"
 import { CARD, CHANGELOG_PATH, releasesFrom, renderChangelog } from "../src/changelog"
 import { card } from "./card"
 
 const { values } = parseArgs({ options: { mode: { type: "string" }, out: { type: "string" } } })
-const origin = originForMode(values.mode)
+const origin = canonicalOriginForMode(values.mode)
 const root = resolve(import.meta.dirname, "..")
 const assets = values.out ?? getWorkerAssetsDir(root)
 const notes = resolve(root, "../docs/releases")

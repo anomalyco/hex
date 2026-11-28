@@ -2,4 +2,13 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>__ORIGIN__/</loc></url>
   <url><loc>__ORIGIN__/meetings/</loc></url>
+  <url><loc>__ORIGIN__/mcp</loc></url>
+  <url><loc>__ORIGIN__/docs/transforms</loc></url>
+  <url><loc>__ORIGIN__/docs/transforms.md</loc></url>
+  <url><loc>__ORIGIN__/docs/admin</loc></url>
+  <url><loc>__ORIGIN__/docs/admin.md</loc></url>
+  <url><loc>__ORIGIN__/llms.txt</loc></url>
+  <url><loc>__ORIGIN__/llms-full.txt</loc></url>
+  <url><loc>__ORIGIN__/skill.md</loc></url>
+  <url><loc>__ORIGIN__/dev</loc></url>
 </urlset>

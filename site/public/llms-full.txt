@@ -1,0 +1,305 @@
+# Hex: the complete reference
+
+One plain-Markdown file for AI assistants and search engines. Hex is a free,
+open-source voice appliance from Anomaly: local dictation, no-bot meeting
+transcription, screen capture, and a read-only MCP server for agents. Every
+claim here matches what Hex ships today; beta status is stated where it
+applies.
+
+- Site: https://anoma.ly/hex/
+- Source: https://github.com/anomalyco/hex (MIT)
+- Author: Anomaly, https://anoma.ly
+- Latest stable release notes: https://anoma.ly/hex/changelog
+- Agent index: https://anoma.ly/hex/llms.txt
+- Agent skill: https://anoma.ly/hex/skill.md
+
+## The short answer
+
+Hex turns speech into text on the machine it runs on. Hold one shortcut, speak,
+release; Hex transcribes with a local speech model and pastes the text wherever
+the cursor is. It is free, open source, and works with no account and no network
+once a model is downloaded.
+
+Hex also records meetings without a bot. On the Mac it captures the microphone
+and the system audio itself, so there is no participant to invite and nothing
+joins the call. Transcripts, live chapters, and stored notes stay in a local
+folder with a retention you choose. `hex mcp` exposes those recordings to
+OpenCode, Claude Code, Claude Desktop, Cursor, and any other MCP client, read
+only.
+
+## Platforms and requirements
+
+- macOS 15 or later on Apple silicon. The stable build; Apple Speech is
+  available as a model.
+- Windows 10 and 11, x64 and ARM64. Beta.
+- Linux, x86_64 and aarch64. Beta. X11 and compatible Wayland desktops through
+  portals; see the Linux guide for the exact input and clipboard paths.
+- iOS 18 or later: Hex's keyboard, on the App Store.
+- Android 12 or later: Hex Preview, outside Google Play.
+
+The command line, read-only history and meetings queries, and `hex mcp` run on
+macOS, Linux, and Windows. Meeting recording runs on the Mac today; other
+machines can read a mirrored meetings folder with `--meetings-dir`.
+
+## Install
+
+Mac:
+
+```sh
+brew install --cask anomalyco/tap/hex
+# or download the DMG
+# https://anoma.ly/hex/download/macos-arm64-dmg
+```
+
+Windows beta (x64; use windows-arm64-setup for ARM64):
+
+```
+https://anoma.ly/hex/download/windows-x64-setup
+```
+
+Linux beta:
+
+```sh
+curl -fsSL https://anoma.ly/hex/install-linux.sh | sh
+```
+
+Linux packages and binaries are on https://anoma.ly/hex, including .deb, .rpm,
+Nix (`nix profile add github:anomalyco/hex`), and AUR (`yay -S hex-bin`).
+
+On macOS the `hex` command lives inside the app. Homebrew links it; otherwise:
+
+```sh
+ln -s /Applications/Hex.app/Contents/MacOS/hex ~/.local/bin/hex
+```
+
+Linux and Windows installs put `hex` on the PATH.
+
+## Dictation
+
+- Hold the shortcut, speak, release. Hex shows a small capsule while it listens
+  and pastes the transcript into the focused app when it is done.
+- Pre-roll and a release tail keep the first and last words; the audio timeline
+  is authoritative even when the UI or another process stalls.
+- Modes and Output steps decide what is pasted: built-in cleanup, word
+  replacements, an optional AI rewrite, and transforms.
+- The last dictation can be pasted again with Paste Last (Option-Shift-V on the
+  Mac).
+- History keeps recent dictations for 7 days by default, up to 10,000 entries
+  or 16 MiB. Dictation audio is not stored unless Keep recordings is turned on.
+
+## Models
+
+Hex runs speech recognition locally. The catalog includes Parakeet and Whisper
+GGUF models for dictation on macOS, Windows, and Linux, and Apple Speech on the
+Mac. Models download once and then run offline. A model can be chosen in
+Settings, installed with the model commands, or added as a custom GGUF or from
+Hugging Face. One model owner serves dictation first; meeting chunks, Annotate,
+and `/streams` clients yield to it.
+
+## Meetings, without a bot
+
+Meetings is Hex's local recorder for calls. It sees a call start, offers to
+record, and writes the result on the Mac.
+
+- Captures the microphone ("You") and system audio ("Them") at the same time.
+  Remote speakers are not separated.
+- Transcribes while the call runs, with live chapters, and stores a short title
+  and summary when the Mac can write one. Details, decisions, and action items
+  live in the transcript.
+- Search is stemmed and fuzzy, so misheard names still match; quote a phrase to
+  require it exactly.
+- The transcript can be copied as Markdown, SRT, or VTT, or handed to an agent
+  as a prompt that keeps reading as the call goes on.
+- Meetings are kept 7 days by default; the choices are 24 hours, 7 days, 30
+  days, or forever. Audio follows the meeting unless a separate audio retention
+  is chosen. Expired meetings move to the Trash, and exported Markdown is never
+  touched.
+- Calendar matching links a recording to the event it belongs to.
+
+Meetings is a feature you turn on; Hex never records a call silently and never
+sends one anywhere.
+
+## MCP: meetings for your agent
+
+`hex mcp` is a local MCP server over stdio. It reads the meetings folder and
+needs no running Hex, no login, no API key, and no network.
+
+Tools:
+
+| Tool | What it returns |
+| --- | --- |
+| `list_meetings` | Meetings newest first: id, title, start, duration, status, transcript kind, participants, whether notes exist. Filters: `since`, `until`, `query`, `limit` (default 20, max 200), `include_in_progress`. |
+| `search_transcripts` | Ranked passages with meeting id, title, speaker, offset, absolute time, snippet, and match counts. Fuzzy and stemmed by default; `meeting_id` narrows to one meeting; `limit` defaults to 10, max 50. |
+| `get_transcript` | Merged You/Them turns with mm:ss offsets and local clock times. Optional `start`/`end` (or `from`/`to`), `speaker` (`you`, `them`, `all`), `max_chars` (default 20,000), and `cursor` to continue. |
+| `get_meeting_notes` | The stored title and a summary of at most two sentences. Never generates notes. |
+| `get_chapters` | Topics with a name, one line, and start and end offsets, for meetings recorded with live chapters. Never generates chapters. |
+
+Resource: `hex-meeting://<meeting_id>` returns that meeting's metadata, stored
+notes, and transcript as Markdown.
+
+Setup:
+
+OpenCode, in `opencode.json`:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "hex": {
+        "type": "local",
+        "command": ["hex", "mcp"]
+      }
+    }
+  }
+}
+```
+
+Claude Code:
+
+```sh
+claude mcp add hex -- hex mcp
+```
+
+Claude Desktop and Cursor share the `mcpServers` shape:
+
+```json
+{
+  "mcpServers": {
+    "hex": {
+      "command": "hex",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Claude Desktop reads
+`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS and
+`%APPDATA%\Claude\claude_desktop_config.json` on Windows. Cursor reads
+`.cursor/mcp.json` in a project or `~/.cursor/mcp.json` for every project.
+
+`hex mcp --meetings-dir <path>` reads a copy of a meetings folder elsewhere,
+such as a mirror pulled from a laptop. A binary named `hex-meetings-mcp` always
+serves meetings with the same flags.
+
+## Annotate
+
+Annotate captures a screen, a window, a region, or a connected iPhone, then
+opens the capture in an OpenCode session. Captures are stored as
+`.hexannotation` packages with the dictation-timeline audio, so a spoken
+walkthrough and the screen line up. Annotate is on in every build; organizations
+can turn it off with the managed key `DisableAnnotate`.
+
+## Transforms
+
+Transforms are JavaScript or TypeScript functions in
+`~/.config/hex/hex.config.ts` that change dictated text before Hex pastes it.
+Create the file with `hex commands init`; it writes types, `AGENTS.md`, and a
+`tsconfig.json`.
+
+```ts
+import { defineHexConfig } from "@hex/commands"
+
+export default defineHexConfig({
+  transformations: {
+    "trim-whitespace": {
+      name: "Trim whitespace",
+      description: "Remove leading and trailing whitespace",
+      timeout: 1000,
+      transform: (text, context) => text.trim(),
+    },
+  },
+})
+```
+
+- The config reloads about a third of a second after a file changes. A config
+  that fails to load keeps the previous one.
+- `context` describes the foreground app, browser host and URL, window title,
+  and whether the text came from dictation or the typed-text lab.
+- A script gets `fetch`, `node:child_process` (`exec`, `execFile`), and
+  `node:util`, but no filesystem, environment, `process`, or npm packages.
+- `fetch` and `node:child_process` reach the network only after Hex approves
+  the config's exact content hash. Managed Macs can restrict transforms to
+  loopback or turn them off entirely.
+- Transforms run in the order the person selects in Output, after word
+  replacements and an optional AI rewrite.
+
+## Command line
+
+```sh
+hex status --json                     # what Hex is doing, and this OS's capabilities
+hex dictation start|stop|toggle
+hex dictation stop --print             # print the transcript instead of pasting
+hex transcribe meeting.m4a             # a file, whether or not Hex is running
+hex settings list|get|set              # every persisted setting, dotted keys
+hex settings set dictation_hotkey menu
+hex history --since 7d --json
+hex history --search 'problems board'
+hex meetings list --since 7d --json
+hex meetings show latest --md
+hex meetings show latest --srt > call.srt
+hex meetings chapters latest --json
+hex meetings search 'release schedule'
+hex mcp
+```
+
+- Control commands drive the running app through its owner-only local API and
+  a bearer token; every command takes `--json` and returns a stable exit code.
+- `hex history`, `hex meetings`, and `hex mcp` read files. They never launch
+  Hex. Only `hex start` and `hex restart` open it.
+- `hex transcribe` reads WAV, AIFF, CAF, FLAC, MP3, Ogg, WebM, and
+  MP4/M4A/MOV, including a video's soundtrack.
+
+## Privacy
+
+- Audio is not persisted by default. Keep recordings is an explicit opt-in.
+- Event logs never contain dictated text, full URLs, or window titles.
+- History is the only dictation text store, kept 7 days by default and capped.
+- Meetings and their audio expire to the Trash on your schedule; exported
+  Markdown is never deleted by retention.
+- Hugging Face searches are header-only, on demand, and read-only.
+- No account, no cloud transcription, no in-app telemetry. Usage is measured by
+  release downloads, not by the app.
+
+## Managed Macs
+
+Configuration-profile keys in the `anomaly.hex` domain can disable Meetings,
+Annotate, OpenCode processing, transforms, Labs, and updates, or hold transforms
+to loopback. They are macOS only; Windows reads only `DisableUpdates`, and
+Linux reads none. A locked feature reads as off everywhere and refuses the CLI
+and local API. Removing the profile restores the person's own settings.
+
+## Labs
+
+Labs are features Hex is trying out. Each is off until it is turned on in
+Settings › Labs or with `hex labs on <id>`. They are listed, with one page
+each, at https://anoma.ly/hex/labs. Stable builds never list Dev-only labs.
+
+## Common questions
+
+**Is Hex free?** Yes. MIT licensed, no account, no subscription, no word limit.
+
+**Does Hex work offline?** Yes, after the one-time model download. Dictation and
+meeting transcription make no network request.
+
+**Which models?** Parakeet and Whisper GGUF models, Apple Speech on the Mac, and
+custom models you add.
+
+**Does a bot join my meetings?** No. Hex records the microphone and system audio
+itself; nothing joins the call.
+
+**Can my agent read my meetings?** Yes, with `hex mcp`, read-only over stdio.
+
+**Where is my data?** On your machine. macOS keeps it under
+`~/Library/Application Support/hex/`; Windows uses `%APPDATA%\hex` and
+`%LOCALAPPDATA%\hex`; Linux uses `~/.local/share/hex`.
+
+**What does Hex not do?** It does not join calls, transcribe meetings it did not
+record, separate remote speakers, or send audio to a cloud service.
+
+## Links
+
+- https://anoma.ly/hex/ · https://anoma.ly/hex/meetings/ · https://anoma.ly/hex/mcp
+- https://anoma.ly/hex/changelog · https://anoma.ly/hex/iphone · https://anoma.ly/hex/android
+- https://anoma.ly/hex/docs/transforms · https://anoma.ly/hex/docs/admin
+- https://github.com/anomalyco/hex · https://github.com/anomalyco/hex/blob/dev/docs/transcript-cli.md

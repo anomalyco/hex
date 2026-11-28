@@ -9,12 +9,12 @@ import { getWorkerAssetsDir } from "@cloudflare/build-output-utils"
 import { readFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { parseArgs } from "node:util"
-import { originForMode } from "../src/base"
+import { canonicalOriginForMode } from "../src/base"
 import { ANDROID_PATH, CARDS, IPHONE_PATH, PRIVACY_PATH, renderAndroid, renderIphone, renderPrivacy } from "../src/iphone"
 import { card } from "./card"
 
 const { values } = parseArgs({ options: { mode: { type: "string" }, out: { type: "string" } } })
-const origin = originForMode(values.mode)
+const origin = canonicalOriginForMode(values.mode)
 const assets = values.out ?? getWorkerAssetsDir(resolve(import.meta.dirname, ".."))
 const address = (path: string) => `${origin.replace("https://", "")}${path.slice("/hex".length)}`
 const site = (path: string) => join(assets, path.slice("/hex/".length))

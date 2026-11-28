@@ -9,14 +9,14 @@ import { getWorkerAssetsDir } from "@cloudflare/build-output-utils"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { parseArgs } from "node:util"
-import { originForMode } from "../src/base"
+import { canonicalOriginForMode } from "../src/base"
 import { type Channel, type Lab, cardLine, INDEX_PATH, inSource, osList, pagePath, renderIndex, renderLab } from "../src/labs"
 import catalog from "../src/labs.json"
 import data from "../src/release-data.json"
 import { card } from "./card"
 
 const { values } = parseArgs({ options: { mode: { type: "string" }, out: { type: "string" } } })
-const origin = originForMode(values.mode)
+const origin = canonicalOriginForMode(values.mode)
 const root = resolve(import.meta.dirname, "..")
 const assets = values.out ?? getWorkerAssetsDir(root)
 const labs = catalog.labs as Lab[]

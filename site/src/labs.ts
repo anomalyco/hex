@@ -120,7 +120,7 @@ li a:hover .title { text-decoration: underline; text-decoration-color: #4a4b50; 
 
 const MARK = `<svg aria-hidden="true" viewBox="0 0 64 64"><path d="M32 4 57 18.5v27L32 60 7 45.5v-27Z"/><path d="M32 15 48 24.25v15.5L32 49l-16-9.25v-15.5Z"/></svg>`
 
-export type Meta = { title: string; description: string; url: string; image: string; imageAlt: string }
+export type Meta = { title: string; description: string; url: string; image: string; imageAlt: string; jsonLd?: unknown }
 
 function head(origin: string, meta: Meta, style: string): string {
   const url = `${origin}${meta.url.slice("/hex".length)}`
@@ -149,6 +149,7 @@ function head(origin: string, meta: Meta, style: string): string {
     `<meta name="twitter:image" content="${escape(image)}">`,
     `<meta name="twitter:image:alt" content="${escape(meta.imageAlt)}">`,
     `<link rel="icon" href="${withBase("/favicon.svg")}" type="image/svg+xml">`,
+    ...(meta.jsonLd === undefined ? [] : [`<script type="application/ld+json">${JSON.stringify(meta.jsonLd)}</script>`]),
     `<style>${STYLE}${style}</style>`,
   ]
   return tags.join("\n")

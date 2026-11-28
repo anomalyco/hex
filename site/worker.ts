@@ -7,8 +7,10 @@
 // /hex/download/android, the newest Hex Preview APK, and /hex/ios,
 // Hex for iPhone on the App Store. Other hosts and
 // plain HTTP redirect to the canonical host. `cf dev` with ANY_HOST set turns
-// the redirect off for local testing.
-import { ANDROID_DOWNLOAD_PATH, ANDROID_PREVIEW_URL, BASE_PATH, DEV_DOWNLOAD_PATH, DEV_NOTES_PATH, DEV_NOTES_URL, DOWNLOAD_PATH, FILES_PATH, IOS_PATH, MEETINGS_PATH, RELEASE_SERVICE, stripBase, withBase } from "./src/base"
+// the redirect off for local testing. Every host but production is a preview:
+// its responses carry X-Robots-Tag: noindex, nofollow, and the pages' canonicals
+// name anoma.ly, so dev.anoma.ly is never the indexed copy.
+import { ANDROID_DOWNLOAD_PATH, ANDROID_PREVIEW_URL, BASE_PATH, DEV_DOWNLOAD_PATH, DEV_NOTES_PATH, DEV_NOTES_URL, DOWNLOAD_PATH, FILES_PATH, IOS_PATH, MEETINGS_PATH, PRODUCTION_HOST, RELEASE_SERVICE, stripBase, withBase } from "./src/base"
 import { parseDevNotes, renderDevNotes } from "./src/dev-notes"
 
 type Env = {
@@ -20,51 +22,68 @@ type Env = {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url)
-    if (!env.ANY_HOST && (url.hostname !== env.CANONICAL_HOST || url.protocol !== "https:")) {
-      url.protocol = "https:"
-      url.hostname = env.CANONICAL_HOST
-      url.port = ""
-      return Response.redirect(url.toString(), 301)
-    }
-    // The home page and the Meetings showcase load files relative to their
-    // folder, so they live at their trailing-slash address.
-    if (url.pathname === BASE_PATH || url.pathname === MEETINGS_PATH) {
-      url.pathname = `${url.pathname}/`
-      return Response.redirect(url.toString(), 301)
-    }
-    if (url.pathname === IOS_PATH || url.pathname === `${IOS_PATH}/`) return Response.redirect(APP_STORE_URL, 302)
-    if (url.pathname.startsWith(`${FILES_PATH}/`)) return file(request, env, decodeURIComponent(url.pathname.slice(FILES_PATH.length + 1)))
-    if (url.pathname === DEV_DOWNLOAD_PATH) return devDownload(request)
-    if (url.pathname === ANDROID_DOWNLOAD_PATH) return androidDownload(request)
-    if (url.pathname === DEV_NOTES_PATH || url.pathname === `${DEV_NOTES_PATH}/`) return devNotes(request, env)
-    if (url.pathname.startsWith(`${DOWNLOAD_PATH}/`)) return download(request, url.pathname.slice(DOWNLOAD_PATH.length + 1))
-
-    // The route also matches paths like /hexagon, which are not ours.
-    const path = stripBase(url.pathname)
-    if (path === undefined) return new Response("Not found", { status: 404 })
-    const assetUrl = new URL(url)
-    // Docs are Markdown files served at clean paths, for agents to fetch.
-    const doc = DOCS.get(path)
-    assetUrl.pathname = doc ?? path
-    const assetRequest = new Request(assetUrl, request)
-    const response = await env.ASSETS.fetch(assetRequest)
-    const headers = new Headers(response.headers)
-    // Asset redirects (trailing slashes, /index.html) point at root-relative paths.
-    const location = headers.get("Location")
-    if (location?.startsWith("/")) headers.set("Location", withBase(location))
-    if (path.startsWith("/assets/")) {
-      headers.set("Cache-Control", "public, max-age=31536000, immutable")
-    }
-    if (doc) headers.set("Content-Type", "text/markdown; charset=utf-8")
-    secure(headers)
-    if (path.endsWith(".mp4")) return ranged(request, request.method === "HEAD" ? await env.ASSETS.fetch(new Request(assetUrl, { headers: request.headers })) : response, headers)
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers,
-    })
+    return noindexPreview(request, await respond(request, env))
   },
+}
+
+// A preview host answers the same pages, so it must never be indexed. Its
+// canonicals already name production; this is the header a crawler may read
+// before it reads the page.
+function noindexPreview(request: Request, response: Response): Response {
+  if (new URL(request.url).hostname === PRODUCTION_HOST) return response
+  const headers = new Headers(response.headers)
+  headers.set("X-Robots-Tag", "noindex, nofollow")
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
+}
+
+async function respond(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url)
+  if (!env.ANY_HOST && (url.hostname !== env.CANONICAL_HOST || url.protocol !== "https:")) {
+    url.protocol = "https:"
+    url.hostname = env.CANONICAL_HOST
+    url.port = ""
+    return Response.redirect(url.toString(), 301)
+  }
+  // The home page and the Meetings showcase load files relative to their
+  // folder, so they live at their trailing-slash address.
+  if (url.pathname === BASE_PATH || url.pathname === MEETINGS_PATH) {
+    url.pathname = `${url.pathname}/`
+    return Response.redirect(url.toString(), 301)
+  }
+  if (url.pathname === IOS_PATH || url.pathname === `${IOS_PATH}/`) return Response.redirect(APP_STORE_URL, 302)
+  if (url.pathname.startsWith(`${FILES_PATH}/`)) return file(request, env, decodeURIComponent(url.pathname.slice(FILES_PATH.length + 1)))
+  if (url.pathname === DEV_DOWNLOAD_PATH) return devDownload(request)
+  if (url.pathname === ANDROID_DOWNLOAD_PATH) return androidDownload(request)
+  if (url.pathname === DEV_NOTES_PATH || url.pathname === `${DEV_NOTES_PATH}/`) return devNotes(request, env)
+  if (url.pathname.startsWith(`${DOWNLOAD_PATH}/`)) return download(request, url.pathname.slice(DOWNLOAD_PATH.length + 1))
+
+  // The route also matches paths like /hexagon, which are not ours.
+  const path = stripBase(url.pathname)
+  if (path === undefined) return new Response("Not found", { status: 404 })
+  const assetUrl = new URL(url)
+  // Docs are Markdown files served at clean paths, for agents to fetch.
+  const doc = DOCS.get(path)
+  assetUrl.pathname = doc ?? path
+  const assetRequest = new Request(assetUrl, request)
+  const response = await env.ASSETS.fetch(assetRequest)
+  const headers = new Headers(response.headers)
+  // Asset redirects (trailing slashes, /index.html) point at root-relative paths.
+  const location = headers.get("Location")
+  if (location?.startsWith("/")) headers.set("Location", withBase(location))
+  if (path.startsWith("/assets/")) {
+    headers.set("Cache-Control", "public, max-age=31536000, immutable")
+  }
+  // Markdown and plain text for agents, with the charset spelled out, whether
+  // the file is a .md doc served at a clean path or a file like llms.txt.
+  if (doc || path.endsWith(".md")) headers.set("Content-Type", "text/markdown; charset=utf-8")
+  else if (path.endsWith(".txt")) headers.set("Content-Type", "text/plain; charset=utf-8")
+  secure(headers)
+  if (path.endsWith(".mp4")) return ranged(request, request.method === "HEAD" ? await env.ASSETS.fetch(new Request(assetUrl, { headers: request.headers })) : response, headers)
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  })
 }
 
 // /hex/ios, the short link to Hex for iPhone on the App Store.
