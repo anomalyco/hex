@@ -126,6 +126,11 @@ internal class TypingPreferences(context: Context) {
     var voiceBarFromMenu: Boolean
         get() = prefs.getBoolean(VOICE_BAR_FROM_MENU, false)
         set(value) { prefs.edit().putBoolean(VOICE_BAR_FROM_MENU, value).apply() }
+    /** Labs › Keyboard › No gap under the keys: the bottom row's keycaps end where the system's bar begins, without
+     * Gboard's 12.2 dp under them (#3004). Off by default. */
+    var flushBottom: Boolean
+        get() = prefs.getBoolean(FLUSH_BOTTOM, false)
+        set(value) { prefs.edit().putBoolean(FLUSH_BOTTOM, value).apply() }
     /** Settings › Keyboard › Height: Normal until another step is chosen. */
     var height: KeyboardHeight
         get() = KeyboardHeight.of(prefs.getString(HEIGHT, null))
@@ -182,6 +187,7 @@ internal class TypingPreferences(context: Context) {
         const val VOICE_ONLY = "voiceOnly"
         const val VOICE_BAR_FROM_MENU = "voiceBarFromMenu"
         const val HEIGHT = "keyboardHeight"
+        const val FLUSH_BOTTOM = "flushBottom"
         const val HEX_KEY_LEFT = "hexKeyLeft"
         const val VOLUME_IN_MENU = "volumeInMenu"
         const val KEY_COLORS = "keyColors"

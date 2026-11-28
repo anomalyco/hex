@@ -188,6 +188,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val voiceBarFromMenu = remember(revision) { typing.voiceBarFromMenu }
     val hexKeyLeft = remember(revision) { typing.hexKeyLeft }
     val volumeInMenu = remember(revision) { typing.volumeInMenu }
+    val flushBottom = remember(revision) { typing.flushBottom }
     // Labs › Dictate from Quick Settings is the tile service's enabled state, not a preference.
     var quickDictation by remember { mutableStateOf(QuickDictation.enabled(context)) }
     val keyColors = remember(revision) { typing.keyColors }
@@ -654,6 +655,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 // Labs › Keyboard › Volume in the Hex menu: off, the Hex menu has no Volume row.
                                 Toggle(stringResource(R.string.volume_in_menu), stringResource(R.string.volume_in_menu_detail),
                                     volumeInMenu) { typing.volumeInMenu = it }
+                                Rule()
+                                // Labs › Keyboard › No gap under the keys: off, Gboard's gap stays under the bottom row.
+                                Toggle(stringResource(R.string.flush_bottom), stringResource(R.string.flush_bottom_detail),
+                                    flushBottom) { typing.flushBottom = it }
                                 Rule()
                                 // Labs › Keyboard › Key colors: iPhone Hex's key themes, the keys only. Off, the keys are
                                 // Automatic's whatever Color says; the choice is kept for the next time it is on.

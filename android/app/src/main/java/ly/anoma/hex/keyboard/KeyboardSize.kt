@@ -26,9 +26,14 @@ internal enum class KeyboardHeight(val key: String, val share: Float) {
     }
 }
 
-/** The rows one keyboard view was built with: this screen's ([KeyRows]) at [height]. */
-internal class KeySize private constructor(val height: KeyboardHeight, val rows: RowSize) {
+/** The rows one keyboard view was built with: this screen's ([KeyRows]) at [height], and whether the bottom row's
+ * keycaps end at the system's bar ([flushBottom], Labs › Keyboard › No gap under the keys). */
+internal class KeySize private constructor(val height: KeyboardHeight, val rows: RowSize, val flushBottom: Boolean) {
+    /** Whether a view built with this size is the one [height] and [flushBottom] ask for. */
+    fun matches(height: KeyboardHeight, flushBottom: Boolean) = this.height == height && this.flushBottom == flushBottom
+
     companion object {
-        fun of(resources: Resources, height: KeyboardHeight) = KeySize(height, height.of(KeyRows.of(resources)))
+        fun of(resources: Resources, height: KeyboardHeight, flushBottom: Boolean = false) =
+            KeySize(height, height.of(KeyRows.of(resources)), flushBottom)
     }
 }
