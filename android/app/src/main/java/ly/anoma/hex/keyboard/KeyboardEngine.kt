@@ -507,15 +507,21 @@ internal class KeyboardEngine(
     /** A strip slot was tapped. What was typed, a fix or a word goes in with its space, unless the text
      * after the cursor already starts with a space or closing mark: then the space waits for the next
      * key that starts a word. A space right after a picked word is swallowed (it still counts towards
-     * double-space), and a closing mark takes its place (in a URL field, also / and the other joiners). */
+     * double-space), and a closing mark takes its place (in a URL field, also / and the other joiners).
+     * A next word picked right after a word with no space yet ("up to‸ best") puts that space in first,
+     * where the strip offers next words ([showPredictions]: nothing letter-like after the cursor, so never
+     * inside a word); and a word being typed with a letter after the cursor (Gmail's Smart Compose text)
+     * goes in with its space before that text rather than a tap that does nothing. */
     fun pickSuggestion(text: String) {
         val w = word ?: return
         if (pickSwiped(text)) return
         edited()
-        if ((symbols && w.token.isEmpty()) || !canEndWord()) return
+        if (secure || (symbols && w.token.isEmpty())) return
         val old = w.token
         if (old.isNotEmpty() && !endsWith(prefix + old)) { resetTyping(); surface?.suggestions(emptyList()); return }
-        if (old.isEmpty() && !w.startsWord(before())) return
+        val lead = old.isEmpty() && canEndWord() && !w.startsWord(before()) && TypingWord.endsBareWord(before())
+        // A next word goes in only where the strip offers next words: never before a letter, as inside a word.
+        if (old.isEmpty() && (!canEndWord() || (!lead && !w.startsWord(before())))) return
         val holds = SpaceRules.separates(target.after(1))
         clearSpaces()
         val committed = smartWord(text)
@@ -525,7 +531,7 @@ internal class KeyboardEngine(
             if (old.isNotEmpty()) t.picked(old, text, overCorrection = text == old && feedback.autocorrect && correctingField &&
                 w.replacement() != null, before = before())
         }
-        if (replace(old, if (holds) committed else "$committed ")) {
+        if (replace(old, (if (lead) " " else "") + (if (holds) committed else "$committed "))) {
             resetTyping()
             val b = before()
             if (holds) heldAnchor = b else pickedAnchor = b
@@ -554,8 +560,16 @@ internal class KeyboardEngine(
         val now = clock()
         val b = before()
         when {
-            // The text after the cursor already separates the picked word: space has nothing to add.
-            heldAnchor != null && heldAnchor == b -> { clearSpaces(); showPredictions(b); return }
+            // The text after the cursor already separates the picked word: the first space keeps the held
+            // space for the next word, and a second one goes in.
+            heldAnchor != null && heldAnchor == b && spaceAnchor != b -> {
+                spaceAnchor = b; spaceAt = now; showPredictions(b); return
+            }
+            heldAnchor != null && heldAnchor == b -> {
+                clearSpaces(); resetTyping()
+                if (target.commit(" ")) afterSpace(now)
+                return
+            }
             pickedAnchor != null && pickedAnchor == b -> { clearSpaces(); spaceAnchor = b; spaceAt = now; showPredictions(b); return }
             (word != null || (wordField && literalLayout)) && !exactField && spaceAnchor == b && now - spaceAt <= SpaceRules.DOUBLE_SPACE_MS && SpaceRules.periodFits(b) -> {
                 clearSpaces()
