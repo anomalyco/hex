@@ -178,6 +178,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val holdClick = remember(revision) { typing.holdClick }
     val closingQuoteTakesSpace = remember(revision) { typing.closingQuoteTakesSpace }
     val swiftKeyLayout = remember(revision) { typing.swiftKeyLayout }
+    val learnWords = remember(revision) { typing.learnWords }
     val adaptiveTouch = remember(revision) { typing.adaptiveTouch }
     // Labs › Keyboard › Adaptive touch: how far it has learned (labelled taps on one key plane, and whether any reads your
     // own centres), and whether the phone keeps averages, which Reset touch learning removes even with the lab off.
@@ -428,7 +429,8 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 R.string.adaptive_touch to R.string.settings_privacy_lab_touch,
                                 R.string.pick_model to R.string.settings_privacy_lab_model,
                                 R.string.clipboard_history to R.string.settings_privacy_lab_clipboard,
-                                R.string.imported_words to R.string.settings_privacy_lab_words).forEachIndexed { i, (name, keeps) ->
+                                R.string.imported_words to R.string.settings_privacy_lab_words,
+                                R.string.learn_words to R.string.settings_privacy_lab_learned).forEachIndexed { i, (name, keeps) ->
                                 if (i != 0) Rule()
                                 Entry(stringResource(name), stringResource(keeps), titleLines = Int.MAX_VALUE, noteLines = Int.MAX_VALUE)
                             }
@@ -618,6 +620,9 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 Rule()
                                 Toggle(stringResource(R.string.swiftkey_layout), stringResource(R.string.swiftkey_layout_detail),
                                     swiftKeyLayout) { typing.swiftKeyLayout = it }
+                                Rule()
+                                Toggle(stringResource(R.string.learn_words), stringResource(R.string.learn_words_detail),
+                                    learnWords) { typing.learnWords = it }
                                 Rule()
                                 // Labs › Keyboard › Adaptive touch: off, the keys read the drawn centres and learn nothing;
                                 // what was learned stays on the phone until Reset touch learning or Delete what Hex learned.

@@ -67,6 +67,8 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
     override fun undoDictation(shown: Boolean) = strip.undo(shown)
     override fun toolsChanged() = strip.update()
     fun notice(notice: StripNotice?) = strip.notice(notice)
+    /** The strip's notice showing now, if any. */
+    val shownNotice get() = strip.shownNotice
     /** Android's inline autofill suggestions (the service's own views) in the strip's word slots. */
     fun inlineSuggestions(unpinned: List<View>, pinned: List<View>) =
         strip.inlineSuggestions(unpinned, pinned)

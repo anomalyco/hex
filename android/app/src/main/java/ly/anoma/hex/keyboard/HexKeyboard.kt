@@ -54,6 +54,7 @@ import ly.anoma.hex.speech.swipeUnreadableIn
 import ly.anoma.hex.speech.typingLayout
 import ly.anoma.hex.typing.AdaptiveTouchStore
 import ly.anoma.hex.typing.ImportedWords
+import ly.anoma.hex.typing.PersonalDictionary
 import ly.anoma.hex.typing.PersonalWords
 import ly.anoma.hex.typing.SpatialDecoder
 import ly.anoma.hex.typing.TypingModel
@@ -119,7 +120,12 @@ class HexKeyboard : InputMethodService() {
     // Android's personal dictionary is read off the main thread, and again whenever it changes.
     private val words = Executors.newSingleThreadExecutor { Thread(it, "Hex personal words") }
     private val dictionaryChanged = object : ContentObserver(Handler(Looper.getMainLooper())) {
-        override fun onChange(selfChange: Boolean) = engine.personalWordsChanged()
+        override fun onChange(selfChange: Boolean) {
+            engine.personalWordsChanged()
+            // Labs › Keyboard › Learn new words: once the dictionary is read back (the reloads above run first on the
+            // same thread), what it holds decides; a word removed in Android's settings can be learned again.
+            words.execute { added.clear() }
+        }
     }
     internal val engine by lazy {
         KeyboardEngine(InputConnectionTarget(this), feedback, { layoutLanguage }, { typingLanguage },
@@ -129,7 +135,8 @@ class HexKeyboard : InputMethodService() {
             emoji = EmojiWords(assets, words),
             learned = { if (preferences.learnFixes) fixes.record(it) },
             adaptiveTouch = { if (feedback.adaptiveTouch) AdaptiveTouchStore.get(this) else null },
-            swipeUnavailable = ::swipeUnavailable)
+            swipeUnavailable = ::swipeUnavailable,
+            learnWord = ::learnWord)
     }
     private val typingChanged = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == TypingPreferences.SUGGEST_SWEAR_WORDS) engine.swearWordsChanged()
@@ -451,6 +458,29 @@ class HexKeyboard : InputMethodService() {
         checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED -> R.string.keyboard_hint_microphone
         else -> R.string.keyboard_hint_hold
     })
+    // Labs › Keyboard › Learn new words: what this process added, touched only on the words thread.
+    private val added = HashSet<String>()
+    /** Labs › Keyboard › Learn new words: [word] joins Android's personal dictionary off the main thread (the content
+     * observer then reads it back), and the strip says so until typing starts; a tap on the line takes it out again. */
+    private fun learnWord(word: String, language: String) {
+        words.execute {
+            // The same word kept twice before the dictionary is read back (its chip tapped again) is added once.
+            val key = "$language:${word.lowercase()}"
+            if (!added.add(key)) return@execute
+            if (!PersonalDictionary.add(this, word, language)) { added.remove(key); return@execute }
+            main.post {
+                // Another notice (Hex Preview's update line) keeps the line, and this one gives the strip back to its
+                // suggestions after a few seconds if no key took it away first.
+                val strip = view ?: return@post
+                if (strip.shownNotice != null) return@post
+                val note = StripNotice(getString(R.string.keyboard_note_learned, word), getString(R.string.keyboard_note_dismiss),
+                    tap = { words.execute { PersonalDictionary.remove(contentResolver, word, language); added.remove(key) } },
+                    dismiss = {})
+                strip.notice(note)
+                main.postDelayed({ if (view?.shownNotice === note) view?.notice(null) }, LEARNED_NOTICE_MS)
+            }
+        }
+    }
     /** A swipe in a dictation language without a typing model types nothing: the strip names the language until typing
      * starts, a tap or its ✕ (in place of Hex Preview's update line, which comes back in the next field). */
     private fun swipeUnavailable() {
@@ -665,5 +695,7 @@ class HexKeyboard : InputMethodService() {
         const val VOICE_NOTE_MS = 1_200L
         /** How long a dictation whose field went away waits, in memory only, to be offered. */
         const val KEPT_MS = 120_000L
+        /** Labs › Keyboard › Learn new words' line gives the strip back after this long. */
+        const val LEARNED_NOTICE_MS = 4_000L
     }
 }

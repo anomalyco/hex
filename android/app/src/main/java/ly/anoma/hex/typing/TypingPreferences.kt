@@ -103,6 +103,11 @@ internal class TypingPreferences(context: Context) {
     var swiftKeyLayout: Boolean
         get() = prefs.getBoolean(SWIFTKEY_LAYOUT, false)
         set(value) { prefs.edit().putBoolean(SWIFTKEY_LAYOUT, value).apply() }
+    /** Labs › Keyboard › Learn new words: a spelling no dictionary knows that you keep as typed (its chip tapped over a
+     * correction, or the correction undone) joins Android's personal dictionary ([LearnedWords], #3020). Off by default. */
+    var learnWords: Boolean
+        get() = prefs.getBoolean(LEARN_WORDS, false)
+        set(value) { prefs.edit().putBoolean(LEARN_WORDS, value).apply() }
     /** Labs › Keyboard › Adaptive touch: the decoder reads taps with your own key centres once it has learned them
      * ([AdaptiveTouch], kept by [AdaptiveTouchStore]). Off by default. */
     var adaptiveTouch: Boolean
@@ -196,6 +201,7 @@ internal class TypingPreferences(context: Context) {
         const val HOLD_CLICK = "holdClick"
         const val CLOSING_QUOTE_TAKES_SPACE = "closingQuoteTakesSpace"
         const val SWIFTKEY_LAYOUT = "swiftKeyLayout"
+        const val LEARN_WORDS = "learnWords"
         const val ADAPTIVE_TOUCH = "adaptiveTouch"
         const val USE_IMPORTED_WORDS = "importedWords"
         /** A counter [ImportedWords] bumps whenever the imported list changes, so the keyboard reads it again. */
