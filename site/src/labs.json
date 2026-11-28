@@ -2,19 +2,6 @@
   "labs": [
     {
       "added": "2026-10-30",
-      "group": "meetings",
-      "groupTitle": "Meetings",
-      "id": "meetings",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "Record calls and keep a written copy",
-      "title": "Meetings (beta)"
-    },
-    {
-      "added": "2026-10-30",
       "group": "dictation",
       "groupTitle": "Dictation",
       "id": "live-text",

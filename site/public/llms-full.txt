@@ -38,8 +38,8 @@ only.
 - Android 12 or later: Hex Preview, outside Google Play.
 
 The command line, read-only history and meetings queries, and `hex mcp` run on
-macOS, Linux, and Windows. Meetings is a beta on all three, turned on in
-Settings › Labs; another machine can read a mirrored meetings folder with
+macOS, Linux, and Windows. Meetings is in the sidebar on all three, off until
+you turn it on; another machine can read a mirrored meetings folder with
 `--meetings-dir`.
 
 ## Install
@@ -100,8 +100,8 @@ and `/streams` clients yield to it.
 ## Meetings, without a bot
 
 Meetings is Hex's local recorder for calls. It sees a call start, offers to
-record, and writes the result on your machine. It is a beta on macOS, Windows,
-and Linux, off until you turn it on in Settings › Labs.
+record, and writes the result on your machine. It runs on macOS, Windows, and
+Linux, off until you turn it on in the Meetings tab.
 
 - Captures the microphone ("You") and system audio ("Them") at the same time.
   Remote speakers are not separated.

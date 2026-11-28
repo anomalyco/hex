@@ -2,9 +2,9 @@
 //! (`crate::labs`), each off by default. Discover shows what's new, then
 //! every lab as a card under its group's collapsible header, and Turned on
 //! what's on. Each card shows its description and switch, and while on any
-//! settings the lab has of its own. A feature with its own pane (Meetings,
-//! Voice Filter, Playground, Modes editor) joins the main sidebar while on
-//! and is hidden while off.
+//! settings the lab has of its own. A feature with its own pane (Voice Filter,
+//! Playground, Modes editor) joins the main sidebar while on and is hidden
+//! while off.
 
 mod clipboard_phrase;
 mod group;
@@ -40,8 +40,8 @@ pub(super) static LABS_ICON: Icon = Icon {
 };
 
 /// The main sidebar's panes, in order: General, Output, the Modes editor
-/// while its lab is on, History, then the features turned on (Meetings and
-/// Voice Filter from Labs, Annotate in dev builds).
+/// while its lab is on, History, Meetings, Annotate, and Voice Filter while
+/// its lab or driver is on.
 pub(super) fn main_panes(ui: &Ui) -> Vec<Pane> {
     let mut panes = vec![Pane::General, Pane::Output];
     if Pane::Modes.shown(ui) {
@@ -654,9 +654,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
         None => row(feature, icon),
     };
     let mut rows = Vec::new();
-    if caps.meetings {
-        rows.push(row(Feature::Meetings, Some(Pane::Meetings.icon())));
-    }
     if caps.fun && Feature::VoiceFilter.managed().is_some() {
         rows.push(row(Feature::VoiceFilter, Some(&VOICE_FILTER_ICON)));
     } else if caps.fun {
@@ -1047,7 +1044,6 @@ fn row_key(lab: Lab) -> &'static str {
         Lab::Annotate => return "lab-annotate",
     };
     match feature {
-        Feature::Meetings => "lab-meetings",
         Feature::VoiceFilter => "lab-voice-filter",
         Feature::Playground => "lab-playground",
         Feature::LiveText => "lab-live-text",

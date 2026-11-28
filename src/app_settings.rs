@@ -845,10 +845,7 @@ impl AppSettings {
             self.shortcut_mode == crate::dictation::ShortcutMode::Toggle,
             Ordering::Relaxed,
         );
-        MEETINGS_ENABLED.store(
-            self.meetings.available() && crate::labs::Feature::Meetings.shipped(),
-            Ordering::Release,
-        );
+        MEETINGS_ENABLED.store(self.meetings.available(), Ordering::Release);
         crate::labs::apply(&self.labs);
         screenshots::apply_screenshots(self);
         #[cfg(hex_capture)]

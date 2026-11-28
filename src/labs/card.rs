@@ -8,7 +8,6 @@ impl Feature {
     /// The card's title.
     pub const fn title(self) -> &'static str {
         match self {
-            Self::Meetings => "Meetings (beta)",
             Self::VoiceFilter => "Voice Filter",
             Self::Playground => "Playground",
             Self::LiveText => "Live text",
@@ -110,7 +109,6 @@ impl Feature {
     /// The card's one line, under its title.
     pub const fn summary(self) -> &'static str {
         match self {
-            Self::Meetings => "Record calls and keep a written copy",
             Self::VoiceFilter => "A Hex Microphone other apps can pick, with live voice filters",
             Self::Playground => "Browse scenes and stories in a window",
             Self::LiveText => {

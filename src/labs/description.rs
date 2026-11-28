@@ -8,7 +8,6 @@ impl Feature {
     /// its translated row.
     pub const fn description(self) -> &'static str {
         match self {
-            Self::Meetings => "Record calls and keep a written copy (its own pane)",
             Self::VoiceFilter => {
                 "A Hex Microphone other apps can pick, with live voice filters (its own pane)"
             }

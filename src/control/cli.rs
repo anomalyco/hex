@@ -1474,8 +1474,8 @@ mod tests {
         assert!(text.starts_with("Hex 2.3.1 (pid 42, 412 MB)\n"));
         assert!(text.contains("Meeting      recording “Design sync” for 1:02:03\n"));
         assert!(text.ends_with("Labs         none\n"));
-        report.labs = vec!["live-text".into(), "meetings".into()];
-        assert!(human_status(&report).ends_with("Labs         live-text, meetings\n"));
+        report.labs = vec!["live-text".into(), "live-chapters".into()];
+        assert!(human_status(&report).ends_with("Labs         live-text, live-chapters\n"));
     }
 
     #[test]

@@ -137,9 +137,9 @@ impl Policy {
         ForcedPolicy
     }
 
-    /// The lock on a Labs feature: its feature-specific lock (Meetings,
-    /// Annotate for every Annotate-group lab, or OpenCode processing for a
-    /// voice prompt) when active, otherwise Labs.
+    /// The lock on a Labs feature: its feature-specific lock (Meetings for
+    /// every Meetings-group lab, Annotate for every Annotate-group lab, or
+    /// OpenCode processing for a voice prompt) when active, otherwise Labs.
     pub fn labs_lock(self, feature: crate::labs::Feature) -> Option<Lock> {
         if let Some(lock) = feature.lock()
             && self.locks(lock)
@@ -155,6 +155,7 @@ impl Policy {
             return self.labs_lock(feature);
         }
         let lock = match name {
+            "meetings.enabled" => Lock::Meetings,
             "capture.enabled" => Lock::Annotate,
             "labs.app_model_switching" => Lock::Labs,
             _ => return None,
@@ -171,6 +172,9 @@ impl Policy {
         }
         if self.locks(Lock::Labs) {
             settings.labs.app_model_switching = false;
+        }
+        if self.locks(Lock::Meetings) {
+            settings.meetings.enabled = false;
         }
         #[cfg(hex_capture)]
         if self.locks(Lock::Annotate) {
@@ -194,6 +198,9 @@ impl Policy {
         }
         if self.locks(Lock::Labs) {
             settings.labs.app_model_switching = saved.labs.app_model_switching;
+        }
+        if self.locks(Lock::Meetings) {
+            settings.meetings.enabled = saved.meetings.enabled;
         }
         #[cfg(hex_capture)]
         if self.locks(Lock::Annotate) {
@@ -302,6 +309,68 @@ mod tests {
         );
         let labs = Policy::default().with(Lock::Labs);
         assert_eq!(labs.labs_lock(feature), Some(Lock::Labs));
+    }
+
+    /// No Meetings-group lab may escape DisableMeetings: every one reports
+    /// `Lock::Meetings` from `labs_lock` and `setting_lock` (including companion
+    /// keys), is forced off by `enforce`, and is preserved by `keep_saved`.
+    #[test]
+    fn every_meetings_group_lab_is_locked_by_disable_meetings() {
+        use crate::labs::{Feature, Group};
+        let meetings = Policy::default().with(Lock::Meetings);
+        let meetings_features: Vec<_> = Feature::ALL
+            .into_iter()
+            .filter(|feature| feature.group() == Group::Meetings)
+            .collect();
+        assert!(meetings_features.contains(&Feature::LiveChapters));
+        assert!(meetings_features.contains(&Feature::MeetingAudioSource));
+
+        let mut saved = AppSettings::default();
+        saved.meetings.enabled = true;
+        for &feature in &meetings_features {
+            assert_eq!(
+                meetings.labs_lock(feature),
+                Some(Lock::Meetings),
+                "{} escaped DisableMeetings in labs_lock",
+                feature.name()
+            );
+            assert_eq!(
+                meetings.setting_lock(feature.settings_key()),
+                Some(Lock::Meetings),
+                "{} escaped DisableMeetings in setting_lock",
+                feature.settings_key()
+            );
+            for extra in feature.extra_settings_keys() {
+                assert_eq!(
+                    meetings.setting_lock(extra),
+                    Some(Lock::Meetings),
+                    "companion key {extra} escaped DisableMeetings"
+                );
+            }
+            feature.set_field(&mut saved, true);
+        }
+
+        let mut loaded = saved.clone();
+        meetings.enforce(&mut loaded);
+        assert!(!loaded.meetings.enabled);
+        for &feature in &meetings_features {
+            assert!(
+                !feature.on(&loaded),
+                "{} remained on after DisableMeetings enforce",
+                feature.name()
+            );
+        }
+
+        let mut written = loaded.clone();
+        meetings.keep_saved(&mut written, &saved);
+        assert_eq!(written.meetings.enabled, saved.meetings.enabled);
+        for &feature in &meetings_features {
+            assert!(
+                feature.on(&written),
+                "{} was not restored by DisableMeetings keep_saved",
+                feature.name()
+            );
+        }
     }
 
     /// No Annotate-group lab may escape DisableAnnotate: every one reports
@@ -508,7 +577,12 @@ mod tests {
         assert_eq!(meetings.setting_lock("labs.live_text"), None);
         let labs = Policy::default().with(Lock::Labs);
         assert_eq!(labs.setting_lock("labs.live_text"), Some(Lock::Labs));
-        assert_eq!(labs.setting_lock("meetings.enabled"), Some(Lock::Labs));
+        assert_eq!(labs.setting_lock("meetings.enabled"), None);
+        assert_eq!(labs.setting_lock("labs.live_chapters"), Some(Lock::Labs));
+        assert_eq!(
+            meetings.setting_lock("labs.live_chapters"),
+            Some(Lock::Meetings)
+        );
         assert_eq!(labs.setting_lock("pause_browser_media"), Some(Lock::Labs));
         assert_eq!(labs.setting_lock("sound_effects"), None);
         // A choice that is only partly locked: `hex settings` refuses

@@ -2,9 +2,10 @@
 
 Labs holds unproven, user-requested, and externally contributed features behind
 per-feature switches, **off by default**. There is no master switch. Every build
-shows General, Output, History, Labs, and Annotate (`capture.enabled`, on by
-default); a Labs feature with its own sidebar pane (such as Meetings, Voice
-Filter, Playground, or the Modes editor) joins the sidebar only while enabled.
+shows General, Output, History, Meetings (`meetings.enabled`, off by default),
+Annotate (`capture.enabled`, on by default), and Labs; a Labs feature with its
+own sidebar pane (such as Voice Filter, Playground, or the Modes editor) joins
+the sidebar only while enabled.
 
 ## Single Source Of Truth
 
@@ -59,16 +60,16 @@ example, `KeyboardModelSwitching` checks input-source support and
      `labs.keep_microphone_open_seconds`, `labs.voice_prompt_phrase`,
      `labs.yolo_mode_apps`) are published before the bank bits so hot-path
      readers never observe a bit enabled ahead of its payload.
-   - Features bound as `app(<path>)` (such as `meetings.enabled`,
+   - Features bound as `app(<path>)` (such as
      `experimental.hex_microphone`, `paste_with_shift`,
      `keyboard_model_switching.enabled`, `pause_browser_media`,
      `share_dictation_shortcut`) read directly from `AppSettings` and do not
      use `SwitchBank`.
 3. **Managed policy locks (`src/policy.rs`, `Feature::lock`):**
    - `Lock::Labs` locks every Labs feature off.
-   - Feature-specific locks also apply: `Meetings` -> `Lock::Meetings`,
-     `VoicePrompt` -> `Lock::OpenCodeProcessing`, and every `Group::Annotate`
-     feature -> `Lock::Annotate`.
+   - Feature-specific locks also apply: `VoicePrompt` ->
+     `Lock::OpenCodeProcessing`, every `Group::Meetings` feature ->
+     `Lock::Meetings`, and every `Group::Annotate` feature -> `Lock::Annotate`.
    - Locked features read off and refuse CLI and UI changes.
 4. **Toggle side effects & refusals (`src/labs/feature.rs`, `src/labs/cli.rs`):**
    - Turning off shortcut-expanding labs repairs saved shortcuts that rely on

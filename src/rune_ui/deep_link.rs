@@ -95,6 +95,9 @@ pub(crate) fn labs_link(scheme: &str, feature: crate::labs::Feature) -> String {
 /// Opens the window's page for `target`; the caller brings the window forward.
 pub(crate) fn open(ui: &mut Ui, target: Target, tx: &mut Tx) {
     match target {
+        Target::Labs(link) if link.lab.as_deref() == Some("meetings") => {
+            open(ui, Target::Settings("meetings".into()), tx);
+        }
         Target::Labs(link) => super::labs::reveal(ui, &link, tx),
         Target::Settings(name) => {
             let pane = PANES

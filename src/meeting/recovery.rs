@@ -204,9 +204,7 @@ pub(super) fn can_recover() -> bool {
     let Ok(settings) = crate::app_settings::AppSettings::read() else {
         return false;
     };
-    settings.meetings.available()
-        && crate::labs::Feature::Meetings.shipped()
-        && model_installed(&settings.transcription)
+    settings.meetings.available() && model_installed(&settings.transcription)
 }
 
 fn model_installed(selection: &crate::transcription::models::TranscriptionSelection) -> bool {

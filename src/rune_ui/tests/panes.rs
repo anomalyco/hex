@@ -23,11 +23,34 @@ fn refresh(rt: &mut Runtime<Ui>) {
 
 #[test]
 fn each_os_lists_only_the_panes_it_can_run() {
-    // Meetings (beta) is a Labs switch on every OS; this Mac fixture has it on.
+    // Meetings is a top-level sidebar item on every OS; while off it shows
+    // its setup screen with only the rows that OS supports.
     for scene in ["portal", "windows-settings"] {
         let mut rt = runtime(scene, true, PANE_SIZE);
+        assert!(
+            rt.find("nav-meetings").is_some(),
+            "{scene} lists Meetings in the sidebar"
+        );
+        tap(&mut rt, "nav-meetings");
+        assert_eq!(rt.state.pane, Pane::Meetings);
+        assert!(
+            rt.find("meetings-turn-on").is_some(),
+            "{scene} offers opt-in"
+        );
+        assert!(rt.find("setup-call-start").is_some());
+        assert!(rt.find("setup-system-audio").is_none());
+        assert!(rt.find("setup-calendar").is_none());
+        let shown = texts(&rt);
+        assert!(
+            shown.iter().any(|text| text
+                == "Transcripts stay on this computer for 7 days, then move to the Trash."),
+            "{scene} says on this computer: {shown:?}"
+        );
         open_labs(&mut rt);
-        assert!(rt.find("lab-meetings").is_some(), "{scene} offers Meetings");
+        assert!(
+            rt.find("lab-meetings").is_none(),
+            "{scene} graduated Meetings out of Labs"
+        );
     }
     let mut mac = runtime("mac-settings", true, PANE_SIZE);
     tap(&mut mac, "nav-labs");
@@ -1646,21 +1669,31 @@ fn the_select_all_calendars_lab_saves_every_calendar_at_once() {
     assert!(texts(&rt).iter().any(|text| text == "Select all"));
 
     {
-        // An organization's Labs lock closes the Meetings pane itself
-        // (`meetings::available`), so the button goes with it; the saved
-        // setting stays as it was.
+        // An organization's Labs lock hides the bulk-select lab button while
+        // keeping Meetings itself open; the saved setting stays as it was.
         use crate::policy::{Lock, Policy};
         let _locked = Policy::forced_for_test(Policy::default().with(Lock::Labs));
         refresh(&mut rt);
         assert!(
-            rt.find("meetings-enabled").is_some(),
-            "the lock takes effect"
+            rt.find("calendar-calendars-control-trigger").is_some(),
+            "Meetings stays open under Lock::Labs"
         );
         assert!(
             rt.find("calendar-select-all").is_none(),
             "a locked lab hides the button"
         );
         assert!(rt.state.settings.labs.calendar_bulk_select);
+    }
+    {
+        // DisableMeetings closes the Meetings pane to its managed row.
+        use crate::policy::{Lock, Policy};
+        let _locked = Policy::forced_for_test(Policy::default().with(Lock::Meetings));
+        refresh(&mut rt);
+        assert!(
+            rt.find("meetings-enabled").is_some(),
+            "DisableMeetings shows the managed row"
+        );
+        assert!(rt.find("calendar-calendars-control-trigger").is_none());
     }
     refresh(&mut rt);
     assert!(
@@ -2564,7 +2597,7 @@ fn labs_lists_every_toggle_off_by_default() {
     rt.state.settings.experimental.hex_microphone = false;
     rt.state.platform.hex_microphone = None;
     refresh(&mut rt);
-    // On a Mac, Meetings stays in the sidebar while off, to offer itself.
+    // Meetings stays in the sidebar while off on every OS, to offer itself.
     assert!(
         rt.find("nav-meetings").is_some(),
         "Meetings left the sidebar"
@@ -2581,9 +2614,9 @@ fn labs_lists_every_toggle_off_by_default() {
     open_labs(&mut rt);
     assert!(rt.find("send-feedback").is_some());
     assert!(rt.find("restart-onboarding").is_some());
+    assert!(rt.find("lab-meetings").is_none(), "Meetings graduated");
     let settings = &rt.state.settings;
     for (row, on) in [
-        ("lab-meetings", settings.meetings.enabled),
         ("lab-voice-filter", settings.experimental.hex_microphone),
         ("lab-playground", settings.labs.playground),
         ("lab-live-text", settings.labs.live_text),
@@ -2607,28 +2640,21 @@ fn labs_lists_every_toggle_off_by_default() {
     }
     assert!(rt.find("lab-terminal-paste").is_none(), "Windows only");
 
-    tap(&mut rt, "lab-meetings");
-    assert!(rt.state.settings.meetings.enabled);
-    assert!(
-        rt.find("nav-meetings").is_some(),
-        "Meetings joins the main sidebar"
-    );
     tap(&mut rt, "lab-live-text");
     assert!(rt.state.settings.labs.live_text);
     tap(&mut rt, "lab-vocabulary-files");
     assert!(rt.state.settings.labs.vocabulary_files);
     tap(&mut rt, "lab-cursor-context");
     assert!(rt.state.settings.labs.cursor_context);
-    tap(&mut rt, "lab-meetings");
-    assert!(
-        rt.find("nav-meetings").is_some(),
-        "a Mac keeps it while off, to offer itself"
-    );
 
     // Windows lists Terminal paste in Labs, not General. Labs is tall enough
     // that its last row needs the macOS half's height to be on screen.
     let mut rt = runtime("windows-settings", true, (980.0, 2600.0));
     assert!(rt.find("terminal-paste").is_none());
+    assert!(
+        rt.find("nav-meetings").is_some(),
+        "Meetings is in the Windows sidebar"
+    );
     open_labs(&mut rt);
     assert!(rt.find("lab-return-to-app").is_none(), "macOS only");
     assert!(rt.find("lab-screen-vocabulary").is_none(), "macOS only");
@@ -2643,10 +2669,7 @@ fn labs_lists_every_toggle_off_by_default() {
     );
     tap(&mut rt, "lab-terminal-paste");
     assert!(rt.state.settings.paste_with_shift);
-    assert!(
-        rt.find("lab-meetings").is_some(),
-        "Meetings runs on Windows too"
-    );
+    assert!(rt.find("lab-meetings").is_none(), "Meetings graduated");
 
     // Linux lists the second dictation shortcut as well.
     let mut rt = runtime("linux-labs", true, (980.0, 2000.0));

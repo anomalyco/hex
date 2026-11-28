@@ -129,8 +129,10 @@ macro_rules! define_features {
             /// (in addition to `Lock::Labs`, which locks every Labs feature).
             pub const fn lock(self) -> Option<crate::policy::Lock> {
                 match self {
-                    Self::Meetings => Some(crate::policy::Lock::Meetings),
                     Self::VoicePrompt => Some(crate::policy::Lock::OpenCodeProcessing),
+                    _ if matches!(self.group(), Group::Meetings) => {
+                        Some(crate::policy::Lock::Meetings)
+                    }
                     _ if matches!(self.group(), Group::Annotate) => {
                         Some(crate::policy::Lock::Annotate)
                     }
@@ -142,7 +144,6 @@ macro_rules! define_features {
 }
 
 define_features! {
-    Meetings => app(meetings.enabled), "meetings", Meetings, Everyone, EVERY, 20261030;
     VoiceFilter => app(experimental.hex_microphone), "voice-filter", Dictation, Dev, MACOS_LINUX, 20261030;
     Playground => labs(playground), "playground", Dictation, Dev, EVERY, 20261030;
     LiveText => labs(live_text), "live-text", Dictation, Everyone, EVERY, 20261030;

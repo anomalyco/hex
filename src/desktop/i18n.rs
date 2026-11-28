@@ -727,6 +727,7 @@ mod tests {
         include_str!("../rune_ui/meeting_capsules/call_ended.rs"),
         include_str!("../rune_ui/meetings.rs"),
         include_str!("../rune_ui/meetings/selection.rs"),
+        include_str!("../rune_ui/meetings/setup.rs"),
         include_str!("../rune_ui/models.rs"),
         include_str!("../rune_ui/found.rs"),
         include_str!("../rune_ui/found_choice.rs"),

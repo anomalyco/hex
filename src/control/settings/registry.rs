@@ -901,7 +901,7 @@ pub(super) const KEYS: &[Key] = &[
     key(
         "meetings.enabled",
         Kind::Bool,
-        "Labs: Meetings (beta), call detection, recording, and transcripts",
+        "Meetings: call detection, recording, and transcripts",
     ),
     optional(
         "meetings.output_folder",

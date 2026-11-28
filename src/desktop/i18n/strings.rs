@@ -709,7 +709,6 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Open applications", ["Otwieranie aplikacji", "打开应用", "アプリを開く", "Apps öffnen", "Abrir aplicaciones", "Відкриття програм"]),
     ("Open websites", ["Otwieranie stron", "打开网站", "ウェブサイトを開く", "Websites öffnen", "Abrir sitios web", "Відкриття вебсайтів"]),
     ("Voice control", ["Sterowanie głosem", "语音控制", "音声操作", "Sprachsteuerung", "Control por voz", "Голосове керування"]),
-    ("Meetings (beta)", ["Spotkania (beta)", "会议（测试版）", "会議（ベータ）", "Besprechungen (Beta)", "Reuniones (beta)", "Зустрічі (бета)"]),
     ("Offer to record calls and save local transcripts", ["Proponuj nagrywanie rozmów i zapisuj lokalne transkrypcje", "提供通话录音并保存本地转写", "通話の録音を提案し、ローカルに文字起こしを保存", "Aufnahme von Anrufen anbieten und lokale Transkripte speichern", "Ofrecer grabar llamadas y guardar transcripciones locales", "Пропонувати записувати дзвінки й зберігати транскрипти локально"]),
     ("Screen & System Audio Recording", ["Nagrywanie ekranu i dźwięku systemu", "屏幕与系统音频录制", "画面とシステムオーディオの収録", "Bildschirm- und Systemaudioaufnahme", "Grabación de pantalla y audio del sistema", "Записування системного звуку й екрана"]),
     ("Captures the other participants' audio", ["Nagrywa dźwięk pozostałych uczestników", "录制其他参与者的音频", "ほかの参加者の音声を収録します", "Nimmt den Ton der anderen Teilnehmenden auf", "Graba el audio de los demás participantes", "Записує аудіо інших учасників"]),

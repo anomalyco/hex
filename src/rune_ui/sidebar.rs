@@ -63,7 +63,7 @@ pub(super) enum Pane {
     /// The old per-app editor, in the sidebar while Labs › Modes editor is on
     /// (the `--snap` scenes render it directly).
     Modes,
-    /// Recorded calls and their settings, or the opt-in (macOS beta).
+    /// Recorded calls and their settings, or the setup screen while off.
     Meetings,
     History,
     /// Annotate (Scrawl's captures inside Hex): past annotations (or captures
@@ -101,13 +101,11 @@ impl Pane {
             Pane::HudLab | Pane::Activity => false,
             // Labs › Modes editor; scenes render the pane without the lab.
             Pane::Modes => ui.settings.labs.modes_editor,
-            // On a Mac an ordinary item even while off: the pane itself
-            // offers to turn it on. Elsewhere it shows once it is on.
+            // An ordinary item on every OS even while off: the pane itself
+            // offers to turn it on. Hidden only when an organization locks it.
             Pane::Meetings => {
                 caps.meetings
-                    && (meetings::available(ui)
-                        || (caps.os == super::platform::Os::Macos
-                            && crate::labs::Feature::Meetings.managed().is_none()))
+                    && !crate::policy::Policy::current().locks(crate::policy::Lock::Meetings)
             }
             // On from Labs (dev builds), or while its driver is installed.
             Pane::VoiceFilter => caps.fun && fun::running(ui),

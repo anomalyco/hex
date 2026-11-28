@@ -31,9 +31,9 @@ person asks; read-only commands need no running app.
 
 ## Read meetings
 
-Meetings is a beta on macOS, Windows, and Linux, turned on in Settings › Labs.
-The read commands work on all three and can read a mirrored folder with
-`--meetings-dir <path>`.
+Meetings runs on macOS, Windows, and Linux, off until it is turned on in the
+Meetings tab. The read commands work on all three and can read a mirrored
+folder with `--meetings-dir <path>`.
 
 ```sh
 hex meetings list --since 7d --json          # ids, titles, times, durations
@@ -109,8 +109,8 @@ hex transcribe meeting.m4a                   # a file, no app needed
 hex settings list                            # every setting key
 hex settings get dictation_hotkey
 hex settings set dictation_hotkey menu
+hex settings set meetings.enabled true
 hex labs list
-hex labs on meetings
 ```
 
 Settings keys are dotted paths (`dictation_hotkey`, `history_retention`,

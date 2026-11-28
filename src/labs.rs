@@ -2,7 +2,7 @@
 //! each behind its own switch, off by default. There is no master switch:
 //! Settings › Labs lists every feature as a card with a toggle, under its
 //! group's collapsible header (`Feature::group`). A feature
-//! with its own pane (Meetings, Voice Filter, Playground, the Modes editor)
+//! with its own pane (Voice Filter, Playground, the Modes editor)
 //! joins the sidebar as a normal item while on and is hidden while off; a
 //! behaviour-only feature is just its toggle.
 //!
@@ -425,6 +425,9 @@ mod tests {
 
     #[test]
     fn graduated_features_answer_by_name() {
+        let error = resolve("meetings", |_| true).unwrap_err().to_string();
+        assert!(error.contains("graduated"), "{error}");
+        assert_eq!(Feature::from_name("meetings"), None);
         let error = resolve("custom-models", |_| true).unwrap_err().to_string();
         assert!(error.contains("graduated"), "{error}");
         assert_eq!(Feature::from_name("custom-models"), None);
@@ -767,11 +770,12 @@ mod tests {
     }
 
     #[test]
-    fn meetings_and_live_chapters_ship_on_every_os() {
-        for feature in [Feature::Meetings, Feature::LiveChapters] {
-            assert_eq!(feature.oses(), &[Os::Macos, Os::Windows, Os::Linux]);
-            assert!(feature.on_this_os());
-        }
+    fn live_chapters_ships_on_every_os() {
+        assert_eq!(
+            Feature::LiveChapters.oses(),
+            &[Os::Macos, Os::Windows, Os::Linux]
+        );
+        assert!(Feature::LiveChapters.on_this_os());
     }
 
     #[test]

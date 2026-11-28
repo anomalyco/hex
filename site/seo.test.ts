@@ -163,10 +163,10 @@ test("every agent file exists and points at every new page", () => {
   for (const page of ["https://anoma.ly/hex/", "https://anoma.ly/hex/meetings/", "https://anoma.ly/hex/mcp", "https://anoma.ly/hex/changelog", "https://anoma.ly/hex/iphone", "https://anoma.ly/hex/android", "https://anoma.ly/hex/docs/transforms.md", "https://anoma.ly/hex/docs/admin.md", "https://anoma.ly/hex/llms-full.txt", "https://anoma.ly/hex/skill.md"]) {
     expect(index).toContain(page)
   }
-  // Meetings is a beta on every desktop OS (src/labs/feature.rs), not Mac-only.
+  // Meetings ships in the sidebar on every desktop OS, not Mac-only or in Labs.
   for (const file of [index, full, skill]) {
-    expect(file.replace(/\s+/g, " ").includes("beta on macOS, Windows, and Linux")).toBe(true)
-    expect(/on the Mac today|Mac feature today/.test(file)).toBe(false)
+    expect(/macOS, (Windows|Linux), and (Linux|Windows)/.test(file.replace(/\s+/g, " "))).toBe(true)
+    expect(/on the Mac today|Mac feature today|hex labs on meetings/.test(file)).toBe(false)
   }
   expect(index).toContain("open-source")
   expect(index).toContain("offline")
