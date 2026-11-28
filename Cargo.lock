@@ -6696,7 +6696,7 @@ dependencies = [
 [[package]]
 name = "transcribe-cpp"
 version = "0.4.1"
-source = "git+https://github.com/anomalyco/transcribe.cpp?rev=60bed89dab84f7c1fddc3a17ad7fa8a27ddfba19#60bed89dab84f7c1fddc3a17ad7fa8a27ddfba19"
+source = "git+https://github.com/anomalyco/transcribe.cpp?rev=2205347439534a157455915f870d7870994b08fa#2205347439534a157455915f870d7870994b08fa"
 dependencies = [
  "log",
  "thiserror 2.0.21",
@@ -6706,7 +6706,7 @@ dependencies = [
 [[package]]
 name = "transcribe-cpp-sys"
 version = "0.4.1"
-source = "git+https://github.com/anomalyco/transcribe.cpp?rev=60bed89dab84f7c1fddc3a17ad7fa8a27ddfba19#60bed89dab84f7c1fddc3a17ad7fa8a27ddfba19"
+source = "git+https://github.com/anomalyco/transcribe.cpp?rev=2205347439534a157455915f870d7870994b08fa#2205347439534a157455915f870d7870994b08fa"
 dependencies = [
  "cmake",
  "serde_json",

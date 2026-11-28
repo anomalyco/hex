@@ -48,12 +48,13 @@ strip = true
 # Parakeet's vocabulary rescoring (branches hex/parakeet-vocabulary and
 # hex/vocabulary-sounds-like), a Metal residency heartbeat that sleeps once
 # its keep-alive runs out (branch hex/metal-idle-residency), Fluid Speech
-# Pro's pre-Conformer encoder block (branch hex/fluid-pre-block), and
-# upstream's Parakeet padding-frame fix (branch hex/nemo-padding-frame). Drop
-# this once a transcribe.cpp release carries them.
+# Pro's pre-Conformer encoder block (branch hex/fluid-pre-block),
+# upstream's Parakeet padding-frame fix (branch hex/nemo-padding-frame), and
+# the lowered 1.5 default vocabulary boost (branch hex/vocabulary-boost-1.5).
+# Drop this once a transcribe.cpp release carries them.
 [patch.crates-io]
-transcribe-cpp = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "60bed89dab84f7c1fddc3a17ad7fa8a27ddfba19" }
-transcribe-cpp-sys = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "60bed89dab84f7c1fddc3a17ad7fa8a27ddfba19" }
+transcribe-cpp = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "2205347439534a157455915f870d7870994b08fa" }
+transcribe-cpp-sys = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "2205347439534a157455915f870d7870994b08fa" }
 # The crates Rune patches in its own workspace (Rune's README, "Depending on
 # Rune"): a dependency's `[patch]` never reaches the workspace that depends on
 # it, and without these Hex builds against stock winit, sctk-adwaita,
