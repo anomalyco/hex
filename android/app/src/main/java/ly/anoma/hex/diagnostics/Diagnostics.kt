@@ -580,6 +580,7 @@ internal fun lastDictationLines(t: DictationTimes?): String = buildString {
         DictationPlace.Keyboard -> "  in the keyboard"
         DictationPlace.Home -> "  on Home"
         DictationPlace.QuickSettings -> "  from Quick Settings"
+        DictationPlace.SpeechRequest -> "  for another app's speech request"
     })
     append(String.format(Locale.ROOT, ", %.1f s recorded, %.1f s kept", t.recordedMs / 1000.0, t.keptMs / 1000.0))
     append("; ").append(ranOn(t.ran))

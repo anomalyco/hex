@@ -254,6 +254,8 @@
     <string name="password_manager_suggestions_detail">Show logins, codes and cards from your autofill service in the suggestion strip</string>
     <string name="voice_only_mode">Voice-only mode</string>
     <string name="voice_only_detail">Lets you switch to Hex just to dictate from another keyboard, then switches back</string>
+    <string name="speech_requests">Answer apps’ speech requests</string>
+    <string name="speech_requests_detail">When another keyboard’s mic, such as SwiftKey’s, or an app asks Android for voice input, Hex listens and sends back the text. The first time, Android asks which app to use: choose Hex and Always.</string>
     <string name="voice_bar_from_menu">Voice bar from the Hex menu</string>
     <string name="voice_bar_from_menu_detail">Adds Voice only to the Hex menu, which folds the keys into a small dictation bar in the same field</string>
     <string name="hex_key_left">Hex key on the left</string>

@@ -226,6 +226,8 @@
     <string name="password_manager_suggestions_detail">在建议栏中显示自动填充服务提供的登录信息、验证码和卡片</string>
     <string name="voice_only_mode">仅语音模式</string>
     <string name="voice_only_detail">让你从其他键盘切换到 Hex 只做听写，说完再切换回去</string>
+    <string name="speech_requests">响应应用的语音输入请求</string>
+    <string name="speech_requests_detail">当其他键盘的麦克风（例如 SwiftKey 的）或某个应用向 Android 请求语音输入时，Hex 会聆听并把文字发回。第一次时，Android 会问用哪个应用：选择 Hex 和“始终”。</string>
     <string name="voice_bar_from_menu">从 Hex 菜单切换到语音栏</string>
     <string name="voice_bar_from_menu_detail">在 Hex 菜单中加入“仅语音”，在同一个输入框里把按键收起为一个小听写栏</string>
     <string name="hex_key_left">Hex 键放在左侧</string>
