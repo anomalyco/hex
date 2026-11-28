@@ -122,11 +122,11 @@ const COPY_ICONS =
 
 // Hidden until the page's script runs, so a page without scripts shows no
 // button that cannot work.
-function copy(text: string, name: string): string {
+export function copy(text: string, name: string): string {
   return `<button type="button" class="copy" data-copy="${escape(text)}" aria-label="Copy ${escape(name)}" title="Copy" hidden>${COPY_ICONS}</button>`
 }
 
-const COPY_SCRIPT = `<script>
+export const COPY_SCRIPT = `<script>
 for (const button of document.querySelectorAll("[data-copy]")) {
   button.hidden = false
   button.addEventListener("click", () => {

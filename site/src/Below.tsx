@@ -129,10 +129,15 @@ export default function Below() {
           <a href={withBase("/changelog")}>Changelog</a>
           <a href={withBase("/meetings/")}>Meetings</a>
           <a href={withBase("/mcp")}>MCP</a>
+          <a href={withBase("/linux")}>Linux</a>
           <a href={withBase("/iphone")}>iOS</a>
           <a href={withBase("/android")}>Android</a>
           <a href="https://github.com/anomalyco/hex">GitHub</a>
           <a href={withBase("/llms.txt")}>llms.txt</a>
+        </nav>
+        <nav className="site-footer__links site-footer__links--compare" aria-label="Compare Hex">
+          <a href={withBase("/vs-wispr-flow")}>Hex vs Wispr Flow</a>
+          <a href={withBase("/vs-superwhisper")}>Hex vs Superwhisper</a>
         </nav>
         <div className="copyright">
           <img src={signature} alt="" aria-hidden="true" width={163} height={64} />

@@ -1,6 +1,7 @@
 // Finishes the Meetings showcase in the built site (public/meetings/ copied by
 // Vite): writes its canonical address and social tags for this mode's origin
-// into index.html, and refuses a file Workers static assets can't serve.
+// into index.html, adds the crawlable section, title, and structured data
+// (src/meetings-page.ts), and refuses a file Workers static assets can't serve.
 //
 //   bun scripts/meetings/build.ts --mode dev
 import { getWorkerAssetsDir } from "@cloudflare/build-output-utils"
@@ -8,6 +9,7 @@ import { readFileSync, statSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { parseArgs } from "node:util"
 import { canonicalOriginForMode } from "../../src/base"
+import { finishMeetings } from "../../src/meetings-page"
 import { MEETINGS_CARD, MEETINGS_DIR, meetingsHead, runtimeFiles, stripHead } from "./bundle"
 
 const { values } = parseArgs({ options: { mode: { type: "string" } } })
@@ -28,5 +30,5 @@ for (const file of [...bundle.files, MEETINGS_CARD]) {
 const index = join(dir, "index.html")
 const html = stripHead(readFileSync(index, "utf8"))
 if (!html.includes("</head>")) throw new Error("meetings/index.html has no </head>")
-writeFileSync(index, html.replace("</head>", `${meetingsHead(origin)}</head>`))
+writeFileSync(index, finishMeetings(html.replace("</head>", `${meetingsHead(origin)}</head>`), origin))
 console.log(`Meetings: ${bundle.files.length + 1} files, ${(bytes / 1024 / 1024).toFixed(2)} MiB.`)

@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // `bun run build [--mode dev]`: release data from the release service, typecheck, client build
-// (Cloudflare Build Output), SSR build, prerender, then the Labs, iPhone, changelog, and Meetings pages.
+// (Cloudflare Build Output), SSR build, prerender, then the Labs, iPhone, changelog, MCP, comparison and
+// Linux, and Meetings pages.
 import { parseArgs } from "node:util"
 import { $ } from "bun"
 
@@ -16,4 +17,5 @@ await $`bun scripts/labs.ts --mode ${mode}`
 await $`bun scripts/iphone.ts --mode ${mode}`
 await $`bun scripts/changelog.ts --mode ${mode}`
 await $`bun scripts/mcp.ts --mode ${mode}`
+await $`bun scripts/pages.ts --mode ${mode}`
 await $`bun scripts/meetings/build.ts --mode ${mode}`
