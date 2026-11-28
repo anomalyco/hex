@@ -97,6 +97,12 @@ internal class TypingPreferences(context: Context) {
     var closingQuoteTakesSpace: Boolean
         get() = prefs.getBoolean(CLOSING_QUOTE_TAKES_SPACE, false)
         set(value) { prefs.edit().putBoolean(CLOSING_QUOTE_TAKES_SPACE, value).apply() }
+    /** Labs › Keyboard › Fix earlier words: with the cursor back in a finished word, the strip offers what autocorrect
+     * changed it from and other words its letters could be that fit the words around it better; a tap replaces the
+     * whole word (#3019). Off by default. */
+    var fixEarlierWords: Boolean
+        get() = prefs.getBoolean(FIX_EARLIER_WORDS, false)
+        set(value) { prefs.edit().putBoolean(FIX_EARLIER_WORDS, value).apply() }
     /** Labs › Keyboard › Adaptive touch: the decoder reads taps with your own key centres once it has learned them
      * ([AdaptiveTouch], kept by [AdaptiveTouchStore]). Off by default. */
     var adaptiveTouch: Boolean
@@ -189,6 +195,7 @@ internal class TypingPreferences(context: Context) {
         const val MARKS_KEEP_SPACE = "marksKeepSpace"
         const val HOLD_CLICK = "holdClick"
         const val CLOSING_QUOTE_TAKES_SPACE = "closingQuoteTakesSpace"
+        const val FIX_EARLIER_WORDS = "fixEarlierWords"
         const val ADAPTIVE_TOUCH = "adaptiveTouch"
         const val USE_IMPORTED_WORDS = "importedWords"
         /** A counter [ImportedWords] bumps whenever the imported list changes, so the keyboard reads it again. */

@@ -315,6 +315,41 @@ internal class SpatialDecoder(val model: TypingModel) {
         return cost - (spatial + lmWeight * readingLm) >= margin
     }
 
+    /** Other words [typed], a word already finished, could have been meant as (Labs › Keyboard › Fix earlier words): its
+     * letters read as taps on their keys' centres in [grid], with one letter missed, extra or swapped as typing allows.
+     * A reading is offered only when it fits the word before ([previous], a context index) and the word after ([next], a
+     * model index, or -1) better than [typed] does by at least [margin] nats, so a word that already fits offers nothing.
+     * Likeliest first (keys and words together), lowercase; none for a word of your own, one with a letter the keys don't
+     * have, or one the never-suggest list holds. */
+    fun alternatives(typed: String, grid: KeyGrid, previous: Int, next: Int, swears: Boolean,
+                     margin: Double = EARLIER_MARGIN, limit: Int = 3): List<String> {
+        val lower = typed.lowercase().replace('\u2019', '\'')
+        val letters = lower.filter { it != '\'' }
+        if (letters.length !in 2..32 || lower.any { it != '\'' && model.code(it) == 0 } ||
+            model.neverSuggest.blocks(lower, swears, previous) || personal?.owns(lower) == true) return emptyList()
+        val taps = letters.map { c ->
+            val p = grid.centres[c] ?: grid.centres[foldAccents(c.toString()).firstOrNull() ?: c] ?: return emptyList()
+            score(grid, p.x, p.y)
+        }
+        // How well a word fits between its neighbours: the pair before it and the pair after it.
+        fun context(word: Int) = model.languageCost(previous, word) + (if (next >= 0) model.languageCost(word, next) else 0.0)
+        val literal = model.index(lower)
+        val own = when {
+            literal >= 0 -> context(literal)
+            // A spelling the model lacks scores as decide scores one, and the word after it by its own frequency.
+            else -> (if (model.known(lower)) 15.0 else 22.0) + (if (next >= 0) 0.92 + model.unigramCost(next) else 0.0)
+        }
+        return search(taps, 0, taps.size, 1, swears, previous).sortedWith(spatialOrder).take(EARLIER_READINGS)
+            .asSequence()
+            .filter { it.word != literal }
+            .map { Triple(it.word, context(it.word), it.cost) }
+            .filter { own - it.second >= margin }
+            .sortedBy { it.third + lmWeight * it.second }
+            .map { model.text(it.first) }
+            .filter { it != lower }
+            .distinct().take(limit).toList()
+    }
+
     // The cost of [codes] read letter for letter from the taps, or with one letter not typed at its cheapest place: never
     // below what the search finds, so a bound to clear. Null when neither fits (another edit, a tap past MAX_TAP_COST).
     private fun aligned(codes: IntArray, taps: List<Tap>): Double? {
@@ -452,6 +487,15 @@ internal class SpatialDecoder(val model: TypingModel) {
         // A space tap reads as a letter only within about the bar's top fifth.
         const val MERGE_REACH = 3.0
         const val USER_WORD_COST = 11.0
+        // Fix earlier words: how many of the search's readings are weighed, and how much better than the word as it
+        // stands one must fit the words around it to be offered. The margin is on the word pairs alone (the keys don't
+        // count: the word's own letters always read best), so it is smaller than a spatial-plus-language margin such as
+        // the issue's 10 nats. On the English model, 3 offers "to" for "too" in "going too the" (7.3 nats better), "from"
+        // for "form" in "came form the" (8.2) and "read" for "red" in "I red the" (4.7), and keeps a word that fits beside
+        // a likelier neighbour: "car" for "cat" scores 1.3 to 2.4 better in "a cat sat", "the cat is", "my cat is" and
+        // "a cat and", and "from" is 1.0 worse in "in form of".
+        const val EARLIER_READINGS = 8
+        const val EARLIER_MARGIN = 3.0
     }
     private fun foldAccents(s: String) = Normalizer.normalize(s, Normalizer.Form.NFD).filter { it !in '\u0300'..'\u0308' || it == '\u0303' }
 }
