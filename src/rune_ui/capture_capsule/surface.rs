@@ -80,7 +80,10 @@ const SEG_PX: f32 = 10.0;
 pub(crate) const HINT_GAP: f32 = 6.0;
 /// The split destination chip's leading icon and trailing `⌄` half.
 pub(crate) const SEND_ICON: f32 = 14.0;
-pub(crate) const CHEVRON_W: f32 = 24.0;
+pub(crate) const CHEVRON_W: f32 = CHIP_H - 2.0 * BUTTON_INSET;
+/// Between the split chip's send button and its ⌄ button: two buttons side
+/// by side, never one fill with a rule inside it.
+pub(crate) const SPLIT_GAP: f32 = 4.0;
 
 /// The open capsule is as wide as the list under it; its field takes what
 /// the rest leaves.
@@ -146,8 +149,6 @@ pub(crate) fn processing() -> &'static str {
 pub(crate) fn clock_style() -> TextStyle {
     Paint::new(false, 1.0).clock()
 }
-/// The hairline between the recording's tools and its stop and cancel.
-pub(crate) const DIVIDER_W: f32 = 1.0;
 
 /// A shortcut as the capsule says it: one quiet word, "⌥⇧V". Symbols run
 /// together, as macOS menus write them; a named key stands apart.
@@ -264,9 +265,10 @@ pub(crate) enum Id {
     Next,
     /// The recording's pen, lit while drawing; a click toggles drawing.
     Pen,
-    /// A hairline in the recording's bar: after the timer, and between its
-    /// tools and stop and cancel.
-    Divider,
+    /// The recording's source button beside the pen: it opens Area, Window,
+    /// Screen and iPhone on demand, so recording starts at once and a
+    /// different target stays one click away.
+    Source,
 }
 
 impl Id {
@@ -308,7 +310,7 @@ impl Id {
             Id::CardHints => "card-hints",
             Id::Next => "next",
             Id::Pen => "pen",
-            Id::Divider => "divider",
+            Id::Source => "source",
         }
     }
 
@@ -345,8 +347,9 @@ impl Id {
             // The label's trail and the action's padding already part
             // them.
             (Id::Done | Id::Why, _) => GROUP_GAP,
-            // Dividers breathe on both sides so a lit pen pill never crowds them.
-            (Id::Divider, _) | (_, Id::Divider) => GROUP_GAP,
+            // The tools (pen, source) and stop / cancel part by space alone,
+            // never a rule between them.
+            (Id::Source, Id::Finish) => GROUP_GAP,
             // Stop and Discard sit slightly apart so destructive ✕ isn't flush beside ■.
             (Id::Finish, Id::Cancel) => CHIP_GAP + 2.0,
             // Boxed buttons and icons keep one even step beside ✕.
@@ -367,12 +370,12 @@ impl Id {
             Id::Lead => 0,
             Id::Processing => 1,
             Id::Done => 2,
-            Id::Why | Id::Pen => 3,
+            Id::Why | Id::Pen | Id::Source => 3,
             Id::Mode(Mode::Area) => 4,
             Id::Mode(Mode::Window) => 5,
             Id::Mode(Mode::Screen) => 6,
             Id::Mode(Mode::Iphone) => 7,
-            Id::Record | Id::Divider => 8,
+            Id::Record => 8,
             Id::Cancel | Id::Keep => 9,
             Id::Finish | Id::Discard => 10,
             Id::Field => 11,
@@ -439,9 +442,10 @@ pub(crate) fn split_send_width(name: &str) -> f32 {
     8.0 + SEND_ICON + 4.0 + measure(name, medium()) + 4.0
 }
 
-/// Total chip width of the split destination chip (one fill, no divider).
+/// Total chip width of the split destination chip: the send button, a
+/// 4 pt gap and the square ⌄ button.
 pub(crate) fn split_width(name: &str) -> f32 {
-    split_send_width(name) + CHEVRON_W + 2.0 * BUTTON_INSET
+    split_send_width(name) + SPLIT_GAP + CHEVRON_W + 2.0 * BUTTON_INSET
 }
 
 /// A chip's label, then its shortcut in quiet text, or a plain chip
@@ -756,11 +760,11 @@ fn line(pres: &Pres, clock: &str, metered: bool) -> ([f32; 4], Vec<Item>) {
                 raw.push((Id::Close, String::new(), CHIP_H, false));
             } else {
                 // Icons only, each a square as tall as the row: the
-                // toolbar (the pen, lit while drawing), a divider, then
-                // stop and cancel.
-                raw.push((Id::Divider, "lead".into(), DIVIDER_W, false));
+                // toolbar (the pen, lit while drawing, and the source that
+                // opens Area / Window / Screen / iPhone), then stop and
+                // cancel, parted by space, with no divider.
                 raw.push((Id::Pen, String::new(), CHIP_H, *pen == Pen::On));
-                raw.push((Id::Divider, "tools".into(), DIVIDER_W, false));
+                raw.push((Id::Source, String::new(), CHIP_H, false));
                 raw.push((Id::Finish, String::new(), CHIP_H, false));
                 raw.push((Id::Cancel, String::new(), CHIP_H, false));
             }
@@ -1442,14 +1446,18 @@ mod tests {
                 "the origin pose follows too"
             );
             assert!(entering.tick(0.001));
-            assert_eq!(entering.shell[0], geometry.left - 12.0);
-            assert_eq!(entering.shell[0] + entering.shell[2], geometry.right + 12.0);
+            // The recording (pen, source, stop, ✕) is wider than the notch,
+            // so it stays centred on it and spans at least its edges.
+            let spans = |shell: [f32; 4], g: notch::Geometry| {
+                assert!((shell[0] + shell[2] * 0.5 - g.centre()).abs() < 0.01);
+                assert!(shell[0] <= g.left - 12.0 && shell[0] + shell[2] >= g.right + 12.0);
+            };
+            spans(entering.shell, geometry);
 
             let mut rest = Surface::new().settled(recording(false));
-            assert_eq!(rest.shell[0], notch::Geometry::default().left - 12.0);
+            spans(rest.shell, notch::Geometry::default());
             assert!(rest.set_notch(geometry));
-            assert_eq!(rest.shell[0], geometry.left - 12.0);
-            assert_eq!(rest.shell[0] + rest.shell[2], geometry.right + 12.0);
+            spans(rest.shell, geometry);
         });
     }
 

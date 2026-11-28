@@ -146,16 +146,20 @@ pub(super) fn list_view(
     list_panel(p, body, footer, x, w, h, blur)
 }
 
-/// The search field at the top of the open list: the kit's search input
-/// in a 32 pt row whose corners match the rows'. It takes its own clicks,
-/// so a click in it never reaches the app behind.
+/// The search field at the top of the open list: the kit's plain search
+/// input in a calm recessed well, a 32 pt row whose corners match the rows'.
+/// It is always typed into, so it never wears a focus ring: the caret says
+/// it. It takes its own clicks, so a click in it never reaches the app
+/// behind.
 fn search_field(p: Paint, typed: &rune::TextEdit) -> El {
+    let c = &p.k.c;
     let mut edit = typed.clone();
     edit.focused = true;
     let input = TextInput::new(&edit)
         .placeholder(tr("Search sessions…"))
         .label(tr("Send to"))
         .leading_icon(p.k.glyph.search)
+        .plain()
         .width(None)
         .height(ROW_H)
         .build(p.k);
@@ -164,6 +168,16 @@ fn search_field(p: Paint, typed: &rune::TextEdit) -> El {
         .trace_name("field")
         .h(ROW_H)
         .w_full()
+        .radius(ROW_RADIUS)
+        .fill(c.bg_deep)
+        .border(p.hair * 2.0, c.border_weak)
+        .box_shadow(rune::Shadow {
+            y: 1.0,
+            blur: 2.0,
+            color: p.k.alpha(c.black, if p.k.dark { 0.35 } else { 0.06 }),
+            inset: true,
+            ..Default::default()
+        })
         .child(input.grow(1.0))
         .hit()
 }

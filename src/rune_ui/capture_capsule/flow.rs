@@ -1932,7 +1932,7 @@ mod tests {
         assert_eq!(done(&flow, 10.0).lead, Lead::Check);
         assert_eq!(done(&flow, 10.0).ask, None, "Undo, as a pick has");
         assert_eq!(done(&flow, 15.0).ask, None, "nothing after the window");
-        // Subtle muted provenance names why it auto-sends ("Rule" or "Jev");
+        // Subtle muted provenance names why it auto-sends ("Rule" or "Smart");
         // the Undo chip's ring drains to the window's end.
         assert_eq!(done(&flow, 10.0).why.as_deref(), Some("Rule"));
         assert!(done(&flow, 10.0).strong_text);
@@ -3876,7 +3876,7 @@ mod tests {
         let pre = done(&flow, 0.0);
         assert_eq!(pre.text, "Sending to ACME");
         assert!(pre.strong_text);
-        assert_eq!(pre.why.as_deref(), Some("Jev"));
+        assert_eq!(pre.why.as_deref(), Some("Smart"));
         assert!(pre.undo);
 
         flow.input(Input::Settled, 0.5);

@@ -1247,6 +1247,19 @@ fn icon(id: Id, width: f32, color: Color) -> Shape {
             );
             paths.push(rounded(8.0, 2.0, 8.0, 4.0, 1.0));
         }
+        // A viewfinder: the area's four corners round a small target, the
+        // recording's source (Area, Window, Screen, iPhone).
+        Id::Source => {
+            for (a, c, b) in [
+                ([4.0, 8.5], [4.0, 4.0], [8.5, 4.0]),
+                ([15.5, 4.0], [20.0, 4.0], [20.0, 8.5]),
+                ([20.0, 15.5], [20.0, 20.0], [15.5, 20.0]),
+                ([8.5, 20.0], [4.0, 20.0], [4.0, 15.5]),
+            ] {
+                paths.push(Path::new().move_to(a).line_to(c).line_to(b));
+            }
+            paths.push(rounded(9.5, 9.5, 5.0, 5.0, 2.5));
+        }
         // An eye, two circular arcs meeting at its corners, and its pupil:
         // look at the capture.
         Id::Pen => {

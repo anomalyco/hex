@@ -201,7 +201,7 @@ fn stills() -> Vec<(&'static str, Pres)> {
         ),
         ("rule-sent", after(&routed(rule()))),
         ("rule-jev", {
-            let to = Dest::new("ACME", "sent · Jev");
+            let to = Dest::new("ACME", "suggested");
             after(&routed(Route::Rule {
                 to: to.clone(),
                 suggested: vec![to],

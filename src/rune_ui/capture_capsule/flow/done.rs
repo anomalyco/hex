@@ -433,7 +433,15 @@ pub(super) fn routed_done(routed: &Routed, now: f64) -> Done {
         },
         Route::Rule { to, by, .. } => Done {
             strong_text: true,
-            why: (!routed.delivered).then(|| tr(by.label()).into()),
+            // Never the model's name in the capsule: a confident pick reads
+            // "Smart", a rule "Rule".
+            why: (!routed.delivered).then(|| {
+                match by {
+                    AutoSendBy::Rule => tr(by.label()),
+                    AutoSendBy::Jev => tr("Smart"),
+                }
+                .into()
+            }),
             // Jev picked it, not a rule: `Always…` turns the pick into one,
             // as it does after a manual send.
             always_button: matches!(by, AutoSendBy::Jev).then_some(false),

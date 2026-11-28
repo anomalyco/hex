@@ -87,6 +87,8 @@ const MEETING_PANEL_WIDTH: f32 = 420.0;
 #[cfg(test)]
 const MEETING_MENU_WIDTH: f32 = 560.0;
 const MEETING_PANEL_HEIGHT: f32 = 64.0;
+/// The automatic-recording capsule hugs its two short lines and buttons.
+const AUTO_STARTED_PANEL_WIDTH: f32 = auto_started::PANEL_WIDTH;
 /// Between a capsule's buttons and its right edge.
 const ACTIONS_INSET: f32 = CAPSULE.button_inset;
 /// The reminder: the meeting's title beside up to three buttons.
@@ -100,17 +102,29 @@ const REMINDER_TICK: Duration = Duration::from_secs(5);
 const CAPSULE_INSET: f32 = CAPSULE.window_inset;
 /// Same header at rest and open so the waveform and timer stay put.
 const REST_HEIGHT: f32 = HEADER_HEIGHT;
-const REST_WIDTH: f32 = 2.0 * REST_PX + waveform::WIDTH + METER_GAP + TIMER_WIDTH;
+const REST_WIDTH: f32 = REST_PL + REST_PX + waveform::WIDTH + METER_GAP + TIMER_WIDTH;
 /// The header's sides, at rest and open, so the timer stays put as the pill
 /// opens: the inset the rows' labels, the title and the summary keep.
 const REST_PX: f32 = CAPSULE.text_rail();
+/// The header's left side: the field's outer columns fade, so it tucks
+/// `FIELD_TUCK` nearer the wall and reads as the time's right inset.
+const REST_PL: f32 = REST_PX - FIELD_TUCK;
+const FIELD_TUCK: f32 = 6.0;
+/// No red dot before the time: the live waveform already says it records.
+const SHOWS_REC_DOT: bool = false;
+/// The dot and its gap before the time, when it shows.
+const DOT_ROOM: f32 = if SHOWS_REC_DOT {
+    REC_DOT + METER_GAP
+} else {
+    0.0
+};
 /// Between the listening field and the time.
 const METER_GAP: f32 = 6.0;
 /// "00:00" in `Paint::clock()` (13 pt tabular medium), reserved as an exact
 /// integer width so layout matches across macOS, Linux, and Windows.
 const TIMER_TEXT_WIDTH: f32 = 38.0;
 /// `TIMER_TEXT_WIDTH` plus the recording dot and its gap before it.
-const TIMER_WIDTH: f32 = TIMER_TEXT_WIDTH + REC_DOT + METER_GAP;
+const TIMER_WIDTH: f32 = TIMER_TEXT_WIDTH + DOT_ROOM;
 /// The recording dot before the elapsed time, a status dot's size.
 const REC_DOT: f32 = 8.0;
 /// The open recording pill and the ready panel.
@@ -587,7 +601,8 @@ impl Capsule {
             State::Offer { .. } => self.presentation.window(),
             State::Reminder { .. } => (REMINDER_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
             State::CallEnded { .. } => (CALL_ENDED_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
-            State::AutoStarted { .. } | State::Empty => (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
+            State::AutoStarted { .. } => (AUTO_STARTED_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
+            State::Empty => (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
         }
     }
 }
@@ -1337,6 +1352,7 @@ fn panel_width(kind: &Kind) -> f32 {
     match kind {
         Kind::Reminder { .. } => REMINDER_PANEL_WIDTH,
         Kind::CallEnded { .. } => CALL_ENDED_PANEL_WIDTH,
+        Kind::AutoStarted { .. } => AUTO_STARTED_PANEL_WIDTH,
         _ => MEETING_PANEL_WIDTH,
     }
 }
@@ -1525,6 +1541,7 @@ mod tests {
     type Chosen = Arc<Mutex<Vec<MeetingProviderChoice>>>;
 
     const PANEL: (f32, f32) = (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT);
+    const AUTO: (f32, f32) = (AUTO_STARTED_PANEL_WIDTH, MEETING_PANEL_HEIGHT);
     const MENU: (f32, f32) = (MEETING_MENU_WIDTH, MEETING_PANEL_HEIGHT);
     const RECORDING: (f32, f32) = RECORDING_WINDOW;
     const REMINDER: (f32, f32) = (REMINDER_PANEL_WIDTH, MEETING_PANEL_HEIGHT);
@@ -2928,8 +2945,8 @@ mod tests {
     }
 
     #[test]
-    fn call_ended_drain_omits_head_under_reduce_motion_and_omits_ring_when_manual() {
-        // Countdown: ring has track, line, and head.
+    fn call_ended_drain_has_no_bright_head_and_omits_ring_when_manual() {
+        // Countdown: ring has track and line, and never a bright head.
         let (mut rt, _, _) = runtime(call_ended_countdown(23), false, true, CALL_ENDED);
         landed(&mut rt);
         let keys = |rt: &Runtime<Capsule>| -> Vec<String> {
@@ -2938,9 +2955,9 @@ mod tests {
         let normal = keys(&rt);
         assert!(normal.contains(&"track".to_string()));
         assert!(normal.contains(&"line".to_string()));
-        assert!(normal.contains(&"head".to_string()));
+        assert!(!normal.contains(&"head".to_string()));
 
-        // Reduce Motion: keeps track and line, drops bright head.
+        // Reduce Motion: keeps track and line.
         let (mut rt_reduced, _, _) = runtime(call_ended_countdown(23), false, true, CALL_ENDED);
         rt_reduced.set_system_reduced_motion(true);
         rt_reduced.update(|_, tx| tx.instant());
@@ -3005,7 +3022,7 @@ mod tests {
                 false,
                 RECORDING,
             ),
-            ("auto-started", auto_started(), false, PANEL),
+            ("auto-started", auto_started(), false, AUTO),
             ("ready", ready_transcript(), false, ready_size()),
             (
                 "ready-summary",
@@ -3328,7 +3345,7 @@ mod tests {
             ("call-ended", call_ended_countdown(23), CALL_ENDED),
             ("call-ended-manual", call_ended(), CALL_ENDED),
             ("ready", ready_transcript(), ready_size()),
-            ("auto-started", auto_started(), PANEL),
+            ("auto-started", auto_started(), AUTO),
             ("recording-rest", live_recording("fixture"), RECORDING),
             ("recording-open", live_recording("fixture"), RECORDING),
         ];
@@ -3351,6 +3368,17 @@ mod tests {
                         *at = Instant::now() + Duration::from_secs(23);
                     }
                 });
+            }
+            // The ready panel shows its first row under the pointer, so its
+            // 8 pt hover fill is in the picture.
+            if name == "ready" {
+                settle_stage(&mut rt);
+                rt.settle_all();
+                rt.frame(0.0);
+                if let Some((x, y)) = rt.find("copy-prompt") {
+                    rt.pointer_move(x, y);
+                    rt.frame(0.0);
+                }
             }
             if name.starts_with("recording-") {
                 rt.update(move |c, _| {

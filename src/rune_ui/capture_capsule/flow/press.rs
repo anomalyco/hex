@@ -77,6 +77,14 @@ impl Flow {
             },
             (Phase::Recording { .. }, Id::Finish) => vec![Action::Finish],
             (Phase::Recording { .. }, Id::Pen) => vec![Action::Pen],
+            // The source button opens the target chips on demand.
+            (Phase::Recording { discard_until, .. }, Id::Source) => {
+                self.phase = Phase::Recording {
+                    chips_until: Some(now + tuning::get().chips_open_s),
+                    discard_until: *discard_until,
+                };
+                Vec::new()
+            }
             // Discarding a recording takes a second click: ✕ asks first.
             (Phase::Recording { .. }, Id::Cancel | Id::Close) => {
                 self.phase = Phase::Recording {

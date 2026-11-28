@@ -6,8 +6,9 @@
 //! (`stroke_radius = ICON_RADIUS + RING_GAP + RING_STROKE / 2`). The drain is
 //! a render-time [`Tween`] (`live_trim`), so it moves every frame with no view
 //! rebuilds; only the seconds count rebuilds, once a second. It fades over its
-//! last moment, so nothing pops when it ends. Under Reduce Motion the drain
-//! steps once a second with the count and leaves out the bright head.
+//! last moment, so nothing pops when it ends. The drain is one calm muted
+//! line, with no bright head on its moving end. Under Reduce Motion it steps
+//! once a second with the count.
 
 use std::f32::consts::{FRAC_PI_2, PI};
 use std::time::Duration;
@@ -56,8 +57,6 @@ const CORNER_STEPS: usize = 20;
 
 /// The drain fades out over its last this long.
 const FADE_S: f64 = 0.18;
-/// How much of the drain the bright head covers.
-const HEAD: f32 = 0.02;
 /// How strongly the track shows under the drain.
 const TRACK: f32 = 0.12;
 
@@ -65,7 +64,6 @@ const TRACK: f32 = 0.12;
 #[derive(Clone)]
 pub(super) struct Countdown {
     line: Tween<[f32; 2]>,
-    head: Tween<[f32; 2]>,
     fade: Tween<f32>,
 }
 
@@ -79,7 +77,6 @@ impl Countdown {
         let full = (left / FADE_S) as f32;
         Self {
             line: Tween::linear([past, 1.0], [1.0, 1.0], over),
-            head: Tween::linear([past, past + HEAD], [1.0, 1.0 + HEAD], over),
             fade: Tween::linear(full, 0.0, over),
         }
     }
@@ -246,8 +243,9 @@ fn track(p: Paint) -> El {
     layer(Shape::new().stroke_with(path, false, RING_STROKE, LineCap::Round, ink)).key("track")
 }
 
-/// The line from the drain's moving end to its finish, and its bright head.
-/// Under Reduce Motion it steps once a second, with the count, and has no head.
+/// The line from the drain's moving end to its finish, in one calm tone
+/// blended with the capsule's chrome: no bright head. Under Reduce Motion it
+/// steps once a second, with the count.
 fn drain(p: Paint, countdown: &Countdown, left: Duration, reduced: bool) -> El {
     let path = rounded_rect(RING_SIZE, STROKE_INSET, STROKE_RADIUS);
     let ground = p.k.c.bg_base;
@@ -275,7 +273,6 @@ fn drain(p: Paint, countdown: &Countdown, left: Duration, reduced: bool) -> El {
     drain
         .live_opacity(&countdown.fade)
         .child(stroke(p.muted()).key("line").live_trim(&countdown.line))
-        .child(stroke(p.text()).key("head").live_trim(&countdown.head))
 }
 
 /// A `size` × `size` rounded rectangle's stroke centreline, `inset` in from

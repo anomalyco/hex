@@ -226,7 +226,7 @@ fn copy_rows(p: Paint, capsule: &Capsule, recording: bool) -> Vec<El> {
         panel_row(
             p,
             "copy-prompt",
-            &icons::PROMPT,
+            &crate::rune_ui::icons::SPARKLES_OUTLINE,
             tr("Copy agent prompt"),
             copied(LiveCopy::Prompt),
             true,
@@ -380,7 +380,7 @@ fn result(
                     .key("clock")
                     .gap(METER_GAP)
                     .center_y()
-                    .child(rec_dot(p).opacity(0.))
+                    .children(SHOWS_REC_DOT.then(|| rec_dot(p).opacity(0.)))
                     .child(
                         text(meeting::format_duration(duration))
                             .key("elapsed")
@@ -566,7 +566,8 @@ fn meter_band() -> El {
     row()
         .key("meta")
         .h(REST_HEIGHT)
-        .px(REST_PX)
+        .pl(REST_PL)
+        .pr(REST_PX)
         .center_y()
         .transition(Transition::none())
         .cursor(Cursor::Grab)
@@ -594,7 +595,7 @@ fn timer_text_width(minutes: u64) -> f32 {
 
 /// The time's width after `minutes`, dot and gap included.
 fn timer_width(minutes: u64) -> f32 {
-    timer_text_width(minutes) + REC_DOT + METER_GAP
+    timer_text_width(minutes) + DOT_ROOM
 }
 
 /// Only grow the compact header for a notice or another minute digit.
@@ -621,7 +622,7 @@ fn minutes_shown(capsule: &Capsule) -> u64 {
 /// The header's room for the field in a surface `width` wide: from the
 /// rows' inset to the time. Another digit on the time takes three columns.
 fn field_room(capsule: &Capsule, width: f32) -> f32 {
-    let room = width - 2. * REST_PX - METER_GAP - timer_width(minutes_shown(capsule));
+    let room = width - REST_PL - REST_PX - METER_GAP - timer_width(minutes_shown(capsule));
     room - discard_room(capsule).min((room - waveform::WIDTH).max(0.))
 }
 
@@ -664,7 +665,8 @@ pub(super) fn field_wanted(capsule: &Capsule) -> f32 {
         _ => false,
     };
     if open {
-        let room = PANEL_WIDTH - 2. * REST_PX - METER_GAP - timer_width(minutes_shown(capsule));
+        let room =
+            PANEL_WIDTH - REST_PL - REST_PX - METER_GAP - timer_width(minutes_shown(capsule));
         (room - DISCARD_ROOM).max(waveform::WIDTH)
     } else {
         waveform::WIDTH
@@ -708,7 +710,7 @@ pub(super) fn meter(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
                 .key("clock")
                 .gap(METER_GAP)
                 .center_y()
-                .child(rec_dot(p))
+                .children(SHOWS_REC_DOT.then(|| rec_dot(p)))
                 .child(
                     text(elapsed)
                         .key("elapsed")
@@ -839,7 +841,8 @@ pub(super) fn arriving_header(
     let meta = row()
         .key("meta")
         .h(REST_HEIGHT)
-        .px(REST_PX)
+        .pl(REST_PL)
+        .pr(REST_PX)
         .center_y()
         .transition(Transition::none());
     let meta = if right {
@@ -906,7 +909,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording, held: Op
     // The notice is measured against the resting header, so the ✕ arriving
     // never recuts it; it has gone once the field is as wide as it opens.
     let field = field_width(capsule);
-    let wide = PANEL_WIDTH - 2. * REST_PX - METER_GAP - timer_width(minutes_shown(capsule));
+    let wide = PANEL_WIDTH - REST_PL - REST_PX - METER_GAP - timer_width(minutes_shown(capsule));
     let widest = wide - DISCARD_ROOM;
     let covered = if widest > waveform::WIDTH {
         ((field - waveform::WIDTH) / (widest - waveform::WIDTH)).clamp(0., 1.)

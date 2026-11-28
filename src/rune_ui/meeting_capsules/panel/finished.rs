@@ -136,7 +136,7 @@ pub(in crate::rune_ui::meeting_capsules) fn ready(
         .child(panel_row(
             p,
             "copy-prompt",
-            &icons::PROMPT,
+            &crate::rune_ui::icons::SPARKLES_OUTLINE,
             tr("Copy agent prompt"),
             copied(LiveCopy::Prompt),
             true,

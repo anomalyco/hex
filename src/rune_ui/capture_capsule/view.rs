@@ -300,7 +300,16 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                     .on_press_tx(press(id)),
             )
         }
-        Id::Divider => base.child(el().size(surface::DIVIDER_W, 16.0).fill(c.border_base)),
+        // Beside the pen: Area, Window, Screen and iPhone on demand, so
+        // recording starts at once and another target is one click away.
+        Id::Source => base.child(
+            icon_button(p, mark(id, 16.0, p.muted()))
+                .role("button")
+                .label(tr("Source"))
+                .help(tr("Source"))
+                .hit()
+                .on_press_tx(press(id)),
+        ),
         // Stop: a filled square, Finish's icon.
         Id::Finish => {
             let side = 10.0;
@@ -473,8 +482,9 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             .hit()
             .on_press_tx(press(id))
         }
-        // Unified destination split chip: one fill, a hairline between
-        // quick-send and the picker, each half its own clickable target.
+        // The destination: two buttons side by side, 4 pt apart, with no
+        // rule between them. Quick-send is the filled one; ⌄ is a quieter
+        // tinted square that opens the picker.
         Id::Split => {
             let queued = shown.active;
             let help = match &surface.pres {
@@ -489,7 +499,6 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 &rune_theme_opencode::icons::ARROW_RIGHT
             };
             let send_w = surface::split_send_width(&shown.ident);
-            let inner_w = send_w + surface::CHEVRON_W;
             let mut left = row()
                 .key("send")
                 .size(send_w, BUTTON_H)
@@ -497,6 +506,7 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 .gap(4.0)
                 .center_y()
                 .radius(ICON_BUTTON_RADIUS)
+                .fill(c.layer_02)
                 .hover(c.hover)
                 .press(c.pressed)
                 .role("button")
@@ -514,16 +524,15 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             }
             // Open, the picker half stays pressed while its list hangs under it.
             let open = matches!(&surface.pres, Pres::Done(Done { open: Some(_), .. }));
-            let mut more = row()
+            let tint = p.k.alpha(c.text_base, if p.k.dark { 0.05 } else { 0.04 });
+            let more = row()
                 .key("more")
                 .size(surface::CHEVRON_W, BUTTON_H)
                 .center()
                 .radius(ICON_BUTTON_RADIUS)
+                .fill(if open { c.layer_02 } else { tint })
                 .hover(c.hover)
                 .press(c.pressed);
-            if open {
-                more = more.fill(c.pressed);
-            }
             let more = more
                 .role("button")
                 .label(tr("Send to…"))
@@ -533,23 +542,13 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 .child(
                     rune::icon(&rune_theme_opencode::icons::CHEVRON_DOWN, 14.0).color(p.muted()),
                 );
-            let hairline = el()
-                .key("split-rule")
-                .absolute(send_w, SPLIT_RULE_INSET)
-                .size(p.hair * 2.0, BUTTON_H - 2.0 * SPLIT_RULE_INSET)
-                .fill(c.border_base)
-                .inert()
-                .a11y_hidden();
             base.child(
                 row()
                     .key("split-fill")
-                    .size(inner_w, BUTTON_H)
-                    .radius(ICON_BUTTON_RADIUS)
-                    .fill(c.layer_02)
+                    .gap(surface::SPLIT_GAP)
+                    .h(BUTTON_H)
                     .child(left)
-                    .child(more)
-                    // The pressed ⌄ half marks the split itself while open.
-                    .children((!open).then_some(hairline)),
+                    .child(more),
             )
         }
         // Post-send `Always…` button beside Undo: quiet at rest, filled while open.
@@ -816,8 +815,6 @@ pub(super) const CHECK: f32 = 16.0;
 /// The finished line's buttons (Paste, Search, Inspect, ✕) are 28 pt tall,
 /// 6 pt in from the walls, their corners concentric with the shell's.
 pub(super) const BUTTON_H: f32 = CHIP_H - 2.0 * surface::BUTTON_INSET;
-/// The split chip's hairline stops this far short of its fill's top and bottom.
-pub(super) const SPLIT_RULE_INSET: f32 = 7.0;
 pub(super) const ICON_BUTTON_RADIUS: f32 = surface::CHIP_RADIUS - 2.0;
 
 /// One of those buttons, `w` wide, its content centred.
