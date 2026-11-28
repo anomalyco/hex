@@ -719,6 +719,34 @@ and Labs › Free memory when idle frees it with the speech model. See
 [labs.md](labs.md) for the stage, the install, the fallbacks, and the checks.
 Not observed: a real dictation through the running app with the lab on.
 
+### Clean Up What I Say v2 (Dev Labs, macOS)
+
+Developer builds have Labs › Clean up what I say v2
+(`labs.cleanup_tagger_v2`, off by default). While it is on it runs in place of
+v1, under the same rules for what is cleaned, with the next cleanup tagger: four
+answers per word (keep or delete, punctuation, case, and span), so it also
+writes spoken numbers, amounts, times, units, emails, links, and code as text
+("two hundred fifty milliseconds" becomes "250 milliseconds").
+
+```text
+Words, one line at a time -> byte-level BPE (the folder's tokenizer.json)
+  -> Core ML (CPU only, 150 ms) -> four heads per word
+  -> KEEP bias + minimum edit probability (runtime.json)
+  -> a correction keeps its words unless it has both a cue and what it takes back
+  -> outside a correction, a run with a name, number, negation, hyphenated
+     compound, or vocabulary term stays whole
+  -> spans written by fixed grammars, or as heard when one does not parse
+```
+
+Nothing downloads: the model is the folder `<models>/cleanup-v2/`
+(`HEX_CLEANUP_V2_DIR` overrides it) with `CleanupTaggerV2.mlpackage`,
+`tokenizer.json`, and an optional `runtime.json`. The package is compiled once
+next to itself. A missing folder, a late answer, or a failed run pastes the
+words as heard, and History says why. `parity_tests` hold the decoder and
+renderer to the tagger's Python reference on recorded model logits and 600
+recorded lines; the real-model test runs by hand. Not observed: a real dictation
+through the running app with the lab on.
+
 ### Rewrite With Nearby Text (Labs, macOS)
 
 While Labs › Rewrite reads nearby text is on (`labs.cursor_context`, off by

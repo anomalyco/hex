@@ -66,6 +66,9 @@ impl Feature {
             Self::CleanupTagger => {
                 "Remove ums, repeated words, false starts, and things you correct out loud from English dictations with Hex's own small model, downloaded once (26 MB) and run on this Mac; it only removes words, and keeps names, numbers, negations, and vocabulary terms (macOS)"
             }
+            Self::CleanupTaggerV2 => {
+                "Clean up English dictations with the next cleanup tagger, in place of Clean up what I say: it removes ums, restarts, and spoken corrections and writes spoken numbers, amounts, times, units, emails, links, and code as text; it reads its model from the cleanup-v2 folder in Hex's models folder, downloads nothing, and never adds a word (macOS, developer builds)"
+            }
             Self::ModelSwitchShortcut => {
                 "One shortcut that swaps dictation to another model and language (model_switch_other), and back"
             }

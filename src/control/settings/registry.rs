@@ -482,6 +482,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: remove ums, repeated words, false starts, and spoken self-corrections from English dictations with a small model on this Mac that only removes words; turning it on downloads the 26 MB model at the next dictation (macOS)",
     ),
     key(
+        "labs.cleanup_tagger_v2",
+        Kind::Bool,
+        "Labs: clean up English dictations with the next cleanup tagger in place of labs.cleanup_tagger; it also writes spoken numbers, emails, and links as text, and reads its model from the cleanup-v2 folder in Hex's models folder (macOS, developer builds)",
+    ),
+    key(
         "labs.second_dictation_shortcut",
         Kind::Bool,
         "Labs: second_dictation_hotkey dictates like the dictation shortcut",

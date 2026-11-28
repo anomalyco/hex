@@ -22,6 +22,10 @@
 //! tagger is the iPhone app's 28 MB model, fetched while the lab is on
 //! (`model`, `archive`) and kept warm on the CPU through Core ML
 //! (`tagger`). No other OS runs a model yet.
+//!
+//! Labs › Clean up what I say v2, a Dev lab, runs the next tagger in its
+//! place ([`v2`]): four answers per word, deletions, punctuation, case, and
+//! spans, with spoken numbers, emails, and links written as text.
 #![cfg_attr(
     not(test),
     expect(
@@ -43,6 +47,7 @@ mod stage;
 #[cfg(any(target_os = "macos", test))]
 mod tagger;
 mod tokenizer;
+mod v2;
 mod words;
 
 pub(crate) use chunk::Chunk;
@@ -53,10 +58,12 @@ pub(crate) use plan::{Disfluency, Edit, EditOp, EditPlan, Proposal};
 pub(crate) use render::render;
 #[cfg(target_os = "macos")]
 pub(crate) use stage::prepare;
-pub(crate) use stage::{Dictation, reconcile, stage};
+pub(crate) use stage::{Dictation, Model, reconcile, stage};
 #[cfg(test)]
 pub(crate) use stage::{Skip, stand_in};
 pub(crate) use tokenizer::{Tokenizer, WrongVocabularySize};
+#[cfg(test)]
+pub(crate) use v2::stand_in as stand_in_v2;
 pub(crate) use words::{Span, Words};
 
 #[cfg(test)]

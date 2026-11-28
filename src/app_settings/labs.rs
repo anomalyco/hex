@@ -159,6 +159,10 @@ pub struct LabsSettings {
     /// this Mac's CPU, and a guard admits them. It only removes words (macOS,
     /// Labs › Clean up what I say).
     pub cleanup_tagger: bool,
+    /// The next cleanup tagger runs in place of `cleanup_tagger`: it also
+    /// writes spoken numbers, emails, and links as text, from a model folder
+    /// on this Mac (macOS developer builds, Labs › Clean up what I say v2).
+    pub cleanup_tagger_v2: bool,
     /// `second_dictation_hotkey` dictates like the dictation shortcut (issue 627).
     pub second_dictation_shortcut: bool,
     /// Up to four more dictation shortcuts, each with its own activation
@@ -540,6 +544,7 @@ impl Default for LabsSettings {
             clean_up_with_apple_intelligence: false,
             neutral_voice: false,
             cleanup_tagger: false,
+            cleanup_tagger_v2: false,
             second_dictation_shortcut: false,
             more_dictation_shortcuts: false,
             terminal_paste_shortcut: false,

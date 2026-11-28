@@ -10,10 +10,12 @@
 //! idle frees it after the same quiet time as the speech model.
 //!
 //! On macOS the model is Core ML's, restricted to the CPU
-//! (`cleanup_tagger.swift`). No other OS runs it yet.
+//! (`cleanup_tagger.swift`). No other OS runs it yet. Labs › Clean up what
+//! I say v2 runs its own model on the same kind of thread (`v2::runtime`).
 
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::chunk::Chunk;
@@ -23,51 +25,70 @@ use super::stage::Skip;
 /// tests.
 pub(super) trait Runtime: Clone + Send + 'static {
     type Model;
+    /// What one run reads: a chunk of token ids for v1.
+    type Input: Send + 'static;
+    /// What one run answers: a DELETE logit per token for v1.
+    type Output: Send + 'static;
 
     /// Loads the model, or says why there is none to load.
     fn load(&self) -> Result<Self::Model, Skip>;
 
-    /// One run over a chunk: a DELETE logit for each of its `length` real
-    /// tokens.
-    fn logits(model: &Self::Model, input_ids: &[i32], length: usize) -> Result<Vec<f32>, String>;
+    /// One run over one input.
+    fn run(model: &Self::Model, input: &Self::Input) -> Result<Self::Output, String>;
 
     /// How long a loaded model may sit unused before it is freed, when it
     /// may not stay loaded for good.
     fn idle(&self) -> Option<Duration>;
 }
 
-/// A dictation's chunks, waiting for their scores.
-struct Request {
-    chunks: Vec<Chunk>,
+/// A dictation's inputs, waiting for their answers.
+struct Request<R: Runtime> {
+    inputs: Vec<R::Input>,
     deadline: Instant,
-    reply: mpsc::Sender<Result<Vec<Vec<f32>>, Skip>>,
+    reply: mpsc::Sender<Result<Vec<R::Output>, Skip>>,
+}
+
+/// The running thread: its inbox (a None job loads the model only) and
+/// whether its model is loaded.
+struct Thread<R: Runtime> {
+    jobs: mpsc::Sender<Option<Request<R>>>,
+    loaded: Arc<AtomicBool>,
 }
 
 /// The one model and the thread it lives on.
 pub(super) struct Tagger<R: Runtime> {
     runtime: R,
-    /// The thread's inbox while it runs. None scores load the model only.
-    jobs: Mutex<Option<mpsc::Sender<Option<Request>>>>,
+    thread: Mutex<Option<Thread<R>>>,
 }
 
 impl<R: Runtime> Tagger<R> {
     pub(super) const fn new(runtime: R) -> Self {
         Self {
             runtime,
-            jobs: Mutex::new(None),
+            thread: Mutex::new(None),
         }
     }
 
-    /// The model's logits for each chunk, in order, or why there are none
+    /// Whether the model is loaded and warm, so an answer takes a run and
+    /// not a load.
+    pub(super) fn loaded(&self) -> bool {
+        self.thread
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .as_ref()
+            .is_some_and(|thread| thread.loaded.load(Ordering::Acquire))
+    }
+
+    /// The model's answer for each input, in order, or why there is none
     /// by `deadline`.
     pub(super) fn score(
         &self,
-        chunks: Vec<Chunk>,
+        inputs: Vec<R::Input>,
         deadline: Instant,
-    ) -> Result<Vec<Vec<f32>>, Skip> {
+    ) -> Result<Vec<R::Output>, Skip> {
         let (reply, answer) = mpsc::channel();
         self.send(Some(Request {
-            chunks,
+            inputs,
             deadline,
             reply,
         }))?;
@@ -91,30 +112,35 @@ impl<R: Runtime> Tagger<R> {
     /// Ends the thread once it finishes what it is doing, which frees the
     /// model. The next request starts a new one.
     pub(super) fn release(&self) {
-        self.jobs
+        self.thread
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .take();
     }
 
-    fn send(&self, job: Option<Request>) -> Result<(), Skip> {
-        let mut jobs = self.jobs.lock().unwrap_or_else(|error| error.into_inner());
-        let job = match jobs.as_ref() {
-            Some(sender) => match sender.send(job) {
+    fn send(&self, job: Option<Request<R>>) -> Result<(), Skip> {
+        let mut thread = self
+            .thread
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let job = match thread.as_ref() {
+            Some(running) => match running.jobs.send(job) {
                 Ok(()) => return Ok(()),
                 // The thread is gone: start another.
                 Err(mpsc::SendError(job)) => job,
             },
             None => job,
         };
-        let (sender, inbox) = mpsc::channel();
+        let (jobs, inbox) = mpsc::channel();
+        let loaded = Arc::new(AtomicBool::new(false));
         let runtime = self.runtime.clone();
+        let marks = loaded.clone();
         std::thread::Builder::new()
             .name("hex-cleanup-tagger".into())
-            .spawn(move || serve(&runtime, &inbox))
+            .spawn(move || serve(&runtime, &inbox, &marks))
             .map_err(|error| Skip::Failed(format!("the cleanup model could not start: {error}")))?;
-        let sent = sender.send(job);
-        *jobs = Some(sender);
+        let sent = jobs.send(job);
+        *thread = Some(Thread { jobs, loaded });
         sent.map_err(|_| Skip::Failed("the cleanup model stopped".into()))
     }
 }
@@ -122,13 +148,14 @@ impl<R: Runtime> Tagger<R> {
 /// The tagger's thread: loads the model for the first job that needs it and
 /// answers each request in turn, until its tagger is released. A model left
 /// idle too long is freed, and the next job loads it again.
-fn serve<R: Runtime>(runtime: &R, inbox: &mpsc::Receiver<Option<Request>>) {
+fn serve<R: Runtime>(runtime: &R, inbox: &mpsc::Receiver<Option<Request<R>>>, loaded: &AtomicBool) {
     let mut model = None;
     loop {
         let job = match runtime.idle().filter(|_| model.is_some()) {
             Some(idle) => match inbox.recv_timeout(idle) {
                 Ok(job) => job,
                 Err(RecvTimeoutError::Timeout) => {
+                    loaded.store(false, Ordering::Release);
                     model = None;
                     continue;
                 }
@@ -141,7 +168,10 @@ fn serve<R: Runtime>(runtime: &R, inbox: &mpsc::Receiver<Option<Request>>) {
         };
         if model.is_none() {
             match runtime.load() {
-                Ok(loaded) => model = Some(loaded),
+                Ok(ready) => {
+                    model = Some(ready);
+                    loaded.store(true, Ordering::Release);
+                }
                 Err(skip) => {
                     if let Some(request) = job {
                         let _ = request.reply.send(Err(skip));
@@ -158,9 +188,9 @@ fn serve<R: Runtime>(runtime: &R, inbox: &mpsc::Receiver<Option<Request>>) {
             continue;
         }
         let scores = request
-            .chunks
+            .inputs
             .iter()
-            .map(|chunk| R::logits(model, &chunk.input_ids(), chunk.length()))
+            .map(|input| R::run(model, input))
             .collect::<Result<Vec<_>, _>>();
         let _ = request.reply.send(scores.map_err(Skip::Failed));
     }
@@ -169,7 +199,7 @@ fn serve<R: Runtime>(runtime: &R, inbox: &mpsc::Receiver<Option<Request>>) {
 #[cfg(all(target_os = "macos", not(test)))]
 pub(super) use core_ml::CoreMl;
 #[cfg(target_os = "macos")]
-pub(super) use core_ml::{Loaded, compile, load, run};
+pub(super) use core_ml::{Loaded, compile, load, run, take_error};
 
 /// Core ML on the CPU, behind the C bridge in `cleanup_tagger.swift`.
 #[cfg(target_os = "macos")]
@@ -206,6 +236,8 @@ mod core_ml {
     #[cfg(not(test))]
     impl super::Runtime for CoreMl {
         type Model = Loaded;
+        type Input = super::Chunk;
+        type Output = Vec<f32>;
 
         fn load(&self) -> Result<Loaded, super::Skip> {
             use super::super::model;
@@ -230,8 +262,8 @@ mod core_ml {
             Ok(loaded)
         }
 
-        fn logits(model: &Loaded, input_ids: &[i32], length: usize) -> Result<Vec<f32>, String> {
-            run(model, input_ids, length)
+        fn run(model: &Loaded, chunk: &super::Chunk) -> Result<Vec<f32>, String> {
+            run(model, &chunk.input_ids(), chunk.length())
         }
 
         /// Labs › Free memory when idle's time, while that lab is on.
@@ -247,6 +279,13 @@ mod core_ml {
     // it, one call at a time, and Core ML models are not tied to the thread
     // that loaded them.
     unsafe impl Send for Loaded {}
+
+    impl Loaded {
+        /// The bridge's handle, for a call that borrows the model.
+        pub(in crate::dictation::cleanup) fn as_ptr(&self) -> *mut c_void {
+            self.0.as_ptr()
+        }
+    }
 
     impl Drop for Loaded {
         fn drop(&mut self) {
@@ -325,7 +364,8 @@ mod core_ml {
         CString::new(path).map_err(|error| error.to_string())
     }
 
-    fn take_error(error: *mut c_char) -> String {
+    /// The bridge's error message, given back to it.
+    pub(in crate::dictation::cleanup) fn take_error(error: *mut c_char) -> String {
         if error.is_null() {
             return "the cleanup model failed".into();
         }
@@ -372,6 +412,8 @@ mod tests {
 
     impl Runtime for Stub {
         type Model = StubModel;
+        type Input = Chunk;
+        type Output = Vec<f32>;
 
         fn load(&self) -> Result<StubModel, Skip> {
             if self.missing {
@@ -385,11 +427,12 @@ mod tests {
             })
         }
 
-        fn logits(model: &StubModel, input_ids: &[i32], length: usize) -> Result<Vec<f32>, String> {
+        fn run(model: &StubModel, chunk: &Chunk) -> Result<Vec<f32>, String> {
             if model.fails {
                 return Err("Core ML could not run the model".into());
             }
-            Ok(input_ids[..length].iter().map(|&id| id as f32).collect())
+            let ids = chunk.input_ids();
+            Ok(ids[..chunk.length()].iter().map(|&id| id as f32).collect())
         }
 
         fn idle(&self) -> Option<Duration> {
@@ -448,6 +491,21 @@ mod tests {
         assert_eq!(stub.loads.load(Ordering::SeqCst), 2);
         tagger.release();
         eventually(&stub.frees, 2);
+    }
+
+    #[test]
+    fn a_tagger_says_whether_its_model_is_loaded() {
+        let stub = Stub::default();
+        let tagger = Tagger::new(stub.clone());
+        assert!(!tagger.loaded());
+        tagger.warm();
+        let give_up = Instant::now() + Duration::from_secs(30);
+        while !tagger.loaded() {
+            assert!(Instant::now() < give_up, "never loaded");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        tagger.release();
+        assert!(!tagger.loaded());
     }
 
     #[test]

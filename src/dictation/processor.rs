@@ -61,6 +61,9 @@ struct DictationLabs {
     /// Labs › Clean up what I say: the tagger takes disfluencies out of an
     /// English dictation ahead of any cleanup pass or rewrite (macOS).
     cleanup_tagger: bool,
+    /// Labs › Clean up what I say v2: the next tagger cleans in place of
+    /// v1 (macOS developer builds).
+    cleanup_tagger_v2: bool,
     /// Labs › Dictation style's choice while on; None leaves the text as
     /// the corrections and rewrite wrote it.
     dictation_style: Option<DictationStyle>,
@@ -74,6 +77,7 @@ impl DictationLabs {
             spoken_symbols: crate::labs::spoken_symbols(),
             filler_words: crate::labs::filler_words(),
             cleanup_tagger: crate::labs::cleanup_tagger(),
+            cleanup_tagger_v2: crate::labs::cleanup_tagger_v2(),
             dictation_style: crate::labs::dictation_style(),
         }
     }
@@ -604,7 +608,10 @@ impl Profiles {
         // and typed text stay as they are.
         let (corrected, tagged) = if source == Source::Dictation {
             crate::dictation::cleanup::stage(
-                labs.cleanup_tagger,
+                crate::dictation::cleanup::Model::chosen(
+                    labs.cleanup_tagger,
+                    labs.cleanup_tagger_v2,
+                ),
                 &corrected,
                 &crate::dictation::cleanup::Dictation {
                     language,
@@ -2073,6 +2080,7 @@ mod tests {
             spoken_symbols: true,
             filler_words: true,
             cleanup_tagger: false,
+            cleanup_tagger_v2: false,
             dictation_style: None,
         };
         let speech = "um first new line done comma thanks";
@@ -2261,6 +2269,35 @@ mod tests {
             assert_eq!(observation.profile, "Clean up what I say");
             assert_eq!(observation.fallback.as_deref(), Some(why));
         }
+        crate::dictation::cleanup::stand_in(None);
+    }
+
+    /// Labs › Clean up what I say v2 cleans in place of v1 while both are
+    /// on, and History names it.
+    #[test]
+    fn the_cleanup_tagger_v2_cleans_in_place_of_v1() {
+        let profiles = Profiles::new(Profile::new("Global", ""));
+        let both = DictationLabs {
+            cleanup_tagger: true,
+            cleanup_tagger_v2: true,
+            ..DictationLabs::default()
+        };
+        crate::dictation::cleanup::stand_in(Some(Ok(&["um"])));
+        crate::dictation::cleanup::stand_in_v2(Some(Ok(&["um", "so"])));
+        let processed = profiles.process_cancellable_inner(
+            "Um, so we go",
+            "en",
+            &context("Zed", None),
+            &AtomicBool::new(false),
+            Source::Dictation,
+            None,
+            true,
+            both,
+        );
+        assert_eq!(processed.text, "We go");
+        let observation = processed.observation.unwrap();
+        assert_eq!(observation.profile, "Clean up what I say v2");
+        crate::dictation::cleanup::stand_in_v2(None);
         crate::dictation::cleanup::stand_in(None);
     }
 

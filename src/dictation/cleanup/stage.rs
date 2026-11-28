@@ -41,19 +41,22 @@ pub(crate) enum Skip {
     Late,
     /// The model is not installed yet; it downloads in the background.
     ModelMissing,
+    /// Labs › Clean up what I say v2's model folder is not on this Mac.
+    NotInstalled,
     /// The model could not load or run.
     Failed(String),
 }
 
 impl Skip {
     /// The reason History shows after "fell back:".
-    fn reason(&self) -> String {
+    pub(super) fn reason(&self) -> String {
         match self {
             Self::Late => format!(
                 "the cleanup took longer than {} ms",
                 TIME_BUDGET.as_millis()
             ),
             Self::ModelMissing => "the cleanup model is still downloading".into(),
+            Self::NotInstalled => "the cleanup v2 model is not installed".into(),
             Self::Failed(why) => why.clone(),
         }
     }
@@ -91,39 +94,72 @@ pub(crate) fn wanted(lab: bool, text: &str, dictation: &Dictation<'_>) -> bool {
         && !text.trim().is_empty()
 }
 
-/// The step for one dictation: the words to paste and, when the tagger was
-/// asked, the observation History and the live log record. `lab` is Labs ›
-/// Clean up what I say's switch as the dictation's processing read it.
+/// Which tagger cleans a dictation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Model {
+    /// Labs › Clean up what I say.
+    V1,
+    /// Labs › Clean up what I say v2, which wins while both are on.
+    V2,
+}
+
+impl Model {
+    /// The tagger the two labs' switches choose, if either is on.
+    pub(crate) fn chosen(v1: bool, v2: bool) -> Option<Self> {
+        if v2 {
+            Some(Self::V2)
+        } else if v1 {
+            Some(Self::V1)
+        } else {
+            None
+        }
+    }
+}
+
+/// The step for one dictation: the words to paste and, when a tagger was
+/// asked, the observation History and the live log record. `model` is the
+/// tagger the labs chose as the dictation's processing read them.
 pub(crate) fn stage(
-    lab: bool,
+    model: Option<Model>,
     text: &str,
     dictation: &Dictation<'_>,
 ) -> (String, Option<ProcessingObservation>) {
-    if !wanted(lab, text, dictation) {
+    if !wanted(model.is_some(), text, dictation) {
         return (text.to_owned(), None);
     }
-    clean(text, dictation.vocabulary)
+    match model {
+        Some(Model::V2) => super::v2::clean(text, dictation.vocabulary),
+        _ => clean(text, dictation.vocabulary),
+    }
 }
 
-/// As a capture starts: while the lab is on, the model installs if it is
-/// missing and loads, behind the person talking. With the lab off nothing is
-/// fetched or loaded. No test fetches or loads the real model.
+/// As a capture starts: while a lab is on, its model installs if it is
+/// missing and loads, behind the person talking. With both labs off nothing
+/// is fetched or loaded. No test fetches or loads the real model.
 #[cfg(target_os = "macos")]
 pub(crate) fn prepare() {
     #[cfg(not(test))]
-    if crate::labs::cleanup_tagger() {
-        TAGGER.warm();
+    match Model::chosen(
+        crate::labs::cleanup_tagger(),
+        crate::labs::cleanup_tagger_v2(),
+    ) {
+        Some(Model::V2) => super::v2::warm(),
+        Some(Model::V1) => TAGGER.warm(),
+        None => {}
     }
 }
 
-/// As the Labs switches change: off frees the loaded model.
-pub(crate) fn reconcile(lab_on: bool) {
+/// As the Labs switches change: a lab turned off frees its loaded model.
+pub(crate) fn reconcile(v1_on: bool, v2_on: bool) {
     #[cfg(all(target_os = "macos", not(test)))]
-    if !lab_on {
+    if !v1_on {
         TAGGER.release();
     }
     #[cfg(not(all(target_os = "macos", not(test))))]
-    let _ = lab_on;
+    let _ = v1_on;
+    if !v2_on {
+        super::v2::release();
+    }
 }
 
 #[cfg(all(target_os = "macos", not(test)))]
@@ -424,6 +460,32 @@ mod tests {
         assert!(!wanted(true, "um hello", &dictation("en", &cancelled)));
     }
 
+    /// Labs › Clean up what I say v2 cleans in place of v1 while it is on,
+    /// under the same rules for what is cleaned.
+    #[test]
+    fn v2_cleans_in_place_of_v1_while_its_lab_is_on() {
+        assert_eq!(Model::chosen(false, false), None);
+        assert_eq!(Model::chosen(true, false), Some(Model::V1));
+        assert_eq!(Model::chosen(true, true), Some(Model::V2));
+        assert_eq!(Model::chosen(false, true), Some(Model::V2));
+        let live = AtomicBool::new(false);
+        stand_in(Some(Ok(&["um"])));
+        super::super::v2::stand_in(Some(Ok(&["um", "so"])));
+        let said = "Um, so we go";
+        let (text, observation) = stage(Some(Model::V2), said, &dictation("en", &live));
+        assert_eq!(text, "We go");
+        assert_eq!(observation.unwrap().profile, "Clean up what I say v2");
+        let (text, observation) = stage(Some(Model::V1), said, &dictation("en", &live));
+        assert_eq!(text, "So we go");
+        assert_eq!(observation.unwrap().profile, "Clean up what I say");
+        assert_eq!(
+            stage(Some(Model::V2), said, &dictation("es", &live)),
+            (said.to_owned(), None)
+        );
+        super::super::v2::stand_in(None);
+        stand_in(None);
+    }
+
     /// The tagger only knows English: on Spanish it took the "no" out of
     /// "Te digo que no puedo ir".
     #[test]
@@ -442,7 +504,7 @@ mod tests {
         stand_in(Some(Ok(&["no"])));
         for language in ["es", "auto"] {
             assert_eq!(
-                stage(true, text, &dictation(language, &live)),
+                stage(Some(Model::V1), text, &dictation(language, &live)),
                 (text.to_owned(), None)
             );
         }
@@ -453,10 +515,10 @@ mod tests {
     fn the_lab_off_asks_no_tagger_and_changes_nothing() {
         let live = AtomicBool::new(false);
         stand_in(Some(Ok(&["um"])));
-        let (text, observation) = stage(false, "Um, so we go", &dictation("en", &live));
+        let (text, observation) = stage(None, "Um, so we go", &dictation("en", &live));
         assert_eq!(text, "Um, so we go");
         assert_eq!(observation, None);
-        let (text, observation) = stage(true, "Um, so we go", &dictation("en", &live));
+        let (text, observation) = stage(Some(Model::V1), "Um, so we go", &dictation("en", &live));
         assert_eq!(text, "So we go");
         assert_eq!(observation.unwrap().fallback, None);
         stand_in(None);

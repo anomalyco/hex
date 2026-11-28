@@ -851,6 +851,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
     // Linux renders of macOS scenes leave it out.
     if caps.os == super::platform::Os::Macos && cfg!(target_os = "macos") {
         rows.push(row(Feature::CleanupTagger, Some(&SPARKLES)));
+        rows.push(row(Feature::CleanupTaggerV2, Some(&SPARKLES)));
     }
     // Every OS writes each dictation in the chosen style after its
     // corrections and before its transformations.
@@ -1068,6 +1069,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::CleanUpWithAppleIntelligence => "lab-clean-up",
         Feature::NeutralVoice => "lab-neutral-voice",
         Feature::CleanupTagger => "lab-clean-up-what-i-say",
+        Feature::CleanupTaggerV2 => "lab-clean-up-what-i-say-v2",
         Feature::SecondDictationShortcut => "lab-second-dictation-shortcut",
         Feature::MoreDictationShortcuts => "lab-more-dictation-shortcuts",
         Feature::TerminalPasteShortcut => "lab-terminal-paste-shortcut",

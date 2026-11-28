@@ -1,0 +1,62 @@
+{
+  "backbone": "jhu-clsp/ettin-encoder-32m",
+  "max_seq_len": 512,
+  "output_tensor_names": [
+    "action_logits",
+    "punct_logits",
+    "case_logits",
+    "span_logits"
+  ],
+  "decode": {
+    "keep_bias": 0.2,
+    "min_edit_prob": 0.5,
+    "calibrated": true,
+    "gates_passed": true,
+    "max_clean_over_deletion": 0.005,
+    "min_hedge_preservation": 1,
+    "delete_openers": false,
+    "guard_correction_runs": true,
+    "use_itn": true
+  },
+  "schema": {
+    "schema_version": 2,
+    "heads": {
+      "action": [
+        "KEEP",
+        "DELETE_FILLER",
+        "DELETE_OPENER",
+        "DELETE_RESTART",
+        "DELETE_CORRECTION"
+      ],
+      "punct_after": [
+        "NONE",
+        "COMMA",
+        "PERIOD",
+        "QUESTION",
+        "EXCLAMATION",
+        "COLON",
+        "NEWLINE",
+        "BULLET"
+      ],
+      "case": [
+        "KEEP",
+        "LOWER",
+        "TITLE",
+        "UPPER"
+      ],
+      "span": [
+        "O",
+        "B_NUMBER",
+        "I_NUMBER",
+        "B_EMAIL",
+        "I_EMAIL",
+        "B_URL",
+        "I_URL",
+        "B_CODE",
+        "I_CODE",
+        "B_UNIT",
+        "I_UNIT"
+      ]
+    }
+  }
+}

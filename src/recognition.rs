@@ -280,6 +280,11 @@ pub fn listen(
         }
     }
     emit_state(&mut events, hotkeys.any_recording(), &input.device_name())?;
+    // Labs › Clean up what I say: the tagger's model loads as Hex starts,
+    // so the first dictation after launch (even one held through the
+    // start, which skips the press's own prepare) finds it warm.
+    #[cfg(target_os = "macos")]
+    crate::dictation::cleanup::prepare();
     tracing::info!(device = %input.device_name(), "dictation listener started");
 
     #[cfg(hex_capture)]
