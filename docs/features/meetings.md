@@ -2470,7 +2470,7 @@ Agents -> hex meetings delete <id>                 // exact `meetings list --jso
   -> done -> "Deleted “<title>”; moved to the Trash"; an open pane drops the
      row at its next 1 s rescan
   // checks: deleting_a_meeting_answers_its_refusal_code; JSON shape
-  // {"version":4,"command":"meeting-delete","id":"…"} (control.rs)
+  // {"version":5,"command":"meeting-delete","id":"…"} (control.rs)
 ```
 
 Choice: Delete trashes the Markdown copy too, since it holds the transcript;

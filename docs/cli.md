@@ -500,11 +500,11 @@ audio/wav`. The route answers each piece's transcript
 Requests are flat objects tagged by `command` (kebab-case):
 
 ```json
-{"version": 4, "command": "meeting-record", "title": "Design sync"}
-{"version": 4, "command": "settings-set", "key": "sound_effects", "value": "off"}
-{"version": 4, "command": "dictation", "action": "start"}
-{"version": 4, "command": "dictation", "action": "start", "print": true}
-{"version": 4, "command": "dictation", "action": "stop", "print": true}
+{"version": 5, "command": "meeting-record", "title": "Design sync"}
+{"version": 5, "command": "settings-set", "key": "sound_effects", "value": "off"}
+{"version": 5, "command": "dictation", "action": "start"}
+{"version": 5, "command": "dictation", "action": "start", "print": true}
+{"version": 5, "command": "dictation", "action": "stop", "print": true}
 ```
 
 ```ts
@@ -533,28 +533,28 @@ it sends the WAV itself to `POST /transcriptions` (see Transport above).
 Replies are tagged by `status`:
 
 ```json
-{"version": 4, "status": "done", "message": "Recording “Design sync”; …", "changed": true}
-{"version": 4, "status": "error", "code": "feature-off", "message": "Meetings are off; …"}
-{"version": 4, "status": "settings", "settings": [{"key": "sound_effects", "value": true,
+{"version": 5, "status": "done", "message": "Recording “Design sync”; …", "changed": true}
+{"version": 5, "status": "error", "code": "feature-off", "message": "Meetings are off; …"}
+{"version": 5, "status": "settings", "settings": [{"key": "sound_effects", "value": true,
   "kind": "bool", "writable": true, "about": "Play recording and error tones"}]}
-{"version": 4, "status": "models", "models": [{"id": "parakeet_v3", "name": "…",
+{"version": 5, "status": "models", "models": [{"id": "parakeet_v3", "name": "…",
   "languages": ["en", "…"], "size": "…", "installed": true, "selected": true,
   "streams": true, "vocabulary": "bias", "supports_recognition_hints": false}]}
-{"version": 4, "status": "vocabulary", "entries": [{"term": "OpenCode",
+{"version": 5, "status": "vocabulary", "entries": [{"term": "OpenCode",
   "sounds_like": ["open code"]}, {"term": "Rune"}]}
-{"version": 4, "status": "scrawl-capture", "changed": true, "state": "idle",
+{"version": 5, "status": "scrawl-capture", "changed": true, "state": "idle",
   "bundle": "…/captures/1792933491953.scrawl", "elapsed_ms": null,
   "finishing": ["…/captures/1792933491953.scrawl"], "last": null}
-{"version": 4, "status": "scrawl-captures", "captures": [{"id": "1792933491953.scrawl",
+{"version": 5, "status": "scrawl-captures", "captures": [{"id": "1792933491953.scrawl",
   "bundle": "…", "created_at_ms": 1792933491953, "duration_ms": 4000, "mode": "window",
   "app": "Brave", "words": 12, "sent_to": {"session": "ses_…", "title": "Hex"},
   "queued": false}]}
-{"version": 4, "status": "scrawl-capture-detail", "id": "…", "…": "the list's fields",
+{"version": 5, "status": "scrawl-capture-detail", "id": "…", "…": "the list's fields",
   "window_title": "…", "transcript": "…", "note": null, "missing_transcript": null,
   "marks": 2, "keyframes": 3, "video": "…/video.mp4", "audio": null,
   "contact_sheet": "…/contact-sheet.jpg"}
-{"version": 4, "status": "scrawl-capture-route", "explanation": "Capture   …"}
-{"version": 4, "status": "transcript", "text": "Ship it."}
+{"version": 5, "status": "scrawl-capture-route", "explanation": "Capture   …"}
+{"version": 5, "status": "transcript", "text": "Ship it."}
 ```
 
 `done.changed` is `false` when the command found things already so ("Already
@@ -566,7 +566,7 @@ recording", "The window isn't open"). Setting `kind` is one of `bool`,
 
 ```json
 {
-  "version": 4, "status": "status",
+  "version": 5, "status": "status",
   "app_version": "2.3.1", "pid": 31708, "memory_footprint_bytes": 412000000,
   "listener": {"running": true, "status": "Listening"},
   "capture": {"state": "idle", "recording": null, "pending_jobs": 0},
