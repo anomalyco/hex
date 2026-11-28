@@ -91,6 +91,7 @@ impl Feature {
             Self::VocabularyMenu => "Vocabulary menu",
             Self::AnnotateAgentTools => "Agent tools for captures",
             Self::AnnotateAgentInstall => "Install agent skill from Annotate",
+            Self::AnnotateShortcutPastes => "Shortcut pastes a capture",
             Self::Signature => "Signature",
             Self::DictationStyle => "Dictation style",
             Self::HudHeight => "HUD height",
@@ -351,6 +352,9 @@ impl Feature {
             }
             Self::AnnotateAgentInstall => {
                 "Adds an Agents section to the Annotate pane that writes the hex-annotate skill into Claude Code, Codex, OpenCode, or Pi, and on macOS links hex onto PATH"
+            }
+            Self::AnnotateShortcutPastes => {
+                "Press the Annotate shortcut again to paste a finished capture when its capsule shows Paste"
             }
             Self::Signature => "Add a line to the end of each dictation, such as \"Sent from Hex\"",
             Self::DictationStyle => {

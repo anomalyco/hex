@@ -227,6 +227,7 @@ define_features! {
     VocabularyMenu => labs(vocabulary_menu), "vocabulary-menu", Dictation, Everyone, MACOS, 20261123;
     AnnotateAgentTools => labs(annotate_agent_tools), "annotate-agent-tools", Annotate, Everyone, EVERY, 20261121;
     AnnotateAgentInstall => labs(annotate_agent_install), "annotate-agent-install", Annotate, Everyone, EVERY, 20261121;
+    AnnotateShortcutPastes => labs(annotate_shortcut_pastes), "annotate-shortcut-pastes", Annotate, Everyone, MACOS, 20261128;
     Signature => labs(signature), "signature", Output, Everyone, EVERY, 20261121, extra: ["labs.signature_text"];
     DictationStyle => labs(dictation_style), "dictation-style", Output, Everyone, EVERY, 20261122, extra: ["labs.dictation_style_choice"];
     HudHeight => labs(hud_height), "hud-height", Dictation, Everyone, MACOS, 20261122, extra: ["labs.hud_bottom_gap"];

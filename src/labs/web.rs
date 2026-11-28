@@ -19,6 +19,7 @@ impl Feature {
                     | Self::CopyCaptureZip
                     | Self::AnnotateAgentTools
                     | Self::AnnotateAgentInstall
+                    | Self::AnnotateShortcutPastes
             )
     }
 
@@ -129,6 +130,7 @@ mod tests {
             Feature::CopyCaptureZip,
             Feature::AnnotateAgentTools,
             Feature::AnnotateAgentInstall,
+            Feature::AnnotateShortcutPastes,
         ] {
             assert!(!feature.on_the_web(), "{}", feature.name());
         }

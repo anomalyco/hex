@@ -99,7 +99,8 @@ see [docs/cli.md](../cli.md)).
 
 `src/labs/web.rs` exports every `Audience::Everyone` feature except internal
 Annotate sub-labs (`Screenshots`, `AnnotateReplay`, `AnnotatePointerScreen`,
-`CopyCaptureZip`, `AnnotateAgentTools`, `AnnotateAgentInstall`).
+`CopyCaptureZip`, `AnnotateAgentTools`, `AnnotateAgentInstall`,
+`AnnotateShortcutPastes`).
 
 ```sh
 HEX_UPDATE_LABS_JSON=1 scripts/check labs::web

@@ -324,6 +324,10 @@ pub struct LabsSettings {
     /// coding agents' own folders and, on macOS, links `hex` onto PATH
     /// (Labs › Install agent skill from Annotate).
     pub annotate_agent_install: bool,
+    /// Pressing the Annotate shortcut while a finished capsule shows Paste,
+    /// with no list open, pastes as clicking Paste does (macOS; Labs ›
+    /// Shortcut pastes a capture).
+    pub annotate_shortcut_pastes: bool,
     /// The local API's `process=global` returns transcripts after Global
     /// mode's output processing.
     pub api_processing: bool,
@@ -592,6 +596,7 @@ impl Default for LabsSettings {
             vocabulary_menu: false,
             annotate_agent_tools: false,
             annotate_agent_install: false,
+            annotate_shortcut_pastes: false,
             api_processing: false,
             api_timestamps: false,
             speakers_only: false,
