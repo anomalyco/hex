@@ -122,6 +122,13 @@ fn floor(observation: &Observation) -> Option<AppParticipantId> {
     }
 }
 
+fn local_speaking(observation: &Observation) -> bool {
+    match observation {
+        Observation::Active { local_speaking, .. } => *local_speaking,
+        other => panic!("no huddle was read: {other:?}"),
+    }
+}
+
 fn roster(observation: Observation) -> Vec<ObservedParticipant> {
     match observation {
         Observation::Active { roster, .. } => roster,
@@ -137,24 +144,98 @@ fn a_huddle_is_read_as_everyone_on_it_and_the_one_person_speaking() {
         Observation::Active {
             roster: everyone(),
             floor: Some(id("U0002ALICE")),
+            local_speaking: false,
         }
     );
-    // The user's own tile takes the floor like anyone's.
+    // The user's own tile takes the floor when nobody remote is speaking.
     let own = observe(&snapshot(vec![a_huddle(false, false, true)]));
     assert_eq!(floor(&own), Some(id("U0001SELF")));
+    assert!(local_speaking(&own));
 }
 
 #[test]
-fn nobody_holds_the_floor_when_nobody_or_several_people_are_marked() {
+fn nobody_holds_the_floor_when_nobody_or_several_remote_people_are_marked() {
     let quiet = observe(&snapshot(vec![a_huddle(false, false, false)]));
     assert_eq!(floor(&quiet), None);
+    assert!(!local_speaking(&quiet));
     assert_eq!(roster(quiet), everyone());
 
-    for (alice, bob, carol) in [(true, true, false), (true, false, true), (true, true, true)] {
+    for (alice, bob, carol) in [(true, true, false), (true, true, true)] {
         let overlap = observe(&snapshot(vec![a_huddle(alice, bob, carol)]));
         assert_eq!(floor(&overlap), None, "{alice} {bob} {carol}");
+        assert_eq!(local_speaking(&overlap), carol, "{alice} {bob} {carol}");
         assert_eq!(roster(overlap), everyone());
     }
+}
+
+#[test]
+fn the_sole_remote_speaker_holds_the_floor_when_the_user_speaks_too() {
+    // Local + 1 remote: that remote participant is the only remote speaker on
+    // system audio, while `local_speaking` keeps the user's tile visible.
+    let alice_and_carol = observe(&snapshot(vec![a_huddle(true, false, true)]));
+    assert_eq!(
+        alice_and_carol,
+        Observation::Active {
+            roster: everyone(),
+            floor: Some(id("U0002ALICE")),
+            local_speaking: true,
+        }
+    );
+    let bob_and_carol = observe(&snapshot(vec![a_huddle(false, true, true)]));
+    assert_eq!(floor(&bob_and_carol), Some(id("U0003BOB")));
+    assert!(local_speaking(&bob_and_carol));
+
+    // Duplicate tiles of the user (one without the `self_` prefix marked, one
+    // with it unmarked) still merge `is_local` before partitioning speakers.
+    let merged = observe(&snapshot(vec![window(vec![
+        tile("peer-3", "U0001SELF", "Carol", true),
+        own_tile("U0001SELF", "Carol", false),
+        tile("peer-1", "U0002ALICE", "Alice", true),
+    ])]));
+    assert_eq!(floor(&merged), Some(id("U0002ALICE")));
+    assert!(local_speaking(&merged));
+
+    // An un-ID'd marked tile still clears `floor` even when the user's own
+    // tile is marked too.
+    let unknown = Node {
+        dom_id: None,
+        ..tile("peer-9", "U0009ANON", "Anon", true)
+    };
+    let with_unknown = observe(&snapshot(vec![window(vec![
+        own_tile("U0001SELF", "Carol", true),
+        tile("peer-1", "U0002ALICE", "Alice", true),
+        unknown,
+    ])]));
+    assert_eq!(floor(&with_unknown), None);
+    assert!(local_speaking(&with_unknown));
+
+    // Through the reader: simultaneous local + remote and local + two remotes
+    // save `local_speaking: true` without ever writing a Slack id.
+    let mut reader = PollState::continuing(&[]);
+    let mut saved = Vec::new();
+    for (at_ms, alice, bob, carol) in [
+        (0, false, false, true),
+        (500, true, false, true),
+        (1_000, true, true, true),
+        (1_500, true, false, false),
+    ] {
+        let seen = Observation::of(&snapshot(vec![a_huddle(alice, bob, carol)]), &ADAPTER);
+        saved.extend(reader.observe(at_ms, seen).evidence);
+    }
+    let floor_lines: Vec<String> = saved
+        .iter()
+        .filter(|line| matches!(line, Evidence::Floor { .. }))
+        .map(|line| serde_json::to_string(line).unwrap())
+        .collect();
+    assert_eq!(
+        floor_lines,
+        [
+            r#"{"kind":"floor","at_ms":0,"holder":"p1","local_speaking":true}"#,
+            r#"{"kind":"floor","at_ms":500,"holder":"p2","local_speaking":true}"#,
+            r#"{"kind":"floor","at_ms":1000,"holder":null,"local_speaking":true}"#,
+            r#"{"kind":"floor","at_ms":1500,"holder":"p2"}"#,
+        ]
+    );
 }
 
 #[test]

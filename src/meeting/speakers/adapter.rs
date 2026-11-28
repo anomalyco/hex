@@ -69,7 +69,18 @@ pub enum Observation {
         /// The one person the app marks as speaking, or nobody. They are
         /// in the roster, now or at an earlier look: a mark on someone the
         /// app never showed says nothing about the floor.
+        ///
+        /// When an app marks active tiles independently (as Slack does),
+        /// the user's own tile does not compete with a lone remote speaker
+        /// because the microphone is its own audio track: the sole remote
+        /// speaker holds `floor`, while `local_speaking` records the user's
+        /// own tile.
         floor: Option<AppParticipantId>,
+        /// Whether the user's own tile is marked as speaking at this look,
+        /// even while a remote speaker holds `floor` or several remote
+        /// tiles are marked at once. Lets calibration follow the user's
+        /// tile without blocking remote attribution.
+        local_speaking: bool,
     },
     /// None of the app's windows is a call.
     NoCallWindow,
@@ -124,6 +135,7 @@ mod tests {
         Observation::Active {
             roster: Vec::new(),
             floor: None,
+            local_speaking: false,
         }
     }
 
@@ -185,6 +197,7 @@ mod tests {
                 is_local: false,
             }],
             floor: Some(id),
+            local_speaking: false,
         };
         let printed = format!("{seen:?}");
         assert!(!printed.contains("U024BE7LH") && !printed.contains("Priya"));

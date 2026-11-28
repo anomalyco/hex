@@ -42,6 +42,7 @@ fn looks(end_ms: u64, marked: impl Fn(u64) -> Option<u32>) -> Vec<Evidence> {
     evidence.extend((0..=end_ms / POLL).map(|look| Evidence::Floor {
         at_ms: look * POLL,
         holder: marked(look * POLL).map(key),
+        local_speaking: false,
     }));
     evidence
 }
@@ -427,4 +428,53 @@ fn the_in_call_transcript_is_named_as_it_grows_and_its_table_handed_on_when_it_c
     assert_eq!(live.name_when(&folder, heard.clone(), false), heard);
     assert_eq!(table.take(), Some(Speakers::default()));
     fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
+fn simultaneous_local_speech_keeps_calibration_healthy_and_names_the_sole_remote_speaker() {
+    // Six rounds where Carol (local) talks for 4 s while Alice backchannels
+    // inside her turn, plus a seventh round where Alice and Bob both talk over
+    // Carol (which must stay Them).
+    let mut entries = Vec::new();
+    for round in 0..6 {
+        let start = round * 10_000;
+        entries.push(you(start, start + 4_000, "Walking through the rollout."));
+        entries.push(them(start + 1_600, start + 2_400, "Yeah, makes sense."));
+    }
+    entries.push(you(60_000, 64_000, "Any other questions?"));
+    entries.push(them(61_600, 62_400, "Wait, what about caching?"));
+
+    let mut evidence = huddle();
+    for look in 0..=66_000 / POLL {
+        let at_ms = look * POLL;
+        let round = at_ms / 10_000;
+        let within = at_ms % 10_000;
+        let local_speaking = (500..=5_000).contains(&within);
+        let alice = (2_000..=3_500).contains(&within);
+        let bob = round == 6 && (2_000..=3_500).contains(&within);
+        let holder = match (alice, bob, local_speaking) {
+            (true, false, _) => Some(key(ALICE)),
+            (false, true, _) => Some(key(BOB)),
+            (false, false, true) => Some(key(CAROL)),
+            _ => None,
+        };
+        evidence.push(Evidence::Floor {
+            at_ms,
+            holder,
+            local_speaking,
+        });
+    }
+
+    let (named, summary) = derive(&entries, &evidence);
+    assert_eq!(
+        summary.calibration,
+        Calibration::Healthy(Timing {
+            onset_lag_ms: 500,
+            release_tail_ms: 1_000,
+        })
+    );
+    assert_eq!((summary.remote_lines, summary.named_lines), (7, 6));
+    let mut expected: Vec<&str> = (0..6).flat_map(|_| ["You", "Alice"]).collect();
+    expected.extend(["You", "Them"]);
+    assert_eq!(labels(&named), expected);
 }

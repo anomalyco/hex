@@ -172,7 +172,11 @@ fn invented_app(snapshot: &Snapshot) -> Observation {
             is_local: is(tile, "tile--self"),
         });
     }
-    Observation::Active { roster, floor }
+    Observation::Active {
+        roster,
+        floor,
+        local_speaking: false,
+    }
 }
 
 fn is(node: &Node, class: &str) -> bool {
@@ -282,6 +286,7 @@ fn floor(at_ms: u64, holder: Option<u32>) -> Evidence {
     Evidence::Floor {
         at_ms,
         holder: holder.map(key),
+        local_speaking: false,
     }
 }
 
@@ -459,6 +464,7 @@ fn someone_who_left_the_roster_can_still_hold_the_floor() {
         Observation::Active {
             roster: Vec::new(),
             floor: Some(priya),
+            local_speaking: false,
         },
     );
     assert_eq!(step.evidence, [floor(500, Some(1))]);
@@ -476,6 +482,7 @@ fn a_mark_on_someone_the_app_never_showed_writes_nothing_of_the_floor() {
                 is_local: true,
             }],
             floor: AppParticipantId::parse(MARCUS),
+            local_speaking: false,
         },
     );
     // Kit is still on the call. Who spoke is not known, and no key is
@@ -738,7 +745,11 @@ impl Dice {
             // Anyone at all, in the roster or not, ever seen or not.
             _ => Some(person(self).id),
         };
-        Observation::Active { roster, floor }
+        Observation::Active {
+            roster,
+            floor,
+            local_speaking: self.roll(2) == 1,
+        }
     }
 }
 

@@ -37,6 +37,7 @@ fn alice_speaking(_: &Snapshot) -> Observation {
             is_local: false,
         }],
         floor: Some(id),
+        local_speaking: false,
     }
 }
 
