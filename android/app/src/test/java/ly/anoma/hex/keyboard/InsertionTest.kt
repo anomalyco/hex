@@ -234,6 +234,12 @@ class InsertionTest {
         for (n in listOf(-1, -2, -3, -4, -5, -9, 1)) slide.moveTo(n)
         assertEquals(listOf(7, 6, 2, 1, 0, 8), moves)
     }
+    @Test fun aHeldDeleteTakesWordsFasterTheLongerItIsHeld() {
+        // Labs › Keyboard › Delete words when held: 500, 400, 320, 256… ms, never under 90 ms.
+        val gaps = generateSequence(HeldDeleteWords.FIRST_GAP, HeldDeleteWords::next).take(12).toList()
+        assertEquals(listOf(500L, 400L, 320L, 256L, 205L, 164L, 131L, 105L, 90L, 90L), gaps.take(10))
+        assertEquals(90L, gaps.last())
+    }
     @Test fun aDeleteSlideSelectsWholeWordsWithTheirSpaces() {
         assertEquals(listOf(4, 9, 14), DeleteSlide.wordLengths("far away from home").take(3))
         assertEquals(listOf(7, 14), DeleteSlide.wordLengths("Hello, world. ").toList())

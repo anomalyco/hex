@@ -20,7 +20,9 @@ internal enum class Tap(private val predefined: Int, private val millis: Long) {
     /** Dictation starting: a click. */
     Start(VibrationEffect.EFFECT_CLICK, 20),
     /** Dictation ending (done, cancelled or failed): a tick. */
-    End(VibrationEffect.EFFECT_TICK, 12);
+    End(VibrationEffect.EFFECT_TICK, 12),
+    /** Labs › Keyboard › Delete words when held: each word a held Delete removes, so the words can be counted by feel. */
+    Word(VibrationEffect.EFFECT_HEAVY_CLICK, 30);
 
     fun effect(vibrator: Vibrator): VibrationEffect = when (val play = plays(vibrator)) {
         is TapPlay.Predefined -> VibrationEffect.createPredefined(play.effect)

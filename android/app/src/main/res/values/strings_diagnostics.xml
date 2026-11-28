@@ -30,6 +30,8 @@
     <string name="diagnostics_tap_release">Held key lifting</string>
     <string name="diagnostics_tap_start">Dictation start</string>
     <string name="diagnostics_tap_end">Dictation end</string>
+    <string name="diagnostics_tap_word">Held Delete’s word</string>
+    <string name="diagnostics_tap_heavy_click">heavy click</string>
     <string name="diagnostics_tap_click">click</string>
     <string name="diagnostics_tap_tick">tick</string>
     <string name="diagnostics_tap_predefined" formatted="false">%1$s: Android’s %2$s</string>

@@ -62,3 +62,15 @@ internal class DeleteSlide(private val target: KeyboardTextTarget, private val c
         }
     }
 }
+
+/** Labs › Keyboard › Delete words when held, as SwiftKey's held delete: after the usual hold
+ * ([KeyboardMetrics.DELETE_REPEAT_DELAY]) the word before the cursor goes at once, then one more word after
+ * [FIRST_GAP] ms, each next gap [SPEEDUP] shorter than the one before, never under [SHORTEST_GAP] ms:
+ * 500, 400, 320, 256… ms. A word is what a delete slide takes ([DeleteSlide.wordLengths]). */
+internal object HeldDeleteWords {
+    const val FIRST_GAP = 500L
+    const val SPEEDUP = 0.2
+    const val SHORTEST_GAP = 90L
+    /** The gap before the word after one that waited [gap] ms. */
+    fun next(gap: Long): Long = maxOf(SHORTEST_GAP, Math.round(gap * (1 - SPEEDUP)))
+}

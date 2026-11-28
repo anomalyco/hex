@@ -756,6 +756,18 @@ internal class KeyboardEngine(
         adaptive?.forget(); resetTyping(); clearSpaces(); surface?.suggestions(emptyList())
         return DeleteSlide(target, selStart, target.before(2000).orEmpty())
     }
+    /** Labs › Keyboard › Delete words when held: a held Delete takes the word before the cursor (what a delete slide
+     * would select first). Returns the UTF-16 length removed, 0 with nothing before the cursor, or -1 where words
+     * can't be read (the lab off, a password or TYPE_NULL field, a selection, no known cursor), so the held key
+     * repeats letters as before. */
+    fun deleteWord(): Int {
+        if (!feedback.deleteWords || secure || keyEventEditor || selStart < 0 || selStart != selEnd || !target.connected) return -1
+        val before = target.before(2000) ?: return -1
+        val length = DeleteSlide.wordLengths(before).firstOrNull() ?: return 0
+        tracker.keyboardRemoved()
+        edited(); adaptive?.forget(); resetTyping(); clearSpaces(); surface?.suggestions(emptyList())
+        return if (target.deleteBefore(length)) length else -1
+    }
     /** The delete slide lifted with words selected: they go. */
     fun deleteSelection() {
         if (!target.connected) return
