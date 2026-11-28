@@ -48,7 +48,7 @@
 ## What Hex does
 
 - Local dictation on macOS, Windows, and Linux, with Parakeet and Whisper GGUF models, Apple Speech on the Mac, and custom models
-- No-bot meeting transcription on the Mac: microphone plus system audio, live chapters, a stored summary, search, SRT and VTT export, and configurable retention
+- No-bot meeting transcription, a beta on macOS, Windows, and Linux turned on in Settings › Labs: microphone plus system audio, live chapters, a stored summary, search, SRT and VTT export, and configurable retention
 - Annotate: capture a screen, a window, a region, or a connected iPhone and open it in an OpenCode session
 - Transforms: deterministic JavaScript for the text Hex pastes, including `fetch` and `node:child_process` after you approve the config's exact contents
 - A command line for status, dictation, settings, history, meetings, and transcribing a file
@@ -58,5 +58,5 @@
 
 - No bot joins a call, and Hex cannot transcribe a meeting it did not record
 - No cloud transcription, account, subscription, word cap, or per-minute billing
-- Meeting capture runs on the Mac today; Windows and Linux run dictation, the CLI, and the read-only MCP server
+- Meetings records nothing until it is turned on: it is a beta in Settings › Labs on macOS, Windows, and Linux
 - Remote speakers are not separated: the microphone is "You" and system audio is "Them"

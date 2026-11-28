@@ -31,8 +31,9 @@ person asks; read-only commands need no running app.
 
 ## Read meetings
 
-Meeting capture is a Mac feature today; the read commands work on macOS, Linux,
-and Windows and can read a mirrored folder with `--meetings-dir <path>`.
+Meetings is a beta on macOS, Windows, and Linux, turned on in Settings › Labs.
+The read commands work on all three and can read a mirrored folder with
+`--meetings-dir <path>`.
 
 ```sh
 hex meetings list --since 7d --json          # ids, titles, times, durations

@@ -53,7 +53,7 @@ test("the below-the-fold copy names the product category and its facts", () => {
     "Parakeet",
     "Whisper",
     "Apple Speech",
-    "your Mac's system audio",
+    "your mic and system audio",
     "No bot joins the call",
     "hex.config.ts",
     "hex transcribe",
@@ -87,6 +87,8 @@ test("the structured data is one graph with the app, site, video, and FAQ", () =
   expect(app["isAccessibleForFree"]).toBe(true)
   expect(app["sameAs"]).toEqual(["https://github.com/anomalyco/hex"])
   expect(Array.isArray(app["featureList"])).toBe(true)
+  // Google requires a video's upload date.
+  expect(String(graph[3]["uploadDate"])).toMatch(/^\d{4}-\d{2}-\d{2}T/)
   const faq = graph[4] as { mainEntity: Array<{ name: string; acceptedAnswer: { text: string } }> }
   expect(faq.mainEntity).toHaveLength(6)
   for (const question of faq.mainEntity) {
@@ -160,6 +162,11 @@ test("every agent file exists and points at every new page", () => {
   const skill = read("./public/skill.md")
   for (const page of ["https://anoma.ly/hex/", "https://anoma.ly/hex/meetings/", "https://anoma.ly/hex/mcp", "https://anoma.ly/hex/changelog", "https://anoma.ly/hex/iphone", "https://anoma.ly/hex/android", "https://anoma.ly/hex/docs/transforms.md", "https://anoma.ly/hex/docs/admin.md", "https://anoma.ly/hex/llms-full.txt", "https://anoma.ly/hex/skill.md"]) {
     expect(index).toContain(page)
+  }
+  // Meetings is a beta on every desktop OS (src/labs/feature.rs), not Mac-only.
+  for (const file of [index, full, skill]) {
+    expect(file.replace(/\s+/g, " ").includes("beta on macOS, Windows, and Linux")).toBe(true)
+    expect(/on the Mac today|Mac feature today/.test(file)).toBe(false)
   }
   expect(index).toContain("open-source")
   expect(index).toContain("offline")

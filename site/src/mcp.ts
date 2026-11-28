@@ -38,7 +38,7 @@ const STYLE = `
 .mcp .copy svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .mcp .copy svg + svg, .mcp .copy[data-copied] svg:first-child { display: none; }
 .mcp .copy[data-copied] svg + svg { display: block; }
-.clients { margin: 20px 0 0; }
+.clients { position: relative; margin: 20px 0 0; }
 .clients > input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .clients__tabs { display: inline-grid; max-width: 100%; grid-auto-columns: 1fr; grid-auto-flow: column; gap: 4px; padding: 4px; border: 1px solid var(--edge); border-radius: 13px; }
 .clients__tabs label { padding: 7px 14px; border-radius: 9px; color: #8a8b90; font-size: 14px; font-weight: 500; text-align: center; white-space: nowrap; cursor: pointer; transition: color 160ms ease, background-color 160ms ease; }
@@ -74,7 +74,7 @@ const STYLE = `
 .mcp td { color: #b4b5ba; font-size: 15px; }
 .mcp .about { margin-top: 24px; padding-top: 0; border-top: 0; font-size: 14px; }
 .mcp td, .mcp .row > span, .mcp .note { text-wrap: pretty; }
-@media (max-width: 600px) {
+@media (max-width: 640px) {
   .clients__tabs { display: grid; grid-auto-flow: row; grid-template-columns: 1fr 1fr; }
   .mcp .row, .mcp .row--copy { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; }
   .mcp .row__label { grid-column: 1 / -1; }
@@ -227,7 +227,7 @@ export function renderMcp(origin: string): string {
     (install) =>
       `<div class="row row--copy"><span class="row__label">${install.os}</span><span class="row__value">${mono(install.path)}<small>${install.note}</small></span>${copy(install.path, `the ${install.os} ${install.kind ?? "path"}`)}</div>`,
   ).join("\n")
-  const radios = CLIENTS.map((client, index) => `<input type="radio" name="client" id="client-${client.id}" aria-label="${client.name}"${index === 0 ? " checked" : ""}>`).join("")
+  const radios = CLIENTS.map((client, index) => `<input type="radio" name="client" id="client-${client.id}"${index === 0 ? " checked" : ""}>`).join("")
   const tabs = CLIENTS.map((client) => `<label for="client-${client.id}">${client.name}</label>`).join("")
   const tools = TOOLS.map(([name, returns]) => `<tr><th scope="row">${escape(name)}</th><td>${returns}</td></tr>`).join("\n")
   const facts = FACTS.map(([label, value]) => `<div class="row"><span class="row__label">${label}</span><span>${value}</span></div>`).join("\n")

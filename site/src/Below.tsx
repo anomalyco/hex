@@ -23,7 +23,7 @@ const FEATURES: { id: string; title: string; line: string; tags: ReactNode[] }[]
   {
     id: "meetings",
     title: "Meetings without bots",
-    line: "Hex records your mic and your Mac's system audio, and writes the transcript locally. No bot joins the call.",
+    line: "Hex records your mic and system audio, and writes the transcript locally. No bot joins the call.",
     tags: ["Chapters", "Notes", <a href={withBase("/meetings/")}>Meetings ↗</a>],
   },
   {
@@ -55,7 +55,7 @@ const QUESTIONS: { question: string; answer: ReactNode }[] = [
   },
   {
     question: "Does a bot join my meetings?",
-    answer: "No. Hex records your microphone and your Mac's system audio itself, so there is no bot in the call.",
+    answer: "No. Hex records your microphone and system audio itself, so there is no bot in the call.",
   },
   {
     question: "Can my coding agent read my meetings?",
