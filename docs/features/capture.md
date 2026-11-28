@@ -792,8 +792,8 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   │   typing there never loses a letter. ⌫, ↑↓, ⏎, and Esc stay the
 │   │   │   app's until the search opens
 │   │   │   (`typing_stays_the_apps_until_the_pointer_moves_onto_the_suggestions`)
-│   │   ├── Suggestions -> at the session tap no key at all (the toast's
-│   │   │   ⏎ and ⇥ aside), only a mouse press, which folds them (the click
+│   │   ├── Suggestions -> at the session tap no key at all, only a mouse
+│   │   │   press, which folds them (the click
 │   │   │   still reaches the app) unless the pointer is on the pill or the
 │   │   │   list under it: the tap reports the press before the overlay gets
 │   │   │   it, so a click on a row would otherwise fold the row away first
@@ -1488,7 +1488,6 @@ Checks:
   `every_change_moves_at_once`,
   `entry_lands_the_pose_instantly_then_springs_to_rest_with_its_content`,
   goldens
-  `tests/golden/capture-capsule-*.png`, and  `the_menu_bar_flow_folds_up_toward_the_menu_bar`, goldens
   `tests/golden/capture-capsule-*.png`, and
   `the_capsule_moves_inside_its_panel_and_comes_to_rest`, which traces every
   scripted state change per frame, Calm and Reduce Motion, for no pops,
