@@ -746,12 +746,15 @@ mod tests {
         include_str!("../rune_ui/onboarding_kit/versus.rs"),
         include_str!("../rune_ui/output.rs"),
         include_str!("../rune_ui/screenshot_thumbnail.rs"),
+        include_str!("../rune_ui/screenshot_thumbnail/files.rs"),
         #[cfg(hex_capture)]
         include_str!("../rune_ui/screenshot_thumbnail/card.rs"),
         #[cfg(hex_capture)]
         include_str!("../rune_ui/captures.rs"),
         #[cfg(hex_capture)]
         include_str!("../rune_ui/screenshot_thumbnail/editor.rs"),
+        #[cfg(hex_capture)]
+        include_str!("../rune_ui/screenshot_thumbnail/editor/layers.rs"),
         #[cfg(hex_capture)]
         include_str!("../rune_ui/screenshot_thumbnail/editor/view.rs"),
         include_str!("../screenshots.rs"),

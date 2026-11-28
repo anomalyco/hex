@@ -105,6 +105,8 @@ impl Export {
         let rect = marks::pixel_rect(self.crop, self.size);
         let rgba = if self.marks.is_empty() {
             marks::crop(&self.rgba, self.size[0], rect)
+        } else if self.marks.iter().all(|m| matches!(m, Mark::Image(_))) {
+            super::image_layer::composite_all_images(&self.rgba, self.size, rect, &self.marks)
         } else {
             self.render(rect).map_err(MarksNotDrawn)?
         };
@@ -122,6 +124,13 @@ impl Export {
         );
         while self.image.pixels().size() == (0, 0) {
             std::thread::yield_now();
+        }
+        for mark in &self.marks {
+            if let Mark::Image(img) = mark {
+                while img.image.pixels().size() == (0, 0) {
+                    std::thread::yield_now();
+                }
+            }
         }
         let [x, y, w, h] = rect;
         let state = ExportView {
@@ -171,17 +180,34 @@ pub(super) fn deliver(out: &Out, png: &[u8], words: &str) -> anyhow::Result<()> 
         Out::Copy => save::copy(png, None),
         Out::Save(path) => save::write_to(path, png),
         Out::Send(dest) => {
-            let folder = std::env::temp_dir().join("hex-screenshots");
+            let folder = scratch();
             let path = save::write(&folder, png)?;
             let text = if words.is_empty() { SEND_TEXT } else { words };
             crate::capture_host::send_image(&dest.session, text, &path)
+        }
+        Out::Preview => {
+            let folder = scratch();
+            let path = save::write(&folder, png)?;
+            crate::rune_ui::screenshot_thumbnail::files::open_in_preview_sync(&path)
         }
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(super) fn deliver(_: &Out, _: &[u8], _: &str) -> anyhow::Result<()> {
-    anyhow::bail!("the screenshot editor exports on macOS only")
+pub(super) fn deliver(out: &Out, png: &[u8], _: &str) -> anyhow::Result<()> {
+    match out {
+        Out::Preview => {
+            let folder = std::env::temp_dir().join("hex-screenshots");
+            std::fs::create_dir_all(&folder)?;
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis());
+            let path = folder.join(format!("hex-preview-{stamp}.png"));
+            std::fs::write(&path, png)?;
+            crate::rune_ui::screenshot_thumbnail::files::open_in_preview_sync(&path)
+        }
+        _ => anyhow::bail!("the screenshot editor exports on macOS only"),
+    }
 }
 
 /// What a recording's export needs, taken from the editor.
@@ -222,6 +248,10 @@ impl ClipExport {
                 let sheet = save::write(&scratch(), &encode(*w, *h, rgba, 1.0)?)?;
                 let text = clip_text(&self.words, &movie, self.length_ms);
                 crate::capture_host::send_image(&dest.session, &text, &sheet)
+            }
+            Out::Preview => {
+                let movie = self.written(progress)?;
+                crate::rune_ui::screenshot_thumbnail::files::open_in_preview_sync(&movie)
             }
         }
     }

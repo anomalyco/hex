@@ -100,13 +100,17 @@ fn entry(p: Paint, card: &Entry, hovered: bool, reduced: bool) -> El {
             .absolute(CLOSE_INSET, h - CLOSE_INSET - PILL_H)
             .opacity(arrived)
     });
+    let recording = card.shot.recording.is_some();
     let shell = shell
         .cursor(Cursor::Pointer)
         .on_press_tx(move |s: &mut Cards, tx| s.open(id, tx))
-        .on_secondary_press(move |_: &mut Cards, press, tx| menu(id, press, tx))
+        .on_secondary_press(move |_: &mut Cards, press, tx| menu(id, recording, press, tx))
         .drag_out(move |s: &Cards| {
-            s.get(id)
-                .map(|card| rune::DragItem::new().file(card.shot.path.clone()))
+            s.get(id).map(|card| {
+                rune::DragItem::new()
+                    .file(card.shot.path.clone())
+                    .within_app()
+            })
         })
         .hit()
         .on_hover_change(move |s: &mut Cards, on, tx| {
@@ -141,9 +145,12 @@ fn travel([_, _, w, _]: [f32; 4], reduced: bool) -> Transition {
 }
 
 /// The card's right-click menu.
-fn menu(id: u64, press: rune::PointerPress, tx: &mut Tx) {
-    let menu = PopupMenu::new()
-        .item(PopupItem::new("edit", tr("Open in Editor")))
+fn menu(id: u64, recording: bool, press: rune::PointerPress, tx: &mut Tx) {
+    let mut menu = PopupMenu::new().item(PopupItem::new("edit", tr("Open in Editor")));
+    if !recording {
+        menu = menu.item(PopupItem::new("preview", super::files::preview_label()));
+    }
+    let menu = menu
         .item(PopupItem::new("copy", tr("Copy")))
         .item(PopupItem::new("reveal", tr("Show in Finder")))
         .separator()
@@ -152,6 +159,7 @@ fn menu(id: u64, press: rune::PointerPress, tx: &mut Tx) {
     tx.popup_menu(menu, press, move |s: &mut Cards, picked, tx| {
         let key = match picked {
             Some("edit") => CardKey::Edit,
+            Some("preview") => CardKey::Preview,
             Some("copy") => CardKey::Copy,
             Some("reveal") => CardKey::Reveal,
             Some("trash") => CardKey::Trash,

@@ -13,6 +13,10 @@
 
 pub(crate) mod clip;
 mod export;
+pub(super) mod image_layer;
+mod layers;
+#[cfg(target_os = "macos")]
+mod mac_drop;
 pub(crate) mod marks;
 mod narration;
 mod view;
@@ -52,7 +56,7 @@ const LIST_ROWS: usize = 8;
 /// How long a note such as "Copied" stays.
 const NOTE_S: f64 = 2.0;
 /// How long a close takes, before the overlay hides.
-const LEAVE_S: f64 = 0.3;
+const LEAVE_S: f64 = 0.21;
 /// How often the playhead moves while a recording plays.
 const PLAY_STEP: Duration = Duration::from_millis(33);
 
@@ -96,6 +100,8 @@ enum Out {
     /// To the file the save panel chose.
     Save(PathBuf),
     Send(Dest),
+    /// Open in Preview (macOS) or the system's default viewer.
+    Preview,
 }
 
 /// The toolbar button an export was pressed on, which shows its progress.
@@ -110,7 +116,7 @@ impl Out {
     fn pressed(&self) -> Pressed {
         match self {
             Self::Copy => Pressed::Copy,
-            Self::Save(_) => Pressed::Save,
+            Self::Save(_) | Self::Preview => Pressed::Save,
             Self::Send(_) => Pressed::Send,
         }
     }
@@ -154,6 +160,19 @@ pub(crate) struct Editor {
     cropping: Option<([f32; 2], [f32; 2])>,
     /// Text being typed: its top-left and what's typed.
     typing: Option<([f32; 2], String)>,
+    /// Currently selected stacked image layer, if any.
+    selected_image: Option<u64>,
+    /// Active move or corner-resize drag on an image layer.
+    image_drag: Option<image_layer::ImageDrag>,
+    /// Potential click-to-select on an unselected image layer.
+    pending_image_click: Option<(u64, [f32; 2])>,
+    /// Next unique ID for a pasted or dropped image layer.
+    next_image_id: u64,
+    /// Whether a file drag carrying images is hovering over the editor.
+    drop_hover: bool,
+    /// Undo and redo snapshots for marks, crop, and image layers.
+    undo_stack: Vec<image_layer::Snapshot>,
+    redo_stack: Vec<image_layer::Snapshot>,
     send: Option<SendList>,
     /// What was said over the shot, every dictation's words joined.
     words: String,
@@ -339,6 +358,8 @@ impl Editor {
     fn pick(&mut self, tool: Tool) {
         self.finish_typing();
         self.send = None;
+        self.selected_image = None;
+        self.image_drag = None;
         self.tool = tool;
     }
 
@@ -347,16 +368,9 @@ impl Editor {
         if let Some((at, text)) = self.typing.take()
             && let Some(mark) = (Mark::Text { at, text }).finished(scale)
         {
+            let before = self.snapshot();
             self.marks.push(mark);
-        }
-    }
-
-    fn undo(&mut self) {
-        if self.typing.take().is_some() {
-            return;
-        }
-        if self.marks.pop().is_none() {
-            self.crop = None;
+            self.push_undo(before);
         }
     }
 
@@ -385,15 +399,18 @@ impl Editor {
     }
 
     /// A drag on the shot, at `at` in its pixels.
+    #[cfg_attr(not(test), allow(dead_code))]
     fn draw(&mut self, phase: Phase, at: [f32; 2]) {
+        let fit = self.layout().fit;
+        self.handle_canvas_drag(phase, at, fit);
+    }
+
+    /// Runs the active drawing, text, or crop tool at `at` (already clamped).
+    pub(super) fn draw_tool(&mut self, phase: Phase, at: [f32; 2]) {
         let Some(shot) = &self.shot else {
             return;
         };
         let (size, scale) = (shot.size, shot.scale);
-        let at = [
-            at[0].clamp(0.0, size[0] as f32),
-            at[1].clamp(0.0, size[1] as f32),
-        ];
         match (self.tool, phase) {
             (Tool::Text, Phase::Down) => {
                 self.finish_typing();
@@ -409,7 +426,12 @@ impl Editor {
             }
             (Tool::Crop, Phase::Up) => {
                 if let Some((from, _)) = self.cropping.take() {
-                    self.crop = marks::crop_rect(from, at, size, scale);
+                    let next = marks::crop_rect(from, at, size, scale);
+                    if next != self.crop {
+                        let before = self.snapshot();
+                        self.crop = next;
+                        self.push_undo(before);
+                    }
                 }
             }
             (tool, Phase::Down) => {
@@ -426,7 +448,9 @@ impl Editor {
             },
             (_, Phase::Up) => {
                 if let Some(mark) = self.draft.take().and_then(|mark| mark.finished(scale)) {
+                    let before = self.snapshot();
                     self.marks.push(mark);
+                    self.push_undo(before);
                 }
             }
         }
@@ -625,6 +649,7 @@ impl Editor {
                             Out::Copy => tr("Copied").to_owned(),
                             Out::Save(path) => return saved(&overlay, path, None),
                             Out::Send(dest) => tr_fill("Sent to {}", &dest.name),
+                            Out::Preview => return,
                         };
                         overlay.update(move |s, tx| s.note(note, tx));
                     }
@@ -706,11 +731,14 @@ impl Editor {
                                 return saved(&overlay, path, Some(generation));
                             }
                             Out::Send(dest) => tr_fill("Sent to {}", &dest.name),
+                            Out::Preview => String::new(),
                         };
                         overlay.update(move |s, tx| {
                             if s.generation == generation {
                                 s.exporting = None;
-                                s.note(note, tx);
+                                if !note.is_empty() {
+                                    s.note(note, tx);
+                                }
                             }
                         });
                     }
@@ -798,6 +826,7 @@ fn export_failure(error: &anyhow::Error, out: &Out) -> String {
         Out::Copy => tr("Couldn't copy").to_owned(),
         Out::Save(_) => tr("Couldn't save").to_owned(),
         Out::Send(_) => tr("Couldn't send").to_owned(),
+        Out::Preview => tr("Couldn't open").to_owned(),
     }
 }
 
@@ -841,7 +870,15 @@ fn on_key(s: &mut Editor, key: &KeyEvent, tx: &mut Tx) -> bool {
     }
     tx.animated();
     if key.is_command('z') {
-        s.undo();
+        if key.mods.shift {
+            s.redo();
+        } else {
+            s.undo();
+        }
+        return true;
+    }
+    if key.is_command('v') && s.typing.is_none() && s.send.is_none() && s.clip.is_none() {
+        s.request_paste(tx);
         return true;
     }
     if key.is_command('c') && s.typing.is_none() {
@@ -897,10 +934,17 @@ fn on_key(s: &mut Editor, key: &KeyEvent, tx: &mut Tx) -> bool {
         tx.wake_after(Duration::ZERO);
         return true;
     }
+    if matches!(key.key, Key::Backspace | Key::Delete) && s.selected_image.is_some() {
+        s.delete_selected_image();
+        return true;
+    }
     if key.key == Key::Escape {
-        // Escape first cancels a dictation over the shot; the panel stays.
+        // Escape first cancels a dictation over the shot, then deselects any
+        // active image layer, before closing the panel.
         if s.cancel_listening() {
             talk(Talk::Cancel);
+        } else if s.selected_image.take().is_some() {
+            s.image_drag = None;
         } else {
             s.close(tx);
         }
@@ -985,6 +1029,8 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) {
         .release_gpu_when_hidden()
         .on_key(on_key)
         .poll(poll);
+    #[cfg(target_os = "macos")]
+    let spec = spec.on_created(|created| mac_drop::attach(created.window_number));
     let overlay = app.overlay(spec, Editor::default());
     let handle = overlay.clone();
     overlay.update(move |s, _| s.overlay = Some(handle));
@@ -1089,5 +1135,7 @@ pub(crate) fn open_from(path: PathBuf, words: String, from: Option<From>) {
     }
 }
 
+#[cfg(test)]
+mod image_layer_tests;
 #[cfg(test)]
 mod tests;

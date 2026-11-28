@@ -378,3 +378,40 @@ fn restore_brings_back_the_card_closed_last_but_never_a_trashed_one() {
     std::fs::remove_file(&file).unwrap();
     assert!(!cards.restore());
 }
+
+#[test]
+fn snappier_thumbnail_and_flight_timings_stay_critically_damped() {
+    assert!(flight::FLY.duration <= 0.35 && flight::FLY.bounce == 0.0);
+    assert!(flight::LIFT.duration < flight::FLY.duration && flight::LIFT.bounce == 0.0);
+    assert!(FADE.duration <= 0.16 && LEAVE.duration <= 0.18 && LEAVE_S <= 0.30);
+    assert_eq!(
+        REDUCED,
+        crate::rune_ui::capture_capsule::tuning::spring(crate::rune_hud::spring::REDUCED_FADE)
+    );
+}
+
+#[test]
+fn card_drag_out_allows_in_app_drops_onto_the_editor() {
+    let cards = Cards::one(shot([800, 600]), false);
+    let mut rt = crate::rune_ui::offscreen::runtime(
+        cards,
+        card::view,
+        PREVIEW,
+        rune::Env {
+            system_dark: true,
+            scale: 2.0,
+        },
+        rune::text::TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES),
+    );
+    rt.settle_all();
+    rt.frame(0.0);
+    assert!(
+        rt.elements()
+            .into_iter()
+            .any(|e| e.key.as_deref().is_some_and(|k| k.starts_with("card-"))),
+        "a rendered card"
+    );
+    let cmd = files::open_in_preview_command(std::path::Path::new("/tmp/shot.png"));
+    #[cfg(target_os = "macos")]
+    assert_eq!(cmd.get_program(), "/usr/bin/open");
+}

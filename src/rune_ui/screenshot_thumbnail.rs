@@ -22,6 +22,7 @@
 
 mod card;
 pub(crate) mod editor;
+pub(crate) mod files;
 mod flight;
 
 use std::cell::Cell;
@@ -52,15 +53,15 @@ const RADIUS: f32 = SCREEN_RADIUS - INSET;
 /// ✕ sits inside the card's corner, its corner concentric with the card's.
 const CLOSE_INSET: f32 = 6.0;
 const CLOSE_RADIUS: f32 = RADIUS - CLOSE_INSET;
-const FADE: Spring = Spring::new(0.22, 0.0);
+const FADE: Spring = Spring::new(0.15, 0.0);
 /// Out past the display's edge: short, no bounce.
-const LEAVE: Spring = Spring::new(0.24, 0.0);
+const LEAVE: Spring = Spring::new(0.17, 0.0);
 const REDUCED: Spring =
     super::capture_capsule::tuning::spring(crate::rune_hud::spring::REDUCED_FADE);
 /// How far it leans back as it leaves, about its bottom-right corner.
 const TRAVEL_SCALE: f32 = 0.94;
 /// How long leaving takes, before the empty overlay hides.
-const LEAVE_S: f64 = 0.4;
+const LEAVE_S: f64 = 0.28;
 /// How long a note such as "Copied" shows on its card.
 const NOTE_S: f64 = 1.6;
 /// The recording pill's height, inside the card's bottom-left corner.
@@ -181,6 +182,8 @@ pub(crate) enum CardKey {
     Reveal,
     /// ⌘E: the editor.
     Edit,
+    /// Right-click: Open in Preview (macOS) or the default viewer.
+    Preview,
     /// ⌘W or Escape.
     Close,
     /// Return: the file is already saved, so this closes it. Only the
@@ -395,6 +398,7 @@ impl Cards {
         let recording = card.shot.recording.is_some();
         match key {
             CardKey::Edit => self.open(id, tx),
+            CardKey::Preview => files::open_in_preview(path),
             CardKey::Close | CardKey::Keep => self.close(id, tx),
             CardKey::Copy => files::copy(path, recording, self.overlay.clone(), id),
             CardKey::Reveal => files::reveal(&path),
@@ -668,94 +672,6 @@ impl Thumbnail {
             tx.animated();
             tx.wake_after(Duration::ZERO);
         });
-    }
-}
-
-/// What a card does with its file, off the main thread.
-pub(crate) mod files {
-    use std::path::{Path, PathBuf};
-
-    use rune::OverlayHandle;
-
-    use super::Cards;
-    use crate::desktop::i18n::tr;
-
-    /// The file on the clipboard, and a shot's picture with it. Card `id`
-    /// says what was copied once the clipboard has it, or that it wasn't.
-    pub(super) fn copy(
-        path: PathBuf,
-        recording: bool,
-        overlay: Option<OverlayHandle<Cards>>,
-        id: u64,
-    ) {
-        spawn("hex-card-copy", move || {
-            #[cfg(target_os = "macos")]
-            let copied = crate::screenshots::save::copy_saved(&path, recording);
-            #[cfg(not(target_os = "macos"))]
-            let copied: anyhow::Result<()> = {
-                let _ = (&path, recording);
-                Err(anyhow::anyhow!("cards copy on macOS only"))
-            };
-            let note = match copied {
-                Ok(()) => copied_note(recording),
-                Err(error) => {
-                    tracing::warn!(%error, path = %path.display(), "could not copy the capture");
-                    tr("Couldn't copy")
-                }
-            };
-            if let Some(overlay) = overlay {
-                overlay.update(move |s, tx| s.note(id, note.to_owned(), tx));
-            }
-        });
-    }
-
-    /// What a card says once its copy is on the clipboard: a shot's
-    /// picture, or a recording's movie file.
-    pub(super) fn copied_note(recording: bool) -> &'static str {
-        if recording {
-            tr("Movie copied")
-        } else {
-            tr("Copied")
-        }
-    }
-
-    /// The file selected in Finder or Explorer, or its folder on Linux.
-    pub(super) fn reveal(path: &Path) {
-        crate::meeting::reveal(path);
-    }
-
-    pub(crate) fn trash(path: PathBuf) {
-        spawn("hex-card-trash", move || {
-            #[cfg(target_os = "macos")]
-            match crate::screenshots::save::trash(&path) {
-                Ok(()) => {
-                    crate::history::captures::forget(&path);
-                    crate::history::annotations::forget(&path);
-                }
-                Err(error) => {
-                    tracing::warn!(%error, path = %path.display(), "could not trash the capture");
-                    crate::feedback::play(crate::feedback::Tone::Error);
-                }
-            }
-            #[cfg(not(target_os = "macos"))]
-            match crate::meeting::move_to_trash(&path) {
-                Ok(()) => {
-                    crate::history::captures::forget(&path);
-                    #[cfg(hex_capture)]
-                    crate::history::annotations::forget(&path);
-                }
-                Err(error) => {
-                    tracing::warn!(%error, path = %path.display(), "could not trash the capture");
-                    crate::feedback::play(crate::feedback::Tone::Error);
-                }
-            }
-        });
-    }
-
-    fn spawn(name: &str, work: impl FnOnce() + Send + 'static) {
-        if let Err(error) = std::thread::Builder::new().name(name.into()).spawn(work) {
-            tracing::warn!(%error, "could not start {name}");
-        }
     }
 }
 
