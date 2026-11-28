@@ -172,7 +172,6 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val clipboardHistory = remember(revision) { typing.clipboardHistory }
     val smartQuotes = remember(revision) { typing.smartQuotes }
     val swipeDeleteLetters = remember(revision) { typing.swipeDeleteLetters }
-    val deleteWords = remember(revision) { typing.deleteWords }
     val marksTakeFixSpace = remember(revision) { typing.marksTakeFixSpace }
     val marksKeepSpace = remember(revision) { typing.marksKeepSpace }
     val holdClick = remember(revision) { typing.holdClick }
@@ -601,8 +600,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 Toggle(stringResource(R.string.swipe_delete_letters), stringResource(R.string.swipe_delete_letters_detail),
                                     swipeDeleteLetters) { typing.swipeDeleteLetters = it }
                                 Rule()
-                                Toggle(stringResource(R.string.delete_words), stringResource(R.string.delete_words_detail),
-                                    deleteWords) { typing.deleteWords = it }
+                                DeleteWordsRows(typing, revision)
                                 Rule()
                                 ImportedWordsRows(typing, revision)
                                 Rule()

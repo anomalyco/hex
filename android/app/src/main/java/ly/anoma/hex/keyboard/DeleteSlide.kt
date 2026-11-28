@@ -64,13 +64,24 @@ internal class DeleteSlide(private val target: KeyboardTextTarget, private val c
 }
 
 /** Labs › Keyboard › Delete words when held, as SwiftKey's held delete: after the usual hold
- * ([KeyboardMetrics.DELETE_REPEAT_DELAY]) the word before the cursor goes at once, then one more word after
- * [FIRST_GAP] ms, each next gap [SPEEDUP] shorter than the one before, never under [SHORTEST_GAP] ms:
- * 500, 400, 320, 256… ms. A word is what a delete slide takes ([DeleteSlide.wordLengths]). */
+ * ([KeyboardMetrics.DELETE_REPEAT_DELAY]) the word before the cursor goes at once, then one more word after the
+ * initial delay ([FIRST_GAP] ms by default), each next gap the acceleration ([SPEEDUP]% by default) shorter than the
+ * one before, never under [SHORTEST_GAP] ms: 500, 400, 320, 256… ms. Both are the lab's sliders (#3032). A word is
+ * what a delete slide takes ([DeleteSlide.wordLengths]). */
 internal object HeldDeleteWords {
-    const val FIRST_GAP = 500L
-    const val SPEEDUP = 0.2
+    const val FIRST_GAP = 500
+    const val DELAY_MIN = 200
+    const val DELAY_MAX = 1000
+    const val DELAY_STEP = 50
+    const val SPEEDUP = 20
+    const val SPEEDUP_MIN = 0
+    const val SPEEDUP_MAX = 50
+    const val SPEEDUP_STEP = 5
     const val SHORTEST_GAP = 90L
-    /** The gap before the word after one that waited [gap] ms. */
-    fun next(gap: Long): Long = maxOf(SHORTEST_GAP, Math.round(gap * (1 - SPEEDUP)))
+
+    fun clampDelay(ms: Int) = ms.coerceIn(DELAY_MIN, DELAY_MAX)
+    fun clampSpeedup(percent: Int) = percent.coerceIn(SPEEDUP_MIN, SPEEDUP_MAX)
+    /** The gap before the word after one that waited [gap] ms, each [speedup]% shorter. */
+    fun next(gap: Long, speedup: Int = SPEEDUP): Long =
+        maxOf(SHORTEST_GAP, Math.round(gap * (1 - clampSpeedup(speedup) / 100.0)))
 }

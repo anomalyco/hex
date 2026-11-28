@@ -2,6 +2,7 @@ package ly.anoma.hex.typing
 
 import android.content.Context
 import java.security.MessageDigest
+import ly.anoma.hex.keyboard.HeldDeleteWords
 import ly.anoma.hex.keyboard.KeyClick
 import ly.anoma.hex.keyboard.KeyboardHeight
 import ly.anoma.hex.keyboard.KeyColor
@@ -71,6 +72,16 @@ internal class TypingPreferences(context: Context) {
     var deleteWords: Boolean
         get() = prefs.getBoolean(DELETE_WORDS, false)
         set(value) { prefs.edit().putBoolean(DELETE_WORDS, value).apply() }
+    /** Labs › Keyboard › Delete words when held › Initial delay: the gap after the first word, in ms (#3032). Kept
+     * while the lab is off. */
+    var deleteWordsDelay: Int
+        get() = HeldDeleteWords.clampDelay(prefs.getInt(DELETE_WORDS_DELAY, HeldDeleteWords.FIRST_GAP))
+        set(value) { prefs.edit().putInt(DELETE_WORDS_DELAY, HeldDeleteWords.clampDelay(value)).apply() }
+    /** Labs › Keyboard › Delete words when held › Acceleration: how much shorter each next gap is, in % (#3032). Kept
+     * while the lab is off. */
+    var deleteWordsSpeedup: Int
+        get() = HeldDeleteWords.clampSpeedup(prefs.getInt(DELETE_WORDS_SPEEDUP, HeldDeleteWords.SPEEDUP))
+        set(value) { prefs.edit().putInt(DELETE_WORDS_SPEEDUP, HeldDeleteWords.clampSpeedup(value)).apply() }
     /** Labs › Keyboard › SwiftKey words: the words imported from another keyboard's export ([ImportedWords])
      * join your own words in suggestions. Off by default; the imported list stays on the phone while off. */
     var importedWords: Boolean
@@ -196,6 +207,8 @@ internal class TypingPreferences(context: Context) {
         const val SMART_QUOTES = "smartQuotes"
         const val SWIPE_DELETE_LETTERS = "swipeDeleteLetters"
         const val DELETE_WORDS = "deleteWords"
+        const val DELETE_WORDS_DELAY = "deleteWordsDelay"
+        const val DELETE_WORDS_SPEEDUP = "deleteWordsSpeedup"
         const val MARKS_TAKE_FIX_SPACE = "marksTakeFixSpace"
         const val MARKS_KEEP_SPACE = "marksKeepSpace"
         const val HOLD_CLICK = "holdClick"
