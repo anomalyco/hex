@@ -616,16 +616,19 @@ Zoom / Teams / Slack huddle / FaceTime / WhatsApp / Discord / browser call uses 
   as sitting in a space can hold it; Discord: com.hnc.Discord and its helpers,
   its Canary and PTB builds, Discord.exe, the Linux discord binary and Flatpak,
   #1283)
-Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser call on
-  voice.google.com, messenger.com, facetime.apple.com,
-  web.groupme.com, or webex.com                 // always on (graduated from Labs)
+Signal / Telegram / WeChat / LINE / Webex / Element / Phone / Kontur Talk call, or a
+  browser call on voice.google.com, messenger.com, facetime.apple.com,
+  web.groupme.com, webex.com, or ktalk.ru       // always on (graduated from Labs)
   (Signal: org.whispersystems.signal-desktop; Telegram: ru.keepcoder.Telegram,
   com.tdesktop.Telegram, org.telegram.desktop; WeChat: com.tencent.xinWeChat;
   LINE: jp.naver.line.mac; Webex: com.webex.meetingmanager,
   com.cisco.webexmeetingsapp, Cisco-Systems.Spark (CiscoCollabHost.exe on
-  Windows); Element: im.riot.app; Phone: com.apple.mobilephone;
+  Windows); Element: im.riot.app; Phone: com.apple.mobilephone; Kontur Talk
+  (Толк): kontur.talk and its kontur.talk.helper* helpers, and any *.ktalk.ru
+  page as one ktalk.ru site, #2890;
   Signal, Telegram, WeChat, LINE, Element, Messenger, and GroupMe wait 20 s,
-  as voice notes and clips also hold the microphone; Webex and Phone wait 2 s)
+  as voice notes and clips also hold the microphone; Webex, Kontur Talk, and
+  Phone wait 2 s)
   -> CoreAudio input process -> canonical host app   // parent PID + bundle ID
   -> On the microphone for 2 s by the monotonic clock // meetings.detect
      │   Google Meet, Banshee (banshee.app), and Teams pages
@@ -787,11 +790,14 @@ The Webex app is `com.webex.meetingmanager`, `com.cisco.webexmeetingsapp`, or
 Cisco's current `Cisco-Systems.Spark` bundle, and `CiscoCollabHost.exe` is its
 Windows host. Signal, Telegram, WeChat, LINE, Element, Messenger, and GroupMe
 keep WhatsApp's about-20 s threshold because voice notes and clips hold the
-microphone too; Webex and Phone take the normal 2 s. On macOS, where Hex reads
+microphone too; Webex, Kontur Talk, and Phone take the normal 2 s. On macOS, where Hex reads
 the browser's page, pages on `voice.google.com` (Google Voice), `messenger.com`,
 `facetime.apple.com` (FaceTime), and `web.groupme.com` are named, and any
 `webex.com` subdomain is Webex, with one `webex.com` provider choice covering
-them all. The Calls sheet lists them once Hex has seen a call in them. A
+them all. Kontur Talk (Толк) is the `kontur.talk` app with its
+`kontur.talk.helper*` helpers, and any `*.ktalk.ru` page (each company has its
+own subdomain) is Kontur Talk under one `ktalk.ru` provider choice; its
+Windows and Linux executables are not mapped. The Calls sheet lists them once Hex has seen a call in them. A
 FaceTime page gets its own `facetime.apple.com` answer, shown as
 "FaceTime (web)", which does not follow the FaceTime app's. A Webex page's
 `webex.com` answer covers every subdomain. Their answers work as the

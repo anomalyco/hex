@@ -297,7 +297,7 @@ pub const KNOWN_MEETING_PROVIDERS: [(&str, &str); 8] = [
 ];
 
 /// The other call services Hex names and offers, by the same provider keys.
-pub const MORE_MEETING_PROVIDERS: [(&str, &str); 10] = [
+pub const MORE_MEETING_PROVIDERS: [(&str, &str); 11] = [
     ("org.whispersystems.signal-desktop", "Signal"),
     ("ru.keepcoder.Telegram", "Telegram"),
     ("com.tencent.xinWeChat", "WeChat"),
@@ -308,6 +308,7 @@ pub const MORE_MEETING_PROVIDERS: [(&str, &str); 10] = [
     ("voice.google.com", "Google Voice"),
     ("messenger.com", "Messenger"),
     ("web.groupme.com", "GroupMe"),
+    ("kontur.talk", "Kontur Talk"),
 ];
 
 /// What Hex does when it detects a call from a provider. Shown as Ask each
