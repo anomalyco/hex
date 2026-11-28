@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.anomalyco/hex",
+  "title": "Hex MCP",
+  "description": "Lets your AI agent read the meetings Hex records on your computer: transcripts, chapters, and notes.",
+  "version": "3.5.2",
+  "websiteUrl": "https://anoma.ly/hex/mcp",
+  "repository": {
+    "url": "https://github.com/anomalyco/hex",
+    "source": "github",
+    "id": "1304469751"
+  },
+  "icons": [
+    {
+      "src": "https://anoma.ly/hex/favicon.svg",
+      "mimeType": "image/svg+xml",
+      "sizes": [
+        "any"
+      ]
+    }
+  ]
+}
