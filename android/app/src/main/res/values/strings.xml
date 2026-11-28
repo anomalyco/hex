@@ -258,6 +258,9 @@
     <string name="hex_key_left_detail">Moves the Hex key you hold to talk to the left end of the suggestion strip</string>
     <string name="volume_in_menu">Volume in the Hex menu</string>
     <string name="volume_in_menu_detail">Adds Volume to the Hex menu, which opens the phone’s volume controls</string>
+    <string name="key_click_volume">Key click volume</string>
+    <string name="key_click_volume_detail">Plays the key click at the level you set instead of the phone’s. Follows Touch sounds</string>
+    <string name="key_click_volume_percent">%1$d%%</string>
     <!-- Labs › Keyboard › Key colors, iPhone Hex's words. -->
     <string name="key_colors">Key colors</string>
     <string name="key_color">Color</string>

@@ -2,6 +2,7 @@ package ly.anoma.hex.typing
 
 import android.content.Context
 import java.security.MessageDigest
+import ly.anoma.hex.keyboard.KeyClick
 import ly.anoma.hex.keyboard.KeyboardHeight
 import ly.anoma.hex.keyboard.KeyColor
 import ly.anoma.hex.speech.Spoken
@@ -116,6 +117,17 @@ internal class TypingPreferences(context: Context) {
     var volumeInMenu: Boolean
         get() = prefs.getBoolean(VOLUME_IN_MENU, false)
         set(value) { prefs.edit().putBoolean(VOLUME_IN_MENU, value).apply() }
+    /** Labs › Keyboard › Key click volume: the key click at [keyClickPercent] instead of the phone's own level (#3005).
+     * Off by default. */
+    var keyClickVolume: Boolean
+        get() = prefs.getBoolean(KEY_CLICK_VOLUME, false)
+        set(value) { prefs.edit().putBoolean(KEY_CLICK_VOLUME, value).apply() }
+    /** Labs › Keyboard › Key click volume's slider, [KeyClick.MIN]–[KeyClick.MAX]%; kept while the lab is off. */
+    var keyClickPercent: Int
+        get() = KeyClick.clamp(prefs.getInt(KEY_CLICK_PERCENT, KeyClick.DEFAULT))
+        set(value) { prefs.edit().putInt(KEY_CLICK_PERCENT, KeyClick.clamp(value)).apply() }
+    /** The percent the keys click at, or null for the phone's own level (the lab off). */
+    val clickPercent: Int? get() = if (keyClickVolume) keyClickPercent else null
     /** Labs › Keyboard › Voice-only mode: a "voice" subtype other keyboards switch to for dictation
      * alone, off by default. */
     var voiceOnly: Boolean
@@ -184,6 +196,8 @@ internal class TypingPreferences(context: Context) {
         const val HEIGHT = "keyboardHeight"
         const val HEX_KEY_LEFT = "hexKeyLeft"
         const val VOLUME_IN_MENU = "volumeInMenu"
+        const val KEY_CLICK_VOLUME = "keyClickVolume"
+        const val KEY_CLICK_PERCENT = "keyClickPercent"
         const val KEY_COLORS = "keyColors"
         const val KEY_COLOR = "keyColor"
         const val TEST_KEYBOARD_ON_HOME = "testKeyboardOnHome"
