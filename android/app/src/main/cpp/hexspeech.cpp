@@ -92,9 +92,19 @@ static std::atomic<jlong> abandoned{0};
 extern "C" JNIEXPORT void JNICALL
 Java_ly_anoma_hex_speech_Whisper_abort(JNIEnv *, jobject, jlong job) { abandoned.store(job); }
 
-// [fast]'s bits this thread may run on, or 0 when that leaves fewer cores than the pool has threads: sharing what is
-// left is slower than letting the kernel place them, as before. Also 0 when the kernel refuses to pin this thread to
-// them (tried and put back here), so a pool is either pinned to what Labs › Diagnostics reports or not pinned at all.
+// A bit per core in [set].
+static jlong core_bits(const cpu_set_t &set) {
+    jlong bits = 0;
+    for (int core = 0; core < 64; ++core) if (CPU_ISSET(core, &set)) bits |= static_cast<jlong>(1) << core;
+    return bits;
+}
+
+// [fast]'s cores, or 0 when they are fewer than the pool has threads: sharing them is slower than letting the kernel
+// place the threads, as before. Also 0 when the kernel won't pin this thread to exactly them (tried, read back and put
+// back here), so a pool is either pinned to what Labs › Diagnostics reports or not pinned at all. The fast cores are
+// asked for whichever cores this thread may run on now: HyperOS narrows the UI thread to cpu 4-6 while a touch is boosted
+// (Xiaomi 13T Pro, MT6985, #3037) and threads started then keep that, so intersecting with it left 3 of 4 fast cores
+// and the pool unpinned. sched_setaffinity widens it again where the cpuset allows; the read-back checks that.
 static jlong pool_mask(jlong fast, int threads) {
     if (fast == 0) return 0;
     cpu_set_t allowed;
@@ -105,12 +115,23 @@ static jlong pool_mask(jlong fast, int threads) {
     CPU_ZERO(&wanted);
     for (int core = 0; core < GGML_MAX_N_THREADS && core < 64; ++core) {
         const jlong bit = static_cast<jlong>(1) << core;
-        if ((fast & bit) && CPU_ISSET(core, &allowed)) { usable |= bit; ++cores; CPU_SET(core, &wanted); }
+        if (fast & bit) { usable |= bit; ++cores; CPU_SET(core, &wanted); }
     }
     if (cores < threads) return 0;
-    const bool pinned = sched_setaffinity(0, sizeof(wanted), &wanted) == 0;
+    bool pinned = sched_setaffinity(0, sizeof(wanted), &wanted) == 0;
+    cpu_set_t got;
+    if (pinned) pinned = sched_getaffinity(0, sizeof(got), &got) == 0 && core_bits(got) == usable;
     sched_setaffinity(0, sizeof(allowed), &allowed);
     return pinned ? usable : 0;
+}
+
+// The threads an unpinned pool gets: its workers inherit this thread's cores, and more spinning workers than cores
+// leave every graph's barrier waiting on one that isn't running (4 on cpu 4-6: an 11 s clip took 230 s, #3037).
+static int unpinned_threads(int threads) {
+    cpu_set_t mine;
+    if (sched_getaffinity(0, sizeof(mine), &mine) != 0) return threads;
+    const int cores = CPU_COUNT(&mine);
+    return cores > 0 ? std::min(threads, cores) : threads;
 }
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -133,6 +154,7 @@ Java_ly_anoma_hex_speech_Whisper_threadPool(JNIEnv *, jobject, jlong handle, jin
     auto ctx = reinterpret_cast<whisper_context *>(handle);
     if (!ctx) return false;
     const jlong mask = threads > 0 ? pool_mask(fast, threads) : 0;
+    if (threads > 0 && mask == 0) threads = unpinned_threads(threads);
     {
         std::lock_guard<std::mutex> hold(pools_lock);
         auto found = pools.find(ctx);
