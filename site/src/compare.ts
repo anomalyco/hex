@@ -31,10 +31,9 @@ export type Comparison = {
   art?: { src: string; alt: string; width: number; height: number }
 }
 
-const BETA = '<span class="pill">Beta</span>'
-const COMPUTERS_HEX = `Mac with Apple silicon (macOS 15+)<br>Windows 10 and 11 ${BETA}<br>Linux ${BETA}`
+const COMPUTERS_HEX = "Mac with Apple silicon (macOS 15+)<br>Windows 10 and 11<br>Linux"
 const PHONES_HEX = "iPhone, and Android through Hex Preview"
-const MEETINGS_HEX = "Mac, plus Windows and Linux in beta. Transcribed and saved on your computer"
+const MEETINGS_HEX = "Mac, Windows, and Linux. Transcribed and saved on your computer"
 
 export const WISPR_FLOW: Comparison = {
   id: "wispr-flow",
@@ -77,7 +76,7 @@ export const WISPR_FLOW: Comparison = {
     },
     {
       question: "Does Hex run on Linux?",
-      answer: `Yes, in beta, on x86_64 and ARM64. It works on X11 and Wayland, including GNOME, KDE Plasma, Hyprland, and Sway. See <a href="${withBase("/linux")}">Hex for Linux</a>. Wispr Flow doesn't support Linux.`,
+      answer: `Yes, on x86_64 and ARM64. It works on X11 and Wayland, including GNOME, KDE Plasma, Hyprland, and Sway. See <a href="${withBase("/linux")}">Hex for Linux</a>. Wispr Flow doesn't support Linux.`,
     },
     {
       question: "Does Hex record meetings without a bot?",
@@ -117,7 +116,6 @@ export const SUPERWHISPER: Comparison = {
     "You're on an Intel Mac or macOS 14. Hex needs Apple silicon and macOS 15.",
     "You want cloud models, or AI modes that rewrite and translate, with priority support in one paid app.",
     "You want each person in a meeting labeled. Hex labels your microphone You and everyone else Them.",
-    "You need a finished release on Windows or Linux. Hex is in beta on both.",
   ],
   questions: [
     {
@@ -127,11 +125,11 @@ export const SUPERWHISPER: Comparison = {
     },
     {
       question: "Does Hex run on Linux and Windows?",
-      answer: `Yes, both in beta. On Linux, Hex works on X11 and Wayland, on x86_64 and ARM64 (see <a href="${withBase("/linux")}">Hex for Linux</a>). On Windows, it runs on 10 and 11, x64 and ARM64.`,
+      answer: `Yes. On Linux, Hex works on X11 and Wayland, on x86_64 and ARM64 (see <a href="${withBase("/linux")}">Hex for Linux</a>). On Windows, it runs on 10 and 11, x64 and ARM64.`,
     },
     {
       question: "Does Hex record meetings without a bot?",
-      answer: `Yes. <a href="${withBase("/meetings/")}">Hex Meetings</a> records your microphone and system audio and transcribes them on your computer. It runs on the Mac, and on Windows and Linux in beta.`,
+      answer: `Yes. <a href="${withBase("/meetings/")}">Hex Meetings</a> records your microphone and system audio and transcribes them on your computer. It runs on the Mac, Windows, and Linux.`,
     },
     {
       question: "Can I use Parakeet for free?",

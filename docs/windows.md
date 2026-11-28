@@ -1,7 +1,7 @@
-# Windows Beta
+# Windows
 
-The Windows port is a beta with a Rune desktop app (a tray process; see
-[The app](#the-app)), WASAPI capture,
+The Windows build is a Rune desktop app (a tray process; see
+[The app](#the-app)), with WASAPI capture,
 local `transcribe.cpp` transcription, a global shortcut, and generation-safe
 automatic paste. Its daily-use surface includes live microphone, model, and
 shortcut settings, Hold, Tap, and double-tap shortcut modes, Paste Last

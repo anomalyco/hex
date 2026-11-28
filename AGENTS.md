@@ -29,7 +29,7 @@
 ## Product & Surface Rules
 
 Hex is a local, observable native-Rust voice appliance (`anomaly.hex`) for macOS with
-explicit Linux (X11 and compatible Wayland) and Windows (x64 and ARM64) beta contracts. Keep
+explicit Linux (X11 and compatible Wayland) and Windows (x64 and ARM64) contracts. Keep
 consequential behavior explicit and modules deep. User settings persist in `<Application
 Support>/hex/settings.json`; deterministic personal transcript transformations live in
 `~/.config/hex/hex.config.ts` (embedded QuickJS; public contract at

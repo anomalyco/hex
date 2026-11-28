@@ -5,8 +5,8 @@ Start with the document for your task.
 ## User & Platform Guides
 
 - [`../README.md`](../README.md): install and use Hex on macOS, Windows, and Linux.
-- [`windows.md`](windows.md): Windows x64 and ARM64 beta requirements, installation, and source builds.
-- [`linux.md`](linux.md): Linux X11 and Wayland beta requirements, portals, and installation.
+- [`windows.md`](windows.md): Windows x64 and ARM64 requirements, installation, and source builds.
+- [`linux.md`](linux.md): Linux X11 and Wayland requirements, portals, and installation.
 - [`nix.md`](nix.md): Nix flake packaging, development shell, and Home Manager autostart.
 - [`../site/public/docs/transforms.md`](../site/public/docs/transforms.md): TypeScript transformation API (`~/.config/hex/hex.config.ts`).
 - [`../site/public/docs/admin.md`](../site/public/docs/admin.md): macOS managed-preference feature locks (`anomaly.hex`).

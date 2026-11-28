@@ -9,7 +9,7 @@ implementation invariants; [ROADMAP.md](../../ROADMAP.md) owns future work;
 ## Product Map
 
 ```ts
-Hex                                    // macOS, Windows (beta), Linux (beta)
+Hex                                    // macOS, Windows, Linux
 ├── Get ready                          // install, permissions, local speech model
 ├── Dictate                            // hold, toggle, or hands-free capture
 ├── Use the result                     // clipboard-restoring paste, Paste last, History
@@ -59,9 +59,9 @@ Hex                                    // macOS, Windows (beta), Linux (beta)
 - **Desktop OS contracts:**
   - macOS: primary release target; supports managed-preference locks
     ([site/public/docs/admin.md](../../site/public/docs/admin.md)).
-  - Windows (beta, x64 and ARM64): [windows.md](../windows.md),
+  - Windows (x64 and ARM64): [windows.md](../windows.md),
     [windows-signing.md](../windows-signing.md).
-  - Linux (beta, X11 and portal-based Wayland): [linux.md](../linux.md),
+  - Linux (X11 and portal-based Wayland): [linux.md](../linux.md),
     [nix.md](../nix.md).
 - **Mobile:** Hex Mobile for iOS and Android shares the `.hexwords` vocabulary format
   ([ios/README.md](../../ios/README.md), [android/README.md](../../android/README.md),

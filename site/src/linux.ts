@@ -91,7 +91,7 @@ export function renderLinux(origin: string, install: LinuxInstall): string {
   const requirements = REQUIREMENTS.map(([label, value]) => `<div class="row"><span class="row__label">${label}</span><span>${value}</span></div>`).join("\n")
 
   const body = `<div class="intent">
-<p class="eyebrow">Hex for Linux<span class="pill">Beta</span></p>
+<p class="eyebrow">Hex for Linux</p>
 <h1>Voice dictation for Linux</h1>
 <p class="lede">Hold a shortcut, speak, and Hex types what you said into the focused window. A speech model runs on your GPU or CPU, and nothing you say leaves your machine.</p>
 
@@ -125,7 +125,7 @@ ${requirements}
 </div>
 
 <h2>Meetings on Linux</h2>
-<p class="text"><a href="${withBase("/meetings/")}">Hex Meetings</a> records your microphone and each output's PipeWire monitor, so no bot joins the call, and transcribes the meeting on your machine. Turn it on in the Meetings tab. It's in beta on Linux. Titles and summaries stay off unless you send them to your own OpenCode model.</p>
+<p class="text"><a href="${withBase("/meetings/")}">Hex Meetings</a> records your microphone and each output's PipeWire monitor, so no bot joins the call, and transcribes the meeting on your machine. Turn it on in the Meetings tab. Titles and summaries stay off unless you send them to your own OpenCode model.</p>
 
 <h2>From a terminal</h2>
 <pre class="block"><code>hex status --json               <span class="dim"># what Hex is doing</span>

@@ -1,6 +1,6 @@
-# Install The Linux Beta
+# Install Hex On Linux
 
-The Linux beta targets x86_64 and ARM64 (aarch64) Linux: i3/X11 and compatible wlroots-based Wayland
+Hex targets x86_64 and ARM64 (aarch64) Linux: i3/X11 and compatible wlroots-based Wayland
 compositors such as Hyprland or Sway. Audio uses ALSA, including PipeWire systems
 with ALSA compatibility. Inference uses Vulkan when available and can fall back
 to the CPU. A GPU that hangs or fails while transcribing is remembered for

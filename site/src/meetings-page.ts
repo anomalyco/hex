@@ -3,16 +3,16 @@
 // the build (scripts/meetings/build.ts) adds this below it: how Hex records a
 // meeting, where it runs, the CLI and MCP, and the questions, with a title,
 // description, and structured data that say the same. Checked against
-// docs/features/meetings.md: Windows and Linux are beta, and titles and
-// summaries come from Apple Intelligence on a Mac and from OpenCode, only when
-// turned on, elsewhere.
+// docs/features/meetings.md: macOS, Windows, and Linux all ship it, and titles
+// and summaries come from Apple Intelligence on a Mac and from OpenCode, only
+// when turned on, elsewhere.
 import { withBase } from "./base"
 import { faqPage, hexApp, MONO, type Question } from "./intent"
 import { escape } from "./labs"
 
 export const MEETINGS_TITLE = "Hex Meetings: local meeting transcription with no bot"
 export const MEETINGS_DESCRIPTION =
-  "Hex records your microphone and system audio itself, so no bot joins the call, and transcribes the meeting on your computer. Free and open source, on Mac, with Windows and Linux in beta. Your agent reads it with hex mcp."
+  "Hex records your microphone and system audio itself, so no bot joins the call, and transcribes the meeting on your computer. Free and open source, on Mac, Windows, and Linux. Your agent reads it with hex mcp."
 
 const HOW: [label: string, value: string][] = [
   ["No bot", "Hex records the call from your computer. Nothing joins the meeting, and there's no one to admit from the waiting room."],
@@ -23,10 +23,10 @@ const HOW: [label: string, value: string][] = [
   ["Retention", "Meetings stay 7 days by default, or 24 hours, 30 days, or forever. Expired ones go to the Trash. Exported Markdown is never deleted."],
 ]
 
-const WHERE: [os: string, audio: string, status: string][] = [
-  ["macOS 15, Apple silicon", "A Core Audio process tap, or ScreenCaptureKit with Screen Recording", "Stable"],
-  ["Windows 10 and 11", "WASAPI loopback of the outputs the call plays on", "Beta"],
-  ["Linux", "PipeWire, recording each output's monitor", "Beta"],
+const WHERE: [os: string, audio: string][] = [
+  ["macOS 15, Apple silicon", "A Core Audio process tap, or ScreenCaptureKit with Screen Recording"],
+  ["Windows 10 and 11", "WASAPI loopback of the outputs the call plays on"],
+  ["Linux", "PipeWire, recording each output's monitor"],
 ]
 
 export const MEETINGS_QUESTIONS: Question[] = [
@@ -64,9 +64,7 @@ const STYLE = `<style>
 .mx thead th { padding-top: 0; border-top: 0; color: #8a8b90; font-size: 0.8125rem; font-weight: 500; }
 .mx tbody th { width: 11rem; color: #f2f2ef; font-weight: 500; }
 .mx td { color: #b4b5ba; }
-.mx td:last-child { padding-right: 0; white-space: nowrap; }
-.mx .pill { display: inline-block; padding: 0 0.45rem; border: 1px solid rgba(242, 242, 239, 0.16); border-radius: 999px; color: #a3a4a9; font-size: 0.6875rem; font-weight: 500; letter-spacing: 0.03em; line-height: 1.1rem; }
-.mx tr:first-child .pill { border-color: rgba(242, 242, 239, 0.3); color: #e6e7e9; }
+.mx td:last-child { padding-right: 0; }
 .mx pre { margin: 1.25rem 0 0; overflow-x: auto; padding: 1rem 1.125rem; border: 1px solid rgba(242, 242, 239, 0.1); border-radius: 0.8rem; background: rgba(242, 242, 239, 0.025); color: #d6d7db; font: 0.8125rem/1.7 ${MONO}; }
 .mx pre code { font: inherit; }
 .mx pre span { color: #6f7075; }
@@ -77,13 +75,12 @@ const STYLE = `<style>
   .mx thead { display: none; }
   .mx tr { display: grid; padding: 0.8rem 0; border-top: 1px solid #1d1e21; }
   .mx th, .mx td { padding: 0; border: 0; }
-  .mx td:last-child { white-space: normal; }
 }
 </style>`
 
 export function meetingsDetails(): string {
   const how = HOW.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join("\n")
-  const where = WHERE.map(([os, audio, status]) => `<tr><th scope="row">${os}</th><td>${audio}</td><td><span class="pill">${status}</span></td></tr>`).join("\n")
+  const where = WHERE.map(([os, audio]) => `<tr><th scope="row">${os}</th><td>${audio}</td></tr>`).join("\n")
   const questions = MEETINGS_QUESTIONS.map((entry) => `<h3>${escape(entry.question)}</h3>\n<p>${entry.answer}</p>`).join("\n")
   return `${STYLE}
 <section class="mx" aria-labelledby="mx-how">
@@ -95,7 +92,7 @@ ${how}
 
 <h2>Where it runs</h2>
 <table>
-<thead><tr><th scope="col">System</th><th scope="col">System audio</th><th scope="col">Status</th></tr></thead>
+<thead><tr><th scope="col">System</th><th scope="col">System audio</th></tr></thead>
 <tbody>
 ${where}
 </tbody>
