@@ -12,8 +12,14 @@ use serde::{Deserialize, Serialize};
 use super::Model;
 use crate::desktop::opencode_service::Service;
 
-/// Newest one-shot generation route first; older OpenCode V2 builds only serve the later name.
-const GENERATE_ENDPOINTS: [&str; 2] = ["/api/experimental/generate", "/api/generate"];
+/// Newest one-shot generation route first; older OpenCode V2 builds only serve
+/// the later names (`/api/experimental/generate` is a deprecated alias of the
+/// first since OpenCode 2.4).
+const GENERATE_ENDPOINTS: [&str; 3] = [
+    "/api/experimental/generate/text",
+    "/api/experimental/generate",
+    "/api/generate",
+];
 
 #[derive(Serialize)]
 pub(super) struct Request<'a> {
@@ -64,7 +70,7 @@ pub(super) fn generate_single_model(
         match post(&data, remaining, cancelled)? {
             Response::Success { data } => return Ok(data.text),
             Response::Error { message }
-                if attempt == 0 && retryable_generation_error(&message, model.is_some()) =>
+                if attempt == 0 && retryable_generation_error(&message) =>
             {
                 tracing::warn!(%message, "OpenCode model unavailable during startup; retrying");
                 wait_for_generation_retry(started, deadline, cancelled)?;
@@ -77,7 +83,7 @@ pub(super) fn generate_single_model(
     unreachable!("generation loop returns on its second attempt")
 }
 
-/// Posts to the newest generation route and falls back to the older name only
+/// Posts to the newest generation route and falls back to the older names only
 /// when the server reports that route missing (a 404 that isn't OpenCode's
 /// own error). Every attempt shares one deadline.
 pub(super) fn post_generation(
@@ -124,12 +130,12 @@ fn route_missing(response: &crate::desktop::opencode_service::Response) -> bool 
 }
 
 /// OpenCode answers a model it is still loading with "Model unavailable", and
-/// a named model whose provider hasn't finished loading with "Model not found"
-/// (#2849); either is asked once more within the same deadline. A request that
-/// names no model never sees the latter.
-pub(super) fn retryable_generation_error(message: &str, names_model: bool) -> bool {
-    message.starts_with("Model unavailable:")
-        || (names_model && message.starts_with("Model not found:"))
+/// a model whose provider hasn't finished loading with "Model not found"
+/// (#2849); either is asked once more within the same deadline. A request
+/// that names no model sees the latter too: OpenCode resolves its own default
+/// model while a workspace it evicted when idle boots again (#3048).
+pub(super) fn retryable_generation_error(message: &str) -> bool {
+    message.starts_with("Model unavailable:") || message.starts_with("Model not found:")
 }
 
 pub(super) fn wait_for_generation_retry(

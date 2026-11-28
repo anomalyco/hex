@@ -91,9 +91,13 @@ floating default saves the resolved catalog model alongside it; existing explici
 model selections are preserved.
 
 One-shot generation accepts a prompt and optional model reference and returns
-`data.text`. Current OpenCode serves it at `/api/experimental/generate`; Hex
-falls back to the older `/api/generate` only when the server answers the new
-route with HTTP 404, within the same generation deadline. It is stateless and uses the server's base configuration, not the
+`data.text`. Current OpenCode serves it at `/api/experimental/generate/text`
+(with `/api/experimental/generate` as a deprecated alias); Hex falls back to
+`/api/experimental/generate` and then the older `/api/generate` only when the
+server answers a route with an untagged HTTP 404, within the same generation
+deadline. OpenCode can answer "Model not found" or "Model unavailable" while a
+workspace it evicted when idle boots again, whether or not the request names a
+model; Hex waits briefly and asks once more within the same deadline. It is stateless and uses the server's base configuration, not the
 catalog request's directory header. Existing saved selections whose catalog and
 upstream IDs match need no migration. Previously broken alias selections can be
 fixed by reselecting the model; Hex does not guess an ID migration.
