@@ -75,6 +75,12 @@ internal class TypingPreferences(context: Context) {
     var marksTakeFixSpace: Boolean
         get() = prefs.getBoolean(MARKS_TAKE_FIX_SPACE, false)
         set(value) { prefs.edit().putBoolean(MARKS_TAKE_FIX_SPACE, value).apply() }
+    /** Labs › Keyboard › Space after punctuation: outside URL fields, a clause mark that takes a pick's space (or, with
+     * Punctuation after autocorrect, a fix's) puts it back after itself ("here", ",", gives "here, "), and a space typed
+     * straight after is swallowed as one after a pick is (#3000). Off by default. */
+    var marksKeepSpace: Boolean
+        get() = prefs.getBoolean(MARKS_KEEP_SPACE, false)
+        set(value) { prefs.edit().putBoolean(MARKS_KEEP_SPACE, value).apply() }
     /** Labs › Keyboard › Adaptive touch: the decoder reads taps with your own key centres once it has learned them
      * ([AdaptiveTouch], kept by [AdaptiveTouchStore]). Off by default. */
     var adaptiveTouch: Boolean
@@ -152,6 +158,7 @@ internal class TypingPreferences(context: Context) {
         const val SMART_QUOTES = "smartQuotes"
         const val SWIPE_DELETE_LETTERS = "swipeDeleteLetters"
         const val MARKS_TAKE_FIX_SPACE = "marksTakeFixSpace"
+        const val MARKS_KEEP_SPACE = "marksKeepSpace"
         const val ADAPTIVE_TOUCH = "adaptiveTouch"
         const val USE_IMPORTED_WORDS = "importedWords"
         /** A counter [ImportedWords] bumps whenever the imported list changes, so the keyboard reads it again. */
