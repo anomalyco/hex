@@ -165,9 +165,11 @@ internal object Diagnostics {
     /** The page's words for [tapLines], in the person's language. */
     fun tapWords(c: Context) = TapWords(
         mapOf(Tap.Press to c.getString(R.string.diagnostics_tap_press), Tap.Release to c.getString(R.string.diagnostics_tap_release),
-            Tap.Start to c.getString(R.string.diagnostics_tap_start), Tap.End to c.getString(R.string.diagnostics_tap_end)),
+            Tap.Start to c.getString(R.string.diagnostics_tap_start), Tap.End to c.getString(R.string.diagnostics_tap_end),
+            Tap.Word to c.getString(R.string.diagnostics_tap_word)),
         mapOf(VibrationEffect.EFFECT_CLICK to c.getString(R.string.diagnostics_tap_click),
-            VibrationEffect.EFFECT_TICK to c.getString(R.string.diagnostics_tap_tick)),
+            VibrationEffect.EFFECT_TICK to c.getString(R.string.diagnostics_tap_tick),
+            VibrationEffect.EFFECT_HEAVY_CLICK to c.getString(R.string.diagnostics_tap_heavy_click)),
         c.getString(R.string.diagnostics_tap_predefined), c.getString(R.string.diagnostics_tap_pulse),
         c.getString(R.string.diagnostics_tap_default_strength), c.getString(R.string.diagnostics_tap_strength))
 
@@ -365,8 +367,10 @@ internal class TapWords(val taps: Map<Tap, String>, val effects: Map<Int, String
     companion object {
         /** The copied report's words, the same in every language like the rest of the report. */
         val English = TapWords(
-            mapOf(Tap.Press to "Key press", Tap.Release to "Held key lifting", Tap.Start to "Dictation start", Tap.End to "Dictation end"),
-            mapOf(VibrationEffect.EFFECT_CLICK to "click", VibrationEffect.EFFECT_TICK to "tick"),
+            mapOf(Tap.Press to "Key press", Tap.Release to "Held key lifting", Tap.Start to "Dictation start", Tap.End to "Dictation end",
+                Tap.Word to "Held Delete's word"),
+            mapOf(VibrationEffect.EFFECT_CLICK to "click", VibrationEffect.EFFECT_TICK to "tick",
+                VibrationEffect.EFFECT_HEAVY_CLICK to "heavy click"),
             "%1\$s: Android's %2\$s", "%1\$s: a %2\$d ms pulse %3\$s, because this phone doesn't offer Android's %4\$s",
             "at the phone's default strength", "at %1\$d%% strength")
     }

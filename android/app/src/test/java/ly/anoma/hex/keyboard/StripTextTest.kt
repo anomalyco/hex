@@ -140,7 +140,7 @@ class StripTextTest {
         // The same decision tap() makes: Android's effect where offered, else Hex's pulse.
         val offered = Tap.entries.map { it to it.plays(offered = true) }
         assertEquals(listOf("Key press: Android's click", "Held key lifting: Android's tick", "Dictation start: Android's click",
-            "Dictation end: Android's tick"), tapLines(TapWords.English, offered))
+            "Dictation end: Android's tick", "Held Delete's word: Android's heavy click"), tapLines(TapWords.English, offered))
         assertEquals("Key press: a 20 ms pulse at the phone's default strength, because this phone doesn't offer Android's click",
             tapLines(TapWords.English, listOf(Tap.Press to Tap.Press.plays(offered = false))).single())
         // A pulse at a set strength, as Hex played before #2718.

@@ -150,9 +150,25 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private var swipe: KeyboardEngine.SwipeContext? = null
     private val trail = SwipeTrail(this, (ink and 0xFFFFFF) or ((if (ink.isLight()) 0x80 else 0x66) shl 24), 6 * density)
     private val preview = SwipePreview { post(it) }
+    // Labs › Keyboard › Delete words when held: the gap before the next word, or 0 while the held key repeats letters
+    // (the lab off, or a field whose words can't be read, from the first repeat to the lift).
+    private var wordGap = 0L
     private val repeatDelete = object : Runnable {
         override fun run() {
-            if (deleting) { repeated = true; ime.engine.delete(); postDelayed(this, KeyboardMetrics.DELETE_REPEAT_EVERY) }
+            if (!deleting) return
+            val first = !repeated
+            repeated = true
+            if (first || wordGap > 0) {
+                val removed = ime.engine.deleteWord()
+                if (removed >= 0) {
+                    if (removed > 0) tap(context, ime.feedback.haptics, Tap.Word)
+                    val gap = if (first) HeldDeleteWords.FIRST_GAP else wordGap
+                    wordGap = HeldDeleteWords.next(gap)
+                    postDelayed(this, gap); return
+                }
+                wordGap = 0L
+            }
+            ime.engine.delete(); postDelayed(this, KeyboardMetrics.DELETE_REPEAT_EVERY)
         }
     }
 

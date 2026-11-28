@@ -26,6 +26,8 @@
     <string name="diagnostics_tap_release">长按后松开</string>
     <string name="diagnostics_tap_start">听写开始</string>
     <string name="diagnostics_tap_end">听写结束</string>
+    <string name="diagnostics_tap_word">长按删除键删除一个单词</string>
+    <string name="diagnostics_tap_heavy_click">重击</string>
     <string name="diagnostics_tap_click">点击</string>
     <string name="diagnostics_tap_tick">轻触</string>
     <string name="diagnostics_tap_predefined" formatted="false">%1$s：Android 的%2$s效果</string>

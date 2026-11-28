@@ -66,6 +66,11 @@ internal class TypingPreferences(context: Context) {
     var swipeDeleteLetters: Boolean
         get() = prefs.getBoolean(SWIPE_DELETE_LETTERS, false)
         set(value) { prefs.edit().putBoolean(SWIPE_DELETE_LETTERS, value).apply() }
+    /** Labs › Keyboard › Delete words when held: a held Delete removes whole words, slowly at first and faster the
+     * longer it is held ([ly.anoma.hex.keyboard.HeldDeleteWords]), as SwiftKey's does (#3007). Off by default. */
+    var deleteWords: Boolean
+        get() = prefs.getBoolean(DELETE_WORDS, false)
+        set(value) { prefs.edit().putBoolean(DELETE_WORDS, value).apply() }
     /** Labs › Keyboard › SwiftKey words: the words imported from another keyboard's export ([ImportedWords])
      * join your own words in suggestions. Off by default; the imported list stays on the phone while off. */
     var importedWords: Boolean
@@ -179,6 +184,7 @@ internal class TypingPreferences(context: Context) {
         const val KEYBOARD_TOOLS = "keyboardTools"
         const val SMART_QUOTES = "smartQuotes"
         const val SWIPE_DELETE_LETTERS = "swipeDeleteLetters"
+        const val DELETE_WORDS = "deleteWords"
         const val MARKS_TAKE_FIX_SPACE = "marksTakeFixSpace"
         const val MARKS_KEEP_SPACE = "marksKeepSpace"
         const val HOLD_CLICK = "holdClick"
