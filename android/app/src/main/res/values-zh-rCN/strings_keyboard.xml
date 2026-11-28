@@ -48,6 +48,7 @@
     <string name="keyboard_space">空格</string>
     <string name="keyboard_period">句点</string>
     <string name="keyboard_comma">逗号</string>
+    <string name="keyboard_tab">制表符</string>
     <string name="keyboard_at">@ 符号</string>
     <string name="keyboard_slash">斜杠</string>
     <string name="keyboard_correction">改正为 %1$s</string>

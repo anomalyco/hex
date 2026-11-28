@@ -71,6 +71,9 @@
     <string name="keyboard_page_numbers" translatable="false">123</string>
     <string name="keyboard_page_symbols" translatable="false">=\\&lt;</string>
     <string name="keyboard_more_symbols">More symbols</string>
+    <string name="keyboard_page_swiftkey_symbols" translatable="false">{&amp;=</string>
+    <string name="keyboard_tab_label" translatable="false">Tab</string>
+    <string name="keyboard_tab">Tab</string>
     <string name="keyboard_pad_symbols" translatable="false">!?#</string>
     <string name="keyboard_pad">Number pad</string>
     <string name="keyboard_pad_label" translatable="false">12\n34</string>

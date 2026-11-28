@@ -110,6 +110,11 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private val comma: KeyCap
     private val emojiKey: KeyCap
     private val period: KeyCap
+    // SwiftKey layout's {&= page: four marks between space and enter, gone on every other page.
+    private val markKeys = ArrayList<KeyCap>()
+    // SwiftKey layout's held comma: the dictation its hold is about to start, and the key whose hold started one.
+    private var pendingTalk: Runnable? = null
+    private var talkingKey: KeyCap? = null
     // The emoji panel: AndroidX's picker where the strip and the letter rows are, then ABC, space and delete.
     private var picker: EmojiPickerView? = null
     private val emojiBottom = KeyRowLayout(context, 10f, side, gap, insetTop, insetBottom + bottomExtra)
@@ -198,7 +203,9 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         // key had there. Elsewhere it is the field's mark or a comma, a plain key as before: the long click
         // is attached only while that page shows (showPage).
         typesOnLift(comma, preview = { null },
-            holds = { if (current?.more == true) listOf(LetterFeedback.symbolHolds('<')) else emptyList() },
+            holds = { if (current?.more == true && current?.swiftKey == false) listOf(LetterFeedback.symbolHolds('<')) else emptyList() },
+            // SwiftKey layout: held on the letters, the comma dictates as the Hex key held does.
+            talks = { current?.let { it.swiftKey && !it.symbols } == true },
             type = { option -> if (option != null) ime.engine.type(option) else comma.performClick() })
         bottomSlides[comma] = { ime.engine.type(commaText(current)) }
         // Emoji on the letters; on the symbol pages Gboard's 1234 key, which opens its number pad.
@@ -250,13 +257,14 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         // Held on the letters page, period offers Gboard's punctuation; on ?123 an ellipsis, and on =<
         // what its > holds.
         period.setOnLongClickListener {
-            host.openAccents(if (current?.symbols == false) LetterFeedback.periodHolds.flatten()
-                else LetterFeedback.symbolHolds(periodText(current)[0]), it); true
+            host.openAccents(periodHolds(current).flatten(), it); true
         }
         period.longClickLabel = context.getString(R.string.keyboard_more_characters)
-        typesOnLift(period, preview = { null },
-            holds = { if (current?.symbols == false) LetterFeedback.periodHolds else listOf(LetterFeedback.symbolHolds(periodText(current)[0])) },
-            default = { if (current?.symbols == false) LetterFeedback.PERIOD_DEFAULT else 0 },
+        // SwiftKey layout's period on the letters: one row in its own order, and a sideways flick opens it at once.
+        typesOnLift(period, preview = { null }, holds = { periodHolds(current) },
+            default = { when { current?.symbols != false -> 0; current?.swiftKey == true -> LetterFeedback.SWIFTKEY_PERIOD_DEFAULT
+                else -> LetterFeedback.PERIOD_DEFAULT } },
+            ordered = { swiftKeyLetters(current) }, flicks = { swiftKeyLetters(current) },
             type = { option -> if (option != null) ime.engine.type(option) else period.performClick() })
         bottomSlides[period] = { ime.engine.type(periodText(current)) }
         enterKey = caps.cap("", context.getString(R.string.keyboard_return), modifier, 17f, ime.engine::enter)
@@ -266,9 +274,18 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         enterIcon.setImageResource(R.drawable.ic_enter)
         enterIcon.imageTintList = ColorStateList.valueOf(ink)
         enterKey.face.addView(enterIcon, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER))
+        repeat(KeyboardLetters.SWIFTKEY_BOTTOM.length) { i ->
+            val mark = KeyboardLetters.SWIFTKEY_BOTTOM[i].toString()
+            val k = caps.cap(mark, mark) { ime.engine.type(mark) }
+            typesOnLift(k, preview = { mark }, holds = { listOf(LetterFeedback.symbolHolds(mark[0])) },
+                type = { option -> if (option != null && option != mark) ime.engine.type(option) else k.performClick() })
+            bottomSlides[k] = { ime.engine.type(mark) }
+            k.visibility = GONE
+            markKeys.add(k)
+        }
         var at = 0f
-        for ((key, width) in listOf(modeKey to KeyboardMetrics.MODE, comma to KeyboardMetrics.COMMA, emojiKey to KeyboardMetrics.EMOJI,
-                spaceKey to KeyboardMetrics.SPACE, period to KeyboardMetrics.PERIOD, enterKey to KeyboardMetrics.ENTER)) { bottom.add(key, at, width); at += width }
+        for ((key, width) in gboardBottom()) { bottom.add(key, at, width); at += width }
+        for (k in markKeys) bottom.add(k, 10f, 0f)
         // Gboard's emoji panel ends with ABC and delete; Hex puts a space bar between them.
         val letters = caps.cap(context.getString(R.string.keyboard_letters_label), context.getString(R.string.keyboard_letters),
             modifier, 17f) { host.closeEmoji(); ime.engine.letters() }
@@ -282,6 +299,45 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         emojiBottom.add(newDeleteKey(), 10f - KeyboardMetrics.MODE, KeyboardMetrics.MODE)
         emojiBottom.visibility = GONE
         addView(emojiBottom, LayoutParams(LayoutParams.MATCH_PARENT, rowHeight + bottomExtra))
+    }
+
+    /** Gboard's bottom row, in tenths: ?123, comma, emoji, space, period, enter. */
+    private fun gboardBottom() = listOf(modeKey to KeyboardMetrics.MODE, comma to KeyboardMetrics.COMMA, emojiKey to KeyboardMetrics.EMOJI,
+        spaceKey to KeyboardMetrics.SPACE, period to KeyboardMetrics.PERIOD, enterKey to KeyboardMetrics.ENTER)
+
+    /** The bottom row's keys for [page], moved and hidden in place so a finger already on one (?123 switching pages
+     * as it goes down) keeps its press. Labs › Keyboard › SwiftKey layout: emoji before the comma on the letters; on
+     * 123 no emoji key and a wider space; on {&= space, then its four marks, then enter. Off, Gboard's row. */
+    private fun layBottom(page: KeyboardPage) {
+        val marks = page.bottomMarks
+        val mode = KeyboardMetrics.MODE; val enter = KeyboardMetrics.ENTER
+        val keys: List<Pair<KeyCap, Float>> = when {
+            !page.swiftKey -> gboardBottom()
+            marks.isNotEmpty() -> listOf(modeKey to mode, spaceKey to 10f - mode - enter - marks.length) +
+                markKeys.take(marks.length).map { it to 1f } + (enterKey to enter)
+            page.symbols -> listOf(modeKey to mode, comma to KeyboardMetrics.COMMA, spaceKey to KeyboardMetrics.SPACE + KeyboardMetrics.EMOJI,
+                period to KeyboardMetrics.PERIOD, enterKey to enter)
+            else -> listOf(modeKey to mode, emojiKey to KeyboardMetrics.EMOJI, comma to KeyboardMetrics.COMMA,
+                spaceKey to KeyboardMetrics.SPACE, period to KeyboardMetrics.PERIOD, enterKey to enter)
+        }
+        val shown = keys.mapTo(HashSet()) { it.first }
+        for (k in listOf(modeKey, comma, emojiKey, spaceKey, period, enterKey) + markKeys) {
+            val visibility = if (k in shown) VISIBLE else GONE
+            if (k.visibility != visibility) { if (visibility == GONE) k.isPressed = false; k.visibility = visibility }
+        }
+        var at = 0f
+        for ((k, width) in keys) { bottom.place(k, at, width); at += width }
+        for ((i, k) in markKeys.withIndex()) marks.getOrNull(i)?.let { k.label?.text = it.toString(); k.contentDescription = it.toString() }
+    }
+
+    private fun swiftKeyLetters(page: KeyboardPage?) = page != null && page.swiftKey && !page.symbols
+
+    /** What the period holds on [page]: Gboard's three rows on the letters (SwiftKey layout's one row there), and
+     * the ellipsis on the symbol pages (=<'s > holds its own). */
+    private fun periodHolds(page: KeyboardPage?): List<List<String>> = when {
+        page == null || page.symbols -> listOf(LetterFeedback.symbolHolds(periodText(page)[0]))
+        page.swiftKey -> LetterFeedback.swiftKeyPeriodHolds
+        else -> LetterFeedback.periodHolds
     }
 
     private fun cased(c: Char) = if (current?.let { !it.symbols && it.shifted } == true) c.uppercaseChar().toString() else c.toString()
@@ -321,10 +377,13 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         rows.removeAllViews()
         page.pad?.let { showPad(page, it); return }
         bottom.visibility = VISIBLE
+        layBottom(page)
         val language = page.language
         val symbols = page.symbols
         val currency = page.currency
         val letterHolds = !symbols && letterSymbols
+        // Labs › Keyboard › SwiftKey layout: SwiftKey's held symbols, whether or not Symbols on letter keys is on.
+        val swift = !symbols && page.swiftKey
         val lines = page.lines
         val columns = KeyboardMetrics.columns(lines).toFloat()
         val side = KeyboardMetrics.sideWidth(page, lines)
@@ -341,7 +400,12 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
             val width = if (index < 2) 1f else (columns - 2 * side) / line.length
             if (index == 2) {
                 // Gboard labels the page switch =< going out and ?123 coming back.
-                val switch = if (symbols) caps.cap(context.getString(if (page.more) R.string.keyboard_numbers_label else R.string.keyboard_page_symbols),
+                // SwiftKey layout's are {&= and 123.
+                val switch = if (symbols) caps.cap(context.getString(when {
+                        page.swiftKey -> if (page.more) R.string.keyboard_page_numbers else R.string.keyboard_page_swiftkey_symbols
+                        page.more -> R.string.keyboard_numbers_label
+                        else -> R.string.keyboard_page_symbols
+                    }),
                     context.getString(R.string.keyboard_more_symbols), modifier, 15f, ime.engine::shiftUp).also { it.textEntry = false }
                 else caps.icon(shiftIconFor(page), shiftDescription(page), modifier, { ime.engine.shiftDown(); ime.engine.shiftUp() }).also { key ->
                     shiftIcon = key.face.getChildAt(0) as ImageView
@@ -367,24 +431,31 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                 var touch: KeyPoint? = null
                 // The letter as it was when the finger went down, so shift lifting mid-press can't change it.
                 var downText: String? = null
-                val k = caps.cap(cased(c), cased(c)) {
+                val tab = c == KeyboardLetters.TAB
+                val click = {
                     val g = if (symbols) null else geometry()
                     val p = touch ?: g?.centres?.get(c)
                     val text = (downText ?: cased(c)).let { if (symbols || touch == null) it else likelier(c, it, touch!!) }
                     typeFromKey(text, g, p, aimed = touch != null && !slidTap)
                 }
+                // SwiftKey layout's {&= page has a Tab key, which types a tab.
+                val k = if (tab) caps.cap(context.getString(R.string.keyboard_tab_label), context.getString(R.string.keyboard_tab), modifier, 15f, click)
+                    else caps.cap(cased(c), cased(c), click = click)
                 row.add(k, at, width); at += width
                 if (!symbols) { letters[c] = k; caseKeys.add(c to k) }
                 val digit = if (symbols) null else page.hint(index, position)
                 // Gboard's top-row set is only a fallback for a row-1 letter with no home- or bottom-row
                 // symbol of its own (AZERTY a and z keep @ and *); rows 2 and 3 always keep Gboard's,
                 // wherever a layout draws their letters. A local currency takes $'s place on d.
-                val symbol = if (letterHolds) LetterFeedback.letterSymbol(c, topRow = index == 0,
-                    currency = currency) else null
+                val symbol = when {
+                    swift -> LetterFeedback.swiftKeySymbol(c, topRow = index == 0, currency = currency)
+                    letterHolds -> LetterFeedback.letterSymbol(c, topRow = index == 0, currency = currency)
+                    else -> null
+                }
                 k.hint(digit?.toString() ?: symbol?.toString())
                 fun holds() = if (symbols) LetterFeedback.symbolHolds(c, currency)
                     else LetterFeedback.holds(cased(c).single(), language.layoutCode, digit, letterHolds,
-                        topRow = index == 0, currency = currency)
+                        topRow = index == 0, currency = currency, swiftKey = swift)
                 if (holds().isNotEmpty()) {
                     k.setOnLongClickListener { host.openAccents(holds(), it); true }
                     k.longClickLabel = context.getString(R.string.keyboard_more_characters)
@@ -393,7 +464,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                     val g = if (symbols) null else geometry()
                     typeFromKey(cased(c), g, p, aimed = false)
                 }
-                typesOnLift(k, preview = { cased(c) }, holds = { listOf(holds()) }, swipes = !symbols,
+                typesOnLift(k, preview = { if (tab) null else cased(c) }, holds = { listOf(holds()) }, swipes = !symbols,
                     down = { e ->
                         downText = cased(c)
                         touch = KeyPoint((k.left + e.getX(e.actionIndex)).toDouble(), (row.top + e.getY(e.actionIndex)).toDouble())
@@ -420,9 +491,12 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         val commaLabel = page.commaText
         comma.label?.text = commaLabel
         comma.labelSize = if (commaLabel == "@") 21f else 26f
-        comma.longClickLabel = if (page.more) context.getString(R.string.keyboard_more_characters) else null
-        comma.setOnLongClickListener(if (page.more) commaHolds else null)
-        comma.isLongClickable = page.more
+        val commaHeld = page.more && !page.swiftKey
+        comma.longClickLabel = if (commaHeld) context.getString(R.string.keyboard_more_characters) else null
+        comma.setOnLongClickListener(if (commaHeld) commaHolds else null)
+        comma.isLongClickable = commaHeld
+        // SwiftKey layout: a microphone in the comma's corner says its hold dictates, as SwiftKey's does.
+        comma.hintIcon(if (swiftKeyLetters(page)) R.drawable.ic_mic else null)
         comma.contentDescription = when (commaLabel) {
             "@" -> context.getString(R.string.keyboard_at)
             "/" -> context.getString(R.string.keyboard_slash)
@@ -668,9 +742,13 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
 
     /** Touches for a key that types as it lifts: pressed, its pop-up, after [KeyboardMetrics.HOLD_MS] its held
      * options to slide over, and on lifting (or when another key goes down first) [type] with the option
-     * chosen, or null for the key's own. */
+     * chosen, or null for the key's own. [ordered]: the held row keeps its order wherever the key is. [flicks]: a sideways slide opens the held options at
+     * once and the finger already picks among them. [talks]: held still for [KeyboardMetrics.TALK_HOLD_MS], the key
+     * dictates as the Hex key held does, finished as it lifts, and types nothing (SwiftKey layout's comma). */
     private fun typesOnLift(k: KeyCap, preview: () -> String?, holds: () -> List<List<String>>, default: () -> Int = { 0 },
-                            swipes: Boolean = false, down: (MotionEvent) -> Unit = {}, type: (String?) -> Unit, done: () -> Unit = {}) {
+                            swipes: Boolean = false, down: (MotionEvent) -> Unit = {}, type: (String?) -> Unit, done: () -> Unit = {},
+                            ordered: () -> Boolean = { false }, flicks: () -> Boolean = { false }, talks: () -> Boolean = { false }) {
+        var downX = 0f
         fun finish(): Boolean {
             // The key types: its touch is no swipe any more.
             if (strokeKey === k && swipe == null) forgetStroke()
@@ -693,11 +771,19 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                     down(e)
                     val shown = preview()
                     if (shown != null && ime.feedback.popups && ime.previewAllowed) feedback.present(k.face, listOf(shown))
+                    downX = e.getX(e.actionIndex)
                     val options = holds()
-                    if (options.firstOrNull().isNullOrEmpty().not()) {
+                    if (e.actionMasked == MotionEvent.ACTION_DOWN && talks()) {
+                        // The hold starts a dictation; the key leaves the rollover, so other keys type around it.
+                        pendingTalk = Runnable {
+                            pendingTalk = null
+                            if (v.isPressed && ime.beginSpeech()) { talkingKey = k; roll.up(k); clearCallout() }
+                        }
+                        postDelayed(pendingTalk!!, KeyboardMetrics.TALK_HOLD_MS)
+                    } else if (options.firstOrNull().isNullOrEmpty().not()) {
                         pendingAccents = Runnable {
                             if (!v.isPressed) return@Runnable
-                            feedback.hold(k.face, options, default())
+                            feedback.hold(k.face, options, default(), ordered())
                             // Labs › Keyboard › Click when a hold opens: the press's click, felt as the options appear.
                             if (ime.feedback.holdClick && ime.feedback.haptics) tap(context, true, Tap.Press)
                         }
@@ -705,7 +791,16 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                     }
                 }
                 MotionEvent.ACTION_MOVE -> {
+                    if (talkingKey === k) return@setOnTouchListener true
                     if (swipes && strokeMoved(k, e)) return@setOnTouchListener true
+                    if (!feedback.choosing && v.isPressed && kotlin.math.abs(e.x - downX) > slop && flicks()) {
+                        // A flick: the held options open now, with no wait and no click (the finger is already moving).
+                        val options = holds()
+                        if (options.firstOrNull().isNullOrEmpty().not()) {
+                            pendingAccents?.let(::removeCallbacks); pendingAccents = null
+                            feedback.hold(k.face, options, default(), ordered())
+                        }
+                    }
                     if (feedback.choosing && v.isPressed) { val (x, y) = inHost(v, e); feedback.move(x, y) }
                     else if (e.x < -slop || e.x > v.width + slop || e.y < -slop || e.y > v.height + slop) {
                         if (v.isPressed) clearCallout()
@@ -714,10 +809,17 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                 }
                 // Gboard's lighter second tick when a key types as it lifts, but not for a held option.
                 MotionEvent.ACTION_UP -> when {
+                    talkingKey === k -> { talkingKey = null; v.isPressed = false; ime.finishSpeech(); done() }
                     swipes && strokeKey === k && swipe != null -> { roll.up(k); strokeMoved(k, e); finishSwipe(); done() }
                     else -> { if (strokeKey === k) forgetStroke(); if (roll.up(k) && finish()) k.typedOnLift() }
                 }
                 MotionEvent.ACTION_CANCEL -> {
+                    if (talkingKey === k) {
+                        // As the Hex key's: the keyboard going away under the finger finishes, a cancel with it up discards.
+                        talkingKey = null; v.isPressed = false
+                        if (DictationField.cancelledHoldFinishes(ime.isInputViewShown && isShown)) ime.finishSpeech() else ime.cancelSpeech()
+                        done()
+                    }
                     if (strokeKey === k) cancelSwipe()
                     if (roll.up(k)) { v.isPressed = false; clearCallout(); done() }
                 }
@@ -747,6 +849,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     }
     private fun keyAt(x: Float, y: Float): KeyCap? {
         for (key in slides.keys + bottomSlides.keys) {
+            if (!key.isShown) continue
             key.getLocationOnScreen(onScreen)
             if (x >= onScreen[0] && x < onScreen[0] + key.width && y >= onScreen[1] && y < onScreen[1] + key.height) return key
         }
@@ -954,7 +1057,9 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         if (changed) grid = null
     }
     fun clearCallout() {
-        pendingAccents?.let(::removeCallbacks); pendingAccents = null; feedback.clear()
+        pendingAccents?.let(::removeCallbacks); pendingAccents = null
+        pendingTalk?.let(::removeCallbacks); pendingTalk = null
+        feedback.clear()
     }
     fun refreshSpace() {
         val next = ime.preferences.options(ime.nextEnglish)
@@ -972,6 +1077,8 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         clearCallout(); endSlide(); roll.clear()
         removeCallbacks(repeatDelete); removeCallbacks(switchLanguage)
         spaceKey.isPressed = false
+        // As the Hex key's: a dictation a held comma started goes on, and ✓ finishes it.
+        talkingKey?.isPressed = false; talkingKey = null
         deleting = false
         deleteKey?.isPressed = false
     }

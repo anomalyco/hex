@@ -41,6 +41,7 @@ internal class KeyCap(context: Context, fill: Int, private val paints: KeyPaints
     var longClickLabel: String? = null
     private var downAt = 0L
     private var liftAt = 0L
+    private companion object { const val ICON_SCALE = 1.15f }
     init {
         contentDescription = description
         // The key click below replaces View's own, which would sound again as performClick runs on lifting.
@@ -85,6 +86,19 @@ internal class KeyCap(context: Context, fill: Int, private val paints: KeyPaints
         h.text = text; h.visibility = VISIBLE
     }
 
+    private var hintImage: ImageView? = null
+    /** A small icon in the corner where [hint]'s text goes, in the same quiet colour (SwiftKey layout's microphone on
+     * the comma), or none for null. */
+    fun hintIcon(res: Int?) {
+        if (res == null) { if (hintImage?.visibility == VISIBLE) { hintImage?.visibility = GONE; requestLayout() }; return }
+        val image = hintImage ?: ImageView(context).apply {
+            imageTintList = ColorStateList.valueOf(paints.quiet)
+            face.addView(this, LayoutParams(0, 0, Gravity.TOP or Gravity.END))
+        }.also { hintImage = it }
+        image.setImageResource(res)
+        if (image.visibility != VISIBLE) { image.visibility = VISIBLE; requestLayout() }
+    }
+
     // The label and hint are sized for the keycap here, before they are measured: KeyRowLayout has set the
     // padding that places the keycap inside the touch target.
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -111,6 +125,15 @@ internal class KeyCap(context: Context, fill: Int, private val paints: KeyPaints
             val params = h.layoutParams as LayoutParams
             val top = sizes.hintTop.roundToInt(); val end = sizes.hintEnd.roundToInt()
             if (params.topMargin != top || params.marginEnd != end) { params.topMargin = top; params.marginEnd = end; h.layoutParams = params }
+        }
+        hintImage?.takeIf { it.visibility == VISIBLE }?.let { image ->
+            // As tall as a hint's capitals would stand, a little more so its outline reads.
+            val side = (sizes.hint * ICON_SCALE).roundToInt()
+            val top = sizes.hintTop.roundToInt(); val end = sizes.hintEnd.roundToInt()
+            val params = image.layoutParams as LayoutParams
+            if (params.width != side || params.topMargin != top || params.marginEnd != end) {
+                params.width = side; params.height = side; params.topMargin = top; params.marginEnd = end; image.layoutParams = params
+            }
         }
     }
     // View normally posts its click after UP. Letter gestures commit on UP itself;

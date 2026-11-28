@@ -54,12 +54,14 @@ internal class LetterFeedback(private val host: ViewGroup, private val paints: K
     fun present(key: View, options: List<String>) = show(key, listOf(options), 0, options.size > 1)
     /** A held key's options in rows, the first row nearest the key, with [default] of it under the finger;
      * held with a single option, that option still types on lifting. */
-    fun hold(key: View, options: List<List<String>>, default: Int = 0) = show(key, options, default, true)
-    private fun show(key: View, options: List<List<String>>, default: Int, hold: Boolean) {
+    fun hold(key: View, options: List<List<String>>, default: Int = 0, ordered: Boolean = false) = show(key, options, default, true, ordered)
+    /** [ordered]: a one-row list keeps its order left to right wherever the key is (SwiftKey layout's period, whose
+     * flicks pick by direction), instead of reading away from the nearer edge. */
+    private fun show(key: View, options: List<List<String>>, default: Int, hold: Boolean, ordered: Boolean = false) {
         clear()
         if (host.width <= 0 || options.firstOrNull().isNullOrEmpty() || !inHost(key)) return
         val r = Rect(0, 0, key.width, key.height); host.offsetDescendantRectToMyCoords(key, r)
-        val reverse = hold && options.size == 1 && options[0].size > 1 && r.centerX() > host.width * .52
+        val reverse = !ordered && hold && options.size == 1 && options[0].size > 1 && r.centerX() > host.width * .52
         rows = if (reverse) listOf(options[0].reversed()) else options
         holding = hold; row = 0
         index = (if (reverse) rows[0].lastIndex - default else default).coerceIn(0, rows[0].lastIndex)
@@ -150,11 +152,17 @@ internal class LetterFeedback(private val host: ViewGroup, private val paints: K
          * letter with no digit to show offers its symbol first instead: Gboard's on the second and third
          * rows. On the top row, while the number row holds its digit, Gboard's set only fills in for a
          * letter with no home- or bottom-row symbol of its own. [currency] is Labs › Keyboard › Local
-         * currency's symbol, which takes $'s place on d as it does on the ?123 page. */
+         * currency's symbol, which takes $'s place on d as it does on the ?123 page. With [swiftKey] (Labs ›
+         * Keyboard › SwiftKey layout) the symbol is SwiftKey's instead ([swiftKeySymbol]), the digit still first. */
         fun holds(c: Char, language: String, digit: Char?, symbolsOnLetters: Boolean = false,
-                  topRow: Boolean = false, currency: Char? = null): List<String> {
+                  topRow: Boolean = false, currency: Char? = null, swiftKey: Boolean = false): List<String> {
             val accents = options(c, language)
-            val first = digit?.toString() ?: (if (symbolsOnLetters) letterSymbol(c, topRow, currency)?.toString() else null)
+            val symbol = when {
+                swiftKey -> swiftKeySymbol(c, topRow, currency)
+                symbolsOnLetters -> letterSymbol(c, topRow, currency)
+                else -> null
+            }
+            val first = digit?.toString() ?: symbol?.toString()
             return if (first == null) accents else listOf(first) + accents
         }
 
@@ -174,6 +182,22 @@ internal class LetterFeedback(private val host: ViewGroup, private val paints: K
             // A local currency replaces Gboard's $ on d, as it does on the ?123 page's own key.
             if (lower == 'd' && currency != null) return currency
             return letterSymbols[lower] ?: (if (topRow) topRowSymbols[lower] else null)
+        }
+
+        // Labs › Keyboard › SwiftKey layout: Microsoft SwiftKey's held symbols (English QWERTY, Android), keyed by
+        // letter as Gboard's are. The top row's are offered only while the number row shows the digits; otherwise
+        // row 1 keeps its digit, as SwiftKey's does.
+        private val swiftKeySymbols = mapOf('a' to '@', 's' to '#', 'd' to '&', 'f' to '*', 'g' to '-',
+            'h' to '+', 'j' to '=', 'k' to '(', 'l' to ')', 'z' to '_', 'x' to '$', 'c' to '"',
+            'v' to '\'', 'b' to ':', 'n' to ';', 'm' to '/')
+        private val swiftKeyTopRow = mapOf('q' to '%', 'w' to '^', 'e' to '~', 'r' to '|', 't' to '[',
+            'y' to ']', 'u' to '<', 'i' to '>', 'o' to '{', 'p' to '}')
+        /** A letter's SwiftKey symbol; [topRow] while the letter is drawn on row 1 beside the number row. A local
+         * currency takes $'s place on x, as it does on the 123 page. */
+        fun swiftKeySymbol(c: Char, topRow: Boolean = false, currency: Char? = null): Char? {
+            val lower = c.lowercaseChar()
+            if (lower == 'x' && currency != null) return currency
+            return swiftKeySymbols[lower] ?: (if (topRow) swiftKeyTopRow[lower] else null)
         }
 
         // Gboard's held symbols (Pixel 8 emulator, API 36, black box): the option Gboard selects first,
@@ -196,5 +220,9 @@ internal class LetterFeedback(private val host: ViewGroup, private val paints: K
         val periodHolds = listOf(listOf("(", ")", "#", "!", ",", "?"), listOf("-", ":", "@", "'", "/", ";"),
             listOf("·", "_", "&", "%", "\"", "+"))
         const val PERIOD_DEFAULT = 4
+
+        /** SwiftKey layout's held period: one row, the period under the finger. A sideways flick picks at once. */
+        val swiftKeyPeriodHolds = listOf(listOf("!", ",", ".", "?"))
+        const val SWIFTKEY_PERIOD_DEFAULT = 2
     }
 }

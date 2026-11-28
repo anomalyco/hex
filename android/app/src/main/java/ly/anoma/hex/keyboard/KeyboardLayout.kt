@@ -48,23 +48,33 @@ internal data class KeyboardPage(
      * in place of $ and that d holds on the letters, or null for $. The =< page then shows $ in that symbol's
      * slot, or in ¥'s for one it has none, so both pages keep their keys and neither draws a symbol twice. */
     val currency: Char? = null,
+    /** Labs › Keyboard › SwiftKey layout: SwiftKey's held letter symbols and bottom row on the letters, and its
+     * 123 and {&= pages in place of Gboard's ?123 and =<. */
+    val swiftKey: Boolean = false,
 ) {
     val lines: List<String> get() = when {
         !symbols -> KeyboardLetters.rows(language.layoutCode)
+        swiftKey && more -> KeyboardLetters.swiftKeySymbols(currency)
+        swiftKey -> KeyboardLetters.swiftKeyNumbers(currency)
         more -> KeyboardLetters.symbols(currency)
         else -> KeyboardLetters.numbers(currency)
     }
+
+    /** SwiftKey's {&= page has no comma, period or emoji key in its bottom row: these four marks sit between space
+     * and enter instead. Every other page has none, and keeps its comma and period keys. */
+    val bottomMarks: String get() = if (swiftKey && symbols && more) KeyboardLetters.SWIFTKEY_BOTTOM else ""
 
     /** What the bottom row's comma key types: the field's own mark on the letters (Gboard's @ in an email
      * field and / in a URL), a comma on ?123, and =<'s <, which that page's seven-key row leaves out. */
     val commaText: String get() = when {
         !symbols -> kind.mark
+        swiftKey -> ","
         more -> "<"
         else -> ","
     }
 
     /** What the bottom row's period key types: . on the letters and ?123, and =<'s >. */
-    val periodText: String get() = if (symbols && more) ">" else "."
+    val periodText: String get() = if (symbols && more && !swiftKey) ">" else "."
 
     /** The ten digits above the letter rows while the number row shows; ?123 and the pads keep their own. */
     val digits: String? get() = if (numberRow && !symbols && pad == null) KeyboardLetters.DIGITS else null
@@ -118,6 +128,8 @@ internal object KeyboardMetrics {
     const val DELETE_REPEAT_EVERY = 50L
     /** A key held this long shows what it holds (Gboard's long press: between 300 and 350 ms). */
     const val HOLD_MS = 300L
+    /** A key held still this long dictates, as the Hex key does (SwiftKey layout's comma). */
+    const val TALK_HOLD_MS = 350L
     /** Gboard's pads: 53.3 dp keys on the letters' 58.9 dp rows (a 5.7 dp gap between rows). */
     const val PAD_ROW_GAP = 5.7f
     /** Gboard ticks again as a key lifts when it was held at least this long. */
