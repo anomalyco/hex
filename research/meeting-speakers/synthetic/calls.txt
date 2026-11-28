@@ -1,0 +1,225 @@
+# Fictional demo calls for the speaker-diarization test. Every voice is
+# synthetic (Qwen3-TTS VoiceDesign, then Base cloning) and every name is made up.
+#
+# Line forms:
+#   Name: text      a turn; starts after the previous turn ends, with a short gap
+#   ~Name: text     barge-in; starts before the previous turn ends
+#   +Name: text     backchannel; lands inside the previous turn, does not move the clock
+# Lines starting with # are comments; "== callN" starts a call.
+
+== call1
+Maya: Hey Tom, can you hear me okay? My headphones have been acting up all morning.
+Tom: Loud and clear. Morning, Maya. Or afternoon for you, I suppose.
+Maya: Afternoon, yeah. Okay, so I wanted to go over the launch checklist before Thursday, because I think we've got a couple of loose ends on the pricing page.
++Tom: Right.
+Tom: Mm, I saw your note about that. Is it the annual plan toggle, or is it the copy on the enterprise tier?
+Maya: Both, honestly. The toggle works, but the discount badge still says fifteen percent, and finance told us it's going to be twenty.
+Tom: Ah. That's an easy one. I'll ask Dana to change the string, it's in the shared config, so it should go out with the next deploy.
+Maya: Perfect. And then the enterprise copy. Legal wants us to remove the word unlimited, because apparently we can't promise unlimited anything.
+~Tom: Of course they do.
+Maya: So I rewrote it as generous usage limits, which sounds a bit vague, but it's what they approved.
+Tom: I think that's fine. Nobody reads that line closely anyway. What about the email to existing customers?
+Maya: That's the other thing. The draft is ready, but I'm not sure we should send it on launch day. Support is going to be slammed.
++Tom: Yeah.
+Tom: I'd push it to Friday morning. Give the team one day to catch the obvious bugs, and then we tell everyone.
+Maya: Okay, I like that. Friday at nine, our time?
+Tom: Make it ten. People in the UK will still be at their desks, and the West Coast will be awake.
+Maya: Ten it is. Now, the demo video. Did you get a chance to watch the new cut?
+Tom: I did, last night. It's good. It's a little long. The part where you walk through the settings screen could lose about twenty seconds.
+Maya: That's fair. I was attached to that bit, but you're right, it drags.
+Tom: The ending is lovely though. The little animation with the logo. Keep that.
+Maya: Ha, okay, I'll tell the designer you said lovely. She'll be thrilled.
+Tom: Please do. One more question from my side. Who's on call over the weekend?
+Maya: I think it's Ravi on Saturday and me on Sunday, but let me double check the rota.
+~Tom: No rush.
+Maya: Yeah, Ravi Saturday, me Sunday. And you're backup for both days, if that's still okay.
+Tom: That's fine. I'll keep my laptop nearby. Just text me if anything catches fire.
+Maya: Hopefully nothing catches fire. Alright, I think that's everything on my list. Anything else from you?
+Tom: No, I think we're in good shape. Thanks for pulling all this together, Maya.
+Maya: Of course. Talk Thursday. Bye Tom.
+Tom: Cheers, bye.
+
+== call2
+Priya: Okay, I think everyone's here. Jake, you're on mute, by the way.
+Jake: Sorry, sorry. Can you hear me now?
+Priya: Yes, we've got you. So this is sprint planning for the next two weeks. Maya, do you want to start with what carried over?
+Maya: Sure. So three tickets carried over. The search indexing fix, the onboarding email, and the export to CSV feature, which is about eighty percent done.
++Jake: Yeah.
+Jake: The CSV one is mine. I got stuck on the date formatting. Different customers want different formats, and I wasn't sure if we should let them choose.
+Priya: What did the customers actually ask for?
+Jake: Two of them asked for ISO dates. One asked for the American format, month first.
+Maya: I'd just ship ISO and add a setting later if people complain. It's the least ambiguous.
+~Jake: That's what I was thinking.
+Priya: Agreed. Ship ISO, write a follow-up ticket for the setting, and we'll see if anyone actually asks for it again.
+Jake: Cool. That means I can probably finish it by Wednesday.
+Priya: Great. Maya, the search indexing fix. Where are we with that?
+Maya: It's annoying. The bug only shows up with documents over about fifty pages. I can reproduce it locally now, which is progress, but I don't have the root cause yet.
+Priya: How long do you think?
+Maya: Honestly, it could be a day or it could be a week. I'd rather not commit to a date until I understand it.
++Priya: Okay.
+Priya: That's fair. Let's time-box the investigation to three days. If you don't have a root cause by Thursday, we pair on it.
+Maya: That works for me.
+Jake: I can help too, if you want a second pair of eyes. I touched the indexer last month.
+Maya: Oh, that would be great actually. Maybe tomorrow afternoon?
+Jake: Yeah, tomorrow after lunch works.
+Priya: Good. And the onboarding email. That was waiting on copy from marketing, right?
+Maya: Right, and they sent it yesterday, so that one's unblocked. It's maybe half a day of work.
+Priya: Okay. New work. The big item this sprint is the team permissions feature. We've been promising it to customers for a quarter now.
+Jake: Is the design finished? Last time I looked there were still open questions about guest accounts.
+Priya: The design is finished except for guests. We're going to ship without guest accounts in the first version.
+~Jake: Oh, nice, that simplifies a lot.
+Priya: It does. So the plan is roles at the workspace level. Owner, admin, member. That's it for version one.
+Maya: Do admins get to manage billing? Because that came up in the last customer call.
+Priya: No. Billing stays with owners only. We can revisit that later.
+Maya: Okay, good. That's simpler for the permission checks too.
+Jake: How do we want to split it? I'm happy to take the backend, the role checks and the migration.
+Priya: That makes sense. Maya, could you take the settings screen once you're out of the search bug?
+Maya: Yeah, I can do that. It's mostly forms anyway.
+Priya: Great. I'll write the tickets this afternoon and put estimates on them in the morning. Anything else before we wrap?
+Jake: Just a heads up, I'm out Friday afternoon. Dentist.
++Maya: Ouch.
+Priya: Noted. Thanks, both of you. Good sprint, let's keep it boring.
+Maya: Boring is good. Bye.
+Jake: Bye everyone.
+
+== call3
+Elena: Good morning, everyone. Thank you for making time. I know budget reviews are nobody's favourite meeting.
+Tom: It's fine, Elena. I brought coffee.
++Sam: Ha.
+Elena: So, the quarter. We are about six percent over on infrastructure, and about ten percent under on hiring, because two roles took longer to fill than we planned.
+Priya: Is the infrastructure overrun mostly the new database cluster?
+Elena: Mostly, yes. The cluster itself was in the plan, but we ran the old one and the new one side by side for five weeks instead of two.
+Sam: That's on us. The migration took longer than we thought. We found a bunch of edge cases in the old data, and we didn't want to cut over until they were clean.
+Tom: Which was the right call, for what it's worth. A botched migration would have cost us a lot more than three extra weeks of servers.
++Elena: Absolutely.
+Elena: I agree. I'm not unhappy about it. I just want us to explain it clearly in the board deck, so it doesn't look like we lost control of costs.
+Priya: Can we show the two numbers separately? The planned cost, and then the overlap period as a one-off line?
+Elena: Yes, that's exactly what I'd like. Sam, can you give me the dates when both clusters were running?
+Sam: Sure. I'll pull them from the billing console this afternoon and send them over.
+Elena: Thank you. Now, hiring. We have one open role left, the senior data engineer. Tom, where are we with that?
+Tom: We've got two strong candidates in the final round. One of them is in Lisbon, which raises the question of whether we hire outside our current countries.
+~Priya: I'd be very open to that.
+Tom: Me too, but it has implications for payroll and for the employment contracts, so I wanted to raise it here before we make an offer.
+Elena: It's possible. We'd use an employer of record service. It costs a bit more per month, roughly fifteen percent on top of salary.
+Sam: Is that a permanent cost, or just until we set up a local entity?
+Elena: Until we set up an entity, which only makes sense once we have three or four people in a country.
+Priya: Then I'd say go ahead, if the candidate is the strongest. Fifteen percent for one person is not a big deal.
+Tom: Okay. I'll finish the reference checks this week, and if they come back clean, I'll bring a recommendation on Monday.
+Elena: Perfect. Next item. Software subscriptions. We pay for three different design tools, and I suspect we only use one.
++Tom: Mm.
+Sam: We definitely only use one. The other two were from a trial that someone forgot to cancel.
+Elena: Then let's cancel them. Priya, can you check with the design team before I do, just in case?
+Priya: Will do. I'll ask in their channel today.
+Elena: Lovely. Before the offsite, one more thing. The board asked for a forecast for next year, and I'd like each of you to give me your rough numbers by the end of the month.
+Tom: How rough is rough? Are we talking a single number, or broken down by month?
+Elena: Broken down by quarter is enough. Headcount, tools, and anything unusual you expect, like a big conference or a new vendor.
+Sam: For infrastructure, I can give you a range. It depends a lot on how fast the enterprise customers grow, because they use much more storage.
++Elena: Of course.
+Elena: A range is fine. Give me a low, a likely, and a high case, and tell me what would push us into the high one.
+Priya: For the product team, the big question is whether we hire the two designers we talked about in the spring.
+Tom: I thought that was already approved?
+Priya: It was approved in principle, but we paused it when the data engineer search was taking so long. I'd like to restart it in January.
+~Elena: That seems reasonable.
+Elena: Put it in your forecast, then, and we'll discuss it properly at the planning session. I don't want to decide it in a budget meeting.
+Sam: Speaking of vendors, our monitoring contract renews in March, and they've told us the price is going up by about thirty percent.
+Tom: Thirty percent? That's a lot. Have we looked at alternatives?
+Sam: A little. There are two cheaper options, but moving all our dashboards and alerts would take a few weeks of someone's time.
+Priya: A few weeks of an engineer is not free either. We should compare the real cost, not just the subscription price.
++Sam: Totally.
+Elena: Agreed. Sam, could you write a one page comparison? Current vendor at the new price, the two alternatives, and an estimate of the migration effort.
+Sam: Yes, I can do that. It might also give us some leverage to negotiate with the current vendor.
+Tom: Good thinking. They usually find a discount when you show them a competitor's quote.
+Elena: Then let's not tell them anything until we have the comparison. Okay. And finally, the offsite. We budgeted for twenty people, and we are now twenty six.
+Sam: Can we just do it closer to home this year? Fewer flights, cheaper, and honestly people seemed tired after the last one.
+~Tom: I'd second that.
+Elena: I'm hearing a lot of agreement. Let's look at venues within a train ride. Sam, would you be willing to collect three options?
+Sam: Yeah, happy to. I'll have them by the end of next week.
+Elena: Wonderful. I think that covers it. Thank you all, this was quicker than I feared.
+Priya: Thanks, Elena.
+Tom: Thanks, everyone.
+Sam: Cheers, see you.
+
+== call4
+Marcus: Alright, let's get started. This is the design review for the new mobile app home screen. Grace, you want to share your screen?
+Grace: Yes, one second. Okay, can everyone see the Figma file?
++Jake: Yep.
+Maya: We can see it.
+Grace: Great. So the main change is that the home screen is now organised around today, instead of around projects. The first thing you see is what's due today and what changed since you last opened the app.
+Elena: I like that a lot. As a manager, that's what I actually want to know in the morning.
+Marcus: That was the goal. We interviewed about fifteen customers, and nearly all of them said they open the app to answer one question. What do I need to do right now?
+Jake: How does it handle people with a hundred things due today? Because some of our power users really do have that.
+Grace: Good question. We group them by project and collapse anything after the first five. There's a show all link at the bottom of each group.
+~Jake: Okay, that's reasonable.
+Maya: What about notifications? Right now they're in a separate tab. Are we moving them onto the home screen?
+Grace: We're moving the important ones. Mentions and assignments show up in the changed since you last looked section. Everything else stays in the notifications tab.
+Elena: How do you decide what's important? I worry that's going to feel arbitrary to people.
+Marcus: For the first version, it's just mentions and assignments. Later we could let people choose, but we didn't want to start with a settings screen.
++Elena: Fair enough.
+Elena: Fair enough. Keep it simple and see what people say.
+Maya: One thing I noticed. The due today section uses red for overdue items. On the dark theme, that red is really hard to read.
+Grace: Oh, you're right. Let me switch to dark mode. Yeah, that's not great. I'll bump the contrast.
+Jake: Also, small thing, the tap target on the checkbox looks tiny. Like it's going to be really easy to miss on a phone.
+Grace: It's twenty eight points right now. I can make it forty four, which matches the platform guidelines.
+Marcus: Please do. Accessibility issues are the kind of thing that come back to bite us later.
+Elena: Can I ask about the timeline? When do customers actually see this?
+Marcus: We're aiming for a beta in four weeks, to about two hundred users who opted in, and then a full release two weeks after that if the numbers look good.
+Elena: Which numbers?
+Marcus: Daily active use and the time it takes people to complete their first task in the morning. We think both should go up.
+Maya: Do we have a baseline for the second one? I don't remember us tracking it.
+Marcus: We started tracking it two weeks ago, so we'll have about six weeks of data by the time the beta starts.
+~Maya: Oh, good.
+Jake: Is there anything engineering needs to start now, so we're not blocking the beta?
+Grace: The today query is new. Right now the API doesn't have a way to ask for everything due today across all projects.
+Jake: Yeah, that's a new endpoint. It's not hard, but it needs to be fast, because it's the first thing that loads.
+Marcus: Can you have a version of it in two weeks?
+Jake: Two weeks is doable. I'll need Maya's help on the caching side.
+Maya: Happy to. Let's sketch it out tomorrow.
+Grace: I'll send the updated designs with the contrast and tap target fixes by end of day.
+Elena: This looks really promising. Nice work, Grace, and thank you, Marcus, for running such a tidy review.
+Grace: Thank you, that's kind.
+Marcus: Alright, thanks everyone. Let's go build it.
+Jake: Later.
+
+== call5
+Sam: Hey Grace, hey Tom. Thanks for jumping on. This should be quick, it's just the debrief for the frontend candidate we saw yesterday.
+Grace: No problem. I've got my notes open.
+Tom: Same here. Who wants to go first?
+Sam: I'll go. I did the technical interview. Honestly, I was impressed. She solved the main problem quickly and explained her trade-offs really clearly.
++Grace: Mm-hm.
+Grace: That matches what I saw. In the design collaboration interview, she asked a lot of good questions before she started building anything.
+Tom: What kind of questions?
+Grace: Things like, who is this for, what device are they on, what happens when the data is empty. The stuff junior people usually skip.
+~Tom: That's a good sign.
+Tom: My interview was the values one, and I'll be honest, I had one small concern. She talked a lot about her own work and not much about the people she worked with.
+Sam: Hmm. Do you think that's a real concern, or was it just nerves?
+Tom: Could be nerves. When I asked directly about a time she disagreed with a teammate, her answer was actually quite thoughtful.
+Grace: I didn't get that impression at all. If anything she was very collaborative in my session. She kept checking whether her ideas made sense to me.
+Tom: Then I'm probably reading too much into it. I'd still lean yes.
+Sam: What level are we thinking? I'd put her at mid, maybe strong mid.
+Grace: I'd say senior, honestly. The way she handled the empty states was really mature.
+Tom: Let's say strong mid with a path to senior in the first year. That gives us room to adjust either way.
++Sam: Yeah.
+Sam: I can live with that. Do we want a reference check before the offer, or after?
+Tom: Before. It's quick, and it would put my small worry to rest.
+Grace: Okay. Should I reach out to the references, or does recruiting do that?
+Tom: Recruiting usually does it. I'll ask them to prioritise it so we can move this week.
+Sam: Great. Then it's a yes from all three of us, pending references.
+Grace: Yes from me.
+Tom: Yes from me too. While I've got you both, can we talk about the take-home exercise? I've had two candidates this month say it took them a whole weekend.
+Sam: Yeah, I've heard that too. It's supposed to take three hours, but the instructions are vague enough that people keep polishing.
++Grace: Mm.
+Grace: I think the problem is the open-ended design part. We say build a small dashboard, and good people take that as an invitation to build something beautiful.
+Tom: Which is exactly the kind of person we want, and exactly the kind of person we're punishing.
+~Sam: Right, that's the irony.
+Sam: What if we give them a finished design and only ask them to build it? Then it's about the engineering, and it's much easier to compare candidates.
+Grace: I'd be a bit sad to lose the design signal, though. That's how we found out yesterday's candidate thinks about empty states.
+Tom: Could we keep a short design question in the live interview instead? Ten minutes, talk through how you'd handle the edge cases.
+Grace: Oh, I like that. It's a conversation instead of homework.
+Sam: And it's fairer to people with kids or second jobs, who can't give up a weekend.
++Tom: Exactly.
+Tom: Okay. Sam, would you be up for rewriting the exercise? Give it a hard time limit, and a design they just have to follow.
+Sam: Sure. I'll draft it this week and send it to you both for comments.
+Grace: I'll write the ten minute design question. I have a few ideas already.
+Tom: Brilliant. Then let's try the new version with the next three candidates and see how it feels.
+Grace: Sounds good. Thanks, both.
+Sam: Nice. Have a good one.
