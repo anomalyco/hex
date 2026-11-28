@@ -179,6 +179,16 @@ pub enum MeetingsCommand {
         #[command(flatten)]
         output: crate::control::cli::Output,
     },
+    /// Rename a finished meeting, as the Meetings pane's Rename does. Put
+    /// `--` before the id when the title could start with a dash.
+    Rename {
+        /// The exact id `hex meetings list --json` prints.
+        id: String,
+        /// The new title; surrounding and repeated whitespace is dropped.
+        title: String,
+        #[command(flatten)]
+        output: crate::control::cli::Output,
+    },
 }
 
 #[derive(Serialize)]
@@ -801,7 +811,8 @@ fn meetings_to(
         MeetingsCommand::Record { .. }
         | MeetingsCommand::Stop { .. }
         | MeetingsCommand::CopyLast { .. }
-        | MeetingsCommand::Delete { .. } => Err(eyre!("this command needs the running Hex")),
+        | MeetingsCommand::Delete { .. }
+        | MeetingsCommand::Rename { .. } => Err(eyre!("this command needs the running Hex")),
     }
 }
 

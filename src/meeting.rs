@@ -73,6 +73,7 @@ pub mod query;
 mod recording;
 mod recovery;
 mod retention;
+mod retitle;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) mod runtime;
 pub(crate) mod seen_calls;
@@ -106,6 +107,7 @@ pub use recording::recording;
 #[cfg(test)]
 pub use retention::audio_expired;
 pub use retention::{expire, expire_audio, list, retention_for};
+pub use retitle::{RenameError, rename_finished};
 pub use speakers::{Label, Labels, SpeakerName, Speakers, Tracks};
 #[cfg(test)]
 pub use speakers::{NameSource, SpeakerId};

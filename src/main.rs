@@ -798,6 +798,12 @@ mod tests {
                 command: CommandsCommand::Check
             })))
         ));
+        assert!(matches!(
+            parse(&["hex", "meetings", "rename", "--json", "--", "1-2", "-Design review"]),
+            Ok(Some(Command::Control(ControlCli::Meetings {
+                command: transcript_cli::MeetingsCommand::Rename { id, title, output }
+            }))) if id == "1-2" && title == "-Design review" && output.json
+        ));
         assert!(parse(&["hex", "meetings", "cancel"]).is_err());
         assert!(matches!(
             parse(&[

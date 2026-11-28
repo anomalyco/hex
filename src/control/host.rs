@@ -219,6 +219,9 @@ fn command(host: &dyn Host, command: ControlCommand) -> ControlReply {
             Err(error) => ControlReply::error("failed", format!("couldn't copy it: {error}")),
         },
         ControlCommand::MeetingDelete { id } => super::meeting_deleted(crate::meeting::delete(&id)),
+        ControlCommand::MeetingRename { id, title } => {
+            super::meeting_renamed(crate::meeting::rename_finished(&id, &title))
+        }
         ControlCommand::SettingsGet { key } => reply(load().and_then(|settings| {
             Ok(ControlReply::Settings {
                 settings: match key {
