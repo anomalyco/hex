@@ -1187,15 +1187,10 @@ fn rounded(x: f32, y: f32, w: f32, h: f32, r: f32) -> Path {
         .close()
 }
 
-/// A square icon button as tall as the capsule's chips, the icon centred.
+/// A square icon button, the icon centred: the line's 28 pt button box,
+/// 6 pt in from the walls, as ✕ is on the finished line.
 fn icon_button(p: Paint, icon: El) -> El {
-    row()
-        .center()
-        .size(CHIP_H, CHIP_H)
-        .radius(surface::CHIP_RADIUS)
-        .hover(p.k.c.hover)
-        .press(p.k.c.pressed)
-        .child(icon)
+    button_box(p, BUTTON_H).child(icon)
 }
 
 /// Scrawl's line icons on their 24 × 24 grid; `Id::Why` is the warning.

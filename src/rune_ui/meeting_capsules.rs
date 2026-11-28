@@ -106,10 +106,11 @@ const REST_WIDTH: f32 = REST_PL + REST_PX + waveform::WIDTH + METER_GAP + TIMER_
 /// The header's sides, at rest and open, so the timer stays put as the pill
 /// opens: the inset the rows' labels, the title and the summary keep.
 const REST_PX: f32 = CAPSULE.text_rail();
-/// The header's left side: the field's outer columns fade, so it tucks
-/// `FIELD_TUCK` nearer the wall and reads as the time's right inset.
+/// The header's left side: the field's first column is a faint ghost, so it
+/// tucks `FIELD_TUCK` nearer the wall and its first lit one stands 16.5 pt in,
+/// as the time's last digit does from the right.
 const REST_PL: f32 = REST_PX - FIELD_TUCK;
-const FIELD_TUCK: f32 = 6.0;
+const FIELD_TUCK: f32 = 4.0;
 /// No red dot before the time: the live waveform already says it records.
 const SHOWS_REC_DOT: bool = false;
 /// The dot and its gap before the time, when it shows.
@@ -1209,7 +1210,9 @@ fn button(
         })
         .build_push(p.k)
         .key(key)
-        // Concentric with the capsule across its 6 pt inset.
+        // A 32 pt row (the kit's button is 28): 6 pt from the top, the bottom
+        // and the end wall, its corners concentric with the capsule's.
+        .h(CAPSULE.row_h)
         .radius(CAPSULE.inner(CAPSULE.button_inset))
         // The capsule's body drags; its buttons are buttons.
         .cursor(Cursor::Pointer)

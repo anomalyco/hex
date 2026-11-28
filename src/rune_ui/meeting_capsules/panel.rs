@@ -51,6 +51,7 @@ impl Notice {
 const CLOSE_BOX: f32 = CAPSULE.close;
 /// The panel's icon spine: the centre of its rows' 16 pt glyphs, where every
 /// ✕ is centred too.
+#[cfg(test)]
 pub(super) const SPINE: f32 = CAPSULE.icon_spine();
 /// What a discard ✕ would take from the open header's field. The open
 /// header is the waveform and the time alone: no bare ✕ beside them.
@@ -396,7 +397,7 @@ fn result(
         .w(CLOSE_WIDTH)
         .h(REST_HEIGHT)
         .center()
-        .children(manifest.map(|_| dismiss_button(p).transition(replace(capsule))));
+        .children(manifest.map(|_| dismiss_button(p, CLOSE_BOX).transition(replace(capsule))));
     let meta = meter_band();
     let space = el().key("space").grow(1.);
     // ✕ sits before the time in every corner. In a left corner the time

@@ -72,14 +72,23 @@ const LEAD_TRAIL: f32 = 12.0;
 /// after the digits.
 pub(crate) const LEVEL_GAP: f32 = 6.0;
 pub(crate) const LEVEL_W: f32 = 10.0;
-/// A mode chip: its icon, the gap after it, and the padding either side.
+/// A mode chip: its icon, the gap after it, and the padding inside its
+/// 28 pt box. The icon's ink sits inside its square, so its side is trimmed
+/// to 8 pt and reads as the 10 pt after the word.
 pub(crate) const SEG_ICON: f32 = 14.0;
 pub(crate) const SEG_ICON_GAP: f32 = 5.0;
-const SEG_PX: f32 = 10.0;
+pub(crate) const SEG_PL: f32 = 8.0;
+pub(crate) const SEG_PR: f32 = 10.0;
 /// Between a chip's label and its shortcut.
 pub(crate) const HINT_GAP: f32 = 6.0;
 /// The split destination chip's leading icon and trailing `⌄` half.
 pub(crate) const SEND_ICON: f32 = 14.0;
+/// Inside the send button: 8 pt before the arrow (its ink starts 2.5 pt
+/// inside its square, so it reads as 10.5), 4 pt to the name, and 10 pt
+/// after the name, so the arrow and the name sit evenly between its ends.
+pub(crate) const SEND_PL: f32 = 8.0;
+pub(crate) const SEND_ICON_GAP: f32 = 4.0;
+pub(crate) const SEND_PR: f32 = 10.0;
 pub(crate) const CHEVRON_W: f32 = CHIP_H - 2.0 * BUTTON_INSET;
 /// Between the split chip's send button and its ⌄ button: two buttons side
 /// by side, never one fill with a rule inside it.
@@ -314,6 +323,13 @@ impl Id {
         }
     }
 
+    /// Whether a lit chip of this kind wears the sliding highlight: the mode
+    /// chips, whose selection travels. Every other lit button fills its own
+    /// box, and a queued split chip is two buttons, never one fill.
+    const fn lights(self) -> bool {
+        matches!(self, Id::Mode(_))
+    }
+
     const fn group(self) -> u8 {
         match self {
             Id::Lead | Id::Processing | Id::Done | Id::Why => 0,
@@ -347,14 +363,16 @@ impl Id {
             // The label's trail and the action's padding already part
             // them.
             (Id::Done | Id::Why, _) => GROUP_GAP,
-            // The tools (pen, source) and stop / cancel part by space alone,
-            // never a rule between them.
-            (Id::Source, Id::Finish) => GROUP_GAP,
-            // Stop and Discard sit slightly apart so destructive ✕ isn't flush beside ■.
-            (Id::Finish, Id::Cancel) => CHIP_GAP + 2.0,
+            // The recording's pen, source, stop and ✕ are one even row: 28 pt
+            // boxes 6 pt apart, with no rule and no wider step between them
+            // (the same-group arm below).
             // Boxed buttons and icons keep one even step beside ✕.
             (_, Id::Close) if self_button => CHIP_GAP,
             (Id::Inspect | Id::Search, Id::Close) => CHIP_GAP,
+            // The picker's line is one row of boxes too: the lit mode,
+            // Record and ✕ stand 6 pt apart, so ✕ sits midway between the
+            // fill before it and the wall.
+            (Id::Mode(_) | Id::Record, Id::Close) | (Id::Mode(_), Id::Record) => CHIP_GAP,
             // ✕'s circle has air of its own, so it tucks into a plain worded
             // action's right padding; drawn later, it takes the overlap's
             // presses.
@@ -418,7 +436,7 @@ pub(crate) struct Item {
 }
 
 fn mode_width(mode: Mode) -> f32 {
-    measure(mode.label(), medium()) + 2.0 * SEG_PX + SEG_ICON + SEG_ICON_GAP
+    measure(mode.label(), medium()) + SEG_PL + SEG_PR + SEG_ICON + SEG_ICON_GAP + 2.0 * BUTTON_INSET
 }
 
 fn chip_width(label: f32) -> f32 {
@@ -439,7 +457,7 @@ pub(crate) fn shortcut_keycaps() -> Vec<String> {
 
 /// Width of the left send/queued half inside the split destination chip.
 pub(crate) fn split_send_width(name: &str) -> f32 {
-    8.0 + SEND_ICON + 4.0 + measure(name, medium()) + 4.0
+    SEND_PL + SEND_ICON + SEND_ICON_GAP + measure(name, medium()) + SEND_PR
 }
 
 /// Total chip width of the split destination chip: the send button, a
@@ -787,8 +805,17 @@ fn line(pres: &Pres, clock: &str, metered: bool) -> ([f32; 4], Vec<Item>) {
     // it is as wide: the search grows, or ✕ moves out to the list's edge.
     // A card's top line is as wide as the card, as the list's is.
     let listed = matches!(pres, Pres::Done(Done { open: Some(_), .. }));
+    let configuring = matches!(
+        pres,
+        Pres::Done(Done {
+            always_popover: Some(_),
+            ..
+        })
+    );
     let min_w = if listed {
         LIST_W
+    } else if configuring {
+        super::always_view::POP_W
     } else if !card_picks(pres).is_empty() {
         CARD_W
     } else {
@@ -1014,7 +1041,7 @@ impl Surface {
     }
 
     fn highlight_for(&mut self, items: &[Item], motion: Spring) -> Option<Shown> {
-        let active = items.iter().find(|i| i.active)?;
+        let active = items.iter().find(|i| i.active && i.id.lights())?;
         self.generation += 1;
         Some(Shown {
             id: active.id,
@@ -1156,7 +1183,7 @@ impl Surface {
         }
         // The highlight rides its chip when the chip travels and trails a
         // change of mode.
-        let active = items.iter().find(|i| i.active).cloned();
+        let active = items.iter().find(|i| i.active && i.id.lights()).cloned();
         match (&mut self.highlight, &active) {
             (Some(h), Some(a)) => {
                 h.motion = if h.id == a.id {
@@ -1601,7 +1628,14 @@ mod tests {
                 let want = pair[0]
                     .id
                     .gap_before(pair[0].active, pair[1].id, pair[1].active);
-                assert!((gap - want).abs() < 1e-3, "{gap} != {want}");
+                // An open list's capsule is the list's width: the room that
+                // leaves goes after the label, before the actions.
+                let spread = matches!(pres, Pres::Done(Done { open: Some(_), .. }))
+                    && matches!(pair[0].id, Id::Done | Id::Why);
+                assert!(
+                    (gap - want).abs() < 1e-3 || (spread && gap > want),
+                    "{gap} != {want}"
+                );
                 assert!(
                     [
                         CHIP_GAP,

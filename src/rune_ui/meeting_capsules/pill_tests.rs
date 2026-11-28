@@ -48,7 +48,7 @@ fn recording_in(corner: MeetingIndicatorCorner) -> Runtime<Capsule> {
 fn the_header_keeps_the_rows_inset_at_rest_open_and_finished() {
     use MeetingIndicatorCorner::*;
     let inset = PANEL_PAD + ROW_PX;
-    assert_eq!((REST_PL, REST_PX, REST_WIDTH), (10., 16., 148.));
+    assert_eq!((REST_PL, REST_PX, REST_WIDTH), (12., 16., 150.));
     for corner in [TopLeft, TopRight, BottomLeft, BottomRight] {
         let mut rt = recording_in(corner);
         let [px, _, pw, ph] = laid_out(&rt, "pill");
@@ -503,10 +503,14 @@ fn an_automatic_recording_wears_its_apps_icon_the_live_dot_and_the_capsules_clos
     // The live dot leads "Recording" and never touches the icon.
     let [dx, _, _, _] = laid_out(&rt, "rec-dot");
     assert!(dx > ix + iw, "the dot at {dx} overlaps the icon ending at {}", ix + iw);
-    // The ✕ is every capsule's 28 pt box, 6 pt in from the right.
-    let [cx, _, cw, ch] = laid_out(&rt, "close-box");
-    assert_eq!((cw, ch), (CAPSULE.close, CAPSULE.close));
+    // The ✕ box is as tall as Stop beside it: the banner's 32 pt row, 6 pt
+    // in from the right, the top and the bottom.
+    let [cx, cy, cw, ch] = laid_out(&rt, "close-box");
+    assert_eq!((cw, ch), (CAPSULE.row_h, CAPSULE.row_h));
     assert_eq!(px + pw - (cx + cw), CAPSULE.button_inset);
+    assert_eq!(cy - py, CAPSULE.button_inset);
+    let [_, sy, _, sh] = laid_out(&rt, "stop");
+    assert_eq!((sy, sh), (cy, ch));
     let shown = texts(&rt);
     assert!(shown.contains(&"Recording".to_string()), "{shown:?}");
     assert!(shown.contains(&"Slack Huddle · 2:30 PM".to_string()), "{shown:?}");

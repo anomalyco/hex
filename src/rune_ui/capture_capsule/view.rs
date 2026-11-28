@@ -133,10 +133,17 @@ pub(super) fn capsule(
         .size(PANEL_W, PANEL_H)
         .motion(surface.shell_motion);
     if let Some(highlight) = &surface.highlight {
+        // The lit segment is a button box like every other fill in the line:
+        // 2 pt inside its chip, so 6 pt in from the walls on 8 pt corners.
+        let [hx, hy, hw, hh] = highlight.rect;
+        let inset = surface::BUTTON_INSET;
         inner = inner.child(
-            placed(el(), highlight)
+            el().key(highlight.key.clone())
+                .absolute(hx + inset, hy + inset)
+                .size(hw - 2.0 * inset, hh - 2.0 * inset)
+                .motion(highlight.motion)
                 .trace_name("highlight")
-                .radius(surface::CHIP_RADIUS)
+                .radius(ICON_BUTTON_RADIUS)
                 .fill(p.k.c.layer_02)
                 .box_shadow(rune::Shadow {
                     spread: p.hair,
@@ -179,7 +186,7 @@ pub(super) fn capsule(
         ..
     }) = &surface.pres
     {
-        root = root.child(always_view::always_view(p, config, reduced));
+        root = root.child(always_view::always_view(p, config, x, w, reduced));
     }
     root
 }
@@ -269,8 +276,11 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
     match id {
         Id::Mode(mode) => {
             let fg = if shown.active { p.text() } else { p.muted() };
-            let mut chip = base
-                .radius(surface::CHIP_RADIUS)
+            // The icon side is trimmed: its ink sits inside its square, so
+            // 8 pt before it reads as the 10 pt after the word.
+            let mut chip = plain_box(boxed(shown))
+                .pl(surface::SEG_PL)
+                .pr(surface::SEG_PR)
                 .gap(SEG_ICON_GAP)
                 .child(mark(id, SEG_ICON, fg))
                 .child(label(mode.label(), medium(), fg))
@@ -278,7 +288,8 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             if !shown.active {
                 chip = chip.hover(c.hover);
             }
-            chip.role("button")
+            base.child(chip)
+                .role("button")
                 .label(mode.label())
                 .hit()
                 .on_press_tx(press(id))
@@ -336,22 +347,21 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
         ),
         Id::Record => {
             let name = tr("Record");
-            base.radius(surface::CHIP_RADIUS)
-                .fill(c.bg_contrast)
-                .hover(c.contrast_hover)
-                .press(c.contrast_pressed)
-                .child(label(name, medium(), c.text_contrast))
-                .role("button")
-                .label(name)
-                .hit()
-                .on_press_tx(press(id))
+            base.child(
+                plain_box(boxed(shown))
+                    .fill(c.bg_contrast)
+                    .hover(c.contrast_hover)
+                    .press(c.contrast_pressed)
+                    .child(label(name, medium(), c.text_contrast)),
+            )
+            .role("button")
+            .label(name)
+            .hit()
+            .on_press_tx(press(id))
         }
         Id::Keep => {
             let name = surface::keep_label();
-            base.radius(surface::CHIP_RADIUS)
-                .hover(c.hover)
-                .press(c.pressed)
-                .child(label(name, medium(), p.muted()))
+            base.child(button_box(p, boxed(shown)).child(label(name, medium(), p.muted())))
                 .role("button")
                 .label(name)
                 .hit()
@@ -360,11 +370,11 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
         // Destructive, so the danger ink on the neutral chip, never the
         // accent.
         Id::Discard => base
-            .radius(surface::CHIP_RADIUS)
-            .fill(c.layer_02)
-            .hover(c.hover)
-            .press(c.pressed)
-            .child(label(surface::discard_label(), medium(), p.danger()))
+            .child(button_box(p, boxed(shown)).fill(c.layer_02).child(label(
+                surface::discard_label(),
+                medium(),
+                p.danger(),
+            )))
             .role("button")
             .label(surface::discard_label())
             .hit()
@@ -445,10 +455,12 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             }
             done.role("text").label(shown.ident.clone())
         }
-        Id::Next => keyed(p, base, &["⇥"], tr("Next"), medium()).on_press_tx(press(id)),
+        Id::Next => {
+            keyed(p, base, boxed(shown), &["⇥"], tr("Next"), medium()).on_press_tx(press(id))
+        }
         // A chip beside the frame in the menu-bar flow.
         Id::Pick(_) if tuning::get().flow == tuning::CapsuleFlow::MenuBar => {
-            keyed(p, base, &[], shown.text(), medium()).on_press_tx(press(id))
+            keyed(p, base, boxed(shown), &[], shown.text(), medium()).on_press_tx(press(id))
         }
         Id::Pick(row) => pick_row(p, base, shown, row),
         Id::CardHints => base
@@ -502,8 +514,8 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             let mut left = row()
                 .key("send")
                 .size(send_w, BUTTON_H)
-                .pl(8.0)
-                .gap(4.0)
+                .pl(surface::SEND_PL)
+                .gap(surface::SEND_ICON_GAP)
                 .center_y()
                 .radius(ICON_BUTTON_RADIUS)
                 .fill(c.layer_02)
@@ -618,7 +630,7 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             .label(shown.ident.clone())
             .hit()
             .on_press_tx(press(id)),
-        Id::Ask => keyed(p, base, &[], &shown.ident, medium()).on_press_tx(press(id)),
+        Id::Ask => keyed(p, base, boxed(shown), &[], &shown.ident, medium()).on_press_tx(press(id)),
         // The line's one worded action: a filled button the height of the
         // icon buttons beside it, so the three are one row of boxes 6 pt
         // apart and 6 pt in from the walls. The chip around it is its target.
@@ -704,18 +716,23 @@ pub(super) fn pick_row(p: Paint, base: El, shown: &Shown, row: usize) -> El {
         .on_press_tx(press(Id::Pick(row)))
 }
 
-/// A chip's label, then its shortcut, if any, as one quiet word.
-pub(super) fn keyed(p: Paint, base: El, keys: &[&str], name: &str, style: rune::TextStyle) -> El {
-    let mut chip = base
-        .radius(surface::CHIP_RADIUS)
+/// A chip's label, then its shortcut, if any, as one quiet word, in a
+/// button box `w` wide that lights under the pointer.
+pub(super) fn keyed(
+    p: Paint,
+    base: El,
+    w: f32,
+    keys: &[&str],
+    name: &str,
+    style: rune::TextStyle,
+) -> El {
+    let mut chip = button_box(p, w)
         .gap(HINT_GAP)
-        .hover(p.k.c.hover)
-        .press(p.k.c.pressed)
         .child(label(name, style, p.muted()));
     if !keys.is_empty() {
         chip = chip.child(quiet(p, &chord(keys), style));
     }
-    chip.role("button").label(name.to_owned()).hit()
+    base.child(chip).role("button").label(name.to_owned()).hit()
 }
 
 /// Small faint text (a shortcut, a note) beside words in `beside`, on
@@ -819,13 +836,22 @@ pub(super) const ICON_BUTTON_RADIUS: f32 = surface::CHIP_RADIUS - 2.0;
 
 /// One of those buttons, `w` wide, its content centred.
 pub(super) fn button_box(p: Paint, w: f32) -> El {
+    plain_box(w).hover(p.k.c.hover).press(p.k.c.pressed)
+}
+
+/// A button's box with no fill of its own: every fill, hover and lit
+/// segment in the line is this one shape, 28 pt tall on 8 pt corners.
+pub(super) fn plain_box(w: f32) -> El {
     row()
         .key("box")
         .center()
         .size(w, BUTTON_H)
         .radius(ICON_BUTTON_RADIUS)
-        .hover(p.k.c.hover)
-        .press(p.k.c.pressed)
+}
+
+/// The width of the box inside `shown`'s chip.
+pub(super) fn boxed(shown: &Shown) -> f32 {
+    shown.rect[2] - 2.0 * surface::BUTTON_INSET
 }
 
 /// The capture's first frame, cropped to fill a small rounded card, with a

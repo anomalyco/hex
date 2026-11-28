@@ -1,12 +1,12 @@
 //! The capsule that says a recording started on its own while the recording
-//! indicator is off: the call app's icon, clean, in the call-ended capsule's
-//! icon slot, then "● Recording" over the call and its time, then a calm
+//! indicator is off: the call app's icon, clean, nested in the left corners
+//! as the call-ended capsule's is, then "● Recording" over the call and its time, then a calm
 //! Stop and ✕. Keeping the recording is the happy path, so nothing is loud.
 
 use rune::{Cursor, El, el, row, text};
 
 use super::super::controls::{CAPSULE, Paint};
-use super::call_ended::{BODY_PL, BODY_PY, RING_SIZE, app_icon};
+use super::call_ended::{BODY_GAP, BODY_PY, ICON_INSET, LINES_LIFT, app_icon};
 use super::{CAPSULE_INSET, Capsule, button, panel_radius, presence};
 use crate::desktop::i18n::tr;
 use crate::meeting::watcher::ControllerCommand;
@@ -29,16 +29,12 @@ pub(super) fn view(
 ) -> El {
     let c = &p.k.c;
     let heading = tr("Recording");
-    let badge = row()
-        .key("ring")
-        .size(RING_SIZE, RING_SIZE)
-        .center()
-        .child(app_icon(p, app, icon));
     let subtitle = subtitle(title);
     let lines = rune::col()
         .key("lines")
         .grow(1.0)
         .min_w(0.0)
+        .pb(LINES_LIFT)
         .child(
             row()
                 .key("title-line")
@@ -72,7 +68,9 @@ pub(super) fn view(
                 c.close();
             }
         }))
-        .child(dismiss_button(p));
+        // As tall as Stop, so it stands 6 pt from the top, the bottom and
+        // the end wall, and the two are one row of one height.
+        .child(dismiss_button(p, CAPSULE.row_h));
     let body = row()
         .key("pill")
         .role("status")
@@ -84,14 +82,16 @@ pub(super) fn view(
         .w_full()
         .h_full()
         .center_y()
-        .pl(BODY_PL)
+        // The icon nests in the left corners: as far from the left wall as
+        // from the top and bottom, its corners turning about the body's.
+        .pl(ICON_INSET)
         // The ✕ box sits on the capsules' 6 pt inset, like every one.
         .pr(CAPSULE.button_inset)
-        .gap(12.0)
+        .gap(BODY_GAP)
         .radius(panel_radius(p))
         .fill(c.bg_base)
         .border(p.hair, c.border_base)
-        .child(badge)
+        .child(app_icon(p, app, icon))
         .child(lines)
         .child(actions)
         .hit()
@@ -106,14 +106,14 @@ pub(super) fn view(
         .child(presence::anchored(capsule, body))
 }
 
-/// The ✕ that closes a capsule whose actions have no way to, in every
-/// capsule's 28 pt close box. It only hides the capsule: nothing is sent to
-/// the controller (#996).
+/// The ✕ that closes a capsule whose actions have no way to, in a square
+/// box `side` wide: a panel's 28 pt close box, or a banner's 32 pt action
+/// row. It only hides the capsule: nothing is sent to the controller (#996).
 /// The box rounds 8 pt, concentric with the capsule across its 6 pt inset.
-pub(super) fn dismiss_button(p: Paint) -> El {
+pub(super) fn dismiss_button(p: Paint, side: f32) -> El {
     row()
         .key("close-box")
-        .size(CAPSULE.close, CAPSULE.close)
+        .size(side, side)
         .center()
         .radius(CAPSULE.inner(CAPSULE.button_inset))
         .hover(p.k.c.hover)

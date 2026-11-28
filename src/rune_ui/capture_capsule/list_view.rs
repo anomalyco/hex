@@ -56,7 +56,7 @@ pub(super) fn list_view(
         for n in range {
             let dest = &list.rows[n];
             let highlighted = !suggesting && n == list.selected;
-            let send_w = hint_width(tr("Send"), &["⏎"]);
+            let send_w = send_hint_width();
             // The name keeps its width; a long reason is cut first, to no
             // less than two fifths of the row.
             let content = w - 2.0 * LIST_PAD - 2.0 * ROW_PX - 2.0 * ROW_PX;
@@ -100,11 +100,7 @@ pub(super) fn list_view(
                 ))
                 .child(el().grow(1.0))
                 // The highlighted row says what ⏎ does; the rest say why.
-                .child(if highlighted {
-                    hint(p, tr("Send"), &["⏎"]).key("send-hint")
-                } else {
-                    reason
-                })
+                .child(if highlighted { send_hint(p) } else { reason })
                 .role("button")
                 .label(dest.name.clone())
                 .hit()
@@ -146,6 +142,29 @@ pub(super) fn list_view(
     list_panel(p, body, footer, x, w, h, blur)
 }
 
+/// What ⏎ does on the highlighted row: the word on the names' baseline,
+/// then the key itself, bare on the lit row. A tray round it is a button's
+/// height, which would stand 2 pt from the row's top and bottom and 10 pt
+/// from its end; the key alone clears them by 5 pt with its edge on the
+/// reasons' right rail.
+fn send_hint(p: Paint) -> El {
+    use super::super::controls::{KeySize, keycap};
+    row()
+        .key("send-hint")
+        .center_y()
+        .gap(HINT_GAP)
+        .child(
+            label(tr("Send"), small(), p.muted())
+                .offset(0.0, (medium().size - small().size) * BASELINE_DROP),
+        )
+        .child(keycap(p, 0, "⏎", KeySize::Small, false))
+}
+
+/// A [`send_hint`]'s width.
+fn send_hint_width() -> f32 {
+    measure(tr("Send"), small()) + HINT_GAP + super::super::controls::KeySize::Small.min_width()
+}
+
 /// The search field at the top of the open list: the kit's plain search
 /// input in a calm recessed well, a 32 pt row whose corners match the rows'.
 /// It is always typed into, so it never wears a focus ring: the caret says
@@ -182,12 +201,17 @@ fn search_field(p: Paint, typed: &rune::TextEdit) -> El {
         .hit()
 }
 
+/// Beside a footer action's words, inside its hover pill. The footer's
+/// sides are this much narrower than the rows' text rail, so the pill
+/// bleeds past the rail and the words stay on it.
+const ACTION_PX: f32 = 6.0;
+
 /// A quiet clickable footer action in the Send-to list.
 fn footer_action(p: Paint, key: &str, text_label: &'static str, id: Id) -> El {
     row()
         .key(key.to_owned())
         .h(22.0)
-        .px(6.0)
+        .px(ACTION_PX)
         .center_y()
         .radius(ROW_RADIUS - 2.0)
         .hover(p.k.c.hover)
@@ -222,9 +246,9 @@ pub(super) fn search_hints(p: Paint, remember: bool, send: bool, queued: bool, w
     const SEND: [&str; 1] = ["⏎"];
     const REMEMBER: [&str; 2] = ["⇧", "⏎"];
     let room = w - 2.0 * LIST_PAD - 2.0 * ROW_PX;
-    let rules_w = measure(tr("All rules…"), small()) + 12.0;
+    let rules_w = measure(tr("All rules…"), small()) + ACTION_PX;
     let cancel_w = if queued {
-        measure(tr("Cancel send"), small()) + 12.0 + HINTS_GAP
+        measure(tr("Cancel send"), small()) + 2.0 * ACTION_PX + HINTS_GAP
     } else {
         0.0
     };
@@ -241,6 +265,7 @@ pub(super) fn search_hints(p: Paint, remember: bool, send: bool, queued: bool, w
     let left = row()
         .key("left")
         .center_y()
+        .pl(ACTION_PX)
         .gap(HINTS_GAP)
         .grow(1.0)
         .children(send.then(|| hint(p, tr("Send"), &SEND).key("send")))
@@ -278,6 +303,7 @@ pub(super) fn saving_hint(p: Paint, list: &List, site: &str, w: f32) -> El {
     };
     let mut hint = row()
         .center_y()
+        .pl(ACTION_PX)
         .gap(BADGE_GAP)
         .key("saving")
         .child(label(tr("Always send"), small(), p.muted()))
@@ -412,7 +438,7 @@ pub(super) fn footer_box(p: Paint, hints: El, w: f32, h: f32) -> El {
                     .absolute(0.0, 0.0)
                     .size(w, BAND_H)
                     .center_y()
-                    .px(LIST_PAD + ROW_PX)
+                    .px(LIST_PAD + ROW_PX - ACTION_PX)
                     .child(hints.grow(1.0)),
             ),
         ListFooter::Well => el()
@@ -426,7 +452,7 @@ pub(super) fn footer_box(p: Paint, hints: El, w: f32, h: f32) -> El {
                     .absolute(0.0, 0.0)
                     .size(w - 2.0 * LIST_PAD, WELL_H)
                     .center_y()
-                    .px(ROW_PX)
+                    .px(ROW_PX - ACTION_PX)
                     .child(hints.grow(1.0)),
             ),
     }
