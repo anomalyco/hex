@@ -447,6 +447,17 @@ class InsertionTest {
         assertEquals(true, SpaceRules.takesPickedSpace('-', url = true))
         assertEquals(false, SpaceRules.takesPickedSpace('(', url = true))
         assertEquals(false, SpaceRules.takesPickedSpace('w', url = true))
+        // Labs › Keyboard › Space after punctuation (#3000): a clause mark puts the space back after itself ("here, "),
+        // except in a URL field, which keeps joining ("github.").
+        for (mark in ",.!?;:)") {
+            assertEquals("$mark", true, SpaceRules.movesPickedSpace(mark, url = false))
+            assertEquals("$mark", false, SpaceRules.movesPickedSpace(mark, url = true))
+        }
+        assertEquals(false, SpaceRules.movesPickedSpace('/', url = false))
+        assertEquals(false, SpaceRules.movesPickedSpace('-', url = false))
+        // Its space never makes a double-space period: a mark, not a letter or digit, is before it.
+        assertEquals(false, SpaceRules.periodFits("here, "))
+        assertEquals(false, SpaceRules.periodFits("here) "))
     }
     // iOS CleanupTaggerTests' English examples and its hand-written set, met with rules (no tagger).
     @Test fun englishCleanupRulesMeetTheTaggersExamples() {

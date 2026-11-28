@@ -18,6 +18,10 @@ internal object SpaceRules {
      * in a URL field any joiner too ("github" picked, then "." or "/" gives "github." or "github/"). */
     fun takesPickedSpace(mark: Char, url: Boolean) = mark in CLAUSE_MARKS || (url && mark in JOINERS)
 
+    /** Whether [mark], taking a picked suggestion's space, puts it back after itself with Labs › Keyboard › Space after
+     * punctuation on ("here" picked, then "," gives "here, "): a clause mark outside a URL field, which keeps joining. */
+    fun movesPickedSpace(mark: Char, url: Boolean) = !url && mark in CLAUSE_MARKS
+
     /** Whether ". " may replace the space that ends [before]: it follows a letter or a digit. */
     fun periodFits(before: String) = before.length >= 2 && before.last() == ' ' &&
         before[before.length - 2].let { it.isLetterOrDigit() }

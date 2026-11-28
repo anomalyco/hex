@@ -205,6 +205,8 @@
     </plurals>
     <string name="marks_take_fix_space">自动更正后的标点</string>
     <string name="marks_take_fix_space_detail">自动更正后紧接着输入的句号或逗号直接跟在单词后面</string>
+    <string name="marks_keep_space">标点后的空格</string>
+    <string name="marks_keep_space_detail">紧接在所选单词后输入的逗号或句号直接跟在单词后面，并在其后保留空格</string>
     <string name="adaptive_touch">自适应触控</string>
     <string name="adaptive_touch_detail">学习你点击每个按键的位置。内容只留在这台手机上，只保存平均位置，不保存你输入的内容。</string>
     <string name="adaptive_touch_learning">正在学习：已有 %1$d/%2$d 次轻点</string>

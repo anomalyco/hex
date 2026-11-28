@@ -233,6 +233,8 @@
     </plurals>
     <string name="marks_take_fix_space">Punctuation after autocorrect</string>
     <string name="marks_take_fix_space_detail">A period or comma right after an autocorrection goes against the word</string>
+    <string name="marks_keep_space">Space after punctuation</string>
+    <string name="marks_keep_space_detail">A comma or period right after a picked word goes against it with a space after it</string>
     <string name="adaptive_touch">Adaptive touch</string>
     <string name="adaptive_touch_detail">Learns where you tap each key. Stays on this phone and keeps averages, never what you type.</string>
     <string name="adaptive_touch_learning">Learning: %1$d of %2$d taps</string>

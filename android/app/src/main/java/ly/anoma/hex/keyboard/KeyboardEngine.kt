@@ -609,11 +609,17 @@ internal class KeyboardEngine(
         val b = before()
         val mark = value.length == 1 && TypingWord.endsWord(value[0])
         // A clause-ending mark takes the space a picked suggestion, an autocorrection or a text replacement typed
-        // ("Hello,"); in a URL field, so does any mark that joins a word ("github." and "github/", never "github /").
+        // ("Hello,", or "Hello, " with Space after punctuation); in a URL field, so does any mark that joins a word
+        // ("github." and "github/", never "github /").
         val typedSpace = (pickedAnchor != null && pickedAnchor == b) || (fixedAnchor != null && fixedAnchor == b)
         if (value.length == 1 && SpaceRules.takesPickedSpace(value[0], exactField) && typedSpace && b.endsWith(" ")) {
             clearSpaces()
-            if (replace(" ", value)) { resetTyping(); showPredictions(before()); inputDone(); return }
+            // Labs › Keyboard › Space after punctuation: the space goes after the mark instead ("here, "), and a space
+            // typed next is swallowed as one after a pick is.
+            val moves = feedback.marksKeepSpace && SpaceRules.movesPickedSpace(value[0], exactField)
+            if (replace(" ", if (moves) "$value " else value)) {
+                resetTyping(); val after = before(); if (moves) pickedAnchor = after; showPredictions(after); inputDone(); return
+            }
         }
         // Anything that starts another word puts a held space in first; marks go against the word.
         val afterSwipe = swipeAnchor != null && swipeAnchor == b
