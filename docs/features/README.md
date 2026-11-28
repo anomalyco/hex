@@ -14,8 +14,9 @@ Hex                                    // macOS, Windows (beta), Linux (beta)
 ├── Dictate                            // hold, toggle, or hands-free capture
 ├── Use the result                     // clipboard-restoring paste, Paste last, History
 ├── Adjust behavior                    // shortcuts, microphone, Output, Vocabulary
+├── Meetings                           // local call detection, transcripts, chapters, notes
 ├── Annotate                           // screen/window/area/iPhone capture + narration
-├── Opt in (Labs)                      // off-by-default features, Meetings (beta)
+├── Opt in (Labs)                      // off-by-default experimental features
 ├── Automate & read                    // hex CLI, /control, history/meetings, MCP, /streams
 └── Recover & maintain                 // stream recovery, settings backup, updater
 ```

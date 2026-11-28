@@ -393,7 +393,7 @@ impl MeetingSettings {
     /// Whether meetings may record and process: always in developer builds,
     /// otherwise once turned on, and never under a managed lock.
     pub fn available(&self) -> bool {
-        crate::labs::Feature::Meetings.managed().is_none()
+        !crate::policy::Policy::current().locks(crate::policy::Lock::Meetings)
             && (crate::DEVELOPER_FEATURES_ENABLED || self.enabled)
     }
 
@@ -440,9 +440,10 @@ pub fn meetings_enabled() -> bool {
 
 /// Why meetings can't record now.
 pub fn meetings_off_reason() -> &'static str {
-    match crate::labs::Feature::Meetings.managed() {
-        Some(lock) => lock.refusal(),
-        None => "Meetings are off; turn them on with `hex settings set meetings.enabled on`",
+    if crate::policy::Policy::current().locks(crate::policy::Lock::Meetings) {
+        crate::policy::Lock::Meetings.refusal()
+    } else {
+        "Meetings are off; turn them on with `hex settings set meetings.enabled on`"
     }
 }
 

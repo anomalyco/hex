@@ -413,6 +413,7 @@ fn card_drag_out_allows_in_app_drops_onto_the_editor() {
             .any(|e| e.key.as_deref().is_some_and(|k| k.starts_with("card-"))),
         "a rendered card"
     );
+
     #[cfg(target_os = "macos")]
     {
         let cmd = files::open_in_preview_command(std::path::Path::new("/tmp/shot.png"));

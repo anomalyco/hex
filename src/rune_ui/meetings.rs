@@ -1,15 +1,14 @@
-//! The Meetings pane (macOS beta): recorded calls by day with their status,
-//! search, a detail with notes, the live or final transcript as turns,
-//! Copy transcript, Rename, an overflow menu (copy summary, reveal,
-//! summarize, delete), and the two-step trash confirmation. Recording is
-//! started and stopped from the header, whose `Recordings | Settings` switch
-//! also shows the feature's settings (Call recording, Calendar, Detected
-//! calls). With Meetings off, the pane is the opt-in card alone.
+//! The Meetings pane: recorded calls by day with their status, search, a
+//! detail with notes, the live or final transcript as turns, Copy transcript,
+//! Rename, an overflow menu (copy summary, reveal, summarize, delete), and the
+//! two-step trash confirmation. Recording is started and stopped from the
+//! header, whose `Recordings | Settings` switch also shows the feature's
+//! settings (When a call starts, After a meeting, Export, Advanced). With
+//! Meetings off, the pane shows its one-screen setup.
 //!
-//! The meetings store and controller are macOS-only, so the pane reads
-//! [`Meeting`] values the host loads (formatted with `meeting::day_label`,
-//! `meeting::clock`, and the coalesced transcript) and sends
-//! [`MeetingRequest`]s back. Scenes feed [`MeetingsPane::fixture`].
+//! The pane reads [`Meeting`] values the host or window loads (formatted with
+//! `meeting::day_label`, `meeting::clock`, and the coalesced transcript) and
+//! sends [`MeetingRequest`]s back. Scenes feed [`MeetingsPane::fixture`].
 
 use rune::{El, TextEdit, Tx, col, row, text};
 use rune_kit::{
@@ -162,9 +161,9 @@ pub(super) enum View {
 }
 
 /// Meetings is on, so the pane lists recordings and settings instead of the
-/// opt-in card (`MeetingSettings::available`; scenes leave `developer` off).
+/// setup screen (`MeetingSettings::available`; scenes leave `developer` off).
 pub(super) fn available(ui: &Ui) -> bool {
-    crate::labs::Feature::Meetings.managed().is_none()
+    !crate::policy::Policy::current().locks(crate::policy::Lock::Meetings)
         && (ui.settings.meetings.enabled || ui.platform.developer)
 }
 
@@ -399,11 +398,11 @@ pub(super) fn cancel_edit(ui: &mut Ui) -> bool {
     renaming || deleting
 }
 
-/// The opt-in card while Meetings is off; otherwise the header's view
+/// The setup screen while Meetings is off; otherwise the header's view
 /// switch and Start/Stop, then the recordings or the settings.
 pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
     if !available(ui) {
-        if crate::labs::Feature::Meetings.managed().is_none() {
+        if !crate::policy::Policy::current().locks(crate::policy::Lock::Meetings) {
             return (Vec::new(), setup::setup(ui, p, layer));
         }
         let content = page("content").child(card(

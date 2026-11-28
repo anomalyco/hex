@@ -137,7 +137,11 @@ fn live_typing_note() -> Option<&'static str> {
 
 /// The feature `name` names, if this OS has it and `reaches` admits it.
 /// Features that left Labs: `hex labs` still knows their names.
-const GRADUATED: [(&str, &str); 25] = [
+const GRADUATED: [(&str, &str); 26] = [
+    (
+        "meetings",
+        "meetings graduated: turn on Meetings in the Meetings pane, or hex settings set meetings.enabled true",
+    ),
     (
         "custom-models",
         "custom-models graduated: adding a model file and models found on this computer are always on now",

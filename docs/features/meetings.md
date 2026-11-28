@@ -1,7 +1,7 @@
-# Meetings (beta)
+# Meetings
 
 Record a call locally: Hex captures the other participants (system audio) and
-you (microphone) as separate tracks, transcribes them on this Mac, and saves a
+you (microphone) as separate tracks, transcribes them locally, and saves a
 Markdown transcript with `You` and `Them` turns. Recording starts automatically
 only for calls answered Always record (Meetings › Settings › Calls), and
 never stops automatically unless the Calls sheet's Stop when the call ends is
@@ -25,11 +25,10 @@ Checks: `retention_expires_meetings_by_when_they_ended_and_skips_active_ones`,
 ## How To Get To It
 
 ```ts
-Labs > Meetings switch (macOS)                       // meetings.opt-in; off by default
-├── Off -> the Labs switch (Turn on -> meetings.enabled = true), or the pane's
-│   setup screen Turn on Meetings; off, the pane shows that setup screen
-├── On -> Meetings joins the sidebar; header switch Recordings | Settings;
-│   menu-bar items, call detection
+Meetings pane (macOS, Windows, and Linux)            // meetings.opt-in; off by default (graduated from Labs)
+├── Off -> Meetings stays in the sidebar (hidden only under DisableMeetings);
+│   its pane shows the one-screen setup (Turn on Meetings -> meetings.enabled = true)
+├── On -> header switch Recordings | Settings; menu-bar / tray items, call detection
 │   Settings view: When a call starts, After a meeting, Export, Advanced ▸
 │   ├── System Audio Recording                  // meetings.permission; asked only now
 │   │   ├── Untrusted row shown / Allow -> retired Hex IDs cleared (`ScreenCapture` + `AudioCapture`)
@@ -114,9 +113,9 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │       │   beside the Calendars row // labs.calendar_bulk_select
 │       └── Labs › Upcoming meetings in menu bar -> the same meetings in the status menu // labs.calendar_menu
 └── Off -> Controller idles; no microphone-activity inspection or shortcut;
-           the pane leaves the sidebar
+           the pane returns to its setup screen
 
-Debug builds -> Always in the sidebar (DEVELOPER_FEATURES_ENABLED)
+Debug builds -> Recording and settings available without opt-in (DEVELOPER_FEATURES_ENABLED)
 Agents -> hex mcp (read-only MCP server; works whether or not Meetings is on)
 Subtitles -> hex meetings show <id> --srt | --vtt   // always on (#633; graduated from Labs)
              one cue per transcript entry (You / Them), timed by entry offsets,
@@ -176,7 +175,7 @@ refuses to start without either grant and asks macOS for System Audio Recording.
 ## Linux and Windows
 
 The same controller, recorder, transcript pipeline, store, pane, capsules,
-and notes run on Linux and Windows (beta, in Labs, off by default). Only these
+and notes run on the Linux and Windows betas (in the sidebar, off by default). Only these
 adapters differ ([meeting/linux.rs](../../src/meeting/linux.rs),
 [meeting/windows.rs](../../src/meeting/windows.rs),
 [microphone_activity/linux.rs](../../src/microphone_activity/linux.rs),
@@ -2424,22 +2423,22 @@ Detail (a raised card beside the list)
 Under "Summary" and "Transcript" headings; the list's icons keep one column
 Empty: "No meetings yet" with a hint from the default answer (Ask each time
 offers to record, Record automatically starts, Don't offer asks for a call),
-Start recording, and a note that transcripts stay in Hex on this Mac for 7
-days before moving to the Trash while exported Markdown stays; "No meetings
-match." while searching
+Start recording, and a note that transcripts stay on this Mac (or on this
+computer on Windows and Linux) for 7 days before moving to the Trash while
+exported Markdown stays; "No meetings match." while searching
 System Audio Recording not allowed -> a warning above the list ("Hex can't
 hear the other participants") with Open System Settings
-Meetings off (macOS) -> the sidebar still lists Meetings; its pane is one
-setup screen: "Transcribe your meetings", "Records your mic and call audio
-locally. No bots join your calls.", Turn on Meetings, and where transcripts
-are kept
+Meetings off (macOS, Windows, and Linux) -> the sidebar lists Meetings
+(unless DisableMeetings locks it); its pane is one setup screen: "Transcribe
+your meetings", "Records your mic and call audio locally. No bots join your
+calls.", Turn on Meetings, and where transcripts are kept
 ├── System audio -> Allow where the OS asks for it; Allowed once granted
 │   (macOS only, where the tour asks for the permission)
 ├── When a call starts -> the same Ask each time / Record automatically /
 │   Don't offer answer Settings › Calls edits // meetings.default_policy
 ├── Calendar -> Connect / Connected, then Remind me before meetings; each
-│   acts in place, so nothing waits for a second screen // meetings.calendar
-└── A policy that locks Meetings shows the switch card instead
+│   acts in place, so nothing waits for a second screen (macOS) // meetings.calendar
+└── A policy that locks Meetings shows the managed switch card instead
 
 Rename -> inline field; Enter or Save          // meetings.rename
   -> manifest title; Markdown heading only while it reads the old title

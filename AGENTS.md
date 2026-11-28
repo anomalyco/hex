@@ -36,8 +36,9 @@ Support>/hex/settings.json`; deterministic personal transcript transformations l
 `site/public/docs/transforms.md`).
 
 - **Labs gate (`src/labs/feature.rs`, [`docs/features/labs.md`](docs/features/labs.md)):**
-  Every build shows General, Output, History, Labs, and **Annotate** (on by default in every
-  build via `capture.enabled`). **New, unproven, user-requested, and externally contributed
+  Every build shows General, Output, History, **Meetings** (off by default via
+  `meetings.enabled`), **Annotate** (on by default in every build via `capture.enabled`),
+  and Labs. **New, unproven, user-requested, and externally contributed
   features land in Labs, off by default** — never add a master switch or ship them on by
   default. Each `labs::Feature` declares its settings key, group, OSes, and audience
   (`Everyone` or `Dev`; stable builds never list, accept, or run `Dev` labs). Gate where the

@@ -447,22 +447,22 @@ pub(super) fn opencode_managed() -> bool {
     crate::policy::Policy::current().locks(crate::policy::Lock::OpenCodeProcessing)
 }
 
-/// The Meetings (beta) switch: the opt-in card's only row, and the first row
-/// of Meetings › Settings.
+/// The Meetings switch: the locked card's row under `DisableMeetings`, and the
+/// first row of Meetings › Settings.
 pub(super) fn meetings_toggle(ui: &Ui, p: Paint) -> El {
-    if crate::labs::Feature::Meetings.managed().is_some() {
+    if crate::policy::Policy::current().locks(crate::policy::Lock::Meetings) {
         return super::controls::managed_row(
             p,
             "meetings-enabled",
             Some(Pane::Meetings.icon()),
-            tr("Meetings (beta)"),
+            tr("Meetings"),
         );
     }
     icon_toggle_row(
         p,
         "meetings-enabled",
         Pane::Meetings.icon(),
-        tr("Meetings (beta)"),
+        tr("Meetings"),
         tr("Offer to record calls and save local transcripts"),
         ui.settings.meetings.enabled,
         |ui: &mut Ui| {

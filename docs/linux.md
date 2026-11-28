@@ -24,8 +24,8 @@ Such a build is slower on newer CPUs, is not an official release, and never
 self-updates, because every official artifact targets x86-64-v3 and would not
 start on that processor.
 
-Linux opens the same window as macOS and Windows: Settings, Modes,
-and History. Meetings are macOS-only.
+Linux opens the same window as macOS and Windows: General, Output, History,
+Meetings, Annotate, and Labs.
 Paste on Wayland uses `wtype` where the compositor offers the virtual keyboard
 protocol (wlroots compositors, niri) and the desktop's RemoteDesktop portal
 elsewhere (KDE, GNOME). Shortcuts are general: the desktop's GlobalShortcuts portal when it has one, otherwise

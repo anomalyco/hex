@@ -33,7 +33,7 @@ pub(super) enum Os {
 pub(super) struct Capabilities {
     pub(super) os: Os,
     /// Meeting recording and its pane, with the recordings and their
-    /// settings (beta, in Labs).
+    /// settings.
     pub(super) meetings: bool,
     /// Calendar meeting reminders: the Calendar card under Meetings
     /// (macOS, EventKit).

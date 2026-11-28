@@ -34,6 +34,12 @@ slow-timeout = { period = "30s", terminate-after = 2 }
 slow-timeout = { period = "60s", terminate-after = 2 }
 failure-output = "immediate-final"
 
+# Full-catalog frame sweeps step thousands of debug frames on 2-core runners.
+[[profile.ci.overrides]]
+filter = "test(motion_gate::the_first_run_moves_cleanly) | test(rune_ui::tests::every_scene_stops_asking_for_frames)"
+test-group = "gpu"
+slow-timeout = { period = "150s", terminate-after = 2 }
+
 [[profile.ci.overrides]]
 filter = "test(/scene|golden|rune_ui::/) | test(driver_plugin_loopback)"
 test-group = "gpu"

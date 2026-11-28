@@ -206,7 +206,7 @@ const FACTS: [label: string, value: string][] = [
   ["Read-only", "It never records, edits, or deletes a meeting."],
   ["Local", "Reads the meetings folder on disk. No network, login, or running Hex."],
   ["Speakers", "Your microphone is <code>You</code>. System audio is <code>Them</code>."],
-  ["Meetings", `Beta on macOS, Windows, and Linux. Turn it on in <a href="${withBase("/labs/meetings")}">Settings › Labs</a>.`],
+  ["Meetings", `On macOS, Windows, and Linux. Turn it on in Hex's <a href="${withBase("/meetings/")}">Meetings</a> tab.`],
   ["Elsewhere", "<code>hex mcp --meetings-dir &lt;path&gt;</code> reads a copied meetings folder."],
 ]
 

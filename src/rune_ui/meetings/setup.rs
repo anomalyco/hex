@@ -238,15 +238,21 @@ fn calendar_rows(ui: &Ui, p: Paint) -> Vec<El> {
 
 /// Where transcripts stay and for how long, under the action.
 pub(super) fn kept_note(ui: &Ui, p: Paint) -> El {
+    let mac = ui.platform.caps.os == super::super::platform::Os::Macos;
     let kept = ui
         .settings
         .meetings
         .retention
         .unwrap_or(MeetingRetention::DEFAULT);
-    let copy = match kept {
-        MeetingRetention::Forever => tr("Meetings stay on this Mac.").to_owned(),
-        kept => tr_fill(
+    let copy = match (mac, kept) {
+        (true, MeetingRetention::Forever) => tr("Meetings stay on this Mac.").to_owned(),
+        (false, MeetingRetention::Forever) => tr("Meetings stay on this computer.").to_owned(),
+        (true, kept) => tr_fill(
             "Transcripts stay on this Mac for {}, then move to the Trash.",
+            tr(kept.label()),
+        ),
+        (false, kept) => tr_fill(
+            "Transcripts stay on this computer for {}, then move to the Trash.",
             tr(kept.label()),
         ),
     };

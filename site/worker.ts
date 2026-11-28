@@ -50,6 +50,10 @@ async function respond(request: Request, env: Env): Promise<Response> {
     url.pathname = `${url.pathname}/`
     return Response.redirect(url.toString(), 301)
   }
+  if (url.pathname === withBase("/labs/meetings") || url.pathname === withBase("/labs/meetings/")) {
+    url.pathname = `${MEETINGS_PATH}/`
+    return Response.redirect(url.toString(), 301)
+  }
   if (url.pathname === IOS_PATH || url.pathname === `${IOS_PATH}/`) return Response.redirect(APP_STORE_URL, 302)
   if (url.pathname.startsWith(`${FILES_PATH}/`)) return file(request, env, decodeURIComponent(url.pathname.slice(FILES_PATH.length + 1)))
   if (url.pathname === DEV_DOWNLOAD_PATH) return devDownload(request)
