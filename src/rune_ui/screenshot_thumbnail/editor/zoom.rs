@@ -21,23 +21,23 @@ use super::Editor;
 use crate::rune_ui::controls::Paint;
 
 /// The panel around the shot coming in once it has landed, and going.
-pub(super) const CHROME: Spring = Spring::new(0.24, 0.0);
+pub(super) const CHROME: Spring = Spring::new(0.16, 0.0);
 /// How long [`CHROME`] takes to come in, before the flying shot gives way
 /// to the panel's own.
-const CHROME_S: f64 = 0.45;
+const CHROME_S: f64 = 0.30;
 /// How near its place in the panel, in points, the shot is when the panel
 /// starts to come in: the eye reads it as landed well before it rests.
 const ARRIVED: f32 = 2.0;
 /// The shot that landed on its card dissolving into it. The card draws a
 /// smaller copy of the picture, so a cut between them would flicker at
 /// every edge.
-const HAND_BACK: Spring = Spring::new(0.12, 0.0);
+const HAND_BACK: Spring = Spring::new(0.09, 0.0);
 /// How long [`HAND_BACK`] takes, before the editor hides.
-const HAND_BACK_S: f64 = 0.14;
+const HAND_BACK_S: f64 = 0.10;
 /// How small a shot whose card has gone shrinks as it fades.
 const GONE_SCALE: f32 = 0.92;
 /// Its fade.
-const GONE: Spring = Spring::new(0.3, 0.0);
+const GONE: Spring = Spring::new(0.20, 0.0);
 /// The shot's corner in the panel: [`super::view`]'s inner radius.
 const SHOT_RADIUS: f32 = CARD_RADIUS - super::PAD;
 

@@ -3,6 +3,8 @@
 
 use scrawl_capture::sketch::smooth_ink_points;
 
+pub(crate) use super::image_layer::ImageMark;
+
 /// What a drag on the shot does.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Tool {
@@ -45,6 +47,8 @@ pub(crate) enum Mark {
         at: [f32; 2],
         text: String,
     },
+    /// A pasted or dropped image layer stacked in z-order with other marks.
+    Image(ImageMark),
 }
 
 /// Line widths and the text's size, in points: a shot's pixels per point
@@ -57,7 +61,7 @@ pub(crate) const TEXT_PT: f32 = 22.0;
 const HEAD_ANGLE: f32 = 0.5;
 const HEAD_LENGTH: f32 = 4.0;
 /// An arrow or box shorter than this, in points, was a click.
-const MIN_PT: f32 = 4.0;
+pub(super) const MIN_PT: f32 = 4.0;
 
 /// A stroke: from, to, and its width, in the shot's pixels.
 pub(crate) type Segment = ([f32; 2], [f32; 2], f32);
@@ -133,7 +137,7 @@ impl Mark {
                     ([x0, y1], [x0, y0], line),
                 ]
             }
-            Mark::Text { .. } => Vec::new(),
+            Mark::Text { .. } | Mark::Image(_) => Vec::new(),
         }
     }
 }

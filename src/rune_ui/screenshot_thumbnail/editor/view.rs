@@ -10,6 +10,7 @@ use rune::{
 use rune_kit::{Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant};
 
 use super::clip::{Clip, Grip, duration_label, position_label, size_label};
+use super::layers;
 use super::marks::{self, Mark, Tool};
 use super::{
     Editor, Layout, Listen, Out, PAD, Pressed, SendList, Sessions, Shot, Talk, clamp_panel,
@@ -29,10 +30,9 @@ const INNER_RADIUS: f32 = RADIUS - PAD;
 /// The open Send to… list.
 const LIST_W: f32 = 320.0;
 const ROW_H: f32 = 32.0;
-/// In on the HUD family's spring; out shorter, none. Reduce Motion fades.
-const ENTER: Spring =
-    crate::rune_ui::capture_capsule::tuning::spring(crate::rune_hud::spring::MORPH);
-const LEAVE: Spring = Spring::new(0.22, 0.0);
+/// Crisp pop-in and quick exit. Reduce Motion fades.
+const ENTER: Spring = Spring::new(0.22, 0.08);
+const LEAVE: Spring = Spring::new(0.15, 0.0);
 const REDUCED: Spring =
     crate::rune_ui::capture_capsule::tuning::spring(crate::rune_hud::spring::REDUCED_FADE);
 /// How small it grows from.
@@ -51,6 +51,9 @@ pub(super) fn text_style(size: f32) -> TextStyle {
 /// `mark` drawn on a shot shown at `fit` points a pixel; `scale` is the
 /// shot's pixels per point.
 pub(super) fn mark_el(mark: &Mark, fit: f32, scale: f32) -> Option<El> {
+    if let Mark::Image(img) = mark {
+        return Some(layers::image_mark_el(img, fit));
+    }
     if let Mark::Text { at, text: typed } = mark {
         return Some(
             text(typed)
@@ -143,7 +146,8 @@ pub(crate) fn view(s: &Editor, cx: &mut Cx<Editor>) -> El {
             .child(transport_el(p, clip, layout))
             .child(strip_el(p, clip, layout));
     }
-    let mut panel = panel.child(words_el(p, s, layout));
+    let mut panel =
+        layers::panel_drop_target(panel.child(words_el(p, s, layout)), s.clip.is_none());
     if let Some(list) = &s.send {
         panel = panel.child(send_list(p, list).absolute(w - PAD - LIST_W, PAD + CHIP_H + 4.0));
     }
@@ -156,10 +160,10 @@ fn canvas_el(p: Paint, s: &Editor, shot: &Shot, layout: Layout) -> El {
     let [ix, iy, iw, ih] = layout.image;
     let fit = layout.fit;
     let scale = shot.scale;
-    let cursor = if s.tool == Tool::Text {
-        Cursor::Text
-    } else {
-        Cursor::Crosshair
+    let cursor = match (s.selected_image.is_some(), s.tool) {
+        (true, _) => Cursor::Default,
+        (false, Tool::Text) => Cursor::Text,
+        _ => Cursor::Crosshair,
     };
     let image = el()
         .key("shot")
@@ -185,21 +189,7 @@ fn canvas_el(p: Paint, s: &Editor, shot: &Shot, layout: Layout) -> El {
                 .video(player, rune::SurfaceFit::Fit),
         );
     }
-    // A recording's frame takes no marks.
-    if s.clip.is_none() {
-        image =
-            image
-                .hit()
-                .cursor(cursor)
-                .on_drag(move |s: &mut Editor, d: &mut Drag, tx: &mut Tx| {
-                    if d.phase == Phase::Down {
-                        s.send = None;
-                        s.keys();
-                    }
-                    s.draw(d.phase, [d.x / fit, d.y / fit]);
-                    tx.wake_after(Duration::ZERO);
-                });
-    }
+    image = layers::attach_canvas_input(image, s.clip.is_none(), cursor, fit);
     let marks = s
         .marks
         .iter()
@@ -209,6 +199,12 @@ fn canvas_el(p: Paint, s: &Editor, shot: &Shot, layout: Layout) -> El {
         if let Some(mark) = mark_el(mark, fit, scale) {
             image = image.child(mark.key(key));
         }
+    }
+    if let Some(selected) = s.selected_image_mark() {
+        image = image.child(layers::selection_overlay(p, selected.rect, fit));
+    }
+    if s.drop_hover {
+        image = image.child(layers::drop_hover_overlay(p, [iw, ih], INNER_RADIUS));
     }
     if let Some((at, typed)) = &s.typing {
         let size = marks::TEXT_PT * scale * fit;

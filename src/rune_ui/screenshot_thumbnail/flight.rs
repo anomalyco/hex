@@ -9,10 +9,10 @@
 use crate::rune_hud::spring::{Spec, Spring};
 
 /// The way there: critically damped, so neither size nor place overshoots.
-pub(crate) const FLY: Spec = Spec::new(0.5, 0.0);
+pub(crate) const FLY: Spec = Spec::new(0.34, 0.0);
 /// Its corner and shadow, a little ahead of its size, so it reads as
 /// lifting off the screen before it shrinks away from it.
-pub(crate) const LIFT: Spec = Spec::new(0.32, 0.0);
+pub(crate) const LIFT: Spec = Spec::new(0.22, 0.0);
 /// Within this many points of its target, and slower than [`REST_V`]
 /// points a second, it lands.
 const REST: f32 = 0.2;
@@ -131,7 +131,11 @@ mod tests {
         let frames = trace(Flight::at(from, 0.0), to, 1.0);
         assert_eq!(frames[0], from, "the first frame is exactly the area");
         assert_eq!(*frames.last().unwrap(), to, "it lands exactly on the card");
-        assert!(frames.len() < 120, "it lands within a second");
+        assert!(
+            frames.len() < 85,
+            "it lands snappily ({} frames)",
+            frames.len()
+        );
         for pair in frames.windows(2) {
             let [a, b] = [pair[0], pair[1]];
             // Never past the card: no overshoot in place or size.
@@ -139,7 +143,7 @@ mod tests {
             assert!(b[2] >= to[2] - 0.01 && b[3] >= to[3] - 0.01);
             // No frame moves more than a smooth flight does at 120 Hz.
             let step = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
-            assert!(step < 60.0, "a jump of {step} points");
+            assert!(step < 75.0, "a jump of {step} points");
             // Its shape stays the shot's: width and height shrink together.
             let ratio = |r: [f32; 4]| r[2] / r[3];
             assert!((ratio(b) - 1.5).abs() < 0.02, "squashed to {}", ratio(b));
@@ -166,7 +170,7 @@ mod tests {
         // or take the new pull: its velocity carried over.
         for i in 0..4 {
             assert!(
-                (after[i] - kept.rect()[i]).abs() < 1.0,
+                (after[i] - kept.rect()[i]).abs() < 2.5,
                 "{after:?} vs {:?}",
                 kept.rect()
             );
