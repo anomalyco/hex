@@ -234,6 +234,10 @@
     </plurals>
     <string name="delete_words">Delete words when held</string>
     <string name="delete_words_detail">A held Delete removes whole words, faster the longer you hold it</string>
+    <string name="delete_words_delay">Initial delay</string>
+    <string name="delete_words_delay_ms">%1$d ms</string>
+    <string name="delete_words_speedup">Acceleration</string>
+    <string name="delete_words_speedup_percent">%1$d%%</string>
     <string name="marks_take_fix_space">Punctuation after autocorrect</string>
     <string name="marks_take_fix_space_detail">A period or comma right after an autocorrection goes against the word</string>
     <string name="marks_keep_space">Space after punctuation</string>

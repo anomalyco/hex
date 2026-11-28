@@ -236,9 +236,13 @@ class InsertionTest {
     }
     @Test fun aHeldDeleteTakesWordsFasterTheLongerItIsHeld() {
         // Labs › Keyboard › Delete words when held: 500, 400, 320, 256… ms, never under 90 ms.
-        val gaps = generateSequence(HeldDeleteWords.FIRST_GAP, HeldDeleteWords::next).take(12).toList()
+        val gaps = generateSequence(HeldDeleteWords.FIRST_GAP.toLong()) { HeldDeleteWords.next(it) }.take(12).toList()
         assertEquals(listOf(500L, 400L, 320L, 256L, 205L, 164L, 131L, 105L, 90L, 90L), gaps.take(10))
         assertEquals(90L, gaps.last())
+        // Its sliders (#3032): no acceleration keeps the initial delay; the most halves each gap, still never under 90.
+        assertEquals(listOf(800L, 800L, 800L), generateSequence(800L) { HeldDeleteWords.next(it, 0) }.take(3).toList())
+        assertEquals(listOf(1000L, 500L, 250L, 125L, 90L), generateSequence(1000L) { HeldDeleteWords.next(it, 50) }.take(5).toList())
+        assertEquals(50, HeldDeleteWords.clampSpeedup(90)); assertEquals(200, HeldDeleteWords.clampDelay(10))
     }
     @Test fun aDeleteSlideSelectsWholeWordsWithTheirSpaces() {
         assertEquals(listOf(4, 9, 14), DeleteSlide.wordLengths("far away from home").take(3))

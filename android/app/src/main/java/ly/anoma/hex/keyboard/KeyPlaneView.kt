@@ -167,8 +167,8 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                 val removed = ime.engine.deleteWord()
                 if (removed >= 0) {
                     if (removed > 0) tap(context, ime.feedback.haptics, Tap.Word)
-                    val gap = if (first) HeldDeleteWords.FIRST_GAP else wordGap
-                    wordGap = HeldDeleteWords.next(gap)
+                    val gap = if (first) ime.feedback.deleteWordsDelay.toLong() else wordGap
+                    wordGap = HeldDeleteWords.next(gap, ime.feedback.deleteWordsSpeedup)
                     postDelayed(this, gap); return
                 }
                 wordGap = 0L
