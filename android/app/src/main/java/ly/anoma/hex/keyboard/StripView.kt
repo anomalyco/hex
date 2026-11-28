@@ -282,15 +282,15 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         return true
     }
 
-    /** The typing model's slots in their display order ([Suggestion.place]): with what was typed among
+    /** The slots left to right, as placed ([Suggestion.place], [SteadyStrip]): with what was typed among
      * them, typed in quotes on the left then the fix (in a chip) or the likeliest word in the middle;
      * otherwise the likeliest word in the middle and the next on the left, as Gboard and iPhone place
      * them. The emoji always keeps the last slot (Labs › Keyboard › Emoji suggestions). */
-    fun suggestions(slots: List<Suggestion>) {
+    fun suggestions(slots: List<Suggestion?>) {
         // Typing or swiping started: the suggestions (a swipe's word so far) matter more than the notice, which comes
         // back in the next field.
-        if (slots.any { it.kind == Suggestion.Kind.Typed } || ime.engine.swiping) notice = null
-        val shown = Suggestion.place(slots)
+        if (slots.any { it?.kind == Suggestion.Kind.Typed } || ime.engine.swiping) notice = null
+        val shown = List(Suggestion.SLOTS) { slots.getOrNull(it) }
         offered = Array(Suggestion.SLOTS) { shown[it]?.text }
         var chip = -1
         for (i in 0..2) {
