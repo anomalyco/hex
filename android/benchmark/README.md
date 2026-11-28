@@ -64,6 +64,35 @@ On 24 Nov 2026, an API 35 Google ARM64 emulator (4 vCPUs, 4 GiB) on the M5 Ultra
 
 Small's time is nearly flat from 8 to 30 s (the full 30 s window), while Parakeet's grows with the speech, so the gain is largest for 8–13 s and smallest for a minute. Peak native RSS: small 417 / 462 / 500 MiB (short / long / 60 s), faster 260 / 355 / 431 MiB; its weights are a read-only file mapping. Load: 27–117 ms. All 40 clips: small 5.26% WER (the same as on 20 Nov), faster 35.44%, all of it in Spanish, German and Norwegian, which it never sees in the app.
 
+### Through the keyboard, build 2448
+
+On 24 Nov 2026, 20:23–21:08 ET (Studio load average 4.4–9.1 from another project's jobs), a clean debug build of `2278b31af` (Hex Preview build 2448: #2716's encoder window past 8 s and #2783's prompt retry are in) on the same emulator. Each figure is the native decode's time for a dictation made through the real Hex key, with the clip played into the emulator's microphone and no screen reading during the decode. The switch was on and off, twice each, alternating.
+
+| English clips | Standard model | Faster English | Faster by (medians) |
+|---|---:|---:|---:|
+| 6 of 11–13 s (12 dictations each way) | 3,924–5,761 ms, median 4,694 | 700–994 ms, median 748 | 6.3× |
+| 4 short, 2.2–3.7 s (8 each way) | 1,257–2,358 ms, median 1,786 | 109–325 ms, median 236 | 7.6× |
+
+Through the keyboard the ratio is about half the harness's 12–13× above, for two reasons. The keyboard path adds fixed costs to both models. And the harness table predates #2716, which gave the standard model's encoder a window sized to the speech instead of Whisper's full 30 s: at 10–13 s that makes the standard model about a quarter faster. **The faster model didn't get slower**; the model it's compared with got faster. #2755 (timestamps past 30 s) changes only audio over 30 s; the only such clip above is the 60 s one, which has no accuracy figure. The word-error columns are from the native builds of 24 Nov, before both, and still stand for clips under 30 s.
+
+- **First dictation after a restart** (the faster model is loaded, and its file hashed once, while the person speaks): the decode was 233–311 ms, no slower than later ones (151–394 ms). The load and hash stayed inside the 2.8 s of speech.
+- **Switching language each dictation** (English, faster model ↔ Español, standard model): each switch loads the other model while the person speaks. The first decode after a switch was about 200 ms slower for English (410–418 ms against 209–231) and unchanged for Spanish (1,506–1,540 ms).
+- **✕ while a 60 s dictation decodes:** the faster model finished 0.5 s after the ✕ and its text was dropped; the standard model stopped 1.5 s after it. The next dictation took 74 ms with the switch on and 1,641 ms off.
+- **Sentence ends on the microphone set** (33 English clips, switch on): of 39 sentence ends inside dictations, 1 was missing ("just after midnight Can you") and 1 was added ("Bring the blue folder. I mean the green folder."). On the clean files above, the counts were 1 missing of 10 and none added.
+- **The standard model against itself:** two runs of the build before Faster English (`0d6bddad9`) on the 7 clips whose text had differed between that build and the switch-off branch gave different text on 4 of them. So those differences are the injected audio's run-to-run variation, not the switch.
+
+### On real phones
+
+- **OnePlus 12 (Snapdragon 8 Gen 3; 1 prime, 5 performance and 2 efficiency cores), build 2448**, from the Diagnostics report's Last dictation:
+
+| | Kept | Model | Decode | Split | Processor | Text in after ✓ |
+|---|---:|---|---:|---|---:|---:|
+| Switch on | 6.2 s | faster English, 4 threads, loaded while speaking | 411 ms | none reported | 1,579 ms (3.8×) | 533 ms |
+| Switch off | 12.7 s | standard, 4 threads kept ready on cpu 2-7, encoder window 1280, loaded while speaking | 7,919 ms | encoder 7,218, decoder 305, prompt 309, other 87 ms | 32,670 ms (4.1×) | 8,030 ms |
+
+  The faster model ran at the emulator's speed (about 410 ms for 6.2 s on both). The standard model ran about 1.7× slower than on the emulator for the same length: it's compute-bound in its encoder, at 91% of the decode with all four threads busy. The two dictations differ in length, so the phone's ratio for one length is an estimate: about 0.8 s against 7.9 s for 12.7 s, roughly **10×**. The owner's words: before, "a solid 4-5s … to dictate"; after, "Wow! Yes its instant now."
+- **Seen in the release gate on the Studio's gate emulator** (build 2448's candidate, functional runs, not a timing harness): English decodes 0.1–1.6 s with the switch on against 1.8–10.9 s off, and the tester script's long text 873 ms against 5.4 s.
+
 ### Sentence ends
 
 Parakeet TDT-CTC 110M sometimes runs two sentences together in its own output ("back of the bus We should", "Wednesday My brother"), from 11 s up; the 0.6B model and Whisper small wrote all 48 sentence ends of the long English clips. It isn't the attention window (forcing full attention on the 60 s clip left 4 of 30 missing) and no join is involved. The app puts them back in `SentenceEnds` (faster engine only, before Hex's shared formatting): a capitalised word that English writes in lowercase (in the English typing model, not on its capitals list, not "I") after a pause of at least 100 ms of quiet frames (MicCapture's −48 dBFS test) between the two words' starts. Counted on the host over every English clip (24 short, 9 long, the 60 s one, and 14 clips of 2–3 sentences full of names and places with 0.15 or 0.6 s between sentences), with word times from transcribe.cpp (which leave the text unchanged and cost no measurable time):
