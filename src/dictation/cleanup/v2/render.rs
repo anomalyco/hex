@@ -34,8 +34,15 @@ fn terminal(word: &str) -> Option<char> {
         .filter(|last| ".?!".contains(*last))
 }
 
-fn ends_sentence(word: &str) -> bool {
+pub(super) fn ends_sentence(word: &str) -> bool {
     terminal(word).is_some()
+}
+
+/// Whether a word's first letter is a capital, before any digit.
+fn starts_upper(word: &str) -> bool {
+    word.chars()
+        .find(|ch| ch.is_alphabetic() || ch.is_ascii_digit())
+        .is_some_and(char::is_uppercase)
 }
 
 fn capitalize_first_letter(word: &str) -> String {
@@ -217,15 +224,31 @@ pub(crate) fn render(words: &[&str], tags: &[Tag], decode: &Decode) -> String {
     let mut index = 0;
     let mut after_gap = false;
     let mut gap_terminal: Option<char> = None;
+    let mut gap_end: Option<char> = None;
     let mut sentence_start = true;
     while index < count {
         if actions[index].is_delete() {
             after_gap = true;
-            if let Some(mark) = terminal(words[index]) {
-                gap_terminal = Some(mark);
+            gap_end = terminal(words[index]);
+            if gap_end.is_some() {
+                gap_terminal = gap_end;
             }
             index += 1;
             continue;
+        }
+        // "Thanks, um. See you": a deleted word's sentence mark, followed
+        // by a new sentence, moves onto the kept word before the gap.
+        if after_gap
+            && !decode.apply_case_punct
+            && starts_upper(words[index])
+            && let (Some(mark), Some(last)) = (gap_end, out.last_mut())
+            && !ends_sentence(last)
+            && !last.ends_with('\n')
+        {
+            let kept = last.trim_end_matches([',', ';', ':']).len();
+            last.truncate(kept);
+            last.push(mark);
+            sentence_start = true;
         }
         let span = spans[index]
             .kind()
@@ -316,6 +339,21 @@ mod tests {
                 &[o; 7]
             ),
             "Done. Next we ship it."
+        );
+        // A deleted word's sentence mark moves back before a new sentence,
+        // never doubled, never before a lowercase continuation.
+        assert_eq!(
+            cleaned("Thanks, um. See you", &[K, F, K, K], &[o; 4]),
+            "Thanks. See you"
+        );
+        assert_eq!(
+            cleaned("some ums um. Okay", &[K, K, F, K], &[o; 4]),
+            "some ums. Okay"
+        );
+        assert_eq!(cleaned("Done. um? Next", &[K, F, K], &[o; 3]), "Done. Next");
+        assert_eq!(
+            cleaned("went to the, uh. store", &[K, K, K, F, K], &[o; 5]),
+            "went to the, store"
         );
         // Every word would go: the line stays as heard.
         assert_eq!(cleaned("Um, uh.", &[F, F], &[o; 2]), "Um, uh.");

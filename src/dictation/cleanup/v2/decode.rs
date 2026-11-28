@@ -339,14 +339,28 @@ const CUE_PHRASES: &[&[&str]] = &[
 ];
 /// Hesitations a correction may carry besides its cue.
 const HESITATIONS: &[&str] = &["um", "uh", "er", "erm", "ah", "hmm", "like"];
+/// Discourse markers, never what a correction takes back on their own:
+/// "Okay, sorry," takes nothing back.
+const DISCOURSE: &[&str] = &["oh", "okay", "ok", "alright", "well", "so", "right", "yeah"];
+/// How many kept words may separate a correction from a cue-less piece of
+/// the same reparandum.
+const SPLIT_WINDOW: usize = 3;
 
-fn has_cue(norms: &[String]) -> bool {
-    norms.iter().any(|word| CUE_WORDS.contains(&word.as_str()))
-        || CUE_PHRASES.iter().any(|phrase| {
+/// Where the last cue in `norms` ends, if there is one.
+fn last_cue_end(norms: &[String]) -> Option<usize> {
+    let single = norms
+        .iter()
+        .rposition(|word| CUE_WORDS.contains(&word.as_str()));
+    let phrase = CUE_PHRASES
+        .iter()
+        .filter_map(|phrase| {
             norms
                 .windows(phrase.len())
-                .any(|window| window.iter().map(String::as_str).eq(phrase.iter().copied()))
+                .rposition(|window| window.iter().map(String::as_str).eq(phrase.iter().copied()))
+                .map(|at| at + phrase.len() - 1)
         })
+        .max();
+    single.max(phrase)
 }
 
 fn is_cue_word(word: &str) -> bool {
@@ -356,11 +370,23 @@ fn is_cue_word(word: &str) -> bool {
 }
 
 /// Every run of correction deletions, with the fillers inside it, must
-/// hold both a cue and something it takes back; otherwise its correction
-/// words are kept. "um sorry could you" keeps "sorry", "came to four
-/// hundred twelve" keeps "four".
+/// take something back, say so, and leave its repair and the sentence
+/// around it whole. The guard keeps:
+/// - every correction word of a run without a cue ("came to four hundred
+///   twelve" keeps "four") or with nothing taken back but cues,
+///   hesitations and discourse markers ("um sorry could you", "Okay,
+///   sorry,");
+/// - the repair: correction words after the run's last cue, other than
+///   hesitations ("Tuesday. Oh no wait, Wednesday." keeps "Wednesday.");
+/// - the whole run when it ends a sentence the kept words before it left
+///   open ("today is Tuesday. Scratch that." would leave "today is");
+/// - the whole run when a cue-less correction word it kept sits just
+///   before it in the same sentence: the model split one reparandum, and
+///   cutting part of it leaves a fragment ("fifty megabytes of cache, I
+///   mean sixty megabytes" would leave "fifty megabytes of").
 pub(crate) fn guard_corrections(words: &[&str], actions: &mut [Action]) {
     let count = actions.len();
+    let mut cueless = vec![false; count];
     let mut start = 0;
     while start < count {
         if actions[start] != Action::DeleteCorrection {
@@ -384,10 +410,42 @@ pub(crate) fn guard_corrections(words: &[&str], actions: &mut [Action]) {
             .iter()
             .map(|&index| super::itn::norm(words[index]))
             .collect();
-        let taken_back = norms
-            .iter()
-            .any(|word| !word.is_empty() && !is_cue_word(word));
-        if !(has_cue(&norms) && taken_back) {
+        let Some(cue_end) = last_cue_end(&norms) else {
+            for &index in &corrections {
+                actions[index] = Action::Keep;
+                cueless[index] = true;
+            }
+            start = end;
+            continue;
+        };
+        for (position, &index) in corrections.iter().enumerate().skip(cue_end + 1) {
+            if !HESITATIONS.contains(&norms[position].as_str()) {
+                actions[index] = Action::Keep;
+            }
+        }
+        let taken_back = norms[..=cue_end].iter().any(|word| {
+            !word.is_empty() && !is_cue_word(word) && !DISCOURSE.contains(&word.as_str())
+        });
+        let mut last_deleted = start;
+        while last_deleted + 1 < end && actions[last_deleted + 1].is_delete() {
+            last_deleted += 1;
+        }
+        let before = (0..start).rev().find(|&index| !actions[index].is_delete());
+        let leaves_open = before.is_some_and(|before| {
+            super::render::ends_sentence(words[last_deleted])
+                && !super::render::ends_sentence(words[before])
+        });
+        let mut split = false;
+        for back in (start.saturating_sub(SPLIT_WINDOW)..start).rev() {
+            if cueless[back] {
+                split = true;
+                break;
+            }
+            if super::render::ends_sentence(words[back]) {
+                break;
+            }
+        }
+        if !taken_back || leaves_open || split {
             for index in corrections {
                 actions[index] = Action::Keep;
             }
@@ -469,7 +527,7 @@ mod tests {
     #[test]
     fn a_correction_needs_a_cue_and_something_taken_back() {
         use Action::{DeleteCorrection as C, DeleteFiller as F, Keep as K};
-        let cases: [(&[&str], &[Action], &[Action]); 4] = [
+        let cases: [(&[&str], &[Action], &[Action]); 8] = [
             (
                 &["um", "sorry", "could", "you"],
                 &[F, C, K, K],
@@ -489,6 +547,39 @@ mod tests {
                 &["Meet", "Tuesday,", "um,", "actually", "Wednesday."],
                 &[K, C, F, C, K],
                 &[K, C, F, C, K],
+            ),
+            // The repair after the last cue stays, and the discourse
+            // marker the model swept in with it.
+            (
+                &[
+                    "is",
+                    "Tuesday.",
+                    "Oh",
+                    "no",
+                    "wait,",
+                    "Wednesday.",
+                    "Alright,",
+                ],
+                &[K, C, C, C, C, C, C],
+                &[K, C, C, C, C, K, K],
+            ),
+            // A cue with only discourse markers takes nothing back.
+            (
+                &["Okay,", "sorry,", "let's", "start."],
+                &[C, C, K, K],
+                &[K, K, K, K],
+            ),
+            // Ending a sentence the kept words left open.
+            (
+                &["pizza", "with", "mushrooms.", "Scratch", "that.", "Order"],
+                &[K, K, C, C, C, K],
+                &[K, K, K, K, K, K],
+            ),
+            // One reparandum the model split around "of".
+            (
+                &["fifty", "megabytes", "of", "cache,", "I", "mean", "sixty"],
+                &[C, C, K, C, C, C, K],
+                &[K, K, K, K, K, K, K],
             ),
         ];
         for (words, actions, expected) in cases {
