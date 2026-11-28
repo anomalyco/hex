@@ -15,12 +15,12 @@ export const MEETINGS_DESCRIPTION =
   "Hex records your microphone and system audio itself, so no bot joins the call, and transcribes the meeting on your computer. Free and open source, on Mac, with Windows and Linux in beta. Your agent reads it with hex mcp."
 
 const HOW: [label: string, value: string][] = [
-  ["No bot", "Hex records the call from your computer. Nothing joins the meeting, and there's no one to admit from a waiting room."],
+  ["No bot", "Hex records the call from your computer. Nothing joins the meeting, and there's no one to admit from the waiting room."],
   ["Two tracks", "Your microphone is You and the system audio is Them, recorded side by side. Everyone on the far end shares Them."],
-  ["Local transcript", "Hex's local speech model writes the transcript while the call runs, with no network."],
+  ["Local transcript", "A speech model on your computer writes the transcript as the call goes, with no network."],
   ["Notes", "On a Mac with Apple Intelligence, Hex writes a title and a short summary on the Mac. Elsewhere they're off unless you send them to your own OpenCode model."],
-  ["Export", "Each meeting is saved as Markdown in Hex Meetings in your Documents folder, or a folder you choose. Copy it as Markdown, SRT, or VTT."],
-  ["Retention", "Meetings are kept for 7 days unless you choose 24 hours, 30 days, or forever. Expired ones move to the Trash, and exported Markdown is never deleted."],
+  ["Export", "Each meeting is saved as Markdown in Documents › Hex Meetings, or a folder you choose. Copy it as Markdown, SRT, or VTT."],
+  ["Retention", "Meetings stay 7 days by default, or 24 hours, 30 days, or forever. Expired ones go to the Trash. Exported Markdown is never deleted."],
 ]
 
 const WHERE: [os: string, audio: string, status: string][] = [
@@ -64,7 +64,9 @@ const STYLE = `<style>
 .mx thead th { padding-top: 0; border-top: 0; color: #8a8b90; font-size: 0.8125rem; font-weight: 500; }
 .mx tbody th { width: 11rem; color: #f2f2ef; font-weight: 500; }
 .mx td { color: #b4b5ba; }
-.mx td:last-child { padding-right: 0; color: #8a8b90; white-space: nowrap; }
+.mx td:last-child { padding-right: 0; white-space: nowrap; }
+.mx .pill { display: inline-block; padding: 0 0.45rem; border: 1px solid rgba(242, 242, 239, 0.16); border-radius: 999px; color: #a3a4a9; font-size: 0.6875rem; font-weight: 500; letter-spacing: 0.03em; line-height: 1.1rem; }
+.mx tr:first-child .pill { border-color: rgba(242, 242, 239, 0.3); color: #e6e7e9; }
 .mx pre { margin: 1.25rem 0 0; overflow-x: auto; padding: 1rem 1.125rem; border: 1px solid rgba(242, 242, 239, 0.1); border-radius: 0.8rem; background: rgba(242, 242, 239, 0.025); color: #d6d7db; font: 0.8125rem/1.7 ${MONO}; }
 .mx pre code { font: inherit; }
 .mx pre span { color: #6f7075; }
@@ -81,7 +83,7 @@ const STYLE = `<style>
 
 export function meetingsDetails(): string {
   const how = HOW.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join("\n")
-  const where = WHERE.map(([os, audio, status]) => `<tr><th scope="row">${os}</th><td>${audio}</td><td>${status}</td></tr>`).join("\n")
+  const where = WHERE.map(([os, audio, status]) => `<tr><th scope="row">${os}</th><td>${audio}</td><td><span class="pill">${status}</span></td></tr>`).join("\n")
   const questions = MEETINGS_QUESTIONS.map((entry) => `<h3>${escape(entry.question)}</h3>\n<p>${entry.answer}</p>`).join("\n")
   return `${STYLE}
 <section class="mx" aria-labelledby="mx-how">
@@ -98,7 +100,7 @@ ${how}
 ${where}
 </tbody>
 </table>
-<p class="mx__sub">Windows and Linux use the same recorder, transcript, and Meetings pane as the Mac. There are no permissions to grant on either.</p>
+<p class="mx__sub">Windows and Linux use the same recorder, transcript, and Meetings pane as the Mac, with no permissions to grant.</p>
 
 <h2>Read it from a terminal or an agent</h2>
 <pre><code>hex meetings list --since 7d          <span># newest first</span>

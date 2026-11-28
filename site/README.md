@@ -129,7 +129,7 @@ tab never moves the page), and the five tools `src/meeting/mcp.rs` serves. Its
 one script only reveals the copy buttons and makes them work.
 `/hex/vs-wispr-flow` and `/hex/vs-superwhisper` (`src/compare.ts`) compare Hex
 with each app's own public pages, sourced and dated on the page (`CHECKED`),
-with a "may fit better" list; `/hex/linux` (`src/linux.ts`) has this build's
+with a "may fit better" list, and an optional `art` image drawn above the title; `/hex/linux` (`src/linux.ts`) has this build's
 install commands and each desktop's shortcut and paste path. `scripts/pages.ts`
 writes all three, their cards, and their sitemap entries. The Meetings build
 adds `src/meetings-page.ts`'s crawlable section, title, and FAQPage under the

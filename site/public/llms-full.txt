@@ -279,33 +279,34 @@ each, at https://anoma.ly/hex/labs. Stable builds never list Dev-only labs.
 
 ## Linux
 
-Hex for Linux is a beta for x86_64 (AVX2) and ARM64 with glibc 2.36 or later.
-It runs on X11 and on Wayland through one general path: `wtype` and
-`wl-copy` on wlroots compositors (Hyprland, Sway) and niri, the
-RemoteDesktop portal on GNOME and KDE Plasma, and the GlobalShortcuts portal or
-your own keybindings running `hex dictation start|stop|toggle` for shortcuts.
-On Hyprland and Omarchy, bind `anomaly.hex:dictation`. Transcription uses
-Vulkan on the GPU or the CPU; the window needs a Vulkan driver. Meetings
-records each output's PipeWire monitor. Page: https://anoma.ly/hex/linux
+Hex for Linux is in beta on x86_64 (with AVX2) and ARM64, with glibc 2.36 or
+later. It works on X11 and Wayland. On Wayland it pastes with `wtype` and
+`wl-copy` on wlroots compositors (Hyprland, Sway) and niri, and through the
+RemoteDesktop portal on GNOME and KDE Plasma. Shortcuts come from the
+GlobalShortcuts portal, or from your own keybindings that run
+`hex dictation start|stop|toggle`. On Hyprland and Omarchy, bind
+`anomaly.hex:dictation`. Transcription runs on the GPU through Vulkan or on
+the CPU, and the window needs a Vulkan driver. Meetings records each output's
+PipeWire monitor. Page: https://anoma.ly/hex/linux
 
 ## Compared with other dictation apps
 
-These pages compare Hex with each app's own public pages, read on
-November 28, 2026, and say when the other app may fit better.
+Each page compares Hex with the other app's own public pages, read on
+November 28, 2026, and says when the other app may fit better.
 
 - Hex vs Wispr Flow: https://anoma.ly/hex/vs-wispr-flow. Wispr Flow
-  transcribes in the cloud and needs an internet connection; Hex transcribes on
-  the computer and works offline. Wispr Flow has a free plan with limited
+  transcribes in the cloud and needs an internet connection. Hex transcribes
+  on your computer and works offline. Wispr Flow has a free plan with limited
   dictation and a paid Pro plan, runs on Mac, Windows, iPhone, and Android, and
-  has a no-bot Notetaker and a remote MCP server. Hex is free and open source
-  and also runs on Linux.
+  has a no-bot Notetaker and a remote MCP server. Hex is free, open source, and
+  also runs on Linux.
 - Hex vs Superwhisper: https://anoma.ly/hex/vs-superwhisper. Both run local
-  models. Superwhisper is closed source, free with local Whisper models, with
-  Parakeet, cloud models, and AI modes in Pro; its Linux app is Wayland only,
-  and its meetings, CLI, and MCP are on the Mac. Hex includes Parakeet for free,
-  supports X11 and Wayland, and has meetings (Windows and Linux in beta), the
-  CLI, and `hex mcp` on Mac, Windows, and Linux. Superwhisper runs on Intel
-  Macs and macOS 14; Hex needs Apple silicon and macOS 15.
+  models. Superwhisper is closed source and free with local Whisper models;
+  Parakeet, cloud models, and AI modes are in Pro. Its Linux app is Wayland
+  only, and its meetings, CLI, and MCP are Mac only. Hex includes Parakeet for
+  free, works on X11 and Wayland, and has meetings (Windows and Linux in beta),
+  the CLI, and `hex mcp` on Mac, Windows, and Linux. Superwhisper runs on
+  Intel Macs and macOS 14; Hex needs Apple silicon and macOS 15.
 
 ## Common questions
 

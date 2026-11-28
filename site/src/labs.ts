@@ -89,7 +89,8 @@ body { margin: 0; min-height: 100vh; background: radial-gradient(circle at 50% -
 a { color: inherit; }
 header { max-width: 720px; margin: 0 auto; padding: 28px 24px 0; display: flex; align-items: center; gap: 10px; font-weight: 600; }
 header a { text-decoration: none; display: inline-flex; align-items: center; gap: 10px; }
-header svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 3.5; stroke-linejoin: round; }
+header svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 4.5; stroke-linecap: round; stroke-linejoin: round; }
+header svg .core { fill: currentColor; stroke: none; }
 header .crumb { color: #8a8b90; font-weight: 500; }
 main { max-width: 720px; margin: 0 auto; padding: 72px 24px 96px; }
 .eyebrow { margin: 0 0 14px; color: #8a8b90; font-size: 14px; font-weight: 500; letter-spacing: 0.01em; }
@@ -118,7 +119,8 @@ li a:hover .title { text-decoration: underline; text-decoration-color: #4a4b50; 
 .index-intro { margin: 18px 0 0; color: #b4b5ba; font-size: 18px; max-width: 34em; }
 `
 
-const MARK = `<svg aria-hidden="true" viewBox="0 0 64 64"><path d="M32 4 57 18.5v27L32 60 7 45.5v-27Z"/><path d="M32 15 48 24.25v15.5L32 49l-16-9.25v-15.5Z"/></svg>`
+// Hex's mark, as the home page draws it (src/App.tsx): two rings and a solid core.
+export const MARK = `<svg aria-hidden="true" viewBox="0 0 64 64"><path d="M32 4 57 18.5v27L32 60 7 45.5v-27Z"/><path d="M32 15 48 24.25v15.5L32 49l-16-9.25v-15.5Z"/><path class="core" d="m32 24 7.5 4.25v8.5L32 41l-7.5-4.25v-8.5Z"/></svg>`
 
 export type Meta = { title: string; description: string; url: string; image: string; imageAlt: string; jsonLd?: unknown }
 

@@ -49,8 +49,11 @@ test("each comparison is prerendered with its canonical, social tags, and a card
     expect(page).toContain(`<meta property="og:url" content="${url}">`)
     expect(page).toContain(`<meta property="og:image" content="${url}.png">`)
     expect(page).toContain('<meta name="twitter:card" content="summary_large_image">')
-    expect(page).toContain(`<h1>Hex vs ${comparison.name}</h1>`)
-    expect(page.match(/<h1>/g)).toHaveLength(1)
+    expect(page).toContain(`<h1 class="vs__title">Hex <span class="vs__vs">vs</span> ${comparison.name}</h1>`)
+    // Room for header art: none until a comparison sets it.
+    expect(page).not.toContain("vs__art\"")
+    expect(renderComparison({ ...comparison, art: { src: "/hex/vs.webp", alt: "Hex versus", width: 1440, height: 640 } }, ORIGIN)).toContain('<figure class="vs__art"><img src="/hex/vs.webp"')
+    expect(page.match(/<h1[ >]/g)).toHaveLength(1)
     expect(comparison.description.length).toBeLessThanOrEqual(200)
     expect(comparison.title.length).toBeLessThanOrEqual(65)
     expect(page).toContain(`When ${comparison.name} may fit better`)
@@ -64,11 +67,11 @@ test("each comparison is prerendered with its canonical, social tags, and a card
 
 test("the comparisons state the facts each side's pages state", () => {
   const wispr = text(renderComparison(WISPR_FLOW, ORIGIN))
-  for (const fact of ["Transcription needs an internet connection", "$15 a month", "Notetaker", "A remote, read-only server", "Not supported", "Intel Mac"]) {
+  for (const fact of ["Transcription needs an internet connection", "$15 a month", "Notetaker", "Remote server for Notetaker meetings", "Not supported", "Intel Mac"]) {
     expect(wispr).toContain(fact)
   }
   const superwhisper = text(renderComparison(SUPERWHISPER, ORIGIN))
-  for (const fact of ["$8.49 a month", "$249.99 once", "Wayland only", "macOS 14", "Parakeet Free Pro", "Hex on Windows and Linux is in beta"]) {
+  for (const fact of ["$8.49 a month", "$249.99 once", "Wayland only", "macOS 14", "Parakeet Free Pro", "Hex is in beta on both"]) {
     expect(superwhisper).toContain(fact)
   }
   // Superwhisper ships on Linux and has a CLI and MCP on the Mac; the page must not say otherwise.
@@ -123,6 +126,15 @@ test("the landing page's footer and the agent files link every new page", () => 
   }
   expect(read("./scripts/build.ts")).toContain("scripts/pages.ts")
   expect(LINUX_PATH).toBe("/hex/linux")
+})
+
+test("every page draws Hex's real mark: two rings and a solid core", () => {
+  const core = "m32 24 7.5 4.25v8.5L32 41l-7.5-4.25v-8.5Z"
+  expect(read("./src/App.tsx")).toContain(core)
+  expect(read("./public/favicon.svg")).toContain(core)
+  for (const page of [...COMPARISONS.map((comparison) => renderComparison(comparison, ORIGIN)), renderLinux(ORIGIN, INSTALL)]) {
+    expect(page).toContain(`<path class="core" d="${core}"/>`)
+  }
 })
 
 test("the new pages are noindex on dev.anoma.ly", async () => {
