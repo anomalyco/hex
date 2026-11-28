@@ -191,6 +191,8 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val volumeInMenu = remember(revision) { typing.volumeInMenu }
     // Labs › Dictate from Quick Settings is the tile service's enabled state, not a preference.
     var quickDictation by remember { mutableStateOf(QuickDictation.enabled(context)) }
+    // Labs › Keyboard › Answer apps' speech requests is the speech activity's enabled state, not a preference.
+    var speechRequests by remember { mutableStateOf(SpeechRequests.enabled(context)) }
     val keyColors = remember(revision) { typing.keyColors }
     val keyColor = remember(revision) { typing.keyColor }
     val testOnHome = remember(revision) { typing.testKeyboardOnHome }
@@ -646,6 +648,11 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 Rule()
                                 Toggle(stringResource(R.string.voice_only_mode), stringResource(R.string.voice_only_detail),
                                     voiceOnly) { typing.voiceOnly = it; VoiceOnly.setEnabledFromSettings(context, it) }
+                                Rule()
+                                Toggle(stringResource(R.string.speech_requests), stringResource(R.string.speech_requests_detail),
+                                    speechRequests, noteLines = Int.MAX_VALUE) {
+                                    SpeechRequests.setEnabled(context, it); speechRequests = it
+                                }
                                 Rule()
                                 // Labs › Keyboard › Voice bar from the Hex menu: off, the Hex menu has no Voice only.
                                 Toggle(stringResource(R.string.voice_bar_from_menu), stringResource(R.string.voice_bar_from_menu_detail),
