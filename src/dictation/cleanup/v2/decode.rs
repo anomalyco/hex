@@ -445,7 +445,12 @@ pub(crate) fn guard_corrections(words: &[&str], actions: &mut [Action]) {
                 break;
             }
         }
-        if !taken_back || leaves_open || split {
+        let strands_affirmative = norms.iter().any(|word| word == "no")
+            && before.is_some_and(|before| {
+                matches!(super::itn::norm(words[before]).as_str(), "yes" | "yeah")
+                    && (before == 0 || super::render::ends_sentence(words[before - 1]))
+            });
+        if !taken_back || leaves_open || split || strands_affirmative {
             for index in corrections {
                 actions[index] = Action::Keep;
             }
@@ -454,11 +459,17 @@ pub(crate) fn guard_corrections(words: &[&str], actions: &mut [Action]) {
     }
 }
 
+/// Contracted subject + auxiliary forms ("it's", "we're", "I've").
+const CONTRACTED_SUBJ_AUX: &[&str] = &[
+    "i'm", "we're", "you're", "he's", "she's", "they're", "it's", "that's", "there's", "i'd",
+    "we'd", "you'd", "they'd", "i'll", "we'll", "you'll", "they'll", "i've", "we've", "you've",
+    "they've",
+];
 /// Subjects a restart may take back with its auxiliaries.
 const RESTART_SUBJECTS: &[&str] = &[
     "i", "we", "you", "he", "she", "they", "it", "i'm", "we're", "you're", "he's", "she's",
-    "they're", "it's", "i'd", "we'd", "you'd", "they'd", "i'll", "we'll", "you'll", "they'll",
-    "i've", "we've", "you've", "they've",
+    "they're", "it's", "that's", "there's", "i'd", "we'd", "you'd", "they'd", "i'll", "we'll",
+    "you'll", "they'll", "i've", "we've", "you've", "they've",
 ];
 /// Auxiliaries and modals that lead into a bare verb: "was going to".
 const RESTART_AUXILIARIES: &[&str] = &[
@@ -474,6 +485,78 @@ const RESTART_CLAUSE_OPENERS: &[&str] = &[
     "let's", "lets", "let", "and", "but", "or", "then", "maybe", "no", "not", "never", "the", "a",
     "an", "this", "that", "there", "here", "what", "how", "why", "when", "where", "who", "if",
     "please", "actually",
+];
+/// Conversational or emphatic reduplications that stay even if tagged as a
+/// restart ("very, very", "way, way", "ha ha", "bye bye", "blah blah").
+const EMPHATIC_REDUPLICATIONS: &[&str] = &["very", "really", "way", "ha", "bye", "blah"];
+/// Linking words inside X-prep-X / X-and-X idioms ("back to back", "one on one", "more and more").
+const REDUPLICATIVE_LINKS: &[&str] = &["to", "by", "on", "in", "for", "after", "and", "or"];
+/// Closed-class words a single unpunctuated mid-clause restart may remove without a repeat.
+const SINGLE_RESTART_EXTRA_FUNC: &[&str] = &[
+    "in", "on", "at", "to", "for", "with", "of", "from", "by", "as", "into", "about", "my", "our",
+    "your", "his", "her", "their", "its", "some", "any", "all", "one", "do", "does", "did",
+    "don't", "doesn't", "didn't", "can't", "won't", "isn't", "aren't",
+];
+/// Two-word discourse fillers that must go or stay together ("I mean", "you know").
+const PAIRED_FILLER_PHRASES: &[(&str, &str)] = &[("i", "mean"), ("you", "know")];
+/// Words immediately before unpunctuated "like" where "like" is the verb or a comparison.
+const STRICT_CONTENT_LIKE_PREV: &[&str] = &[
+    "look",
+    "looks",
+    "looked",
+    "sound",
+    "sounds",
+    "sounded",
+    "feel",
+    "feels",
+    "felt",
+    "seem",
+    "seems",
+    "seemed",
+    "would",
+    "i'd",
+    "you'd",
+    "we'd",
+    "they'd",
+    "don't",
+    "didn't",
+    "doesn't",
+    "something",
+    "anything",
+    "nothing",
+    "someone",
+    "anyone",
+    "everyone",
+    "more",
+    "less",
+];
+const SUBJ_PRONOUNS: &[&str] = &["i", "we", "you", "they", "he", "she"];
+const INVERTED_MODALS: &[&str] = &[
+    "can",
+    "could",
+    "should",
+    "would",
+    "will",
+    "do",
+    "does",
+    "did",
+    "can't",
+    "couldn't",
+    "shouldn't",
+    "won't",
+    "what",
+    "how",
+    "why",
+    "when",
+    "where",
+];
+/// Words that stay even when a deleted filler separates two copies ("very, um, very").
+const BRIDGE_STUTTER_EXEMPT: &[&str] = &[
+    "very", "really", "way", "ha", "bye", "blah", "so", "no", "yes", "yeah", "okay", "ok", "good",
+    "wait", "stop", "please", "never", "ever", "many", "much", "far", "long", "more", "again",
+    "over", "had", "that", "is", "do", "in", "on", "out", "up", "maybe", "probably", "perhaps",
+    "honestly", "might", "roughly", "kinda", "sorta", "think", "guess", "suppose", "seem", "seems",
+    "pretty", "kind", "sort",
 ];
 
 fn opens_clause(word: &str) -> bool {
@@ -517,12 +600,78 @@ pub(crate) fn guard_restarts(words: &[&str], actions: &mut [Action]) {
             .iter()
             .map(|&index| super::itn::norm(words[index]))
             .collect();
+        if !norms.is_empty()
+            && norms
+                .iter()
+                .all(|word| EMPHATIC_REDUPLICATIONS.contains(&word.as_str()))
+        {
+            for index in restarts {
+                actions[index] = Action::Keep;
+            }
+            start = end;
+            continue;
+        }
+        if !norms.is_empty()
+            && restarts.iter().zip(&norms).all(|(&index, word)| {
+                super::itn::is_digit_word(word)
+                    && !words[index].ends_with([',', '.', '?', '!', ';', ':'])
+            })
+        {
+            for index in restarts {
+                actions[index] = Action::Keep;
+            }
+            start = end;
+            continue;
+        }
+        if restarts.len() == 1 {
+            let index = restarts[0];
+            let word = words[index];
+            let norm = &norms[0];
+            let at_clause_edge =
+                index == 0 || words[index - 1].ends_with([',', '.', '?', '!', ';', ':']);
+            let has_pause_or_cutoff =
+                word.ends_with('-') || word.ends_with([',', '.', '?', '!', ';', ':']);
+            let next1 = if end < count && actions[end] == Action::Keep {
+                super::itn::norm(words[end])
+            } else {
+                String::new()
+            };
+            let next2 = if end + 1 < count && actions[end + 1] == Action::Keep {
+                super::itn::norm(words[end + 1])
+            } else {
+                String::new()
+            };
+            let is_repeated = !norm.is_empty() && (norm == &next1 || norm == &next2);
+            let is_func = opens_clause(norm) || SINGLE_RESTART_EXTRA_FUNC.contains(&norm.as_str());
+            if !at_clause_edge && !has_pause_or_cutoff && !is_repeated && !is_func {
+                actions[index] = Action::Keep;
+                start = end;
+                continue;
+            }
+        }
+        if restarts.len() == 2
+            && restarts[1] == restarts[0] + 1
+            && end < count
+            && actions[end] == Action::Keep
+            && REDUPLICATIVE_LINKS.contains(&norms[1].as_str())
+            && norms[0] == super::itn::norm(words[end])
+            && !RESTART_AUXILIARIES.contains(&norms[0].as_str())
+            && !super::render::ends_sentence(words[restarts[0]])
+            && !super::render::ends_sentence(words[restarts[1]])
+        {
+            for index in restarts {
+                actions[index] = Action::Keep;
+            }
+            start = end;
+            continue;
+        }
         let prefix_only = norms.iter().all(|word| {
             RESTART_SUBJECTS.contains(&word.as_str())
                 || RESTART_AUXILIARIES.contains(&word.as_str())
-        }) && norms
-            .iter()
-            .any(|word| RESTART_AUXILIARIES.contains(&word.as_str()));
+        }) && norms.iter().any(|word| {
+            RESTART_AUXILIARIES.contains(&word.as_str())
+                || CONTRACTED_SUBJ_AUX.contains(&word.as_str())
+        });
         let bare_verb = end < count && actions[end] == Action::Keep && {
             let next = super::itn::norm(words[end]);
             !next.is_empty()
@@ -540,10 +689,126 @@ pub(crate) fn guard_restarts(words: &[&str], actions: &mut [Action]) {
     }
 }
 
+/// Never half-deletes "I mean" or "you know": when one word stays (for
+/// instance because "I" was tagged `DeleteOpener` while openers stay) and
+/// the other would go as a filler or non-stutter restart, both stay so the
+/// line never reads "I we should" or "you it works". Verbatim single-word
+/// stutters ("I, I mean it", "I mean mean it") still go. The reference's
+/// `guard_paired_fillers`.
+pub(crate) fn guard_paired_fillers(words: &[&str], actions: &mut [Action]) {
+    let count = actions.len();
+    for index in 0..count.saturating_sub(1) {
+        if super::render::ends_sentence(words[index]) {
+            continue;
+        }
+        let first = super::itn::norm(words[index]);
+        let second = super::itn::norm(words[index + 1]);
+        if !PAIRED_FILLER_PHRASES.contains(&(first.as_str(), second.as_str())) {
+            continue;
+        }
+        if (first.as_str(), second.as_str()) == ("i", "mean")
+            && index > 0
+            && super::render::ends_sentence(words[index - 1])
+            && actions[index] == Action::DeleteFiller
+            && actions[index + 1] == Action::DeleteFiller
+        {
+            actions[index] = Action::Keep;
+            actions[index + 1] = Action::Keep;
+            continue;
+        }
+        match (actions[index], actions[index + 1]) {
+            (Action::Keep, Action::DeleteFiller) | (Action::DeleteFiller, Action::Keep) => {
+                actions[index] = Action::Keep;
+                actions[index + 1] = Action::Keep;
+            }
+            (Action::Keep, Action::DeleteRestart) => {
+                let second_stutter =
+                    index + 2 < count && super::itn::norm(words[index + 2]) == second;
+                if !second_stutter {
+                    actions[index] = Action::Keep;
+                    actions[index + 1] = Action::Keep;
+                }
+            }
+            (Action::DeleteRestart, Action::Keep) => {
+                let first_stutter = index > 0
+                    && actions[index - 1] == Action::Keep
+                    && !super::render::ends_sentence(words[index - 1])
+                    && super::itn::norm(words[index - 1]) == first;
+                if !first_stutter {
+                    actions[index] = Action::Keep;
+                    actions[index + 1] = Action::Keep;
+                }
+            }
+            _ => {}
+        }
+    }
+    for index in 1..count {
+        if actions[index] != Action::DeleteFiller || super::itn::norm(words[index]) != "like" {
+            continue;
+        }
+        if words[index].ends_with(',') || words[index - 1].ends_with([',', ';', ':', '.', '?', '!'])
+        {
+            continue;
+        }
+        let prev = super::itn::norm(words[index - 1]);
+        if STRICT_CONTENT_LIKE_PREV.contains(&prev.as_str()) {
+            actions[index] = Action::Keep;
+        } else if SUBJ_PRONOUNS.contains(&prev.as_str()) {
+            let prev2 = if index >= 2 && !super::render::ends_sentence(words[index - 2]) {
+                super::itn::norm(words[index - 2])
+            } else {
+                String::new()
+            };
+            if !INVERTED_MODALS.contains(&prev2.as_str()) {
+                actions[index] = Action::Keep;
+            }
+        }
+    }
+}
+
+/// When a deleted filler or restart run sits immediately between two
+/// identical kept words ("and I [you know] I think", "the, [the,] the file"),
+/// drops the first copy too so removing the filler never leaves a duplicate.
+pub(crate) fn collapse_bridged_stutters(words: &[&str], actions: &mut [Action]) {
+    let count = actions.len();
+    let mut start = 0;
+    while start < count {
+        if !matches!(actions[start], Action::DeleteFiller | Action::DeleteRestart) {
+            start += 1;
+            continue;
+        }
+        let mut end = start;
+        while end < count && matches!(actions[end], Action::DeleteFiller | Action::DeleteRestart) {
+            end += 1;
+        }
+        if start > 0
+            && end < count
+            && actions[start - 1] == Action::Keep
+            && actions[end] == Action::Keep
+            && !super::render::ends_sentence(words[start - 1])
+            && !words[start - 1].contains('-')
+            && !words[start - 1].chars().any(|ch| ch.is_ascii_digit())
+        {
+            let previous = super::itn::norm(words[start - 1]);
+            let following = super::itn::norm(words[end]);
+            if !previous.is_empty()
+                && previous == following
+                && !BRIDGE_STUTTER_EXEMPT.contains(&previous.as_str())
+            {
+                actions[start - 1] = Action::DeleteRestart;
+            }
+        }
+        start = end;
+    }
+}
+
 /// Keeps every run of deletions outside a correction, whole, when the
-/// guard protects any of its words. A content adverb is left to the model,
-/// which was measured to keep every hedge: "actually" is also a cue.
+/// guard protects any of its words, unless a restart run is said verbatim
+/// again right after it ("can't we can't we"). A content adverb is left to
+/// the model, which was measured to keep every hedge: "actually" is also a
+/// cue.
 pub(crate) fn protect(words: &Words, tags: &mut [Tag], guard: &CleanupGuard<'_>) -> usize {
+    let heard: Vec<&str> = words.iter().collect();
     let protections = guard.protections(words);
     let protected = |index: usize| {
         protections
@@ -564,7 +829,33 @@ pub(crate) fn protect(words: &Words, tags: &mut [Tag], guard: &CleanupGuard<'_>)
         while end < tags.len() && tags[end].action == action {
             end += 1;
         }
-        if (start..end).any(protected) {
+        let verbatim_stutter = action == Action::DeleteRestart && {
+            let len = end - start;
+            let mut next = end;
+            while next < tags.len() && tags[next].action == Action::DeleteFiller {
+                next += 1;
+            }
+            let norms: Vec<String> = heard[start..end]
+                .iter()
+                .map(|word| super::itn::norm(word))
+                .collect();
+            let bare_negation = norms.len() == 1
+                && matches!(norms[0].as_str(), "no" | "not" | "never")
+                || norms
+                    .iter()
+                    .all(|word| EMPHATIC_REDUPLICATIONS.contains(&word.as_str()));
+            !bare_negation
+                && next + len <= tags.len()
+                && !heard[start..end]
+                    .iter()
+                    .any(|word| super::render::ends_sentence(word))
+                && tags[next..next + len]
+                    .iter()
+                    .all(|tag| tag.action == Action::Keep)
+                && norms.iter().all(|word| !word.is_empty())
+                && (0..len).all(|offset| super::itn::norm(heard[next + offset]) == norms[offset])
+        };
+        if !verbatim_stutter && (start..end).any(protected) {
             for tag in &mut tags[start..end] {
                 tag.action = Action::Keep;
             }
@@ -696,6 +987,21 @@ mod tests {
         tags[10].action = Action::DeleteFiller; // "actually,": an adverb only
         tags[12].action = Action::DeleteFiller; // "kubectl": vocabulary
         assert_eq!(protect(&said, &mut tags, &guard), 6);
+
+        // A verbatim phrase stutter ("can't we can't we") goes because the
+        // identical kept words right after it preserve the contraction; a
+        // standalone emphatic "No, no, wait" still stays.
+        let stutter = Words::new("Can't we can't we ship this today?");
+        let mut stutter_tags = vec![Tag::KEEP; stutter.len()];
+        restart(0..2, &mut stutter_tags);
+        assert_eq!(protect(&stutter, &mut stutter_tags, &guard), 0);
+        assert!(stutter_tags[0].action.is_delete() && stutter_tags[1].action.is_delete());
+
+        let emphatic_no = Words::new("No, no, wait until Friday.");
+        let mut no_tags = vec![Tag::KEEP; emphatic_no.len()];
+        restart(0..1, &mut no_tags);
+        assert_eq!(protect(&emphatic_no, &mut no_tags, &guard), 1);
+        assert_eq!(no_tags[0].action, Action::Keep);
         let gone: Vec<usize> = (0..tags.len())
             .filter(|&index| tags[index].action.is_delete())
             .collect();

@@ -249,6 +249,10 @@ fn digit_word(word: &str) -> Option<u128> {
     ones(word).filter(|&value| value < 10)
 }
 
+pub(super) fn is_ones(word: &str) -> bool {
+    ones(word).is_some()
+}
+
 pub(super) fn is_tens(word: &str) -> bool {
     lookup(TENS, word).is_some()
 }

@@ -14,7 +14,10 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use super::decode::{Action, Case, Decode, Span, Tag, guard_corrections, guard_restarts};
+use super::decode::{
+    Action, Case, Decode, Span, Tag, collapse_bridged_stutters, guard_corrections,
+    guard_paired_fillers, guard_restarts,
+};
 use super::itn::{self, Kind, format_with_punctuation, norm};
 
 static ENDS_IN_PUNCTUATION: LazyLock<Regex> =
@@ -133,6 +136,20 @@ fn span_at(
         )
     {
         let to = run_from(end + 2, Span::Inside(Kind::Number));
+        if let Some(previous) = out.last()
+            && !ENDS_IN_PUNCTUATION.is_match(previous)
+            && matches!(norm(words[start]).as_str(), "hundred" | "thousand")
+        {
+            let prev_norm = norm(previous);
+            if itn::is_ones(&prev_norm) || itn::is_tens(&prev_norm) {
+                let mut tokens: Vec<&str> = vec![previous.as_str()];
+                tokens.extend_from_slice(&words[start..to]);
+                if let Some(piece) = format_with_punctuation(Kind::Number, &tokens) {
+                    out.pop();
+                    return Some((piece, to - start));
+                }
+            }
+        }
         if let Some(piece) = formatted(Kind::Number, to) {
             return Some((piece, to - start));
         }
@@ -163,14 +180,55 @@ fn span_at(
             return Some((piece, end - start));
         }
     }
+    if matches!(kind, Kind::Number | Kind::Unit)
+        && let Some(previous) = out.last()
+        && !ENDS_IN_PUNCTUATION.is_match(previous)
+        && norm(words[start]) == "point"
+    {
+        let prev_norm = norm(previous);
+        if itn::is_ones(&prev_norm) || itn::is_tens(&prev_norm) {
+            let mut tokens: Vec<&str> = vec![previous.as_str()];
+            tokens.extend_from_slice(&words[start..end]);
+            if let Some(piece) = format_with_punctuation(kind, &tokens) {
+                out.pop();
+                return Some((piece, end - start));
+            }
+        }
+    }
     if matches!(spans[start], Span::Begin(_)) || end - start >= 2 {
-        // Never the tail of a spoken compound: "twenty [six hours]" is not
-        // "twenty 6 hours".
+        // Never split a spoken compound across digits and words: neither the
+        // tail ("twenty [six hours]") nor the head ("[four] hundred twelve").
         let previous = out.last().map(|word| norm(word)).unwrap_or_default();
+        let last = norm(words[end - 1]);
+        let following = if live(end) && spans[end] == Span::Outside && open_end(end) {
+            norm(words[end])
+        } else {
+            String::new()
+        };
+        let first = norm(words[start]);
+        let prev_open = out
+            .last()
+            .is_some_and(|word| !ENDS_IN_PUNCTUATION.is_match(word));
+        let all_digit_span = words[start..end]
+            .iter()
+            .all(|word| itn::is_digit_word(&norm(word)));
         let splits_compound = matches!(kind, Kind::Number | Kind::Unit)
-            && itn::is_digit_word(&norm(words[start]))
-            && (itn::is_tens(&previous)
-                || matches!(previous.as_str(), "hundred" | "thousand" | "million"));
+            && ((itn::is_digit_word(&first)
+                && (itn::is_tens(&previous)
+                    || matches!(previous.as_str(), "hundred" | "thousand" | "million")))
+                || (matches!(
+                    first.as_str(),
+                    "hundred" | "thousand" | "million" | "billion" | "point"
+                ) && (itn::is_ones(&previous) || itn::is_tens(&previous)))
+                || matches!(
+                    following.as_str(),
+                    "hundred" | "thousand" | "million" | "billion" | "point"
+                )
+                || (itn::is_tens(&last) && itn::is_digit_word(&following))
+                || (kind == Kind::Number
+                    && all_digit_span
+                    && ((prev_open && itn::is_digit_word(&previous))
+                        || itn::is_digit_word(&following))));
         if !splits_compound && let Some(piece) = formatted(kind, end) {
             return Some((piece, end - start));
         }
@@ -190,6 +248,8 @@ fn guarded(words: &[&str], tags: &[Tag], decode: &Decode) -> Vec<Action> {
         .collect();
     guard_corrections(words, &mut actions);
     guard_restarts(words, &mut actions);
+    guard_paired_fillers(words, &mut actions);
+    collapse_bridged_stutters(words, &mut actions);
     actions
 }
 
@@ -336,6 +396,24 @@ mod tests {
             ),
             "Done. Next we ship it."
         );
+        // Paired discourse fillers ("I mean", "you know") never half-delete
+        // into "I we should" when one word stays (e.g. an opener).
+        assert_eq!(
+            cleaned(
+                "I mean we should ship it.",
+                &[Action::DeleteOpener, F, K, K, K, K],
+                &[o; 6]
+            ),
+            "I mean we should ship it."
+        );
+        assert_eq!(
+            cleaned("I mean we should ship it.", &[F, F, K, K, K, K], &[o; 6]),
+            "We should ship it."
+        );
+        assert_eq!(
+            cleaned("way, way better", &[Action::DeleteRestart, K, K], &[o; 3]),
+            "way, way better"
+        );
         // A deleted word's sentence mark moves back before a new sentence,
         // never doubled, never before a lowercase continuation.
         assert_eq!(
@@ -371,7 +449,7 @@ mod tests {
         );
     }
 
-    /// Kit's live test, line by line: each reads as said, minus its
+    /// One live dictation, line by line: each reads as said, minus its
     /// disfluencies.
     #[test]
     fn a_dictation_with_every_kind_of_disfluency_reads_right() {
