@@ -258,6 +258,8 @@
     <string name="hex_key_left_detail">Moves the Hex key you hold to talk to the left end of the suggestion strip</string>
     <string name="volume_in_menu">Volume in the Hex menu</string>
     <string name="volume_in_menu_detail">Adds Volume to the Hex menu, which opens the phone’s volume controls</string>
+    <string name="flush_bottom">No gap under the keys</string>
+    <string name="flush_bottom_detail">Ends the bottom row of keys where the navigation bar begins</string>
     <!-- Labs › Keyboard › Key colors, iPhone Hex's words. -->
     <string name="key_colors">Key colors</string>
     <string name="key_color">Color</string>

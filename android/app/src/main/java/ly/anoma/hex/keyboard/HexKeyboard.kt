@@ -141,7 +141,7 @@ class HexKeyboard : InputMethodService() {
         if (key == TypingPreferences.VOICE_ONLY) modeChanged()
         if (key == TypingPreferences.VOICE_BAR_FROM_MENU) { collapsed = false; modeChanged(keepDictation = true) }
         if (key == TypingPreferences.PASSWORD_MANAGER_SUGGESTIONS) clearInline()
-        if (key == TypingPreferences.HEIGHT) resize()
+        if (key == TypingPreferences.HEIGHT || key == TypingPreferences.FLUSH_BOTTOM) resize()
         if (key == TypingPreferences.ADAPTIVE_TOUCH) engine.adaptiveTouchChanged()
         if (key == TypingPreferences.HEX_KEY_LEFT) view?.hexKeySideChanged()
         if (key == TypingPreferences.USE_IMPORTED_WORDS || key == TypingPreferences.IMPORTED_WORDS) engine.personalWordsChanged()
@@ -334,9 +334,9 @@ class HexKeyboard : InputMethodService() {
             viewing = true
             return
         }
-        // Settings › Keyboard › Height or Labs › Keyboard › Key colors changed while a dictation ran: the new keys
+        // Settings › Keyboard › Height, Labs › Keyboard › No gap under the keys or Key colors changed while a dictation ran: the new keys
         // now, before they show.
-        if (view?.sized(feedback.height) == false || view?.colored(feedback.drawnKeyColor) == false) setInputView(inputView())
+        if (view?.sized(feedback.height, feedback.flushBottom) == false || view?.colored(feedback.drawnKeyColor) == false) setInputView(inputView())
         view?.cancelGestures()
         // Another type in the same box: back to its keys, as a new field opens (configureTyping draws them).
         if (typeChanged) view?.closeMenu(configure = false)
@@ -435,7 +435,7 @@ class HexKeyboard : InputMethodService() {
      * dictation is running (its bar stays until it ends; the next time the keyboard opens has them). */
     private fun resize() {
         val old = view ?: return
-        if (old.sized(feedback.height) || capture.phase != SpeechPhase.Idle) return
+        if (old.sized(feedback.height, feedback.flushBottom) || capture.phase != SpeechPhase.Idle) return
         old.cancelGestures(); old.reset()
         setInputView(inputView())
         if (isInputViewShown) { engine.configureTyping(keepWord = true); view?.status(capture.phase, idleHint()) }

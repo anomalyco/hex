@@ -41,7 +41,7 @@ import kotlin.math.roundToInt
  * point of the area types a key (KeyRowLayout); the bottom row stays mounted across page changes.
  * Keys that type as they lift do so in the order the fingers went down ([Rollover]). */
 internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, private val host: KeyboardView,
-                            private val feedback: LetterFeedback, size: KeySize) : LinearLayout(context) {
+                            private val feedback: LetterFeedback, private val size: KeySize) : LinearLayout(context) {
     private companion object {
         /** How far (key pitches) a swipe may go from where it went down and still be a tap that slid (iPhone Hex). */
         const val SLID_TAP_REACH = 1.6
@@ -90,17 +90,22 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     /** The keys above the bottom row on [page], the number row included. */
     private fun upperHeight(page: KeyboardPage?) = bands(page).sumOf { it.pitch } + if (page?.digits != null) digitBand.pitch else 0
     private val bottomExtra = px(if (landscape) KeyboardMetrics.BOTTOM_LANDSCAPE else KeyboardMetrics.BOTTOM)
+    /** The space under the last row's keycaps, in px, for a row whose keycaps leave [under] below them: Gboard's
+     * [bottomExtra] more, or none with Labs › Keyboard › No gap under the keys, so they end at the system's bar. */
+    private fun lastUnder(under: Int) = if (size.flushBottom) 0 else under + bottomExtra
+    /** The bottom row's height: its step less the keycaps' own space under them, plus [lastUnder]. */
+    private val bottomHeight = rowHeight - insetBottom + lastUnder(insetBottom)
     private val reach = if (landscape) 0 else px(KeyboardMetrics.ROW1_REACH)
     private val side = KeyboardMetrics.SIDE * density
     private val gap = KeyboardMetrics.GAP * density
     /** The menu's height is the keys' height for the page, the number row included, so opening it
      * never resizes the keyboard. */
-    val menuHeight get() = upperHeight(current) + rowHeight + bottomExtra + reach
+    val menuHeight get() = upperHeight(current) + bottomHeight + reach
     private val letters = LinkedHashMap<Char, KeyCap>()
     private var grid: KeyGrid? = null
     private var pendingAccents: Runnable? = null
     private val rows = LinearLayout(context)
-    private val bottom = KeyRowLayout(context, 10f, side, gap, insetTop, insetBottom + bottomExtra)
+    private val bottom = KeyRowLayout(context, 10f, side, gap, insetTop, lastUnder(insetBottom))
     private val modeKey: KeyCap
     private val enterKey: KeyCap
     private val enterIcon = ImageView(context)
@@ -111,7 +116,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private val period: KeyCap
     // The emoji panel: AndroidX's picker where the strip and the letter rows are, then ABC, space and delete.
     private var picker: EmojiPickerView? = null
-    private val emojiBottom = KeyRowLayout(context, 10f, side, gap, insetTop, insetBottom + bottomExtra)
+    private val emojiBottom = KeyRowLayout(context, 10f, side, gap, insetTop, lastUnder(insetBottom))
     var emojiOpen = false
         private set
     private val roll = Rollover()
@@ -159,7 +164,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         orientation = VERTICAL
         rows.orientation = VERTICAL
         addView(rows, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-        addView(bottom, LayoutParams(LayoutParams.MATCH_PARENT, rowHeight + bottomExtra))
+        addView(bottom, LayoutParams(LayoutParams.MATCH_PARENT, bottomHeight))
         modeKey = caps.cap(context.getString(R.string.keyboard_numbers_label), context.getString(R.string.keyboard_numbers),
             modifier, 17f, ime.engine::mode)
         modeKey.textEntry = false
@@ -264,7 +269,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         emojiBottom.add(emojiSpace, KeyboardMetrics.MODE, 10f - 2 * KeyboardMetrics.MODE)
         emojiBottom.add(newDeleteKey(), 10f - KeyboardMetrics.MODE, KeyboardMetrics.MODE)
         emojiBottom.visibility = GONE
-        addView(emojiBottom, LayoutParams(LayoutParams.MATCH_PARENT, rowHeight + bottomExtra))
+        addView(emojiBottom, LayoutParams(LayoutParams.MATCH_PARENT, bottomHeight))
     }
 
     private fun cased(c: Char) = if (current?.let { !it.symbols && it.shifted } == true) c.uppercaseChar().toString() else c.toString()
@@ -464,8 +469,11 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
             // The symbol pad ends on the letters' bottom row, as Gboard's does.
             val t = if (last && pad == Pad.Symbols) insetTop else top
             val b = if (last && pad == Pad.Symbols) insetBottom else under
-            val row = KeyRowLayout(context, cells, side, gap, t + (if (first) reach else 0), b + (if (last) bottomExtra else 0))
-            val height = (if (last) rowHeight else steps.getOrElse(index) { step }) + (if (first) reach else 0) + (if (last) bottomExtra else 0)
+            val row = KeyRowLayout(context, cells, side, gap, t + (if (first) reach else 0), if (last) lastUnder(b) else b)
+            // The last row is as tall as the letters' bottom row ([bottomHeight]), so the pad, the letters and the
+            // Hex menu ([menuHeight]) are one height. With No gap under the keys a pad whose keycaps leave less than
+            // the letters' space under them gets keycaps that much shorter, ending at the system's bar.
+            val height = (if (last) bottomHeight else steps.getOrElse(index) { step }) + (if (first) reach else 0)
             (if (block != null && !last) block.lines else rows).addView(row, LayoutParams(LayoutParams.MATCH_PARENT, height))
             for (key in line) row.add(padKeyView(key, page), key.start, key.width)
         }

@@ -18,8 +18,9 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
     /** Labs › Keyboard › Key colors as these keys were built: another choice builds a new view. */
     val paints = KeyPaints(context, ime.feedback.drawnKeyColor)
     private val feedback = LetterFeedback(this, paints)
-    /** The rows' height these keys were built at (Settings › Keyboard › Height on this screen). */
-    private val size = KeySize.of(resources, ime.feedback.height)
+    /** The rows' height these keys were built at (Settings › Keyboard › Height on this screen), and whether their
+     * bottom row ends at the system's bar (Labs › Keyboard › No gap under the keys). */
+    private val size = KeySize.of(resources, ime.feedback.height, ime.feedback.flushBottom)
     private val strip = StripView(context, ime, this)
     private val keys = KeyPlaneView(context, ime, this, feedback, size)
     private val menu: SpeechMenu
@@ -52,8 +53,8 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
         status(SpeechPhase.Idle, context.getString(R.string.keyboard_hint_hold))
     }
 
-    /** Whether these keys are still the size Settings asks for: a new height needs a new view. */
-    fun sized(height: KeyboardHeight) = size.height == height
+    /** Whether these keys are still the size Settings and Labs ask for: a new height or bottom needs a new view. */
+    fun sized(height: KeyboardHeight, flushBottom: Boolean) = size.matches(height, flushBottom)
     fun colored(color: KeyColor) = paints.color == color
 
     override fun showPage(page: KeyboardPage) {
