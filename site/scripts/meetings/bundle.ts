@@ -47,7 +47,7 @@ export function stripHead(html: string): string {
 }
 
 const TITLE = "Hex Meetings"
-const LINE = "Local meeting transcripts &amp; notes on your Mac."
+const LINE = "Local meeting transcripts with no bot, on Mac, Windows, and Linux."
 const CARD_ALT = "The Hex mark above the words Hex Meetings, with a pill reading Q4 sync detected and a Record button."
 
 // The page's canonical address and social tags, for the origin the build targets.

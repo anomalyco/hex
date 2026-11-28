@@ -995,6 +995,14 @@ button.download:hover {
   color: #f2f2ef;
 }
 
+/* The comparisons sit under the main links, quieter and centered. */
+.site-footer__links--compare {
+  justify-content: center;
+  gap: 0.5rem 1.75rem;
+  margin-top: -1rem;
+  color: #6f6f6f;
+}
+
 @media (max-width: 34rem) {
   .site-footer__links {
     justify-content: center;

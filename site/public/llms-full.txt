@@ -277,6 +277,36 @@ Labs are features Hex is trying out. Each is off until it is turned on in
 Settings › Labs or with `hex labs on <id>`. They are listed, with one page
 each, at https://anoma.ly/hex/labs. Stable builds never list Dev-only labs.
 
+## Linux
+
+Hex for Linux is a beta for x86_64 (AVX2) and ARM64 with glibc 2.36 or later.
+It runs on X11 and on Wayland through one general path: `wtype` and
+`wl-copy` on wlroots compositors (Hyprland, Sway) and niri, the
+RemoteDesktop portal on GNOME and KDE Plasma, and the GlobalShortcuts portal or
+your own keybindings running `hex dictation start|stop|toggle` for shortcuts.
+On Hyprland and Omarchy, bind `anomaly.hex:dictation`. Transcription uses
+Vulkan on the GPU or the CPU; the window needs a Vulkan driver. Meetings
+records each output's PipeWire monitor. Page: https://anoma.ly/hex/linux
+
+## Compared with other dictation apps
+
+These pages compare Hex with each app's own public pages, read on
+November 28, 2026, and say when the other app may fit better.
+
+- Hex vs Wispr Flow: https://anoma.ly/hex/vs-wispr-flow. Wispr Flow
+  transcribes in the cloud and needs an internet connection; Hex transcribes on
+  the computer and works offline. Wispr Flow has a free plan with limited
+  dictation and a paid Pro plan, runs on Mac, Windows, iPhone, and Android, and
+  has a no-bot Notetaker and a remote MCP server. Hex is free and open source
+  and also runs on Linux.
+- Hex vs Superwhisper: https://anoma.ly/hex/vs-superwhisper. Both run local
+  models. Superwhisper is closed source, free with local Whisper models, with
+  Parakeet, cloud models, and AI modes in Pro; its Linux app is Wayland only,
+  and its meetings, CLI, and MCP are on the Mac. Hex includes Parakeet for free,
+  supports X11 and Wayland, and has meetings (Windows and Linux in beta), the
+  CLI, and `hex mcp` on Mac, Windows, and Linux. Superwhisper runs on Intel
+  Macs and macOS 14; Hex needs Apple silicon and macOS 15.
+
 ## Common questions
 
 **Is Hex free?** Yes. MIT licensed, no account, no subscription, no word limit.
@@ -302,6 +332,7 @@ record, separate remote speakers, or send audio to a cloud service.
 ## Links
 
 - https://anoma.ly/hex/ · https://anoma.ly/hex/meetings/ · https://anoma.ly/hex/mcp
+- https://anoma.ly/hex/linux · https://anoma.ly/hex/vs-wispr-flow · https://anoma.ly/hex/vs-superwhisper
 - https://anoma.ly/hex/changelog · https://anoma.ly/hex/iphone · https://anoma.ly/hex/android
 - https://anoma.ly/hex/docs/transforms · https://anoma.ly/hex/docs/admin
 - https://github.com/anomalyco/hex · https://github.com/anomalyco/hex/blob/dev/docs/transcript-cli.md

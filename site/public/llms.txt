@@ -20,8 +20,11 @@
 ## Pages
 
 - [Hex](https://anoma.ly/hex/): what it is, every platform's install, and the demo
-- [Meetings](https://anoma.ly/hex/meetings/): local meeting capture with chapters, notes, and a handoff to your agent
+- [Meetings](https://anoma.ly/hex/meetings/): local meeting capture with no bot, where it runs, the CLI and MCP, and a handoff to your agent
 - [MCP](https://anoma.ly/hex/mcp): setup for OpenCode, Claude Code, Claude Desktop, and Cursor, and the five read-only tools
+- [Hex for Linux](https://anoma.ly/hex/linux): install commands, how shortcuts and paste work on X11, GNOME, KDE Plasma, Hyprland, Sway, and niri, and the requirements
+- [Hex vs Wispr Flow](https://anoma.ly/hex/vs-wispr-flow): local and open source against cloud transcription, side by side, and when Wispr Flow may fit better
+- [Hex vs Superwhisper](https://anoma.ly/hex/vs-superwhisper): both local, side by side on price, platforms, Linux desktops, meetings, and MCP, and when Superwhisper may fit better
 - [Changelog](https://anoma.ly/hex/changelog): what changed in each stable release
 - [Hex for iPhone](https://anoma.ly/hex/iphone): the keyboard, App Store link, and FAQ
 - [Hex for Android](https://anoma.ly/hex/android): Hex Preview's download and setup

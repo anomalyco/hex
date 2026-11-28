@@ -127,6 +127,14 @@ macOS, Windows, and Linux, one tab per client (OpenCode, Claude Code, Claude
 Desktop, Cursor; radio buttons and CSS, with every card in one grid cell so a
 tab never moves the page), and the five tools `src/meeting/mcp.rs` serves. Its
 one script only reveals the copy buttons and makes them work.
+`/hex/vs-wispr-flow` and `/hex/vs-superwhisper` (`src/compare.ts`) compare Hex
+with each app's own public pages, sourced and dated on the page (`CHECKED`),
+with a "may fit better" list; `/hex/linux` (`src/linux.ts`) has this build's
+install commands and each desktop's shortcut and paste path. `scripts/pages.ts`
+writes all three, their cards, and their sitemap entries. The Meetings build
+adds `src/meetings-page.ts`'s crawlable section, title, and FAQPage under the
+showcase. `intent.test.ts` checks every visible question against its
+structured copy. Update a comparison's facts and its date together.
 `public/llms.txt` is the agent index, `public/llms-full.txt` the single-file
 reference, and `public/skill.md` the skill an agent loads.
 `public/sitemap.xml` lists the static routes and each build script adds its
