@@ -547,8 +547,26 @@ internal class KeyboardEngine(
     /** Whether Labs › Keyboard › Smart quotes applies at the cursor: its toggle on, in a plain text
      * field, and not in a password, email, URL or TYPE_NULL field (a terminal), whose text must keep
      * the straight quotes it has always taken. */
-    private fun smartQuotesHere(): Boolean {
-        if (!feedback.smartQuotes || secure) return false
+    private fun smartQuotesHere(): Boolean = feedback.smartQuotes && plainTextField()
+
+    /** Labs › Keyboard › Closing quotes take the space (#3001): a " or ” typed while a quote is open in the
+     * paragraph replaces the one space before the cursor, whoever typed it ("see you soon " then " gives
+     * "see you soon"), going in as ” with Smart quotes. It reads only the text, so the space survives the
+     * switch to ?123. Off, or outside a plain text field, the quote goes in as before. */
+    private fun closeQuote(mark: Char): Boolean {
+        if (!feedback.closingQuoteTakesSpace || exactField || !plainTextField() || !before().endsWith(" ")) return false
+        if (!SpaceRules.closingQuoteTakesSpace(target.before(SpaceRules.QUOTE_LOOKBACK).orEmpty())) return false
+        edited()
+        val placed = if (mark == '"' && smartQuotesHere()) SmartQuotes.CLOSING_DOUBLE else mark
+        clearSpaces()
+        if (!replace(" ", placed.toString())) return false
+        resetTyping(); showPredictions(before()); inputDone()
+        return true
+    }
+
+    /** A plain text field: not a password, email, URL or TYPE_NULL field (a terminal). */
+    private fun plainTextField(): Boolean {
+        if (secure) return false
         val type = editor?.inputType ?: 0
         return (type and InputType.TYPE_MASK_CLASS) == InputType.TYPE_CLASS_TEXT && FieldKind.of(type) == FieldKind.Text
     }
@@ -612,6 +630,7 @@ internal class KeyboardEngine(
      * they type what they show. */
     fun quote(value: Char) {
         if (!target.connected) return
+        if (value == '"' && closeQuote(value)) return
         val placed = if (smartQuotesHere()) SmartQuotes.typed(value, before().lastOrNull()) else value
         type(placed.toString())
     }
@@ -620,6 +639,7 @@ internal class KeyboardEngine(
         if (!target.connected) return
         edited()
         if (value == " ") { space(); return }
+        if (value == SmartQuotes.CLOSING_DOUBLE.toString() && closeQuote(SmartQuotes.CLOSING_DOUBLE)) return
         val b = before()
         val mark = value.length == 1 && TypingWord.endsWord(value[0])
         // A clause-ending mark takes the space a picked suggestion, an autocorrection or a text replacement typed

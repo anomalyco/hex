@@ -22,6 +22,22 @@ internal object SpaceRules {
      * punctuation on ("here" picked, then "," gives "here, "): a clause mark outside a URL field, which keeps joining. */
     fun movesPickedSpace(mark: Char, url: Boolean) = !url && mark in CLAUSE_MARKS
 
+    /** How much text before the cursor Labs › Keyboard › Closing quotes take the space reads for its paragraph. */
+    const val QUOTE_LOOKBACK = 1000
+
+    /** Whether a closing double quote typed after [before] takes the one space that ends it (Labs › Keyboard ›
+     * Closing quotes take the space, #3001): a quote is open in the paragraph before that space, an odd number
+     * of " or more “ than ”. The space must follow something other than whitespace or the opening quote itself,
+     * so `say " "` and a run of spaces stay as typed. The paragraph is what [before] holds after its last line
+     * break, so one longer than [QUOTE_LOOKBACK] is counted from where the read starts. */
+    fun closingQuoteTakesSpace(before: String): Boolean {
+        if (before.length < 2 || before.last() != ' ') return false
+        val last = before[before.length - 2]
+        if (last.isWhitespace() || last == '"' || last == '“') return false
+        val paragraph = before.substring(before.lastIndexOf('\n') + 1, before.length - 1)
+        return paragraph.count { it == '"' } % 2 == 1 || paragraph.count { it == '“' } > paragraph.count { it == '”' }
+    }
+
     /** Whether ". " may replace the space that ends [before]: it follows a letter or a digit. */
     fun periodFits(before: String) = before.length >= 2 && before.last() == ' ' &&
         before[before.length - 2].let { it.isLetterOrDigit() }
