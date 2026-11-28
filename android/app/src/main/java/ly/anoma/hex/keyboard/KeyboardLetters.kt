@@ -44,4 +44,25 @@ internal object KeyboardLetters {
         }
         return listOf("~`|•√π÷×§Δ", "${money}^°={}\\", "%©®™✓[]")
     }
+
+    /** Labs › Keyboard › SwiftKey layout's 123 page (Microsoft SwiftKey, English QWERTY, Android): its digits, ten
+     * marks, then the eight between its {&= switch and delete. A local currency takes $'s place, as on ?123. */
+    fun swiftKeyNumbers(currency: Char? = null) =
+        listOf(DIGITS, "@#${currency ?: '$'}&_-()=%", "\"*':/!?+")
+
+    /** The tab key's place on SwiftKey's {&= page: it types a tab and is drawn as Tab. */
+    const val TAB = '\t'
+
+    /** SwiftKey's {&= page: money and marks, Tab and brackets, then seven between its 123 switch and delete; its
+     * bottom row's four marks are [SWIFTKEY_BOTTOM]. A local currency on the 123 page gives $ its slot here if it
+     * has one, else ¥'s, so $ is always drawn and nothing twice. */
+    fun swiftKeySymbols(currency: Char? = null): List<String> {
+        val money = when {
+            currency == null -> "£€¥¢"
+            currency in "£€¥¢" -> "£€¥¢".replace(currency, '$')
+            else -> "£€\$¢"
+        }
+        return listOf("${money}©®™~¿", "${TAB}[]{}<>^¡", "`;÷\\|¦¬")
+    }
+    const val SWIFTKEY_BOTTOM = "×§¶°"
 }

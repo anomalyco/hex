@@ -97,6 +97,12 @@ internal class TypingPreferences(context: Context) {
     var closingQuoteTakesSpace: Boolean
         get() = prefs.getBoolean(CLOSING_QUOTE_TAKES_SPACE, false)
         set(value) { prefs.edit().putBoolean(CLOSING_QUOTE_TAKES_SPACE, value).apply() }
+    /** Labs › Keyboard › SwiftKey layout: Microsoft SwiftKey's held letter symbols, bottom row (emoji before the
+     * comma), one-row held period with flicks, a held comma that dictates, and its 123 and {&= pages (#3021). Off by
+     * default. */
+    var swiftKeyLayout: Boolean
+        get() = prefs.getBoolean(SWIFTKEY_LAYOUT, false)
+        set(value) { prefs.edit().putBoolean(SWIFTKEY_LAYOUT, value).apply() }
     /** Labs › Keyboard › Adaptive touch: the decoder reads taps with your own key centres once it has learned them
      * ([AdaptiveTouch], kept by [AdaptiveTouchStore]). Off by default. */
     var adaptiveTouch: Boolean
@@ -189,6 +195,7 @@ internal class TypingPreferences(context: Context) {
         const val MARKS_KEEP_SPACE = "marksKeepSpace"
         const val HOLD_CLICK = "holdClick"
         const val CLOSING_QUOTE_TAKES_SPACE = "closingQuoteTakesSpace"
+        const val SWIFTKEY_LAYOUT = "swiftKeyLayout"
         const val ADAPTIVE_TOUCH = "adaptiveTouch"
         const val USE_IMPORTED_WORDS = "importedWords"
         /** A counter [ImportedWords] bumps whenever the imported list changes, so the keyboard reads it again. */
