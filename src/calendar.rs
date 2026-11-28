@@ -473,24 +473,78 @@ impl ReminderScheduler {
     }
 }
 
-/// The meeting happening now that a detected call belongs to: one whose
-/// link names the call's service, from its reminder lead until it ends.
-pub fn current_for_call<'a>(
-    meetings: &'a [CalendarMeeting],
-    keys: &[&str],
+/// How early a call may match a meeting that hasn't started.
+pub const MATCH_LEAD_MS: i64 = 15 * 60 * 1_000;
+
+/// The one meeting a call belongs to, or `None` when the calendar cannot say.
+///
+/// A meeting matches when it is in progress (from [`MATCH_LEAD_MS`] before its
+/// start until it ends) or starts within that lead. A link naming the call's
+/// own service is the strongest evidence and wins even over a meeting already
+/// in progress, while a link naming another service rules its event out: a
+/// Zoom call never becomes a Google Meet event. Among what remains, exactly
+/// one meeting must stand out, one in progress before one still to start. Two
+/// overlapping meetings with nothing to tell them apart match nothing, so a
+/// recording is never titled from the wrong event.
+pub fn match_active_meeting(
+    meetings: &[CalendarMeeting],
     now_ms: i64,
-    lead_ms: i64,
+    provider: Option<CallProvider>,
+) -> Option<&CalendarMeeting> {
+    let candidates = meetings
+        .iter()
+        .filter(|meeting| {
+            // An event with no length still matches around its start.
+            let end_ms = meeting.end_ms.max(meeting.start_ms + MATCH_LEAD_MS);
+            meeting.start_ms - MATCH_LEAD_MS <= now_ms && now_ms <= end_ms
+        })
+        .collect::<Vec<_>>();
+    let Some(provider) = provider else {
+        return one_by_phase(&candidates, now_ms);
+    };
+    let linked = candidates
+        .iter()
+        .copied()
+        .filter(|meeting| {
+            meeting
+                .link
+                .as_ref()
+                .is_some_and(|link| link.provider == provider)
+        })
+        .collect::<Vec<_>>();
+    if !linked.is_empty() {
+        return one_by_phase(&linked, now_ms);
+    }
+    let compatible = candidates
+        .iter()
+        .copied()
+        .filter(|meeting| {
+            meeting
+                .link
+                .as_ref()
+                .is_none_or(|link| link.provider == provider)
+        })
+        .collect::<Vec<_>>();
+    one_by_phase(&compatible, now_ms)
+}
+
+/// The one meeting in progress among `candidates`, else the one still to
+/// start; `None` unless that is exactly one.
+fn one_by_phase<'a>(
+    candidates: &[&'a CalendarMeeting],
+    now_ms: i64,
 ) -> Option<&'a CalendarMeeting> {
-    meetings.iter().find(|meeting| {
-        now_ms >= meeting.start_ms - lead_ms.max(5 * 60 * 1_000)
-            && now_ms < meeting.end_ms
-            && meeting.link.as_ref().is_some_and(|link| {
-                link.provider
-                    .detection_keys()
-                    .iter()
-                    .any(|known| keys.iter().any(|key| key_matches(key, known)))
-            })
-    })
+    let ongoing = candidates
+        .iter()
+        .copied()
+        .filter(|meeting| meeting.start_ms <= now_ms)
+        .collect::<Vec<_>>();
+    let phase: &[&CalendarMeeting] = if ongoing.is_empty() {
+        candidates
+    } else {
+        &ongoing
+    };
+    (phase.len() == 1).then(|| phase[0])
 }
 
 /// Whether a detected call's app bundle ID or website host is `known`.
@@ -1152,36 +1206,155 @@ mod tests {
         }
     }
 
+    fn linked(id: &str, start_minute: i64, provider: CallProvider) -> CalendarMeeting {
+        let mut meeting = meeting(id, start_minute);
+        meeting.link = Some(CallLink {
+            provider,
+            url: "https://example.test/call".into(),
+        });
+        meeting
+    }
+
+    fn matched(
+        meetings: &[CalendarMeeting],
+        now_ms: i64,
+        provider: Option<CallProvider>,
+    ) -> Option<String> {
+        match_active_meeting(meetings, now_ms, provider).map(|meeting| meeting.id.clone())
+    }
+
     #[test]
-    fn a_detected_call_belongs_to_the_current_meeting_on_its_service() {
-        let mut zoom = meeting("zoom", 100);
-        zoom.link = Some(CallLink {
-            provider: CallProvider::Zoom,
-            url: "https://zoom.us/j/1".into(),
-        });
-        let mut meet = meeting("meet", 100);
-        meet.link = Some(CallLink {
-            provider: CallProvider::GoogleMeet,
-            url: "https://meet.google.com/abc-defg-hij".into(),
-        });
-        let meetings = vec![meeting("no-link", 100), zoom, meet];
-        let found = |keys: &[&str], now| {
-            current_for_call(&meetings, keys, now, MINUTE).map(|meeting| meeting.id.clone())
-        };
+    fn a_call_matches_the_one_meeting_its_link_names() {
+        let meetings = [
+            meeting("no-link", 100),
+            linked("zoom", 100, CallProvider::Zoom),
+            linked("meet", 100, CallProvider::GoogleMeet),
+        ];
         assert_eq!(
-            found(&["us.zoom.xos"], 101 * MINUTE).as_deref(),
+            matched(&meetings, 101 * MINUTE, Some(CallProvider::Zoom)).as_deref(),
             Some("zoom")
         );
         assert_eq!(
-            found(&["com.google.Chrome", "meet.google.com"], 99 * MINUTE).as_deref(),
+            matched(&meetings, 101 * MINUTE, Some(CallProvider::GoogleMeet)).as_deref(),
             Some("meet")
         );
+        // Without a provider the overlap is ambiguous, never a guess.
+        assert_eq!(matched(&meetings, 101 * MINUTE, None), None);
+    }
+
+    #[test]
+    fn a_link_wins_even_when_another_meeting_is_already_under_way() {
+        let meetings = [
+            meeting("in-person", 90),
+            linked("zoom", 105, CallProvider::Zoom),
+        ];
         assert_eq!(
-            found(&["us02web.zoom.us"], 101 * MINUTE).as_deref(),
+            matched(&meetings, 100 * MINUTE, Some(CallProvider::Zoom)).as_deref(),
             Some("zoom")
         );
-        assert_eq!(found(&["com.apple.FaceTime"], 101 * MINUTE), None);
-        assert_eq!(found(&["us.zoom.xos"], 131 * MINUTE), None);
-        assert_eq!(found(&["us.zoom.xos"], 90 * MINUTE), None);
+    }
+
+    #[test]
+    fn one_active_or_starting_meeting_matches_without_a_provider() {
+        let meetings = [meeting("sync", 100)];
+        // In progress.
+        assert_eq!(
+            matched(&meetings, 100 * MINUTE, None).as_deref(),
+            Some("sync")
+        );
+        assert_eq!(
+            matched(&meetings, 129 * MINUTE, None).as_deref(),
+            Some("sync")
+        );
+        // About to start, up to the fifteen-minute lead.
+        assert_eq!(
+            matched(&meetings, 90 * MINUTE, None).as_deref(),
+            Some("sync")
+        );
+        assert_eq!(
+            matched(&meetings, 85 * MINUTE, None).as_deref(),
+            Some("sync")
+        );
+        assert_eq!(matched(&meetings, 85 * MINUTE - 1, None), None);
+        // Ended: an old meeting never titles a new call.
+        assert_eq!(matched(&meetings, 130 * MINUTE + 1, None), None);
+    }
+
+    #[test]
+    fn a_meeting_linked_to_another_service_never_matches() {
+        let meetings = [linked("meet", 100, CallProvider::GoogleMeet)];
+        assert_eq!(
+            matched(&meetings, 101 * MINUTE, Some(CallProvider::Zoom)),
+            None
+        );
+        // Two meetings of another service are still nothing to a Zoom call.
+        let meetings = [
+            linked("meet-a", 100, CallProvider::GoogleMeet),
+            linked("meet-b", 100, CallProvider::GoogleMeet),
+        ];
+        assert_eq!(
+            matched(&meetings, 101 * MINUTE, Some(CallProvider::Zoom)),
+            None
+        );
+    }
+
+    #[test]
+    fn a_linkless_meeting_matches_a_call_only_when_nothing_contradicts_it() {
+        // The Zoom call's own event isn't in the calendar read: the one
+        // unlinked meeting is all there is, so it may name the call.
+        let meetings = [meeting("workshop", 100)];
+        assert_eq!(
+            matched(&meetings, 101 * MINUTE, Some(CallProvider::Zoom)).as_deref(),
+            Some("workshop")
+        );
+        // A Google Meet event rules itself out; the unlinked one remains.
+        let meetings = [
+            linked("meet", 100, CallProvider::GoogleMeet),
+            meeting("workshop", 100),
+        ];
+        assert_eq!(
+            matched(&meetings, 101 * MINUTE, Some(CallProvider::Zoom)).as_deref(),
+            Some("workshop")
+        );
+    }
+
+    #[test]
+    fn two_overlapping_meetings_leave_an_unlinked_call_unmatched() {
+        let meetings = [meeting("design", 100), meeting("standup", 100)];
+        assert_eq!(matched(&meetings, 101 * MINUTE, None), None);
+        // Nor does a provider with no matching link pick one of them.
+        assert_eq!(
+            matched(&meetings, 101 * MINUTE, Some(CallProvider::Teams)),
+            None
+        );
+    }
+
+    #[test]
+    fn a_meeting_in_progress_wins_over_one_starting_soon() {
+        let meetings = [meeting("now", 95), meeting("next", 110)];
+        assert_eq!(
+            matched(&meetings, 100 * MINUTE, None).as_deref(),
+            Some("now")
+        );
+        // Two in progress at once are still ambiguous.
+        let meetings = [
+            meeting("now-a", 95),
+            meeting("now-b", 95),
+            meeting("next", 110),
+        ];
+        assert_eq!(matched(&meetings, 100 * MINUTE, None), None);
+    }
+
+    #[test]
+    fn excluded_calendars_never_match_a_call() {
+        let mut personal = event("Personal sync");
+        personal.calendar = "personal".into();
+        personal.url = Some("https://zoom.us/j/81234567890".into());
+        let included = meetings(&[personal], |calendar| calendar != "personal");
+        assert!(included.is_empty());
+        assert_eq!(
+            matched(&included, 101 * MINUTE, Some(CallProvider::Zoom)),
+            None
+        );
     }
 }

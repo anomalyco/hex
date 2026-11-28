@@ -1063,6 +1063,12 @@ Lead time reached (or Mac wakes within 5 min of the start)   // meetings.reminde
      meeting is cancelled, moved, or reminders are turned off. One at a time: an
      overlapping meeting's reminder waits until this one is answered or closes.
      Waits while Hex records; a recording that starts closes it.
+Detected or manual recording with no calendar event already attached
+  -> the one matching active meeting names it: a link to the call's own
+     service first, else the only meeting in progress, then the only one
+     starting within 15 min. Overlapping meetings with nothing to tell them
+     apart leave it unnamed; a title the user typed or a named call's own
+     title stays. Works with reminders off while a calendar is connected.
 Detected call during a calendar meeting on the same service
   -> recording takes the calendar title and attendees
 ```
@@ -1096,7 +1102,10 @@ from the link's service until the meeting ends; without a link it covers only
 the next detected call, and only until 5 min after the start (or the end, if
 sooner). The manifest's `calendar` field and the
 Markdown's Attendees line carry the calendar title and attendees, and the notes
-prompt gets them as context.
+prompt gets them as context. The same read titles and fills detected and
+manual recordings whose start carries no calendar event yet, so a call
+answers by name even when reminders are off; matching uses the meetings
+already read for reminders, never a fresh EventKit query at the start.
 
 Checks: `meetings_need_other_people_or_a_call_link`,
 `all_day_declined_free_and_cancelled_events_are_skipped`,
@@ -1112,14 +1121,28 @@ Checks: `meetings_need_other_people_or_a_call_link`,
 `a_showing_reminder_closes_when_its_meeting_is_cancelled_or_long_started`,
 `a_moved_meeting_is_reminded_at_its_new_time`, `back_to_back_meetings_each_remind`,
 `reminded_occurrences_are_forgotten_after_they_end`,
-`turning_reminders_off_withdraws_the_showing_one`, and
-`a_detected_call_belongs_to_the_current_meeting_on_its_service` in
+`turning_reminders_off_withdraws_the_showing_one`,
+`a_call_matches_the_one_meeting_its_link_names`,
+`a_link_wins_even_when_another_meeting_is_already_under_way`,
+`one_active_or_starting_meeting_matches_without_a_provider`,
+`a_meeting_linked_to_another_service_never_matches`,
+`a_linkless_meeting_matches_a_call_only_when_nothing_contradicts_it`,
+`two_overlapping_meetings_leave_an_unlinked_call_unmatched`,
+`a_meeting_in_progress_wins_over_one_starting_soon`, and
+`excluded_calendars_never_match_a_call` in
 [calendar.rs](../../src/calendar.rs);
 `a_call_answered_from_its_calendar_reminder_is_not_offered_again` and
 `a_reminder_without_a_call_link_covers_only_the_next_call` in
 [meeting/detection.rs](../../src/meeting/detection.rs);
-`no_reminder_shows_over_a_recording` and
-`a_dismissed_reminder_without_a_link_snoozes_only_around_its_start` in
+`no_reminder_shows_over_a_recording`,
+`a_dismissed_reminder_without_a_link_snoozes_only_around_its_start`,
+`a_manual_recording_takes_the_one_active_meetings_title_and_attendees`,
+`a_detected_call_takes_the_title_of_the_meeting_its_service_names`,
+`a_call_never_takes_a_meeting_linked_to_another_service`,
+`two_overlapping_meetings_leave_a_recording_unnamed_by_the_calendar`,
+`a_title_the_user_gave_is_kept_beside_the_calendar_context`,
+`a_named_call_keeps_its_title_and_still_takes_the_attendees`, and
+`a_connected_calendar_is_read_for_matching_with_reminders_off` in
 [meeting/watcher.rs](../../src/meeting/watcher.rs);
 `calendar_reminders_stay_off_until_connected_and_survive_older_files` in
 [app_settings.rs](../../src/app_settings.rs);
@@ -1205,7 +1228,7 @@ Checks: `an_in_progress_meeting_reads_now`,
 `joining_elsewhere_while_showing_withdraws_it_for_good` in
 [calendar.rs](../../src/calendar.rs);
 `joining_from_the_menu_withdraws_its_reminder_and_starts_nothing`,
-`only_reminders_keep_the_titling_and_reminder_list`, and
+`the_menu_alone_never_keeps_the_titling_and_reminder_list`, and
 `a_menu_only_read_and_a_new_lab_both_force_an_immediate_read` in
 [meeting/watcher.rs](../../src/meeting/watcher.rs);
 `calendar_menu_is_its_own_switch_and_macos_only` in
