@@ -810,6 +810,11 @@ fn rows(ui: &Ui) -> Vec<Row> {
             if Feature::AnnotateReplay.on_this_os() {
                 rows.push(row(Feature::AnnotateReplay, Some(Pane::Annotate.icon())));
             }
+            // Hex's session tap hands a finished capsule the capture shortcut.
+            #[cfg(hex_capture)]
+            if ui.platform.scrawl.is_some() {
+                rows.push(row(Feature::AnnotateShortcutPastes, Some(&KEYBOARD)));
+            }
         }
     }
     // The ISO section key, left of 1, may be a shortcut with no modifier
@@ -1112,6 +1117,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::CopyCaptureZip => "lab-copy-capture-zip",
         Feature::AnnotateAgentTools => "lab-annotate-agent-tools",
         Feature::AnnotateAgentInstall => "lab-annotate-agent-install",
+        Feature::AnnotateShortcutPastes => "lab-annotate-shortcut-pastes",
         Feature::MeetingImport => "lab-meeting-import",
         Feature::TranscriptEdits => "lab-transcript-edits",
         Feature::OpenCodeInWsl => "lab-opencode-in-wsl",

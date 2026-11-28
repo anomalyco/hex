@@ -35,6 +35,7 @@ mod portuguese;
 mod routing;
 mod russian;
 mod screenshots;
+mod shortcut_paste;
 mod signature;
 mod speaker_names;
 mod strings;
@@ -412,6 +413,7 @@ pub(super) fn all_translations() -> impl Iterator<Item = &'static (&'static str,
         .chain(meeting_mute::TRANSLATIONS)
         .chain(confirm_cancel::TRANSLATIONS)
         .chain(middle_mouse::TRANSLATIONS)
+        .chain(shortcut_paste::TRANSLATIONS)
         .chain(speaker_names::TRANSLATIONS)
         .chain(style::TRANSLATIONS)
         .chain(signature::TRANSLATIONS)

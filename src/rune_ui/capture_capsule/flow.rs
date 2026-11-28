@@ -13,6 +13,7 @@ use crate::desktop::i18n::{tr, tr_fill};
 
 use super::tuning;
 mod done;
+mod keys;
 mod press;
 mod routes;
 mod step;
@@ -936,6 +937,9 @@ pub(crate) struct Flow {
     /// On Linux the capsule shows Paste first and Send to… waits for a
     /// click, so Dax can paste again without a list in the way.
     suggest_on_route: bool,
+    /// The capture shortcut presses Paste while it shows (Labs › Shortcut
+    /// pastes a capture).
+    shortcut_pastes: bool,
     /// Annotate draws now.
     drawing: bool,
     /// A capture that just finished with no screen asked for the
@@ -969,6 +973,7 @@ impl Flow {
             uncopied: false,
             undo: Undo::Idle,
             suggest_on_route: true,
+            shortcut_pastes: false,
             drawing: false,
             helper_next: None,
             rule_match: None,
@@ -1154,6 +1159,9 @@ impl Flow {
     }
 
     pub(crate) fn input(&mut self, input: Input, now: f64) -> Vec<Action> {
+        if input == Input::Record && self.shortcut_pastes_now() {
+            return self.click(super::surface::Id::Paste, now);
+        }
         let input = match input {
             Input::Written { bundle, routing } => {
                 self.written = Some((bundle, routing));
@@ -1236,49 +1244,6 @@ impl Flow {
             Phase::Routed(_) | Phase::Sent(_) | Phase::TakenBack { .. }
         ) {
             self.undo = Undo::Idle;
-        }
-    }
-
-    /// The keys the capsule takes from Hex's tap: the picker's, an open
-    /// list's (Escape only in a list Kit opened or the picker), or a compact
-    /// finished capsule's shortcut to open session search.
-    pub(crate) fn keys(&self) -> Option<crate::capture_host::CapsuleKeys> {
-        use crate::capture_host::CapsuleKeys;
-        match &self.phase {
-            Phase::Hidden | Phase::Dismissed | Phase::Kept { .. } => None,
-            Phase::Selecting(_) => Some(CapsuleKeys::Picker),
-            // Nothing to list; ✕ dismisses, or it
-            // leaves by itself.
-            Phase::TakenBack { .. } => None,
-            Phase::Routed(Routed {
-                open: Some(open), ..
-            }) => Some(if open.typing {
-                CapsuleKeys::List
-            } else {
-                CapsuleKeys::Suggest {
-                    cycle: false,
-                    search: self.aimed,
-                }
-            }),
-            Phase::Routed(routed) if routed.compact_searchable() => Some(CapsuleKeys::Suggest {
-                cycle: false,
-                search: false,
-            }),
-            Phase::Queued { .. } => Some(CapsuleKeys::Suggest {
-                cycle: false,
-                search: false,
-            }),
-            // While the `Always…` configurator is open, listen for clicks away
-            // without taking keys from the app in front.
-            Phase::Sent(Sent {
-                always: Some(_), ..
-            }) => Some(CapsuleKeys::Suggest {
-                cycle: false,
-                search: false,
-            }),
-            // Never Escape here: it goes to the app in front, and a send is
-            // taken back only by clicking Undo.
-            _ => None,
         }
     }
 

@@ -695,6 +695,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: Annotate gains an Agents section that writes the hex-annotate skill into Claude Code, Codex, OpenCode, or Pi, copies the npx skills add command, and on macOS links hex onto PATH without replacing another program's hex (macOS, Linux, Windows)",
     ),
     key(
+        "labs.annotate_shortcut_pastes",
+        Kind::Bool,
+        "Labs: pressing the Annotate shortcut while a finished capture's capsule shows Paste, with no list open, pastes it into the app in front as clicking Paste does; the next press records, and a capsule with a suggestion still opens the search (macOS)",
+    ),
+    key(
         "labs.gnome_clipboard_restore",
         Kind::Bool,
         "Labs: on Wayland desktops without data-control, such as GNOME, a paste restores the previous clipboard through XWayland while it is already running (Linux)",

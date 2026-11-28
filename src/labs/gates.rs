@@ -121,6 +121,14 @@ pub fn copy_capture_zip() -> bool {
     feature_on(Feature::CopyCaptureZip)
 }
 
+/// Labs › Shortcut pastes a capture: pressing the Annotate shortcut while a
+/// finished capsule shows Paste (and no list is open) pastes, as clicking
+/// Paste does (macOS; read on every poll of the capsule).
+#[cfg_attr(not(hex_capture), allow(dead_code))]
+pub fn annotate_shortcut_pastes() -> bool {
+    feature_on(Feature::AnnotateShortcutPastes)
+}
+
 /// A kept dictation recording may be copied from History and the menu bar or
 /// tray as a file on the clipboard (read as each Copy audio runs and each
 /// menu or tray opens). It needs Labs › Keep recordings, which owns every

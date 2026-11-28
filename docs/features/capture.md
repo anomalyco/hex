@@ -700,6 +700,14 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   Clipboard-only (no sessions) and unreachable capsules never claim the
 │   │   shortcut. Nothing sends until picked; `Shift`-click in the list still
 │   │   saves a rule.
+│   │   └── Labs › Shortcut pastes a capture (labs.annotate_shortcut_pastes,
+│   │       macOS, off) -> while the capsule shows Paste and no list is open
+│   │       (saved without routing, clipboard-only, no suggestion, or
+│   │       unreachable), the shortcut presses Paste and lets go; the next press
+│   │       records. A suggestion hides Paste, so there it still opens search.
+│   │       Check: capture_capsule::flow::keys
+│   │       the_capture_shortcut_pastes_while_paste_shows,
+│   │       the_capture_shortcut_still_searches_where_paste_is_hidden_or_the_lab_is_off
 │   ├── Queued (`RouteDelivery::Queued`) -> `[thumb] Queued  [⏱ X  ⌄]  ✕`
 │   │   naming the target session, with the hover tooltip carrying `why`, and `⌄`
 │   │   or pressing the Annotate shortcut again opening the Send-to list to
