@@ -63,7 +63,7 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
         val title = context.getString(R.string.keyboard_pane, page.language.label)
         if (accessibilityPaneTitle != title) accessibilityPaneTitle = title
     }
-    override fun suggestions(slots: List<Suggestion>) = strip.suggestions(slots)
+    override fun shown(slots: List<Suggestion?>) = strip.suggestions(slots)
     override fun undoDictation(shown: Boolean) = strip.undo(shown)
     override fun toolsChanged() = strip.update()
     fun notice(notice: StripNotice?) = strip.notice(notice)
