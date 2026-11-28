@@ -69,9 +69,7 @@ pub(super) fn generate_single_model(
         let remaining = remaining_generation_deadline(started, deadline)?;
         match post(&data, remaining, cancelled)? {
             Response::Success { data } => return Ok(data.text),
-            Response::Error { message }
-                if attempt == 0 && retryable_generation_error(&message) =>
-            {
+            Response::Error { message } if attempt == 0 && retryable_generation_error(&message) => {
                 tracing::warn!(%message, "OpenCode model unavailable during startup; retrying");
                 wait_for_generation_retry(started, deadline, cancelled)?;
             }

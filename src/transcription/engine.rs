@@ -689,9 +689,15 @@ impl TranscriptionEngine {
         if !self.streams() {
             return None;
         }
+        let partials = (self.live_text)().then(Partials::default);
+        let held = self.held.lock().unwrap_or_else(|error| error.into_inner());
+        let skip = held.skips_stream_without_live_text();
+        drop(held);
+        if partials.is_none() && skip {
+            return None;
+        }
         let id = self.next_stream.fetch_add(1, Ordering::Relaxed) + 1;
         let cancel = CancelToken::new();
-        let partials = (self.live_text)().then(Partials::default);
         self.requests.fetch_add(1, Ordering::AcqRel);
         self.commands
             .send(Command::Begin {
@@ -3273,6 +3279,75 @@ mod tests {
         assert!(matches!(
             commands.try_iter().collect::<Vec<_>>().as_slice(),
             [Command::Finish { stream: None, .. }]
+        ));
+    }
+
+    fn hold_streaming(
+        engine: &TranscriptionEngine,
+        model: crate::transcription::models::TranscriptionModelId,
+    ) {
+        *engine.held.lock().unwrap() = HeldState::Loaded {
+            selection: Some(crate::transcription::models::TranscriptionSelection {
+                model,
+                language: "en".into(),
+            }),
+            backend: None,
+            streams: true,
+        };
+    }
+
+    /// Unified English's stream usually drops the closing mark and the whole
+    /// clip is decoded after it anyway (#1933). With no live words to show, a
+    /// dictation skips the stream and decodes its clip once.
+    #[test]
+    fn a_unified_english_dictation_without_live_text_decodes_the_clip_once() {
+        let (engine, commands) = TranscriptionEngine::for_test();
+        hold_streaming(
+            &engine,
+            crate::transcription::models::TranscriptionModelId::ParakeetUnifiedEnglish,
+        );
+        assert!(engine.begin().is_none());
+        engine
+            .finish_with(None, vec![0.0; 7], Box::new(|_, _| Ok(String::new())))
+            .unwrap();
+        assert!(matches!(
+            commands.try_iter().collect::<Vec<_>>().as_slice(),
+            [Command::Finish { stream: None, .. }]
+        ));
+    }
+
+    /// Live words still need the stream; its text stays checked for the mark.
+    #[test]
+    fn a_unified_english_dictation_with_live_text_still_streams() {
+        let (engine, commands) = TranscriptionEngine::for_test();
+        let engine = engine.with_live_text();
+        hold_streaming(
+            &engine,
+            crate::transcription::models::TranscriptionModelId::ParakeetUnifiedEnglish,
+        );
+        let _stream = engine.begin().expect("live text needs the stream");
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(Command::Begin {
+                partials: Some(_),
+                ..
+            })
+        ));
+    }
+
+    /// A model whose stream is trusted without a closing mark keeps streaming
+    /// for its speed, live text or not.
+    #[test]
+    fn other_streaming_models_stream_without_live_text() {
+        let (engine, commands) = TranscriptionEngine::for_test();
+        hold_streaming(
+            &engine,
+            crate::transcription::models::TranscriptionModelId::ParakeetV3,
+        );
+        let _stream = engine.begin().expect("the model streams");
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(Command::Begin { partials: None, .. })
         ));
     }
 

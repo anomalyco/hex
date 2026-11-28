@@ -156,6 +156,8 @@ pub(super) fn stream_trailing_silence(model: &Model) -> usize {
 /// sentence punctuation before it is trusted: Unified English's chunked
 /// decode drops the full stop or question mark its whole-clip run keeps often
 /// enough that the clip decides instead (issue 1933). Applies on every OS.
+/// Only a dictation showing live words opens such a stream: without them the
+/// stream's finalize is pure added latency before the whole clip runs.
 pub(super) fn stream_requires_closing_mark(model: &Model) -> bool {
     model.stream_requires_closing_mark()
 }
