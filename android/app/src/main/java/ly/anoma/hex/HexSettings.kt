@@ -177,6 +177,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val holdClick = remember(revision) { typing.holdClick }
     val closingQuoteTakesSpace = remember(revision) { typing.closingQuoteTakesSpace }
     val swiftKeyLayout = remember(revision) { typing.swiftKeyLayout }
+    val compactGerman = remember(revision) { typing.compactGerman }
     val learnWords = remember(revision) { typing.learnWords }
     val adaptiveTouch = remember(revision) { typing.adaptiveTouch }
     // Labs › Keyboard › Adaptive touch: how far it has learned (labelled taps on one key plane, and whether any reads your
@@ -618,6 +619,9 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 Rule()
                                 Toggle(stringResource(R.string.swiftkey_layout), stringResource(R.string.swiftkey_layout_detail),
                                     swiftKeyLayout) { typing.swiftKeyLayout = it }
+                                Rule()
+                                Toggle(stringResource(R.string.compact_german), stringResource(R.string.compact_german_detail),
+                                    compactGerman) { typing.compactGerman = it }
                                 Rule()
                                 Toggle(stringResource(R.string.learn_words), stringResource(R.string.learn_words_detail),
                                     learnWords) { typing.learnWords = it }

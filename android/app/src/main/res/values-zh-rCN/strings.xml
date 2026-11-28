@@ -220,6 +220,8 @@
     <string name="closing_quote_takes_space_detail">引号未闭合时输入的右引号直接跟在前面的单词后面</string>
     <string name="swiftkey_layout">SwiftKey 布局</string>
     <string name="swiftkey_layout_detail">使用 SwiftKey 的长按符号、底行和符号页；长按逗号说话</string>
+    <string name="compact_german">紧凑德语布局</string>
+    <string name="compact_german_detail">德语 QWERTZ 不显示 ü、ö、ä 键；长按 a、o 或 u 输入</string>
     <string name="learn_words">学习新词</string>
     <string name="learn_words_detail">你保留原样输入、且词典中没有的词会加入你的个人词典</string>
     <string name="adaptive_touch">自适应触控</string>

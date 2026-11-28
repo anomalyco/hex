@@ -248,6 +248,8 @@
     <string name="closing_quote_takes_space_detail">A closing quote typed while a quote is open goes against the word before it</string>
     <string name="swiftkey_layout">SwiftKey layout</string>
     <string name="swiftkey_layout_detail">SwiftKey\'s held symbols, bottom row and symbol pages; hold comma to talk</string>
+    <string name="compact_german">Compact German layout</string>
+    <string name="compact_german_detail">German QWERTZ without the ü, ö and ä keys; hold a, o or u for them</string>
     <string name="learn_words">Learn new words</string>
     <string name="learn_words_detail">A word you keep as typed, when no dictionary knows it, joins your personal dictionary</string>
     <string name="adaptive_touch">Adaptive touch</string>

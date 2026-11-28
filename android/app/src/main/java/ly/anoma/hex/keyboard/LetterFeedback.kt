@@ -134,6 +134,10 @@ internal class LetterFeedback(private val host: ViewGroup, private val paints: K
                 "de" -> when (lower) {
                     'a' -> "aàáâæãåā"; 'o' -> "oôòóœøōõ"; 'u' -> "uûùúū"; else -> accents[lower]
                 }
+                // Labs › Keyboard › Compact German layout: no umlaut keys, so each umlaut is its letter's first hold.
+                KeyboardLetters.COMPACT_GERMAN -> when (lower) {
+                    'a' -> "aäàáâæãåā"; 'o' -> "oöôòóœøōõ"; 'u' -> "uüûùúū"; else -> accents[lower]
+                }
                 // iPhone Hex's Portuguese long presses (KeyboardLanguage.swift), Portugal's and Brazil's
                 // letters first; other letters hold nothing.
                 "pt" -> when (lower) {

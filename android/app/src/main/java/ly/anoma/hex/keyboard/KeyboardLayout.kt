@@ -51,9 +51,16 @@ internal data class KeyboardPage(
     /** Labs › Keyboard › SwiftKey layout: SwiftKey's held letter symbols and bottom row on the letters, and its
      * 123 and {&= pages in place of Gboard's ?123 and =<. */
     val swiftKey: Boolean = false,
+    /** Labs › Keyboard › Compact German layout: German's letters without the ü, ö and ä keys, held on u, o and a. */
+    val compactGerman: Boolean = false,
 ) {
+    /** Which letters the keys draw and hold: [KeyboardLetters.COMPACT_GERMAN] for German with Compact German layout
+     * on, else the layout's own code. */
+    val letterLayout: String get() =
+        if (compactGerman && language.layoutCode == "de") KeyboardLetters.COMPACT_GERMAN else language.layoutCode
+
     val lines: List<String> get() = when {
-        !symbols -> KeyboardLetters.rows(language.layoutCode)
+        !symbols -> KeyboardLetters.rows(letterLayout)
         swiftKey && more -> KeyboardLetters.swiftKeySymbols(currency)
         swiftKey -> KeyboardLetters.swiftKeyNumbers(currency)
         more -> KeyboardLetters.symbols(currency)

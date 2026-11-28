@@ -234,6 +234,9 @@ internal class KeyboardEngine(
     /** Labs › Keyboard › SwiftKey layout changed: the keys redraw with it, or without it, at once. */
     fun swiftKeyLayoutChanged() { showPlane() }
 
+    /** Labs › Keyboard › Compact German layout changed: German's keys redraw with or without their umlaut keys. */
+    fun compactGermanChanged() { showPlane() }
+
     /** The local currency changed (Labs › Keyboard › Local currency): the ?123 page and d's held symbol
      * redraw with the phone's own. */
     fun localCurrencyChanged() { showPlane() }
@@ -292,7 +295,8 @@ internal class KeyboardEngine(
         // page reads it for d's held symbol, as the ?123 page does for its $.
         surface?.showPage(KeyboardPage(layoutLanguage(), symbols, more, shift.uppercase, shift.locked, EnterKey.from(editor),
             FieldKind.of(editor?.inputType ?: 0), pad, feedback.numberRow,
-            if (feedback.localCurrency && pad == null) LocalCurrency.local() else null, feedback.swiftKeyLayout))
+            if (feedback.localCurrency && pad == null) LocalCurrency.local() else null, feedback.swiftKeyLayout,
+            feedback.compactGerman))
         // The strip's Emoji tool follows the page (Labs › Keyboard › Keyboard tools): the keys' emoji key is
         // on the letters only, never on a symbol page or a pad.
         val emoji = emojiAvailable
