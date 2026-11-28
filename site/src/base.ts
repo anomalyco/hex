@@ -33,13 +33,25 @@ export const ANDROID_DOWNLOAD_PATH = `${DOWNLOAD_PATH}/android`
 // Worker, so the download link never waits for a site deploy.
 export const ANDROID_PREVIEW_URL = "https://raw.githubusercontent.com/anomalyco/hex/android-preview/latest.json"
 
+// The one host that may be indexed. dev.anoma.ly and any other preview host
+// serve the same pages, and the Worker marks every response there noindex.
+export const PRODUCTION_HOST = "anoma.ly"
+
 // The build mode (`--mode dev`) picks the environment; every other mode builds production.
 export function hostForMode(mode: string | undefined): string {
-  return mode === "dev" ? "dev.anoma.ly" : "anoma.ly"
+  return mode === "dev" ? "dev.anoma.ly" : PRODUCTION_HOST
 }
 
+// Absolute URLs for this build's own links: its install commands, its dev
+// notes, and its downloads.
 export function originForMode(mode: string | undefined): string {
   return `https://${hostForMode(mode)}${BASE_PATH}`
+}
+
+// Canonicals, sitemap entries, social tags, and structured data always name
+// production, even in a dev build, so a preview host is never the indexed copy.
+export function canonicalOriginForMode(_mode: string | undefined): string {
+  return `https://${PRODUCTION_HOST}${BASE_PATH}`
 }
 
 export function withBase(path: string): string {

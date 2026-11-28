@@ -1,21 +1,62 @@
 # Hex
 
-> Hex is local voice dictation for Mac, Windows, and Linux. Hold a shortcut, speak, and Hex transcribes on the device and pastes the text wherever the cursor is.
+> Hex is free, open-source voice dictation and no-bot meeting transcription for Mac, Windows, and Linux. Hold a shortcut, speak, and a local Parakeet or Whisper model types what you said into whatever app has the cursor. Audio never leaves the machine, and dictation keeps working offline after a one-time model download. Hex Meetings records the microphone and system audio itself, so no bot joins the call, and `hex mcp` serves the transcripts and notes to AI coding agents, read-only.
 
-- Mac (Apple silicon, macOS 15 or later): https://anoma.ly/hex/files/releases/HEX-latest-arm64.dmg, or `brew install --cask anomalyco/tap/hex`
-- Windows 10 or 11 beta, x64 and ARM64: per-user Setup.exe installers at __ORIGIN__/
-- Linux beta, x86_64 Arch with glibc 2.44 or later: `curl -fsSL https://anoma.ly/hex/files/install-linux.sh | sh`
-- iOS (iPhone, iOS 18 or later): __ORIGIN__/ios (App Store) and __ORIGIN__/iphone (setup and FAQ)
-- Android (Hex Preview APK, Android 12 or later): __ORIGIN__/android
+- Author: Anomaly (https://anoma.ly)
+- Source: https://github.com/anomalyco/hex (MIT)
+- Price: free. No account, no subscription, no word limit
+- Runs: macOS 15 or later on Apple silicon; Windows 10 and 11 beta (x64 and ARM64); Linux beta (x86_64 and aarch64); iOS 18 or later; Android 12 or later (Hex Preview)
+- Privacy: dictation audio, meeting audio, transcripts, and history stay on the machine. No account, no cloud transcription, no telemetry in the app
+- Offline: download a model once, then dictation and meeting transcription work with no network
+
+## Get Hex
+
+- Mac: https://anoma.ly/hex/download/macos-arm64-dmg, or `brew install --cask anomalyco/tap/hex`
+- Windows beta: https://anoma.ly/hex/download/windows-x64-setup (ARM64: https://anoma.ly/hex/download/windows-arm64-setup)
+- Linux beta: `curl -fsSL https://anoma.ly/hex/install-linux.sh | sh`; packages and binaries at https://anoma.ly/hex
+- iPhone: https://anoma.ly/hex/iphone · Android: https://anoma.ly/hex/android
+- Every release, with notes: https://anoma.ly/hex/changelog
+
+## Pages
+
+- [Hex](https://anoma.ly/hex/): what it is, every platform's install, and the demo
+- [Meetings](https://anoma.ly/hex/meetings/): local meeting capture with chapters, notes, and a handoff to your agent
+- [MCP](https://anoma.ly/hex/mcp): setup for OpenCode, Claude Code, Claude Desktop, and Cursor, and the five read-only tools
+- [Changelog](https://anoma.ly/hex/changelog): what changed in each stable release
+- [Hex for iPhone](https://anoma.ly/hex/iphone): the keyboard, App Store link, and FAQ
+- [Hex for Android](https://anoma.ly/hex/android): Hex Preview's download and setup
+- [Hex Labs](https://anoma.ly/hex/labs): features Hex is trying out, each off until it is turned on
+- [Privacy policy](https://anoma.ly/hex/privacy): what the iPhone and Android apps do with your speech
+- [Dev builds](https://anoma.ly/hex/dev): notes for each dev build
 
 ## Docs
 
-- [README](https://github.com/anomalyco/hex/blob/dev/README.md): features, settings, privacy, and troubleshooting
-- [Windows guide](https://github.com/anomalyco/hex/blob/dev/docs/windows.md)
-- [Linux guide](https://github.com/anomalyco/hex/blob/dev/docs/linux.md)
-- [Transforms](https://anoma.ly/hex/docs/transforms): the JavaScript API for changing dictated text before Hex pastes it, including `fetch` and `node:child_process`
-- [Managing Hex](https://anoma.ly/hex/docs/admin): macOS configuration-profile keys that turn off Meetings, Annotate, OpenCode processing, transforms, Labs, and updates, or hold transforms to this computer
-- [Meetings](__ORIGIN__/meetings/): Hex sees a call start, offers to record it, and writes the transcript and notes on the Mac; `hex meetings` reads them back
-- [Hex Labs](__ORIGIN__/labs): features Hex is trying out, each off until it's turned on in Settings › Labs or with `hex labs on <id>`, one page per lab at __ORIGIN__/labs/<id>
-- [Changelog](__ORIGIN__/changelog): what changed in each stable release, newest first; dev builds' notes are at __ORIGIN__/dev
-- [TypeScript SDK](https://github.com/anomalyco/hex/blob/dev/sdk/typescript/README.md): local transcription for other apps
+- [Transforms](https://anoma.ly/hex/docs/transforms.md): JavaScript and TypeScript in `~/.config/hex/hex.config.ts` that rewrites dictated text before it is pasted
+- [Managed settings](https://anoma.ly/hex/docs/admin.md): macOS configuration-profile keys that turn Meetings, Annotate, OpenCode processing, transforms, Labs, and updates off
+- [CLI and transcripts](https://github.com/anomalyco/hex/blob/dev/docs/transcript-cli.md): `hex history`, `hex meetings list|show|chapters|search`, and `hex mcp --meetings-dir`
+- [Control CLI](https://github.com/anomalyco/hex/blob/dev/docs/cli.md): status, dictation, settings, models, and the local API
+- [Windows](https://github.com/anomalyco/hex/blob/dev/docs/windows.md) and [Linux](https://github.com/anomalyco/hex/blob/dev/docs/linux.md): each beta's setup and limits
+- [TypeScript SDK](https://github.com/anomalyco/hex/blob/dev/sdk/typescript/README.md): `@kitlangton/hex` for local transcription in another app
+
+## For agents
+
+- [llms-full.txt](https://anoma.ly/hex/llms-full.txt): the whole reference in one Markdown file
+- [skill.md](https://anoma.ly/hex/skill.md): how an agent installs Hex and reads it with the CLI and MCP
+- `hex mcp`: read-only MCP server over stdio for meeting transcripts, search, chapters, and stored notes. Tools: `list_meetings`, `search_transcripts`, `get_transcript`, `get_meeting_notes`, `get_chapters`; resource `hex-meeting://<meeting_id>`
+- `hex history`, `hex meetings`, and `hex mcp` read files and never start Hex; only `hex start` and `hex restart` launch it
+
+## What Hex does
+
+- Local dictation on macOS, Windows, and Linux, with Parakeet and Whisper GGUF models, Apple Speech on the Mac, and custom models
+- No-bot meeting transcription on the Mac: microphone plus system audio, live chapters, a stored summary, search, SRT and VTT export, and configurable retention
+- Annotate: capture a screen, a window, a region, or a connected iPhone and open it in an OpenCode session
+- Transforms: deterministic JavaScript for the text Hex pastes, including `fetch` and `node:child_process` after you approve the config's exact contents
+- A command line for status, dictation, settings, history, meetings, and transcribing a file
+- Labs: unproven features, off by default, turned on in Settings › Labs or with `hex labs on <id>`
+
+## What Hex does not do
+
+- No bot joins a call, and Hex cannot transcribe a meeting it did not record
+- No cloud transcription, account, subscription, word cap, or per-minute billing
+- Meeting capture runs on the Mac today; Windows and Linux run dictation, the CLI, and the read-only MCP server
+- Remote speakers are not separated: the microphone is "You" and system audio is "Them"

@@ -7,11 +7,11 @@ import { getWorkerAssetsDir } from "@cloudflare/build-output-utils"
 import { readFileSync, statSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { parseArgs } from "node:util"
-import { originForMode } from "../../src/base"
+import { canonicalOriginForMode } from "../../src/base"
 import { MEETINGS_CARD, MEETINGS_DIR, meetingsHead, runtimeFiles, stripHead } from "./bundle"
 
 const { values } = parseArgs({ options: { mode: { type: "string" } } })
-const origin = originForMode(values.mode)
+const origin = canonicalOriginForMode(values.mode)
 const dir = join(getWorkerAssetsDir(resolve(import.meta.dirname, "../..")), MEETINGS_DIR)
 
 const bundle = runtimeFiles(dir)
