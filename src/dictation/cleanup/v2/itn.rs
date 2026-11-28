@@ -259,6 +259,12 @@ fn symbol(word: &str) -> Option<&'static str> {
 
 /// A word as the grammars read it: quotes and brackets off both ends,
 /// trailing punctuation off, lowercased.
+/// Whether a word names a unit or a currency ("meters", "dollars").
+pub(super) fn is_amount_word(word: &str) -> bool {
+    UNITS.iter().any(|(spoken, _)| *spoken == word)
+        || CURRENCIES.iter().any(|(spoken, _)| *spoken == word)
+}
+
 pub(super) fn norm(token: &str) -> String {
     token
         .trim_matches(|ch| "\"'()[]{}\u{201c}\u{201d}\u{2018}\u{2019}`".contains(ch))

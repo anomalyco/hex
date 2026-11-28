@@ -454,6 +454,92 @@ pub(crate) fn guard_corrections(words: &[&str], actions: &mut [Action]) {
     }
 }
 
+/// Subjects a restart may take back with its auxiliaries.
+const RESTART_SUBJECTS: &[&str] = &[
+    "i", "we", "you", "he", "she", "they", "it", "i'm", "we're", "you're", "he's", "she's",
+    "they're", "it's", "i'd", "we'd", "you'd", "they'd", "i'll", "we'll", "you'll", "they'll",
+    "i've", "we've", "you've", "they've",
+];
+/// Auxiliaries and modals that lead into a bare verb: "was going to".
+const RESTART_AUXILIARIES: &[&str] = &[
+    "was", "were", "am", "is", "are", "be", "been", "going", "gonna", "to", "wanna", "want",
+    "wanted", "gotta", "got", "have", "had", "has", "will", "would", "should", "could", "can",
+    "might", "may", "must", "need", "needed", "try", "trying", "tried", "just", "planning",
+    "hoping", "meant", "supposed",
+];
+/// Words that open a new clause, besides subjects, auxiliaries,
+/// hesitations and discourse markers: a restart before one is a real one
+/// ("I was going to, let's").
+const RESTART_CLAUSE_OPENERS: &[&str] = &[
+    "let's", "lets", "let", "and", "but", "or", "then", "maybe", "no", "not", "never", "the", "a",
+    "an", "this", "that", "there", "here", "what", "how", "why", "when", "where", "who", "if",
+    "please", "actually",
+];
+
+fn opens_clause(word: &str) -> bool {
+    RESTART_SUBJECTS.contains(&word)
+        || RESTART_AUXILIARIES.contains(&word)
+        || HESITATIONS.contains(&word)
+        || DISCOURSE.contains(&word)
+        || RESTART_CLAUSE_OPENERS.contains(&word)
+}
+
+/// Whether a word's first letter is lowercase, before any digit.
+fn starts_lower(word: &str) -> bool {
+    word.chars()
+        .find(|ch| ch.is_alphabetic() || ch.is_ascii_digit())
+        .is_some_and(char::is_lowercase)
+}
+
+/// Every run of restart deletions, with the fillers inside it, is kept
+/// when it takes back only a subject and its auxiliaries and a bare verb
+/// follows: "[I was going to] email him" would leave "Email him", and "I
+/// [was gonna] email him" would leave "I email him". A run before a new
+/// clause ("I was going to, let's") or its own repeat ("can you, uh, can
+/// you send") still goes. The reference's `_guard_restart_runs`.
+pub(crate) fn guard_restarts(words: &[&str], actions: &mut [Action]) {
+    let count = actions.len();
+    let mut start = 0;
+    while start < count {
+        if actions[start] != Action::DeleteRestart {
+            start += 1;
+            continue;
+        }
+        let mut end = start;
+        let mut restarts = Vec::new();
+        while end < count && matches!(actions[end], Action::DeleteRestart | Action::DeleteFiller) {
+            if actions[end] == Action::DeleteRestart {
+                restarts.push(end);
+            }
+            end += 1;
+        }
+        let norms: Vec<String> = restarts
+            .iter()
+            .map(|&index| super::itn::norm(words[index]))
+            .collect();
+        let prefix_only = norms.iter().all(|word| {
+            RESTART_SUBJECTS.contains(&word.as_str())
+                || RESTART_AUXILIARIES.contains(&word.as_str())
+        }) && norms
+            .iter()
+            .any(|word| RESTART_AUXILIARIES.contains(&word.as_str()));
+        let bare_verb = end < count && actions[end] == Action::Keep && {
+            let next = super::itn::norm(words[end]);
+            !next.is_empty()
+                && next.chars().all(char::is_alphabetic)
+                && starts_lower(words[end])
+                && !opens_clause(&next)
+        };
+        let last = restarts[restarts.len() - 1];
+        if prefix_only && bare_verb && !super::render::ends_sentence(words[last]) {
+            for index in restarts {
+                actions[index] = Action::Keep;
+            }
+        }
+        start = end;
+    }
+}
+
 /// Keeps every run of deletions outside a correction, whole, when the
 /// guard protects any of its words. A content adverb is left to the model,
 /// which was measured to keep every hedge: "actually" is also a cue.

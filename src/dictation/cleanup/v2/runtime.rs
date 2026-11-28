@@ -276,6 +276,11 @@ mod core_ml {
             .collect())
     }
 
+    /// The words of the run that warms a loaded model.
+    #[cfg(not(test))]
+    const WARM_UP: &str =
+        "Um, so I was going to send the notes at two thirty, actually let's meet tomorrow.";
+
     /// The model in the v2 folder, loaded with its tokenizer and decode.
     #[cfg(not(test))]
     #[derive(Clone, Copy)]
@@ -305,17 +310,27 @@ mod core_ml {
                 let _ = std::fs::remove_dir_all(&compiled);
                 Skip::Failed(error)
             })?;
-            tracing::info!(
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                keep_bias = settings.decode.keep_bias,
-                min_edit_prob = settings.decode.min_edit_prob,
-                "the cleanup v2 model is loaded"
-            );
-            Ok(super::Warm {
+            let warm = super::Warm {
                 model,
                 tokenizer,
                 settings,
-            })
+            };
+            // Core ML's first run on a loaded model is several times slower
+            // than the next (about 120 ms here): run it now, behind the
+            // person talking, so their dictation gets a warm one.
+            let loaded_ms = started.elapsed().as_millis() as u64;
+            let warm_up: Vec<String> = WARM_UP.split(' ').map(str::to_owned).collect();
+            if let Err(error) = super::score(&warm, &warm_up, run) {
+                tracing::warn!(%error, "the cleanup v2 model's warm-up run failed");
+            }
+            tracing::info!(
+                elapsed_ms = loaded_ms,
+                warm_up_ms = started.elapsed().as_millis() as u64 - loaded_ms,
+                keep_bias = warm.settings.decode.keep_bias,
+                min_edit_prob = warm.settings.decode.min_edit_prob,
+                "the cleanup v2 model is loaded"
+            );
+            Ok(warm)
         }
 
         fn run(warm: &Self::Model, words: &Vec<String>) -> Result<super::Scored, String> {

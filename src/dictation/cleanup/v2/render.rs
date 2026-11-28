@@ -14,13 +14,15 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use super::decode::{Action, Case, Decode, Span, Tag, guard_corrections};
+use super::decode::{Action, Case, Decode, Span, Tag, guard_corrections, guard_restarts};
 use super::itn::{self, Kind, format_with_punctuation, norm};
 
 static ENDS_IN_PUNCTUATION: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[,.?!;:]$").expect("a fixed pattern compiles"));
+/// Never capitalized at a promoted sentence start: addresses, paths,
+/// camelCase, and dotted names ("alex@acme.com", "useState", "acme.com").
 static PATH_LIKE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[@/:_]").expect("a fixed pattern compiles"));
+    LazyLock::new(|| Regex::new(r"[@/:_]|[a-z][A-Z]|\w\.\w").expect("a fixed pattern compiles"));
 
 const CLOSERS: &[char] = &['"', '\'', '(', ')', '[', ']', '}', '\u{201d}', '\u{2019}'];
 const DANGLING: &[char] = &[',', ';', ':', '-', '\u{2014}', '\u{2013}'];
@@ -187,6 +189,7 @@ fn guarded(words: &[&str], tags: &[Tag], decode: &Decode) -> Vec<Action> {
         })
         .collect();
     guard_corrections(words, &mut actions);
+    guard_restarts(words, &mut actions);
     actions
 }
 
@@ -208,14 +211,6 @@ pub(crate) fn render(words: &[&str], tags: &[Tag], decode: &Decode) -> String {
     }
     let actions = guarded(words, tags, decode);
     if actions.iter().all(|action| action.is_delete()) {
-        return words.join(" ");
-    }
-    if actions.iter().all(|action| !action.is_delete())
-        && tags
-            .iter()
-            .all(|tag| tag.span == Span::Outside || !decode.use_itn)
-        && !decode.apply_case_punct
-    {
         return words.join(" ");
     }
     let spans: Vec<Span> = tags.iter().map(|tag| tag.span).collect();
@@ -296,6 +291,7 @@ pub(crate) fn render(words: &[&str], tags: &[Tag], decode: &Decode) -> String {
     if out.is_empty() {
         return words.join(" ");
     }
+    super::clock::clock_times(&mut out);
     let mut line = String::new();
     for word in &out {
         line.push_str(word);
@@ -372,6 +368,103 @@ mod tests {
         assert_eq!(
             render(&words, &tagged(&actions, &[o; 5]), &openers),
             "Write a function."
+        );
+    }
+
+    /// Kit's live test, line by line: each reads as said, minus its
+    /// disfluencies.
+    #[test]
+    fn a_dictation_with_every_kind_of_disfluency_reads_right() {
+        use Action::{DeleteCorrection as C, DeleteFiller as F, DeleteRestart as R, Keep as K};
+        let o = Span::Outside;
+        let keep = |count| vec![K; count];
+        // A deleted sentence start capitalizes the next word.
+        assert_eq!(
+            cleaned(
+                "Um, can you, uh, can you send me the, like, the final deck before three?",
+                &[F, R, R, F, K, K, K, K, R, F, K, K, K, K, K],
+                &[o; 15]
+            ),
+            "Can you send me the final deck before three?"
+        );
+        // An address, a dotted name, or camelCase keeps its own case.
+        for (heard, want) in [
+            ("Um, sam@example.com is mine.", "sam@example.com is mine."),
+            ("Uh, example.com is down.", "example.com is down."),
+            ("Um, useState breaks here.", "useState breaks here."),
+        ] {
+            assert_eq!(cleaned(heard, &[F, K, K, K], &[o; 4]), want);
+        }
+        // A dotted clock time gets its colon.
+        assert_eq!(
+            cleaned(
+                "Let's meet on Tuesday. No wait Thursday at 2.30.",
+                &[K, K, K, C, C, C, K, K, K],
+                &[o; 9]
+            ),
+            "Let's meet on Thursday at 2:30."
+        );
+        assert_eq!(
+            cleaned("Call me at 10.15 tomorrow", &keep(5), &[o; 5]),
+            "Call me at 10:15 tomorrow"
+        );
+        assert_eq!(
+            cleaned(
+                "at two thirty.",
+                &keep(3),
+                &[o, Span::Begin(Kind::Number), Span::Inside(Kind::Number)]
+            ),
+            "at 2:30."
+        );
+        // A restart never leaves a broken imperative.
+        let said = "I was going to email him, actually let's just drop it in Slack.";
+        let mut restart = vec![R; 4];
+        restart.extend(keep(9));
+        assert_eq!(cleaned(said, &restart, &[o; 13]), said);
+        let said = "I was gonna email him actually let's just drop it in Slack";
+        let mut restart = vec![K, R, R];
+        restart.extend(keep(9));
+        assert_eq!(cleaned(said, &restart, &[o; 12]), said);
+        assert_eq!(
+            cleaned(
+                "We wanted to, um, call Sam first.",
+                &[R, R, R, F, K, K, K],
+                &[o; 7]
+            ),
+            "We wanted to, call Sam first."
+        );
+        // A real restart before a new clause or its own repeat still goes.
+        assert_eq!(
+            cleaned(
+                "I was going to, let's just call him.",
+                &[R, R, R, R, K, K, K, K],
+                &[o; 8]
+            ),
+            "Let's just call him."
+        );
+        assert_eq!(
+            cleaned(
+                "I was going to, I'll just call him.",
+                &[R, R, R, R, K, K, K, K],
+                &[o; 8]
+            ),
+            "I'll just call him."
+        );
+        assert_eq!(
+            cleaned(
+                "can you, uh, can you send it",
+                &[R, R, F, K, K, K, K],
+                &[o; 7]
+            ),
+            "Can you send it"
+        );
+        assert_eq!(
+            cleaned(
+                "We've we're going to need a bigger boat.",
+                &[R, K, K, K, K, K, K, K],
+                &[o; 8]
+            ),
+            "We're going to need a bigger boat."
         );
     }
 

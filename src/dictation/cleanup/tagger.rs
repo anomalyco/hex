@@ -13,8 +13,9 @@
 //! (`cleanup_tagger.swift`). No other OS runs it yet. Labs › Clean up what
 //! I say v2 runs its own model on the same kind of thread (`v2::runtime`).
 
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::chunk::Chunk;
@@ -47,19 +48,35 @@ struct Request<R: Runtime> {
     reply: mpsc::Sender<Result<Vec<R::Output>, Skip>>,
 }
 
+/// The running thread: its inbox (a None job loads the model only) and
+/// whether its model is loaded.
+struct Thread<R: Runtime> {
+    jobs: mpsc::Sender<Option<Request<R>>>,
+    loaded: Arc<AtomicBool>,
+}
+
 /// The one model and the thread it lives on.
 pub(super) struct Tagger<R: Runtime> {
     runtime: R,
-    /// The thread's inbox while it runs. None scores load the model only.
-    jobs: Mutex<Option<mpsc::Sender<Option<Request<R>>>>>,
+    thread: Mutex<Option<Thread<R>>>,
 }
 
 impl<R: Runtime> Tagger<R> {
     pub(super) const fn new(runtime: R) -> Self {
         Self {
             runtime,
-            jobs: Mutex::new(None),
+            thread: Mutex::new(None),
         }
+    }
+
+    /// Whether the model is loaded and warm, so an answer takes a run and
+    /// not a load.
+    pub(super) fn loaded(&self) -> bool {
+        self.thread
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .as_ref()
+            .is_some_and(|thread| thread.loaded.load(Ordering::Acquire))
     }
 
     /// The model's answer for each input, in order, or why there is none
@@ -95,30 +112,35 @@ impl<R: Runtime> Tagger<R> {
     /// Ends the thread once it finishes what it is doing, which frees the
     /// model. The next request starts a new one.
     pub(super) fn release(&self) {
-        self.jobs
+        self.thread
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .take();
     }
 
     fn send(&self, job: Option<Request<R>>) -> Result<(), Skip> {
-        let mut jobs = self.jobs.lock().unwrap_or_else(|error| error.into_inner());
-        let job = match jobs.as_ref() {
-            Some(sender) => match sender.send(job) {
+        let mut thread = self
+            .thread
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let job = match thread.as_ref() {
+            Some(running) => match running.jobs.send(job) {
                 Ok(()) => return Ok(()),
                 // The thread is gone: start another.
                 Err(mpsc::SendError(job)) => job,
             },
             None => job,
         };
-        let (sender, inbox) = mpsc::channel();
+        let (jobs, inbox) = mpsc::channel();
+        let loaded = Arc::new(AtomicBool::new(false));
         let runtime = self.runtime.clone();
+        let marks = loaded.clone();
         std::thread::Builder::new()
             .name("hex-cleanup-tagger".into())
-            .spawn(move || serve(&runtime, &inbox))
+            .spawn(move || serve(&runtime, &inbox, &marks))
             .map_err(|error| Skip::Failed(format!("the cleanup model could not start: {error}")))?;
-        let sent = sender.send(job);
-        *jobs = Some(sender);
+        let sent = jobs.send(job);
+        *thread = Some(Thread { jobs, loaded });
         sent.map_err(|_| Skip::Failed("the cleanup model stopped".into()))
     }
 }
@@ -126,13 +148,14 @@ impl<R: Runtime> Tagger<R> {
 /// The tagger's thread: loads the model for the first job that needs it and
 /// answers each request in turn, until its tagger is released. A model left
 /// idle too long is freed, and the next job loads it again.
-fn serve<R: Runtime>(runtime: &R, inbox: &mpsc::Receiver<Option<Request<R>>>) {
+fn serve<R: Runtime>(runtime: &R, inbox: &mpsc::Receiver<Option<Request<R>>>, loaded: &AtomicBool) {
     let mut model = None;
     loop {
         let job = match runtime.idle().filter(|_| model.is_some()) {
             Some(idle) => match inbox.recv_timeout(idle) {
                 Ok(job) => job,
                 Err(RecvTimeoutError::Timeout) => {
+                    loaded.store(false, Ordering::Release);
                     model = None;
                     continue;
                 }
@@ -145,7 +168,10 @@ fn serve<R: Runtime>(runtime: &R, inbox: &mpsc::Receiver<Option<Request<R>>>) {
         };
         if model.is_none() {
             match runtime.load() {
-                Ok(loaded) => model = Some(loaded),
+                Ok(ready) => {
+                    model = Some(ready);
+                    loaded.store(true, Ordering::Release);
+                }
                 Err(skip) => {
                     if let Some(request) = job {
                         let _ = request.reply.send(Err(skip));
@@ -465,6 +491,21 @@ mod tests {
         assert_eq!(stub.loads.load(Ordering::SeqCst), 2);
         tagger.release();
         eventually(&stub.frees, 2);
+    }
+
+    #[test]
+    fn a_tagger_says_whether_its_model_is_loaded() {
+        let stub = Stub::default();
+        let tagger = Tagger::new(stub.clone());
+        assert!(!tagger.loaded());
+        tagger.warm();
+        let give_up = Instant::now() + Duration::from_secs(30);
+        while !tagger.loaded() {
+            assert!(Instant::now() < give_up, "never loaded");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        tagger.release();
+        assert!(!tagger.loaded());
     }
 
     #[test]

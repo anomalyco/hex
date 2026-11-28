@@ -15,6 +15,7 @@
 //! and History says why.
 
 mod bpe;
+mod clock;
 mod decode;
 mod itn;
 mod render;
@@ -58,13 +59,22 @@ pub(super) fn clean(
     let vocabulary =
         crate::dictation::vocabulary::merged(vocabulary, &crate::dictation::vocabulary::entries());
     let protected = ProtectedTerms::new(vocabulary.iter().map(|entry| entry.term.as_str()));
-    clean_with(
-        text,
-        &protected,
-        super::stage::TIME_BUDGET,
-        |lines, deadline| TAGGER.score(lines, deadline),
-    )
+    // A model still loading (the first dictation after launch) is given
+    // the time a load and its warm-up run take; a warm one, the budget.
+    let budget = if TAGGER.loaded() {
+        super::stage::TIME_BUDGET
+    } else {
+        COLD_BUDGET
+    };
+    clean_with(text, &protected, budget, |lines, deadline| {
+        TAGGER.score(lines, deadline)
+    })
 }
+
+/// How long a dictation waits for a model that is not loaded yet: its load
+/// (about 30 ms) and warm-up run (about 120 ms on a cold Core ML), with room.
+#[cfg(any(all(target_os = "macos", not(test)), test))]
+const COLD_BUDGET: Duration = Duration::from_millis(1_000);
 
 /// No other OS runs the tagger yet.
 #[cfg(not(any(target_os = "macos", test)))]
@@ -143,7 +153,13 @@ fn clean_with(
             (cleaned, Some(observation(None)))
         }
         Err(skip) => {
-            let reason = skip.reason();
+            let reason = match skip {
+                Skip::Late if budget > super::stage::TIME_BUDGET => format!(
+                    "the cleanup model was still loading after {} ms",
+                    budget.as_millis()
+                ),
+                _ => skip.reason(),
+            };
             tracing::warn!(
                 latency_ms,
                 %reason,
@@ -324,11 +340,21 @@ mod tests {
             (Skip::Late, "the cleanup took longer than 150 ms"),
             (Skip::Failed("no model".into()), "no model"),
         ] {
-            let (text, observation) =
-                clean_with(said, &protected, Duration::from_secs(5), |_, _| Err(skip));
+            let (text, observation) = clean_with(
+                said,
+                &protected,
+                super::super::stage::TIME_BUDGET,
+                |_, _| Err(skip),
+            );
             assert_eq!(text, said);
             assert_eq!(observation.unwrap().fallback.as_deref(), Some(why));
         }
+        // A model still loading past the cold budget says so.
+        let (_, observation) = clean_with(said, &protected, COLD_BUDGET, |_, _| Err(Skip::Late));
+        assert_eq!(
+            observation.unwrap().fallback.as_deref(),
+            Some("the cleanup model was still loading after 1000 ms")
+        );
         // An answer of the wrong shape is no answer.
         let (text, observation) =
             clean_with(said, &protected, Duration::from_secs(5), |lines, _| {
