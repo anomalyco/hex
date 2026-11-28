@@ -1,6 +1,7 @@
 package ly.anoma.hex.speech
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -95,6 +96,8 @@ internal val lastDictation = MutableStateFlow<DictationTimes?>(null)
 // them); results are inserted in the order they were spoken. Every posted result belongs to its
 // original ticket, including failures.
 internal class MicCapture(
+    /** Reads Labs › Dictation sounds at each start. */
+    private val context: Context,
     private val recognizer: Recognizer,
     private val place: DictationPlace,
     private val update: (SpeechPhase, String?) -> Unit,
@@ -123,6 +126,17 @@ internal class MicCapture(
         var recorded = 0
         var kept = 0
         var spent: SpeechModel.Spent? = null
+        // Labs › Dictation sounds, as it was when the dictation started: whether it plays them, the start sound's length
+        // plus START_GUARD_EXTRA_MS, whether the start sound is still to play or be dropped, when the zeroed head of the
+        // recording ends (uptime ms: when the start sound played plus that guard; 0: nothing to zero), whether the start
+        // sound played, when the stop sound played (uptime ms, 0: not) and whether the dictation failed (the error sound).
+        var sounds = false
+        var guardMs = 0L
+        @Volatile var startPending = false
+        @Volatile var muteEndsAt = 0L
+        @Volatile var startSounded = false
+        var stopSoundAt = 0L
+        var failed = false
     }
     private val main = Handler(Looper.getMainLooper())
     private val recorder = Executors.newSingleThreadExecutor { Thread(it, "Hex dictation") }
@@ -142,6 +156,7 @@ internal class MicCapture(
     fun start(options: SpeechOptions, field: Int = 0) {
         if (active != null) return
         val ticket = Ticket(options, field)
+        DictationSounds.prepare(context)?.let { ticket.sounds = true; ticket.guardMs = it; ticket.startPending = true }
         active = ticket
         publish(SpeechPhase.Opening)
         // The model loads while the person speaks, not after they let go.
@@ -154,9 +169,9 @@ internal class MicCapture(
             try {
                 record(ticket)
             } catch (_: SecurityException) {
-                complete(ticket, "Allow the microphone in Hex")
+                complete(ticket, "Allow the microphone in Hex", failed = true)
             } catch (_: Exception) {
-                complete(ticket, "Microphone unavailable. Try again.")
+                complete(ticket, "Microphone unavailable. Try again.", failed = true)
             }
         }
     }
@@ -175,10 +190,12 @@ internal class MicCapture(
     fun cancelLatest() {
         val ticket = active
         if (ticket != null) {
+            // Like the stop sound, only once the start sound has played.
+            if (ticket.sounds && ticket.startSounded) DictationSounds.play(SoundCue.Cancel)
             ticket.cancelled = true
             active = null
             publish(current())
-        } else cancel()
+        } else cancel(sound = true)
     }
 
     /** The keyboard's field went away: a recording stops as with ✓ and is still transcribed, and nothing of it is shown
@@ -189,7 +206,12 @@ internal class MicCapture(
     }
 
     /** Nothing recording or transcribing goes in: Next keyboard, Home or the Quick Settings sheet closing. A decode in progress stops too, or the next dictation's load and decode would wait for it. */
-    fun cancel() {
+    fun cancel(sound: Boolean = false) {
+        // Labs › Dictation sounds: the cancel sound only when the person discards a dictation (✕, Cancel, Home's pages)
+        // and something was discarded; Hex closing, the screen going off or a field going away discard silently.
+        // A recording counts once its start sound played, like the stop sound; a transcribing one already sounded both.
+        val discarded = active?.takeIf { it.startSounded } ?: queue.firstOrNull()
+        if (sound && discarded?.sounds == true) DictationSounds.play(SoundCue.Cancel)
         active?.cancelled = true
         active = null
         queue.forEach { it.cancelled = true }
@@ -213,16 +235,18 @@ internal class MicCapture(
 
     /** A dictation ends: recording stopped with nothing to transcribe, or its text is ready. */
     private fun complete(ticket: Ticket, note: String? = null, text: String? = null, heard: String? = null,
-                         written: SpeechOptions? = null) = main.post {
+                         written: SpeechOptions? = null, failed: Boolean = false) = main.post {
         if (active === ticket) active = null
         if (ticket.cancelled) { publish(current()); return@post }
         ticket.done = true; ticket.note = note; ticket.text = text; ticket.heard = heard; ticket.written = written
+        ticket.failed = failed
         if (ticket !in queue) queue.addLast(ticket)
         var shown: String? = null
         while (queue.firstOrNull()?.done == true) {
             val next = queue.removeFirst()
             if (!next.left) shown = next.note ?: shown
             next.text?.let { insert(it, next.heard ?: it, next.written ?: next.options, next.field) }
+            sound(next)
             next.spent?.let {
                 val times = durations(next, it, if (next.text != null) System.nanoTime() else 0L)
                 lastDictation.value = times
@@ -231,6 +255,25 @@ internal class MicCapture(
             }
         }
         publish(current(), shown)
+    }
+
+    /** Labs › Dictation sounds once [ticket]'s outcome is shown: the error sound for a failure, and done for text that
+     * went in [DONE_AFTER_STOP_MS] or more after the stop sound. Neither plays while another dictation records, which
+     * would hear it. */
+    private fun sound(ticket: Ticket) {
+        if (!ticket.sounds || active != null) return
+        when {
+            ticket.failed -> DictationSounds.play(SoundCue.Error)
+            ticket.text != null && ticket.stopSoundAt != 0L &&
+                SystemClock.uptimeMillis() - ticket.stopSoundAt >= DONE_AFTER_STOP_MS -> DictationSounds.play(SoundCue.Done)
+        }
+    }
+
+    /** The start sound played at [at] (uptime ms), or never (null): the recorder zeroes up to its end and the guard, and
+     * stops zeroing everything it reads. */
+    private fun startPlayed(ticket: Ticket, at: Long?) {
+        if (at != null) { ticket.muteEndsAt = at + ticket.guardMs; ticket.startSounded = true }
+        ticket.startPending = false
     }
 
     /** [ticket]'s durations once its text went in at [inserted] (0: no text). Arithmetic only. */
@@ -261,14 +304,14 @@ internal class MicCapture(
                 // Labs › Automatic listens for the language: formatted and inserted in the language it was written in.
                 val options = heard.spoken?.let(ticket.options::writtenIn) ?: ticket.options
                 when (val text = heard.text?.let { SpokenText.format(it, options) }) {
-                    null -> complete(ticket, "Couldn’t transcribe. Try again.")
+                    null -> complete(ticket, "Couldn’t transcribe. Try again.", failed = true)
                     "" -> complete(ticket, "No speech heard")
                     else -> complete(ticket, dictationNote(note, heard.note), text, heard.text, options)
                 }
             } catch (_: UnsatisfiedLinkError) {
-                complete(ticket, "Speech model unavailable")
+                complete(ticket, "Speech model unavailable", failed = true)
             } catch (_: Exception) {
-                complete(ticket, "Couldn’t transcribe. Try again.")
+                complete(ticket, "Couldn’t transcribe. Try again.", failed = true)
             } finally {
                 decoding = null
             }
@@ -295,16 +338,30 @@ internal class MicCapture(
         var voiced = 0
         val edges = SpeechEdges(rate)
         var lastUpdate = 0L
+        var recordingStarted = 0L
         try {
             check(record.state == AudioRecord.STATE_INITIALIZED)
             if (!ticket.cancelled && !ticket.finish) {
                 record.startRecording()
+                recordingStarted = SystemClock.uptimeMillis()
                 check(record.recordingState == AudioRecord.RECORDSTATE_RECORDING)
-                main.post { if (active === ticket && !ticket.finish) publish(SpeechPhase.Listening) }
+                main.post {
+                    if (active === ticket && !ticket.finish) {
+                        publish(SpeechPhase.Listening)
+                        // Labs › Dictation sounds: the microphone is open. What it hears of this is zeroed below.
+                        // A start sound still waiting for its set is dropped once the dictation stopped or was discarded,
+                        // so it never plays after the microphone closed.
+                        if (ticket.sounds) DictationSounds.play(SoundCue.Start,
+                            wanted = { active === ticket && !ticket.finish && !ticket.cancelled }) { at -> startPlayed(ticket, at) }
+                    } else ticket.startPending = false
+                }
             }
             while (!ticket.finish && !ticket.cancelled && count < pcm.size) {
                 val n = record.read(pcm, count, minOf(block, pcm.size - count), AudioRecord.READ_BLOCKING)
                 check(n > 0)
+                // The start sound and START_GUARD_EXTRA_MS after it are silence to Whisper (0 with the lab off).
+                val muted = startMuteSamples(ticket.startPending, ticket.muteEndsAt, recordingStarted, rate)
+                if (count < muted) pcm.fill(0, count, minOf(count + n, muted))
                 var energy = 0.0
                 for (i in count until count + n) energy += pcm[i].toDouble() * pcm[i]
                 val rms = sqrt(energy / n) / 32768.0
@@ -323,6 +380,11 @@ internal class MicCapture(
             } finally { record.release() }
         }
         ticket.stoppedAt = System.nanoTime()
+        // Labs › Dictation sounds: the stop sound once the microphone is closed, so the recording never holds it; a
+        // dictation whose start sound never played (stopped before the microphone opened) stays silent.
+        if (ticket.sounds && !ticket.cancelled) main.post {
+            if (ticket.startSounded && !ticket.cancelled) { ticket.stopSoundAt = SystemClock.uptimeMillis(); DictationSounds.play(SoundCue.Stop) }
+        }
         ticket.recorded = count
         val span = speechSpan(edges.first, edges.last, count, rate)
         // Only with "setprop log.tag.HexSpeech DEBUG": how much audio arrived, never the audio or its words.

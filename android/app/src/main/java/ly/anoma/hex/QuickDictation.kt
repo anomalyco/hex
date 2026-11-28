@@ -17,6 +17,7 @@ import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.addCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -133,13 +134,15 @@ class QuickDictationActivity : ComponentActivity(), OfflineScreen {
         enableEdgeToEdge()
         window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         window.setDimAmount(0.32f)
-        capture = MicCapture(LocalSpeech(applicationContext), DictationPlace.QuickSettings,
+        capture = MicCapture(applicationContext, LocalSpeech(applicationContext), DictationPlace.QuickSettings,
             update = { next, reason -> phase = next; note = speechNote(reason); window.keepAwake(next) },
             meter = {}, insert = { text, _, _, _ -> copy(text) })
         setContent {
-            QuickSheet(phase, note, copied, micNeedsSettings, dismiss = ::close, primary = ::primary,
+            QuickSheet(phase, note, copied, micNeedsSettings, dismiss = { close(sound = true) }, primary = ::primary,
                 settings = { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) })
         }
+        // Back discards like Cancel, with Labs › Dictation sounds' cancel sound.
+        onBackPressedDispatcher.addCallback(this) { close(sound = true) }
         if (savedInstanceState == null) begin()
     }
 
@@ -183,8 +186,9 @@ class QuickDictationActivity : ComponentActivity(), OfflineScreen {
         }
     }
 
-    private fun close() {
-        if (::capture.isInitialized) capture.cancel()
+    /** [sound]: the person's Cancel or a tap outside, which plays Labs › Dictation sounds' cancel sound. */
+    private fun close(sound: Boolean = false) {
+        if (::capture.isInitialized) capture.cancel(sound)
         finish()
     }
 

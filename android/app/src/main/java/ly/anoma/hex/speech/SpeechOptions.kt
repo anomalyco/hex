@@ -237,6 +237,13 @@ internal class SpeechPreferences(private val context: Context) {
         get() = prefs.getString("signatureText", Signature.DEFAULT_TEXT)
             ?.takeIf { Signature.textProblem(it) == null }?.trim() ?: Signature.DEFAULT_TEXT
         set(value) { prefs.edit().putString("signatureText", value).apply() }
+    // Labs › Dictation sounds, off by default (DictationSounds); the set is kept while the lab is off.
+    var dictationSounds: Boolean
+        get() = prefs.getBoolean("dictationSounds", false)
+        set(value) { prefs.edit().putBoolean("dictationSounds", value).apply() }
+    var soundSet: SoundSet
+        get() = SoundSet.matching(prefs.getString("soundSet", null))
+        set(value) { prefs.edit().putString("soundSet", value.name).apply() }
     fun options(nextEnglish: Boolean?): SpeechOptions {
         val translated = translation && translatable && (nextEnglish ?: true)
         // A translated dictation is English the model wrote: nothing learned applies to it, and it hints nothing.
