@@ -3,8 +3,8 @@
 One plain-Markdown file for AI assistants and search engines. Hex is a free,
 open-source voice appliance from Anomaly: local dictation, no-bot meeting
 transcription, screen capture, and a read-only MCP server for agents. Every
-claim here matches what Hex ships today; beta status is stated where it
-applies.
+claim here matches what Hex ships today; prerequisites and limits are stated
+where they apply.
 
 - Site: https://anoma.ly/hex/
 - Source: https://github.com/anomalyco/hex (MIT)
@@ -29,10 +29,9 @@ only.
 
 ## Platforms and requirements
 
-- macOS 15 or later on Apple silicon. The stable build; Apple Speech is
-  available as a model.
-- Windows 10 and 11, x64 and ARM64. Beta.
-- Linux, x86_64 and aarch64. Beta. X11 and compatible Wayland desktops through
+- macOS 15 or later on Apple silicon. Apple Speech is available as a model.
+- Windows 10 and 11, x64 and ARM64.
+- Linux, x86_64 and aarch64. X11 and compatible Wayland desktops through
   portals; see the Linux guide for the exact input and clipboard paths.
 - iOS 18 or later: Hex's keyboard, on the App Store.
 - Android 12 or later: Hex Preview, outside Google Play.
@@ -52,13 +51,13 @@ brew install --cask anomalyco/tap/hex
 # https://anoma.ly/hex/download/macos-arm64-dmg
 ```
 
-Windows beta (x64; use windows-arm64-setup for ARM64):
+Windows (x64; use windows-arm64-setup for ARM64):
 
 ```
 https://anoma.ly/hex/download/windows-x64-setup
 ```
 
-Linux beta:
+Linux:
 
 ```sh
 curl -fsSL https://anoma.ly/hex/install-linux.sh | sh
@@ -279,7 +278,7 @@ each, at https://anoma.ly/hex/labs. Stable builds never list Dev-only labs.
 
 ## Linux
 
-Hex for Linux is in beta on x86_64 (with AVX2) and ARM64, with glibc 2.36 or
+Hex for Linux needs x86_64 (with AVX2) or ARM64, with glibc 2.36 or
 later. It works on X11 and Wayland. On Wayland it pastes with `wtype` and
 `wl-copy` on wlroots compositors (Hyprland, Sway) and niri, and through the
 RemoteDesktop portal on GNOME and KDE Plasma. Shortcuts come from the
@@ -304,8 +303,8 @@ November 28, 2026, and says when the other app may fit better.
   models. Superwhisper is closed source and free with local Whisper models;
   Parakeet, cloud models, and AI modes are in Pro. Its Linux app is Wayland
   only, and its meetings, CLI, and MCP are Mac only. Hex includes Parakeet for
-  free, works on X11 and Wayland, and has meetings (Windows and Linux in beta),
-  the CLI, and `hex mcp` on Mac, Windows, and Linux. Superwhisper runs on
+  free, works on X11 and Wayland, and has meetings, the CLI, and `hex mcp` on
+  Mac, Windows, and Linux. Superwhisper runs on
   Intel Macs and macOS 14; Hex needs Apple silicon and macOS 15.
 
 ## Common questions

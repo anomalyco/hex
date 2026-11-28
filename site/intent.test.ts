@@ -1,6 +1,6 @@
 // The comparison pages, Hex for Linux, and the crawlable half of Meetings:
 // prerendered and complete, their questions word for word in their FAQPage,
-// honest about where Hex is in beta, and linked from the landing page.
+// honest about platforms and limits, and linked from the landing page.
 import { expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { COMPARISONS, renderComparison, SUPERWHISPER, WISPR_FLOW } from "./src/compare"
@@ -71,13 +71,13 @@ test("the comparisons state the facts each side's pages state", () => {
     expect(wispr).toContain(fact)
   }
   const superwhisper = text(renderComparison(SUPERWHISPER, ORIGIN))
-  for (const fact of ["$8.49 a month", "$249.99 once", "Wayland only", "macOS 14", "Parakeet Free Pro", "Hex is in beta on both"]) {
+  for (const fact of ["$8.49 a month", "$249.99 once", "Wayland only", "macOS 14", "Parakeet Free Pro", "x86_64 and ARM64"]) {
     expect(superwhisper).toContain(fact)
   }
   // Superwhisper ships on Linux and has a CLI and MCP on the Mac; the page must not say otherwise.
   expect(superwhisper).not.toMatch(/Superwhisper[^.]*(no Linux|not on Linux|Mac and iOS only)/)
   for (const page of [wispr, superwhisper]) {
-    expect(page).toContain("Windows and Linux in beta")
+    expect(page).toContain("Mac, Windows, and Linux")
     expect(page).not.toContain("—")
   }
 })

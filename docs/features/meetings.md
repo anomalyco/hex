@@ -175,7 +175,7 @@ refuses to start without either grant and asks macOS for System Audio Recording.
 ## Linux and Windows
 
 The same controller, recorder, transcript pipeline, store, pane, capsules,
-and notes run on the Linux and Windows betas (in the sidebar, off by default). Only these
+and notes run on both Linux and Windows (in the sidebar, off by default). Only these
 adapters differ ([meeting/linux.rs](../../src/meeting/linux.rs),
 [meeting/windows.rs](../../src/meeting/windows.rs),
 [microphone_activity/linux.rs](../../src/microphone_activity/linux.rs),

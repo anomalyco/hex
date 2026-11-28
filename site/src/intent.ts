@@ -27,8 +27,6 @@ export const STYLE = `
 .vs__art img { display: block; width: 100%; height: auto; }
 .vs__vs { color: #5f6065; font-weight: 500; }
 .intent .actions { margin-top: 32px; }
-.pill { display: inline-block; margin: 0 0 0 6px; padding: 0 7px; border: 1px solid rgba(242, 242, 239, 0.16); border-radius: 999px; color: #a3a4a9; font-size: 11px; font-weight: 500; letter-spacing: 0.03em; line-height: 17px; vertical-align: 1px; white-space: nowrap; }
-.eyebrow .pill { margin-left: 8px; }
 .compare { width: 100%; margin: 28px 0 0; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
 .compare col.compare__label { width: 9.5rem; }
 .compare th, .compare td { padding: 14px 18px 14px 0; border-top: 1px solid var(--line); font-size: 15px; line-height: 1.5; text-align: left; vertical-align: top; text-wrap: pretty; }

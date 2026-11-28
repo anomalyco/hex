@@ -5,15 +5,15 @@
 - Author: Anomaly (https://anoma.ly)
 - Source: https://github.com/anomalyco/hex (MIT)
 - Price: free. No account, no subscription, no word limit
-- Runs: macOS 15 or later on Apple silicon; Windows 10 and 11 beta (x64 and ARM64); Linux beta (x86_64 and aarch64); iOS 18 or later; Android 12 or later (Hex Preview)
+- Runs: macOS 15 or later on Apple silicon; Windows 10 and 11 (x64 and ARM64); Linux (x86_64 and aarch64); iOS 18 or later; Android 12 or later (Hex Preview)
 - Privacy: dictation audio, meeting audio, transcripts, and history stay on the machine. No account, no cloud transcription, no telemetry in the app
 - Offline: download a model once, then dictation and meeting transcription work with no network
 
 ## Get Hex
 
 - Mac: https://anoma.ly/hex/download/macos-arm64-dmg, or `brew install --cask anomalyco/tap/hex`
-- Windows beta: https://anoma.ly/hex/download/windows-x64-setup (ARM64: https://anoma.ly/hex/download/windows-arm64-setup)
-- Linux beta: `curl -fsSL https://anoma.ly/hex/install-linux.sh | sh`; packages and binaries at https://anoma.ly/hex
+- Windows: https://anoma.ly/hex/download/windows-x64-setup (ARM64: https://anoma.ly/hex/download/windows-arm64-setup)
+- Linux: `curl -fsSL https://anoma.ly/hex/install-linux.sh | sh`; packages and binaries at https://anoma.ly/hex
 - iPhone: https://anoma.ly/hex/iphone · Android: https://anoma.ly/hex/android
 - Every release, with notes: https://anoma.ly/hex/changelog
 
@@ -38,7 +38,7 @@
 - [Managed settings](https://anoma.ly/hex/docs/admin.md): macOS configuration-profile keys that turn Meetings, Annotate, OpenCode processing, transforms, Labs, and updates off
 - [CLI and transcripts](https://github.com/anomalyco/hex/blob/dev/docs/transcript-cli.md): `hex history`, `hex meetings list|show|chapters|search`, and `hex mcp --meetings-dir`
 - [Control CLI](https://github.com/anomalyco/hex/blob/dev/docs/cli.md): status, dictation, settings, models, and the local API
-- [Windows](https://github.com/anomalyco/hex/blob/dev/docs/windows.md) and [Linux](https://github.com/anomalyco/hex/blob/dev/docs/linux.md): each beta's setup and limits
+- [Windows](https://github.com/anomalyco/hex/blob/dev/docs/windows.md) and [Linux](https://github.com/anomalyco/hex/blob/dev/docs/linux.md): each platform's setup and limits
 - [TypeScript SDK](https://github.com/anomalyco/hex/blob/dev/sdk/typescript/README.md): `@kitlangton/hex` for local transcription in another app
 
 ## For agents
