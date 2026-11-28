@@ -89,6 +89,7 @@
             "description": "A short demo of Hex turning speech into text on the machine it runs on.",
             "thumbnailUrl": "__ORIGIN__/og.png",
             "contentUrl": "__ORIGIN__/og.mp4",
+            "uploadDate": "2026-10-21T12:14:56-07:00",
             "publisher": { "@id": "__ORIGIN__/#org" }
           },
           {
@@ -97,10 +98,10 @@
             "mainEntity": [
               {
                 "@type": "Question",
-                "name": "Is Hex really free?",
+                "name": "Is Hex free?",
                 "acceptedAnswer": {
                   "@type": "Answer",
-                  "text": "Yes. Hex is open source under the MIT license. There is no account, no subscription, and no word limit."
+                  "text": "Yes. Hex is free and open source under the MIT license, with no account, subscription, or word limit."
                 }
               },
               {
@@ -108,7 +109,7 @@
                 "name": "Does Hex work offline?",
                 "acceptedAnswer": {
                   "@type": "Answer",
-                  "text": "Yes. Hex downloads a speech model once, then turns speech into text on your own machine. Dictation and meeting transcription keep working with no internet connection."
+                  "text": "Yes. After a one-time model download, dictation and meeting transcription run entirely on your machine."
                 }
               },
               {
@@ -116,7 +117,7 @@
                 "name": "Which speech models does Hex run?",
                 "acceptedAnswer": {
                   "@type": "Answer",
-                  "text": "Local Parakeet and Whisper models, plus Apple Speech on the Mac. Download a catalog model or add your own GGUF model in Settings."
+                  "text": "Local Parakeet and Whisper models, Apple Speech on the Mac, or your own GGUF model."
                 }
               },
               {
@@ -124,7 +125,7 @@
                 "name": "Does a bot join my meetings?",
                 "acceptedAnswer": {
                   "@type": "Answer",
-                  "text": "No. Hex records your microphone and your Mac's system audio itself, so there is no participant to invite and no bot in the call. The transcript and notes are written locally."
+                  "text": "No. Hex records your microphone and system audio itself, so there is no bot in the call."
                 }
               },
               {
@@ -132,7 +133,7 @@
                 "name": "Can my coding agent read my meetings?",
                 "acceptedAnswer": {
                   "@type": "Answer",
-                  "text": "Yes, through hex mcp, a read-only MCP server over stdio. It serves transcripts, search, chapters, and stored notes to OpenCode, Claude Code, Claude Desktop, Cursor, and other MCP clients."
+                  "text": "Yes. hex mcp is a read-only MCP server for OpenCode, Claude Code, Claude Desktop, and Cursor."
                 }
               },
               {
@@ -140,7 +141,7 @@
                 "name": "Where does my data go?",
                 "acceptedAnswer": {
                   "@type": "Answer",
-                  "text": "Nowhere. Audio and text stay on your machine. Hex keeps no dictation audio unless you turn on Keep recordings, and meeting transcripts stay in a folder you can delete."
+                  "text": "Nowhere. Audio, transcripts, and history stay on your machine."
                 }
               }
             ]

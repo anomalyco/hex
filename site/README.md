@@ -112,19 +112,25 @@ Playwright's isn't downloaded).
 
 ## Search and agents
 
-The landing page keeps its TV hero and puts the crawlable copy below it:
-`src/App.tsx`'s `details` section has an `h2` per subject and a FAQ, and
-`index.html` carries the matching `FAQPage`, `SoftwareApplication`,
-`Organization`, `WebSite`, and `VideoObject` graph. `seo.test.ts` checks the
-headings, the 450 to 550-word budget, and that every visible FAQ answer matches
-its structured copy.
+The landing page keeps its TV hero and puts the crawlable copy below it, on
+the install stack's width, hairlines, and text spine. `src/Below.tsx` is one
+spec sheet (four facts over a 2×2 of features, each an `h2`, one sentence, and
+a line of mono tags), the questions as closed native `<details>` (no script,
+every answer in the HTML), and the footer's links. `index.html` carries the
+matching `FAQPage`, `SoftwareApplication`, `Organization`, `WebSite`, and
+`VideoObject` graph. `seo.test.ts` checks the headings, that no paragraph
+there passes 22 words (260 in all), and that every visible question and answer
+is its structured copy word for word.
 
-`/hex/mcp` (`src/mcp.ts`, `scripts/mcp.ts`) is the MCP page: setup for
-OpenCode, Claude Code, Claude Desktop, and Cursor, and the five tools
-`src/meeting/mcp.rs` serves. `public/llms.txt` is the agent index,
-`public/llms-full.txt` the single-file reference, and `public/skill.md` the
-skill an agent loads. `public/sitemap.xml` lists the static routes and each
-build script adds its own pages.
+`/hex/mcp` (`src/mcp.ts`, `scripts/mcp.ts`) is the MCP page: where `hex` is on
+macOS, Windows, and Linux, one tab per client (OpenCode, Claude Code, Claude
+Desktop, Cursor; radio buttons and CSS, with every card in one grid cell so a
+tab never moves the page), and the five tools `src/meeting/mcp.rs` serves. Its
+one script only reveals the copy buttons and makes them work.
+`public/llms.txt` is the agent index, `public/llms-full.txt` the single-file
+reference, and `public/skill.md` the skill an agent loads.
+`public/sitemap.xml` lists the static routes and each build script adds its
+own pages.
 
 Canonicals, social tags, and sitemap URLs always name `anoma.ly` even in a dev
 build (`canonicalOriginForMode`). `worker.ts` puts `X-Robots-Tag: noindex,

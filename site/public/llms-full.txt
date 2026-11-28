@@ -20,8 +20,8 @@ release; Hex transcribes with a local speech model and pastes the text wherever
 the cursor is. It is free, open source, and works with no account and no network
 once a model is downloaded.
 
-Hex also records meetings without a bot. On the Mac it captures the microphone
-and the system audio itself, so there is no participant to invite and nothing
+Hex also records meetings without a bot. It captures the microphone and the
+system audio itself, so there is no participant to invite and nothing
 joins the call. Transcripts, live chapters, and stored notes stay in a local
 folder with a retention you choose. `hex mcp` exposes those recordings to
 OpenCode, Claude Code, Claude Desktop, Cursor, and any other MCP client, read
@@ -38,8 +38,9 @@ only.
 - Android 12 or later: Hex Preview, outside Google Play.
 
 The command line, read-only history and meetings queries, and `hex mcp` run on
-macOS, Linux, and Windows. Meeting recording runs on the Mac today; other
-machines can read a mirrored meetings folder with `--meetings-dir`.
+macOS, Linux, and Windows. Meetings is a beta on all three, turned on in
+Settings › Labs; another machine can read a mirrored meetings folder with
+`--meetings-dir`.
 
 ## Install
 
@@ -99,7 +100,8 @@ and `/streams` clients yield to it.
 ## Meetings, without a bot
 
 Meetings is Hex's local recorder for calls. It sees a call start, offers to
-record, and writes the result on the Mac.
+record, and writes the result on your machine. It is a beta on macOS, Windows,
+and Linux, off until you turn it on in Settings › Labs.
 
 - Captures the microphone ("You") and system audio ("Them") at the same time.
   Remote speakers are not separated.
