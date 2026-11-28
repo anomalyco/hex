@@ -143,6 +143,7 @@ class HexKeyboard : InputMethodService() {
         if (key == TypingPreferences.KEY_COLORS || key == TypingPreferences.KEY_COLOR) recolor()
         if (key == TypingPreferences.NUMBER_ROW) engine.numberRowChanged()
         if (key == TypingPreferences.SWIFTKEY_LAYOUT) engine.swiftKeyLayoutChanged()
+        if (key == TypingPreferences.COMPACT_GERMAN) engine.compactGermanChanged()
         if (key == TypingPreferences.LOCAL_CURRENCY) engine.localCurrencyChanged()
         if (key == TypingPreferences.EMOJI_SUGGESTIONS) engine.emojiSuggestionsChanged()
         if (key == TypingPreferences.KEYBOARD_TOOLS) { engine.keyboardToolsChanged(); watchClipboard() }

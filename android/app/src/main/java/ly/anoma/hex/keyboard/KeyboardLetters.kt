@@ -8,6 +8,9 @@ internal object KeyboardLetters {
         "es" to listOf("qwertyuiop", "asdfghjklñ", "zxcvbnm"),
         "nb" to listOf("qwertyuiopå", "asdfghjkløæ", "zxcvbnm"),
         "de" to listOf("qwertzuiopü", "asdfghjklöä", "yxcvbnm"),
+        // Labs › Keyboard › Compact German layout: Gboard's compact QWERTZ, ten keys on rows 1 and 2 and no
+        // umlaut keys; ä, ö and ü are held first on a, o and u (LetterFeedback).
+        COMPACT_GERMAN to listOf("qwertzuiop", "asdfghjkl", "yxcvbnm"),
         // Gboard's French AZERTY (Pixel 8 emulator): ten keys edge to edge on rows 1 and 2, and an
         // apostrophe key after n on row 3, between shift and delete.
         "fr" to listOf("azertyuiop", "qsdfghjklm", "wxcvbn'"),
@@ -17,6 +20,10 @@ internal object KeyboardLetters {
         // letter wide. ё is held on е and ъ on ь.
         "ru" to listOf("йцукенгшщзх", "фывапролджэ", "ячсмитьбю"),
     )
+
+    /** The letters' key for Labs › Keyboard › Compact German layout. Only the keys and their holds use it; the
+     * typing model, suggestions and autocorrect stay German's ("de"). */
+    const val COMPACT_GERMAN = "de-compact"
 
     /** The number row's digits, in the order Gboard's row 1 holds them. */
     const val DIGITS = "1234567890"

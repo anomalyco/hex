@@ -378,7 +378,6 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         page.pad?.let { showPad(page, it); return }
         bottom.visibility = VISIBLE
         layBottom(page)
-        val language = page.language
         val symbols = page.symbols
         val currency = page.currency
         val letterHolds = !symbols && letterSymbols
@@ -454,7 +453,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                 }
                 k.hint(digit?.toString() ?: symbol?.toString())
                 fun holds() = if (symbols) LetterFeedback.symbolHolds(c, currency)
-                    else LetterFeedback.holds(cased(c).single(), language.layoutCode, digit, letterHolds,
+                    else LetterFeedback.holds(cased(c).single(), page.letterLayout, digit, letterHolds,
                         topRow = index == 0, currency = currency, swiftKey = swift)
                 if (holds().isNotEmpty()) {
                     k.setOnLongClickListener { host.openAccents(holds(), it); true }
@@ -1026,7 +1025,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         grid?.let { return it }
         // The pitch from the layout's own first two keys and the row under them: on AZERTY, q, w and a sit on
         // other rows (160 x -155 px instead of 107 x 155). The apostrophe is no letter for the touch model.
-        val rows = KeyboardLetters.rows((current ?: return null).language.layoutCode)
+        val rows = KeyboardLetters.rows((current ?: return null).letterLayout)
         val first = letters[rows[0][0]] ?: return null; val next = letters[rows[0][1]] ?: return null; val below = letters[rows[1][0]] ?: return null
         if (first.width == 0 || next.left == first.left) return null
         val centres = letters.filterKeys { it.isLetter() }.mapValues { (_, cap) -> capCentre(cap) }
