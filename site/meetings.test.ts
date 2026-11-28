@@ -50,6 +50,7 @@ test("/hex/meetings redirects to its trailing-slash address", async () => {
 })
 
 test("the landing page links Meetings in the header and the footer", () => {
-  const app = readFileSync(new URL("./src/App.tsx", import.meta.url), "utf8")
-  expect(app.match(/meetings\/`\}>\s*Meetings/g)?.length).toBe(2)
+  const source = (name: string) => readFileSync(new URL(`./src/${name}`, import.meta.url), "utf8")
+  expect(source("App.tsx").match(/meetings\/`\}>\s*Meetings/g)?.length).toBe(1)
+  expect(source("Below.tsx")).toContain('<a href={withBase("/meetings/")}>Meetings</a>')
 })

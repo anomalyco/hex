@@ -5,7 +5,8 @@ import { expect, test } from "bun:test"
 import { existsSync, readFileSync } from "node:fs"
 import worker from "./worker"
 import { canonicalOriginForMode, originForMode, PRODUCTION_HOST } from "./src/base"
-import { MCP_PATH, renderMcp } from "./src/mcp"
+import { escape } from "./src/labs"
+import { CONFIG_OPENCODE, MCP_PATH, renderMcp } from "./src/mcp"
 import { render } from "./src/prerender"
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8")
@@ -25,40 +26,55 @@ function textOf(markup: string): string {
 
 const details = rendered.slice(rendered.indexOf('<section class="details"'), rendered.indexOf("<footer"))
 const detailsText = textOf(details)
+const footer = rendered.slice(rendered.indexOf("<footer"))
+const words = (text: string) => text.split(" ").filter(Boolean).length
 
 test("the landing page says what it is below the fold, in real headings", () => {
   for (const [id, heading] of [
-    ["dictation", "Voice dictation that stays on your machine."],
-    ["meetings", "Meetings without a bot."],
-    ["tools", "Screenshots, transforms, and the command line."],
-    ["faq", "Questions people ask."],
+    ["dictation", "Offline dictation"],
+    ["meetings", "Meetings without bots"],
+    ["annotate", "Annotate &amp; transforms"],
+    ["cli", "CLI &amp; MCP"],
   ]) {
-    expect(rendered).toContain(`<h2 id="${id}">${heading}</h2>`)
+    expect(details).toContain(`<h2 id="${id}">${heading}</h2>`)
   }
-  expect(detailsText).toContain("Voice dictation that stays on your machine.")
-  expect(detailsText).toContain("Meetings without a bot.")
-  expect(detailsText).toContain("Screenshots, transforms, and the command line.")
-  expect(detailsText).toContain("Questions people ask.")
+  expect(details).toContain('<h2 class="stack__title" id="faq">Questions</h2>')
+  expect(details.match(/<h2/g)).toHaveLength(5)
 })
 
 test("the below-the-fold copy names the product category and its facts", () => {
   for (const phrase of [
-    "open-source voice dictation",
-    "Parakeet or Whisper",
-    "Audio never leaves the machine",
-    "microphone and your Mac's system audio",
-    "no participant to invite and no bot in the call",
+    "Open source",
+    "MIT licensed",
+    "Offline",
+    "Private",
+    "Free",
+    "A local model types what you said",
+    "Parakeet",
+    "Whisper",
+    "Apple Speech",
+    "your Mac's system audio",
+    "No bot joins the call",
     "hex.config.ts",
+    "hex transcribe",
     "hex mcp",
   ]) {
     expect(detailsText).toContain(phrase)
   }
 })
 
-test("the below-the-fold copy is a concise 450 to 550 words", () => {
-  const words = detailsText.split(" ")
-  expect(words.length).toBeGreaterThanOrEqual(450)
-  expect(words.length).toBeLessThanOrEqual(550)
+// The section is a spec sheet, not an essay: a wall of prose here fails.
+test("the below-the-fold copy stays short enough to scan", () => {
+  expect(words(detailsText)).toBeLessThanOrEqual(260)
+  const paragraphs = [...details.matchAll(/<p>([\s\S]*?)<\/p>/g)].map((match) => textOf(match[1]))
+  expect(paragraphs).toHaveLength(10)
+  for (const paragraph of paragraphs) expect(words(paragraph)).toBeLessThanOrEqual(22)
+})
+
+test("the questions are closed <details> that need no script", () => {
+  expect(details.match(/<details>/g)).toHaveLength(6)
+  expect(details).not.toContain("<details open")
+  expect(details.match(/<summary>/g)).toHaveLength(6)
 })
 
 test("the structured data is one graph with the app, site, video, and FAQ", () => {
@@ -74,9 +90,8 @@ test("the structured data is one graph with the app, site, video, and FAQ", () =
   const faq = graph[4] as { mainEntity: Array<{ name: string; acceptedAnswer: { text: string } }> }
   expect(faq.mainEntity).toHaveLength(6)
   for (const question of faq.mainEntity) {
-    expect(detailsText).toContain(question.name)
-    // The visible answer and the structured one are the same words.
-    expect(detailsText).toContain(question.acceptedAnswer.text.split(".")[0])
+    // The visible question and answer are the structured ones, word for word.
+    expect(detailsText).toContain(`${question.name} ${question.acceptedAnswer.text}`)
   }
 })
 
@@ -87,10 +102,11 @@ test("canonicals and the sitemap always name production, even in a dev build", (
   expect(canonicalOriginForMode("production")).toBe("https://anoma.ly/hex")
 })
 
-test("the landing page links the MCP page from the footer and the copy", () => {
-  const app = read("./src/App.tsx")
-  expect(app).toContain("mcp`}>MCP</a>")
-  expect(app.match(/BASE_URL}mcp/g)?.length).toBeGreaterThanOrEqual(3)
+test("the landing page links the MCP page from the copy and every page from the footer", () => {
+  expect(details.match(/href="\/hex\/mcp"/g)?.length).toBeGreaterThanOrEqual(2)
+  for (const href of ["/hex/changelog", "/hex/meetings/", "/hex/mcp", "/hex/iphone", "/hex/android", "https://github.com/anomalyco/hex", "/hex/llms.txt"]) {
+    expect(footer).toContain(`href="${href}"`)
+  }
 })
 
 test("the MCP page is prerendered, complete, and truthful about the tools", () => {
@@ -106,11 +122,33 @@ test("the MCP page is prerendered, complete, and truthful about the tools", () =
   expect(page).toContain("claude mcp add hex -- hex mcp")
   expect(page).toContain("mcpServers")
   expect(page).toContain("hex-meeting://")
+  // OpenCode's config nests servers under mcp.servers.
+  expect(JSON.parse(CONFIG_OPENCODE)).toEqual({ mcp: { servers: { hex: { type: "local", command: ["hex", "mcp"] } } } })
+  expect(page.includes(`<pre><code>${escape(CONFIG_OPENCODE)}</code></pre>`)).toBe(true)
+  expect(page.includes("opencode mcp add hex -- hex mcp")).toBe(true)
   // Names the server does not have.
   expect(page).not.toContain("get_meeting<")
   expect(page).not.toContain("search_meetings")
   const ld = page.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)?.[1]
   expect((JSON.parse(ld as string) as { "@type": string })["@type"]).toBe("SoftwareApplication")
+})
+
+test("the MCP page says where hex is on macOS, Windows, and Linux", () => {
+  const page = renderMcp("https://anoma.ly/hex")
+  for (const path of ["/Applications/Hex.app/Contents/MacOS/hex", "%APPDATA%\\hex\\bin\\hex.com", "~/.local/bin/hex", "/usr/bin/hex", "%APPDATA%\\Claude\\", "~/Library/Application Support/Claude/", "%USERPROFILE%"]) {
+    expect([path, page.includes(path)]).toEqual([path, true])
+  }
+  for (const os of ["macOS", "Windows", "Linux"]) expect([os, page.includes(`<span class="row__label">${os}</span>`)]).toEqual([os, true])
+})
+
+test("the MCP page works without scripts: CSS tabs, and copy buttons only a script reveals", () => {
+  const page = renderMcp("https://anoma.ly/hex")
+  expect(page.match(/<input type="radio" name="client"/g)).toHaveLength(4)
+  expect(page.match(/<input type="radio" name="client"[^>]* checked>/g)).toHaveLength(1)
+  const buttons = page.match(/<button [^>]*>/g) ?? []
+  expect(buttons).toHaveLength(7)
+  for (const button of buttons) expect(button).toMatch(/ hidden>$/)
+  expect(page.match(/<script>/g)).toHaveLength(1)
 })
 
 test("every agent file exists and points at every new page", () => {
