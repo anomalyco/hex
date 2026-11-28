@@ -1,32 +1,21 @@
 //! The capsule that says a recording started on its own while the recording
-//! indicator is off. Its icon slot is the call-ended capsule's: the call
-//! app's icon, with what the recording is doing on it. Here that is the red
-//! dot of a live recording on the icon's corner; there it is the ring that
-//! drains to an automatic stop.
+//! indicator is off: the call app's icon, clean, nested in the left corners
+//! as the call-ended capsule's is, then "● Recording" over the call and its time, then a calm
+//! Stop and ✕. Keeping the recording is the happy path, so nothing is loud.
 
 use rune::{Cursor, El, el, row, text};
-use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
 use super::super::controls::{CAPSULE, Paint};
-use super::call_ended::{BODY_PL, ICON_SIZE, RING_SIZE, app_icon};
-use super::{CAPSULE_INSET, Capsule, REC_DOT, button, panel_radius, presence};
+use super::call_ended::{BODY_GAP, BODY_PY, ICON_INSET, LINES_LIFT, app_icon};
+use super::{CAPSULE_INSET, Capsule, button, panel_radius, presence};
 use crate::desktop::i18n::tr;
 use crate::meeting::watcher::ControllerCommand;
 
-/// The capsule's ground round the dot, so the dot reads as its own mark
-/// where it overlaps the icon.
-const KNOCKOUT: f32 = 2.0;
-/// The dot and its ring.
-const BADGE: f32 = REC_DOT + 2.0 * KNOCKOUT;
-/// The dot's centre, in from the icon's bottom-right corner: on the corner's
-/// own curve.
-const BADGE_INSET: f32 = 2.0;
-/// The badge's origin in the icon slot.
-const BADGE_AT: f32 = (RING_SIZE + ICON_SIZE) / 2.0 - BADGE_INSET - BADGE / 2.0;
-
-// The 26 pt icon spans 5..31 of the 36 pt slot: the 12 pt badge starts at 23
-// and stays inside the slot.
-const _: () = assert!(BADGE == 12.0 && BADGE_AT == 23.0 && BADGE_AT + BADGE <= RING_SIZE);
+/// The capsule's width: the icon, two short lines, Stop and ✕, with no
+/// empty middle.
+pub(super) const PANEL_WIDTH: f32 = 300.0;
+/// The live dot before "Recording", a status dot's size.
+const LIVE_DOT: f32 = 6.0;
 
 /// The automatic-recording capsule in its window: the call app's icon and
 /// the live dot, what is being recorded, then Stop and ✕. Dismissing leaves
@@ -39,27 +28,30 @@ pub(super) fn view(
     icon: Option<&rune::Pixels>,
 ) -> El {
     let c = &p.k.c;
-    let heading = tr("Recording automatically");
-    let badge = row()
-        .key("ring")
-        .size(RING_SIZE, RING_SIZE)
-        .center()
-        .child(app_icon(p, app, icon))
-        .child(live_dot(p));
+    let heading = tr("Recording");
+    let subtitle = subtitle(title);
     let lines = rune::col()
         .key("lines")
         .grow(1.0)
         .min_w(0.0)
+        .pb(LINES_LIFT)
         .child(
-            text(heading.to_owned())
-                .key("title")
-                .truncate()
-                .font(p.strong())
-                .color(p.text())
-                .a11y_hidden(),
+            row()
+                .key("title-line")
+                .gap(6.0)
+                .center_y()
+                .child(live_dot(p))
+                .child(
+                    text(heading.to_owned())
+                        .key("title")
+                        .truncate()
+                        .font(p.strong())
+                        .color(p.text())
+                        .a11y_hidden(),
+                ),
         )
-        .children((!title.is_empty()).then(|| {
-            text(title.to_owned())
+        .children((!subtitle.is_empty()).then(|| {
+            text(subtitle.clone())
                 .key("subtitle")
                 .truncate()
                 .font(p.meta())
@@ -67,29 +59,39 @@ pub(super) fn view(
         }));
     let actions = row()
         .key("actions")
-        .gap(8.0)
+        .gap(CAPSULE.button_inset)
         .center_y()
-        .child(button(p, "stop", tr("Stop"), true, |c| {
+        // Keeping the recording is the happy path: Stop is a calm neutral
+        // button, never the loud one.
+        .child(button(p, "stop", tr("Stop"), false, |c| {
             if c.send(ControllerCommand::Stop) {
                 c.close();
             }
         }))
-        .child(dismiss_button(p));
+        // As tall as Stop, so it stands 6 pt from the top, the bottom and
+        // the end wall, and the two are one row of one height.
+        .child(dismiss_button(p, CAPSULE.row_h));
     let body = row()
         .key("pill")
         .role("status")
-        .label(heading)
+        .label(if subtitle.is_empty() {
+            heading.to_owned()
+        } else {
+            format!("{heading}, {subtitle}")
+        })
         .w_full()
         .h_full()
         .center_y()
-        .pl(BODY_PL)
-        // The ✕ is centred on the icon spine, like every capsule's.
-        .pr(CAPSULE.icon_spine() - CAPSULE.close / 2.0)
-        .gap(12.0)
+        // The icon nests in the left corners: as far from the left wall as
+        // from the top and bottom, its corners turning about the body's.
+        .pl(ICON_INSET)
+        // The ✕ box sits on the capsules' 6 pt inset, like every one.
+        .pr(CAPSULE.button_inset)
+        .gap(BODY_GAP)
         .radius(panel_radius(p))
         .fill(c.bg_base)
         .border(p.hair, c.border_base)
-        .child(badge)
+        .child(app_icon(p, app, icon))
         .child(lines)
         .child(actions)
         .hit()
@@ -100,48 +102,72 @@ pub(super) fn view(
         .w_full()
         .h_full()
         .px(CAPSULE_INSET)
-        .py(CAPSULE_INSET)
+        .py(BODY_PY)
         .child(presence::anchored(capsule, body))
 }
 
-/// The ✕ that closes a capsule whose actions have no way to, in every
-/// capsule's 28 pt close box. It only hides the capsule: nothing is sent to
-/// the controller (#996).
-pub(super) fn dismiss_button(p: Paint) -> El {
-    let close = IconButton::new(&rune_theme_opencode::icons::CLOSE_SMALL)
-        .variant(IconButtonVariant::GhostMuted)
-        .control_size(ControlSize::Small)
+/// The ✕ that closes a capsule whose actions have no way to, in a square
+/// box `side` wide: a panel's 28 pt close box, or a banner's 32 pt action
+/// row. It only hides the capsule: nothing is sent to the controller (#996).
+/// The box rounds 8 pt, concentric with the capsule across its 6 pt inset.
+pub(super) fn dismiss_button(p: Paint, side: f32) -> El {
+    row()
+        .key("close-box")
+        .size(side, side)
+        .center()
+        .radius(CAPSULE.inner(CAPSULE.button_inset))
+        .hover(p.k.c.hover)
+        .press(p.k.c.pressed)
+        .role("button")
         .label(tr("Close"))
-        .build(p.k)
-        .key("dismiss")
+        .focusable(true)
+        .focus_ring(2., -2., p.k.c.border_focus)
         .cursor(Cursor::Pointer)
         .no_window_drag()
+        .hit()
         .on_press_tx(|c: &mut Capsule, tx| {
             c.close();
             c.stir(tx);
-        });
-    row()
-        .key("close-box")
-        .size(CAPSULE.close, CAPSULE.close)
-        .center()
-        .child(close)
+        })
+        .child(
+            rune::icon(&rune_theme_opencode::icons::CLOSE_SMALL, 16.0)
+                .key("dismiss")
+                .color(p.muted())
+                .a11y_hidden(),
+        )
 }
 
-/// The recording dot on the icon's bottom-right corner, ringed by the
-/// capsule's ground.
+/// The live recording dot before "Recording", on its own line rather than
+/// over the app icon's edge.
 fn live_dot(p: Paint) -> El {
-    row()
-        .key("live")
-        .absolute(BADGE_AT, BADGE_AT)
-        .size(BADGE, BADGE)
-        .center()
-        .radius(BADGE / 2.0)
-        .fill(p.k.c.bg_base)
+    el().key("rec-dot")
+        .size(LIVE_DOT, LIVE_DOT)
+        .radius(LIVE_DOT / 2.0)
+        .fill(p.danger())
         .a11y_hidden()
-        .child(
-            el().key("rec-dot")
-                .size(REC_DOT, REC_DOT)
-                .radius(REC_DOT / 2.0)
-                .fill(p.danger()),
-        )
+}
+
+/// The call and its time as the capsule says them: "Slack Huddle · 2:30 PM"
+/// for "Slack Huddle call — 2:30 PM", no dash and no "call".
+fn subtitle(title: &str) -> String {
+    title
+        .replace(" call — ", " · ")
+        .replace(" — ", " · ")
+        .trim()
+        .to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::subtitle;
+
+    #[test]
+    fn the_subtitle_drops_the_dash_and_the_word_call() {
+        assert_eq!(
+            subtitle("Slack Huddle call — 2:30 PM"),
+            "Slack Huddle · 2:30 PM"
+        );
+        assert_eq!(subtitle("Design sync — 2:30 PM"), "Design sync · 2:30 PM");
+        assert_eq!(subtitle("Standup"), "Standup");
+    }
 }

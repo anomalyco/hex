@@ -77,6 +77,14 @@ impl Flow {
             },
             (Phase::Recording { .. }, Id::Finish) => vec![Action::Finish],
             (Phase::Recording { .. }, Id::Pen) => vec![Action::Pen],
+            // The source button opens the target chips on demand.
+            (Phase::Recording { discard_until, .. }, Id::Source) => {
+                self.phase = Phase::Recording {
+                    chips_until: Some(now + tuning::get().chips_open_s),
+                    discard_until: *discard_until,
+                };
+                Vec::new()
+            }
             // Discarding a recording takes a second click: ✕ asks first.
             (Phase::Recording { .. }, Id::Cancel | Id::Close) => {
                 self.phase = Phase::Recording {
@@ -249,17 +257,7 @@ impl Flow {
                 vec![Action::OpenRules]
             }
             (_, Id::Ask | Id::Search | Id::More) => self.input(Input::OpenList, now),
-            (_, Id::Row(row) | Id::Pick(row)) => self.input(Input::SendRow(row), now),
-            (_, Id::Next) => self.input(Input::Cycle(1), now),
-            // The toast's line is its one guess: a click sends it.
-            (
-                Phase::Routed(Routed {
-                    open: Some(open), ..
-                }),
-                Id::Done,
-            ) if !open.typing && tuning::get().flow == CapsuleFlow::Toast => {
-                self.input(Input::Send { always: false }, now)
-            }
+            (_, Id::Row(row)) => self.input(Input::SendRow(row), now),
             // ✕ beside "Sent to X" just closes, a rule's as a pick's.
             (_, Id::Close) => self.input(Input::Dismiss, now),
             _ => Vec::new(),

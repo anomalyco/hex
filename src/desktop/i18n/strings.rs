@@ -1118,4 +1118,7 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Already sent to {}", ["Już wysłano do {}", "已发送到 {}", "{} に送信済み", "Schon an {} gesendet", "Ya enviado a {}", "Вже надіслано до {}"]),
     ("OpenCode didn't answer", ["OpenCode nie odpowiedział", "OpenCode 没有响应", "OpenCode が応答しませんでした", "OpenCode hat nicht geantwortet", "OpenCode no respondió", "OpenCode не відповів"]),
     ("Caps Lock dictation", ["Dyktowanie Caps Lockiem", "Caps Lock 听写", "Caps Lock で音声入力", "Diktat mit der Feststelltaste", "Dictado con Bloq Mayús", "Диктування Caps Lock"]),
+    ("Suggested", ["Proponowane", "建议", "候補", "Vorschläge", "Sugerencias", "Запропоновані"]),
+    ("Recent", ["Ostatnie", "最近", "最近", "Zuletzt", "Recientes", "Нещодавні"]),
+    ("Search sessions…", ["Szukaj sesji…", "搜索会话…", "セッションを検索…", "Sitzungen suchen…", "Buscar sesiones…", "Шукати сесії…"]),
 ];

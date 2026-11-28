@@ -18,12 +18,12 @@ fn discard_room_at(width: f32, height: f32, longer: f32) -> f32 {
     (panel::DISCARD_ROOM * ((height - REST_HEIGHT) / ROW_HEIGHT).clamp(0., 1.)).min(grown)
 }
 
-/// Between the field's end and the time: the meter's gap, the recording dot,
-/// and the dot's gap.
-const CLOCK_LEAD: f32 = METER_GAP + REC_DOT + METER_GAP;
+/// Between the field's end and the time: the meter's gap, and the recording
+/// dot and its gap when it shows.
+const CLOCK_LEAD: f32 = METER_GAP + DOT_ROOM;
 
 /// The field across the open header, clear of the time and the ✕.
-const OPEN_FIELD: f32 = PANEL_WIDTH - 2. * REST_PX - METER_GAP - TIMER_WIDTH - panel::DISCARD_ROOM;
+const OPEN_FIELD: f32 = PANEL_WIDTH - REST_PL - REST_PX - METER_GAP - TIMER_WIDTH - panel::DISCARD_ROOM;
 
 /// Halfway from the resting field to `wide`, give or take half a point.
 fn halfway(wide: f32) -> f32 {
@@ -48,7 +48,7 @@ fn recording_in(corner: MeetingIndicatorCorner) -> Runtime<Capsule> {
 fn the_header_keeps_the_rows_inset_at_rest_open_and_finished() {
     use MeetingIndicatorCorner::*;
     let inset = PANEL_PAD + ROW_PX;
-    assert_eq!((REST_PX, REST_WIDTH), (16., 168.));
+    assert_eq!((REST_PL, REST_PX, REST_WIDTH), (12., 16., 150.));
     for corner in [TopLeft, TopRight, BottomLeft, BottomRight] {
         let mut rt = recording_in(corner);
         let [px, _, pw, ph] = laid_out(&rt, "pill");
@@ -56,7 +56,8 @@ fn the_header_keeps_the_rows_inset_at_rest_open_and_finished() {
         let [fx, _, _, _] = laid_out(&rt, "meeting-listening-field");
         let [tx, _, tw, _] = laid_out(&rt, "elapsed");
         // The pill's contents are as far from one wall as from the other.
-        assert_eq!((fx - px, px + pw - (tx + tw)), (inset, inset), "{corner:?} at rest");
+        // The field tucks FIELD_TUCK nearer its wall: its outer columns fade.
+        assert_eq!((fx - px, px + pw - (tx + tw)), (inset - FIELD_TUCK, inset), "{corner:?} at rest");
         let rest = (tx, tw);
 
         open_recording(&mut rt);
@@ -78,20 +79,15 @@ fn the_header_keeps_the_rows_inset_at_rest_open_and_finished() {
         let [hx, _, hw, _] = laid_out(&rt, "hint");
         // The rows' icons and their trailing words are that far in too.
         assert_eq!((gx - px, px + pw - (hx + hw)), (inset, inset), "{corner:?} open");
-        // The ✕ is centred on the icons' spine on the field's free side, and
-        // the field and time keep clear of it.
-        let [dx, _, dw, _] = laid_out(&rt, "discard-slot");
+        // The open header is the waveform and the time alone: no bare ✕
+        // beside them, so the field runs to the wall the time leaves.
         let [fx, _, fw, _] = laid_out(&rt, "meeting-listening-field");
         if corner.is_right() {
-            assert_eq!(dx + dw / 2. - px, panel::SPINE, "{corner:?}: the ✕ off the spine");
             assert_eq!(tx + tw, hx + hw, "{corner:?}: the time and the hint end apart");
-            assert_eq!(fx, dx + dw, "{corner:?}: the field and the ✕ apart");
         } else {
-            assert_eq!(px + pw - (dx + dw / 2.), panel::SPINE, "{corner:?}: the ✕ off the spine");
-            assert_eq!(tx + tw, dx, "{corner:?}: the time and the ✕ apart");
-            assert_eq!(fx, gx, "{corner:?}: the field and the icons start apart");
+            assert_eq!(fx + FIELD_TUCK, gx, "{corner:?}: the field and the icons start apart");
         }
-        assert_eq!(fw, PANEL_WIDTH - 2. * REST_PX - METER_GAP - TIMER_WIDTH - panel::DISCARD_ROOM);
+        assert_eq!(fw, PANEL_WIDTH - REST_PL - REST_PX - METER_GAP - TIMER_WIDTH);
 
         rt.update(|c, tx| {
             c.capture_stopped();
@@ -150,8 +146,9 @@ fn rows_that_can_both_be_filled_are_one_gap_apart() {
 #[test]
 fn the_field_widens_with_the_wall_one_whole_column_at_a_time() {
     let pitch = crate::rune_hud::dot_scope::Tuning::default().spacing;
-    let wide = PANEL_WIDTH - 2. * REST_PX - METER_GAP - TIMER_WIDTH - panel::DISCARD_ROOM;
-    assert_eq!((waveform::WIDTH, wide), (78., 140.));
+    let wide = PANEL_WIDTH - REST_PL - REST_PX - METER_GAP - TIMER_WIDTH - panel::DISCARD_ROOM;
+    // No bare ✕ beside the time leaves the field the whole open header.
+    assert_eq!((waveform::WIDTH, wide), (78., 180.));
     for name in ["whole", "interrupted", "close", "hundred", "notice", "reduced"] {
         let shots = replayed(name);
         let (mut widest, mut flights) = (0f32, 0);
@@ -169,8 +166,9 @@ fn the_field_widens_with_the_wall_one_whole_column_at_a_time() {
             widest = widest.max(w);
             // It ends beside the time, which never moves.
             assert!((x + w + CLOCK_LEAD - tx).abs() < 0.02, "{name} f{frame}: {x} + {w}, time {tx}");
-            // It starts no nearer the wall than the rows' icons do.
-            assert!(x - px > REST_PX - 0.02, "{name} f{frame}: {} from the wall", x - px);
+            // At rest it tucks FIELD_TUCK nearer its wall than the rows'
+            // icons; open, it starts on their rail.
+            assert!(x - px >= REST_PL - 0.02, "{name} f{frame}: {} from the wall", x - px);
             assert!(
                 w > waveform::WIDTH - 0.01 && w < wide + 0.01,
                 "{name} f{frame}: {w}"
@@ -184,7 +182,9 @@ fn the_field_widens_with_the_wall_one_whole_column_at_a_time() {
             // The dots keep their places from the time's side, and none is
             // drawn outside the field's place, let alone the pill.
             assert!((last - (x + w)).abs() < 0.02, "{name} f{frame}: last dot at {last}");
-            assert!(first > x - 0.02 && first > px + REST_PX - 0.02, "{name} f{frame}: {first}");
+            // At rest the field tucks FIELD_TUCK nearer its wall, so its
+            // first column can stand there.
+            assert!(first > x - 0.02 && first > px + REST_PL - 0.02, "{name} f{frame}: {first}");
             // While the wall is between its rests the field's free end is
             // the wall's motion, frame for frame.
             let flying = name != "notice"
@@ -197,10 +197,12 @@ fn the_field_widens_with_the_wall_one_whole_column_at_a_time() {
                 flights += 1;
                 // A sixth digit is 7.8 pt wide and counted as 8.
                 let (slack, longer) = if name == "hundred" { (0.25, 8.) } else { (0.03, 0.) };
+                // Its start sits between the resting tuck and the rows'
+                // rail; its free end is the wall's motion.
+                let left = x - px - discard_room_at(pw, ph, longer);
                 assert!(
-                    (x - px - REST_PX - discard_room_at(pw, ph, longer)).abs() < slack,
-                    "{name} f{frame}: {} from the wall",
-                    x - px
+                    (REST_PL - slack..=REST_PX + slack).contains(&left),
+                    "{name} f{frame}: {left} from the wall"
                 );
             }
         }
@@ -218,8 +220,8 @@ fn the_field_widens_with_the_wall_one_whole_column_at_a_time() {
         let shots = replayed(name);
         (shots[rest].columns.0, shots[open].columns.0)
     };
-    assert_eq!(columns("whole", 171, 250), (31, 54));
-    assert_eq!(columns("hundred", 19, 85), (31, 51));
+    assert_eq!(columns("whole", 171, 250), (31, 70));
+    assert_eq!(columns("hundred", 19, 85), (31, 67));
 }
 
 /// In a left corner the field kept its resting 78 pt in the open header and
@@ -227,7 +229,7 @@ fn the_field_widens_with_the_wall_one_whole_column_at_a_time() {
 #[test]
 fn a_left_corners_field_fills_the_header_and_the_time_rides_the_wall() {
     let pitch = crate::rune_hud::dot_scope::Tuning::default().spacing;
-    let wide = PANEL_WIDTH - 2. * REST_PX - METER_GAP - TIMER_WIDTH - panel::DISCARD_ROOM;
+    let wide = PANEL_WIDTH - REST_PL - REST_PX - METER_GAP - TIMER_WIDTH - panel::DISCARD_ROOM;
     for name in ["left", "left-stop", "left-notice"] {
         let shots = replayed(name);
         let (mut widest, mut flights, mut was) = (0f32, 0, None::<f32>);
@@ -246,7 +248,10 @@ fn a_left_corners_field_fills_the_header_and_the_time_rides_the_wall() {
             // never moves further in a frame than the wall can.
             assert!(tx + tw < wall - REST_PX + 0.03, "{name} f{frame}: {tx} + {tw}, wall {wall}");
             if let Some(tx_was) = was {
-                assert!((tx - tx_was).abs() < 24., "{name} f{frame}: {tx_was} → {tx}");
+                // Never further in a frame than the wall itself moved.
+                let [wpx, _, wpw, _] = shots[frame - 1].pill.unwrap_or([px, 0., pw, 0.]);
+                let wall_step = (wall - (wpx + wpw)).abs();
+                assert!((tx - tx_was).abs() <= wall_step.max(24.) + 0.05, "{name} f{frame}: {tx_was} → {tx}");
             }
             was = Some(tx);
             // While the wall is between its rests the time is its motion,
@@ -262,8 +267,8 @@ fn a_left_corners_field_fills_the_header_and_the_time_rides_the_wall() {
                 continue;
             };
             widest = widest.max(w);
-            // The field starts at the rows' inset and ends beside the time.
-            assert!((x - px - REST_PX).abs() < 0.02, "{name} f{frame}: {} from the wall", x - px);
+            // The field starts at its tucked inset and ends beside the time.
+            assert!((x - px - REST_PL).abs() < 0.02, "{name} f{frame}: {} from the wall", x - px);
             assert!((x + w + CLOCK_LEAD - tx).abs() < 0.02, "{name} f{frame}: {x} + {w}, time {tx}");
             let (columns, shift, _) = shot.columns;
             assert_eq!(columns, (w / pitch + 1e-3).floor() as usize + 1, "{name} f{frame}: {w}");
@@ -326,7 +331,7 @@ fn the_field_keeps_its_light_through_the_opening() {
         assert!(lit(shot) > 0.5 * lit(was), "f{frame}");
     }
     assert!(arrived >= 5, "{arrived}");
-    assert_eq!(shots[231].columns.0, 54);
+    assert_eq!(shots[231].columns.0, 70);
 }
 
 /// With a notice the resting pill is already the panel's width. The field
@@ -482,26 +487,32 @@ fn the_open_recordings_foot_opens_the_live_meeting() {
     assert_eq!(opened.lock().unwrap().len(), 2);
 }
 
-/// The automatic recording's capsule had a bare status dot and a larger ✕
-/// than every other capsule's.
+/// The automatic recording's capsule had a red dot hanging off its app
+/// icon's corner, a loud Stop, and a wide empty middle.
 #[test]
 fn an_automatic_recording_wears_its_apps_icon_the_live_dot_and_the_capsules_close() {
-    let (mut rt, _, _) = runtime(auto_started(), false, true, PANEL);
+    let size = (auto_started::PANEL_WIDTH, MEETING_PANEL_HEIGHT);
+    let (mut rt, _, _) = runtime(auto_started(), false, true, size);
     landed(&mut rt);
     let [px, py, pw, ph] = laid_out(&rt, "pill");
     let [ix, iy, iw, ih] = laid_out(&rt, "icon");
     assert_eq!((iw, ih), (call_ended::ICON_SIZE, call_ended::ICON_SIZE));
-    // The icon is centred in its 36 pt slot, as far from the left edge as
-    // from the top and bottom.
-    assert_eq!((ix - px, iy - py), (15., 15.));
-    assert_eq!(py + ph - (iy + ih), 15.);
-    // The dot's centre is 2 pt in from the icon's bottom-right corner.
-    let [dx, dy, dw, dh] = laid_out(&rt, "rec-dot");
-    assert_eq!((dw, dh), (REC_DOT, REC_DOT));
-    assert_eq!((dx + dw / 2., dy + dh / 2.), (ix + iw - 2., iy + ih - 2.));
-    // The ✕ is every capsule's: 28 pt, centred on the icon spine.
-    let [cx, _, cw, ch] = laid_out(&rt, "close-box");
-    assert_eq!((cw, ch), (CAPSULE.close, CAPSULE.close));
-    assert_eq!(px + pw - (cx + cw / 2.), panel::SPINE);
-    assert!(texts(&rt).contains(&"Recording automatically".to_string()));
+    // The icon sits centred in its slot, as far from the left as from the
+    // top and bottom.
+    assert_eq!(ix - px, iy - py);
+    assert_eq!(py + ph - (iy + ih), iy - py);
+    // The live dot leads "Recording" and never touches the icon.
+    let [dx, _, _, _] = laid_out(&rt, "rec-dot");
+    assert!(dx > ix + iw, "the dot at {dx} overlaps the icon ending at {}", ix + iw);
+    // The ✕ box is as tall as Stop beside it: the banner's 32 pt row, 6 pt
+    // in from the right, the top and the bottom.
+    let [cx, cy, cw, ch] = laid_out(&rt, "close-box");
+    assert_eq!((cw, ch), (CAPSULE.row_h, CAPSULE.row_h));
+    assert_eq!(px + pw - (cx + cw), CAPSULE.button_inset);
+    assert_eq!(cy - py, CAPSULE.button_inset);
+    let [_, sy, _, sh] = laid_out(&rt, "stop");
+    assert_eq!((sy, sh), (cy, ch));
+    let shown = texts(&rt);
+    assert!(shown.contains(&"Recording".to_string()), "{shown:?}");
+    assert!(shown.contains(&"Slack Huddle · 2:30 PM".to_string()), "{shown:?}");
 }

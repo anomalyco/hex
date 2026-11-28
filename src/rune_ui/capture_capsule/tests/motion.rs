@@ -16,7 +16,7 @@ fn scripts() -> Vec<Script> {
             name: "picker",
             beats: vec![
                 (0.2, stage(Stage::Recording)),
-                (0.2, In(Input::Chips)),
+                (0.2, Click(Id::Source)),
                 (1.2, Click(Id::Mode(Mode::Area))),
                 (2.0, Click(Id::Mode(Mode::Window))),
                 (2.8, Click(Id::Mode(Mode::Screen))),
@@ -29,7 +29,7 @@ fn scripts() -> Vec<Script> {
             name: "record-window",
             beats: vec![
                 (0.2, stage(Stage::Recording)),
-                (0.2, In(Input::Chips)),
+                (0.2, Click(Id::Source)),
                 (1.2, Click(Id::Mode(Mode::Window))),
                 // The pick's own recording: a window, so no chips.
                 (2.2, stage(Stage::Recording)),
@@ -45,7 +45,7 @@ fn scripts() -> Vec<Script> {
             beats: vec![
                 (0.1, In(Input::Phone(true))),
                 (0.2, stage(Stage::Recording)),
-                (0.2, In(Input::Chips)),
+                (0.2, Click(Id::Source)),
                 (1.6, Click(Id::Mode(Mode::Iphone))),
                 // The phone's capture takes the capsule over.
                 (1.9, stage(Stage::Recording)),
@@ -69,7 +69,7 @@ fn scripts() -> Vec<Script> {
         },
         Script {
             name: "chips-close",
-            beats: vec![(0.2, stage(Stage::Recording)), (1.0, In(Input::Chips))],
+            beats: vec![(0.2, stage(Stage::Recording)), (1.0, Click(Id::Source))],
             end: 5.6,
         },
         // Escape ends nothing while recording; ✕ asks, and Discard ends it.
@@ -108,7 +108,7 @@ fn scripts() -> Vec<Script> {
                 (0.2, stage(Stage::Transcribing)),
                 (1.2, In(Input::Routed(rule()))),
                 (2.4, stage(Stage::Recording)),
-                (2.6, In(Input::Chips)),
+                (2.6, Click(Id::Source)),
                 (3.4, Click(Id::Mode(Mode::Area))),
             ],
             end: 5.0,
@@ -168,10 +168,9 @@ fn scripts() -> Vec<Script> {
             ],
             end: 5.4,
         },
-        // Every flow's whole path (`HEX_CAPSULE_FLOW`): a recording that
-        // ⌥⇧S stops (the host's stages), the guesses come, one is picked (the toast's ⇥ then ⏎,
-        // the rest a digit), Sent with Undo, gone; then a saved rule sends
-        // on its own and leaves by itself.
+        // The whole path: a recording that ⌥⇧S stops (the host's stages),
+        // the guesses come, one is picked, Sent with Undo, gone; then a
+        // saved rule sends on its own and leaves by itself.
         Script {
             name: "flow",
             beats: flow_beats(),
@@ -187,20 +186,14 @@ fn scripts() -> Vec<Script> {
 
 fn flow_beats() -> Vec<(f64, Beat)> {
     let stage = |s| In(Input::Stage(s));
-    let toast = super::tuning::get().flow == super::tuning::CapsuleFlow::Toast;
     let mut beats = vec![
         (0.2, stage(Stage::Recording)),
         (1.6, stage(Stage::Stopping)),
         (1.8, stage(Stage::Transcribing)),
         (2.4, stage(Stage::Done)),
         (2.4, In(Input::Routed(guess()))),
+        (3.8, In(Input::SendRow(0))),
     ];
-    if toast {
-        beats.push((3.1, In(Input::Cycle(1))));
-        beats.push((3.8, In(Input::Send { always: false })));
-    } else {
-        beats.push((3.8, In(Input::SendRow(0))));
-    }
     beats.extend([
         (6.4, stage(Stage::Transcribing)),
         (7.0, stage(Stage::Done)),
@@ -587,20 +580,18 @@ fn capture_capsule_hover_snapshots() {
     }
 }
 
-/// Clicking any of the capsule's choices does what it says, in every flow:
-/// a suggestion, a search result, Search, Undo and the list it brings
-/// back, ✕, and each flow's picks. The tap's press
-/// arrives before the click, so a click on the list must not read as a
-/// click away from it.
+/// Clicking any of the capsule's choices does what it says: a suggestion,
+/// a search result, Search, Undo and the list it brings back, and ✕. The
+/// tap's press arrives before the click, so a click on the list must not
+/// read as a click away from it.
 #[test]
 fn clicks_on_the_capsule_do_what_they_say() {
-    use super::tuning::{self, CapsuleFlow};
     let routed = |route: Route| vec![processing_input(), Input::Routed(route)];
     let send = |to: &str| Action::Send {
         to: to.into(),
         always: None,
     };
-    tuning::with_flow(CapsuleFlow::List, || {
+    {
         let written = Input::Written {
             bundle: "marked.scrawl".into(),
             routing: true,
@@ -662,17 +653,6 @@ fn clicks_on_the_capsule_do_what_they_say() {
         let (mut rt, _) = live(routed(rule()));
         click_on(&mut rt, "close", 0);
         assert_eq!(rt.state.surface.pres, Pres::Hidden);
-    });
-    for flow in [
-        CapsuleFlow::Cursor,
-        CapsuleFlow::Notch,
-        CapsuleFlow::MenuBar,
-    ] {
-        tuning::with_flow(flow, || {
-            let (mut rt, actions) = live(routed(guess()));
-            click_on(&mut rt, "pick", 1);
-            assert_eq!(*actions.lock().unwrap(), vec![send("HEX")], "{flow:?}");
-        });
     }
 }
 
@@ -682,7 +662,6 @@ fn clicks_on_the_capsule_do_what_they_say() {
 /// and in the search.
 #[test]
 fn shift_marks_and_saves_the_row_under_the_pointer() {
-    use super::tuning::{self, CapsuleFlow};
     let always = |rt: &Runtime<CapsuleState>| -> Vec<String> {
         let Pres::Done(super::flow::Done {
             open: Some((_, list)),
@@ -696,7 +675,7 @@ fn shift_marks_and_saves_the_row_under_the_pointer() {
             .map(|dest| dest.name.clone())
             .collect()
     };
-    tuning::with_flow(CapsuleFlow::List, || {
+    {
         for search in [false, true] {
             let inputs = if search {
                 vec![processing_input(), Input::Routed(guess()), Input::OpenList]
@@ -720,7 +699,7 @@ fn shift_marks_and_saves_the_row_under_the_pointer() {
                 "search: {search}"
             );
         }
-    });
+    }
 }
 
 fn processing_input() -> Input {
@@ -755,7 +734,7 @@ fn capture_capsule_motion() {
     let only = std::env::var("HEX_CAPSULE_SCRIPTS").ok();
     // `HEX_CAPSULE_FRAMES=all` writes Reduce Motion's frames too.
     let reduced_frames = std::env::var("HEX_CAPSULE_FRAMES").is_ok_and(|v| v == "all");
-    top_line_from_env();
+    undo_from_env();
     let mut report = Vec::new();
     for script in scripts() {
         if only

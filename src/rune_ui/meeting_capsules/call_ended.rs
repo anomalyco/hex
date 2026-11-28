@@ -6,8 +6,9 @@
 //! (`stroke_radius = ICON_RADIUS + RING_GAP + RING_STROKE / 2`). The drain is
 //! a render-time [`Tween`] (`live_trim`), so it moves every frame with no view
 //! rebuilds; only the seconds count rebuilds, once a second. It fades over its
-//! last moment, so nothing pops when it ends. Under Reduce Motion the drain
-//! steps once a second with the count and leaves out the bright head.
+//! last moment, so nothing pops when it ends. The drain is one calm muted
+//! line, with no bright head on its moving end. Under Reduce Motion it steps
+//! once a second with the count.
 
 use std::f32::consts::{FRAC_PI_2, PI};
 use std::time::Duration;
@@ -27,9 +28,13 @@ pub(super) const PANEL_WIDTH: f32 = 460.0;
 
 /// The call app's icon (or rounded-rect fallback tile) inside the ring.
 pub(super) const ICON_SIZE: f32 = 26.0;
-/// Matches the capsule buttons' corner radius (`p.k.radius.md`) and macOS app
-/// icons' rounded-rect silhouette.
-const ICON_RADIUS: f32 = CAPSULE.inner(CAPSULE.button_inset);
+/// The icon's corners turn about the body's: it stands `ICON_INSET` from the
+/// left, top and bottom walls, so it rounds the body's radius less that
+/// (5 pt, close to a macOS app icon's own silhouette). The ring round it is
+/// concentric with both: its outer edge rounds 10 pt, 4 pt in from the walls.
+const ICON_RADIUS: f32 = CAPSULE.inner(ICON_INSET);
+/// From the body's left, top and bottom walls to the icon.
+pub(super) const ICON_INSET: f32 = (BODY_H - ICON_SIZE) / 2.0;
 /// Fallback provider glyph size inside the `ICON_SIZE` tile.
 const GLYPH_SIZE: f32 = 15.0;
 /// Uniform clear gap between the icon's outer edge and the ring's inner edge.
@@ -43,15 +48,27 @@ pub(super) const RING_SIZE: f32 = ICON_SIZE + 2.0 * RING_GAP + 2.0 * RING_STROKE
 const STROKE_INSET: f32 = RING_STROKE * 0.5;
 /// Centreline corner radius, concentric with the icon across `RING_GAP`.
 const STROKE_RADIUS: f32 = ICON_RADIUS + RING_GAP + STROKE_INSET;
-/// Left padding inside the 56 pt body: matches top/bottom `(56 - 36) / 2 = 10`.
-pub(super) const BODY_PL: f32 = CAPSULE.row_px;
+/// The body: a 32 pt button row on the capsules' 6 pt inset.
+pub(super) const BODY_H: f32 = 32.0 + 2.0 * CAPSULE.button_inset;
+/// The app icon's ring sits as far from the left wall as from the top and
+/// bottom, so its corners turn about the body's.
+pub(super) const BODY_PL: f32 = (BODY_H - RING_SIZE) / 2.0;
+/// Between the window's edge and the body, above and below it.
+pub(super) const BODY_PY: f32 = (super::MEETING_PANEL_HEIGHT - BODY_H) / 2.0;
+/// Between the icon (or its ring) and the lines, and the lines and the
+/// buttons.
+pub(super) const BODY_GAP: f32 = 12.0;
+/// The two lines are a 20 pt title line over a 12 pt one. Centred as a box,
+/// the title's capitals stand 10.5 pt under the top wall and the second
+/// line's baseline 8 pt over the bottom one, so the words read low. This
+/// much under them lifts them 1.5 pt: 9 pt above the capitals, 9.5 below
+/// the baseline.
+pub(super) const LINES_LIFT: f32 = 3.0;
 /// Points sampled along each 90° rounded corner.
 const CORNER_STEPS: usize = 20;
 
 /// The drain fades out over its last this long.
 const FADE_S: f64 = 0.18;
-/// How much of the drain the bright head covers.
-const HEAD: f32 = 0.02;
 /// How strongly the track shows under the drain.
 const TRACK: f32 = 0.12;
 
@@ -59,7 +76,6 @@ const TRACK: f32 = 0.12;
 #[derive(Clone)]
 pub(super) struct Countdown {
     line: Tween<[f32; 2]>,
-    head: Tween<[f32; 2]>,
     fade: Tween<f32>,
 }
 
@@ -73,7 +89,6 @@ impl Countdown {
         let full = (left / FADE_S) as f32;
         Self {
             line: Tween::linear([past, 1.0], [1.0, 1.0], over),
-            head: Tween::linear([past, past + HEAD], [1.0, 1.0 + HEAD], over),
             fade: Tween::linear(full, 0.0, over),
         }
     }
@@ -123,7 +138,7 @@ pub(super) fn view(
     };
     let actions = row()
         .key("actions")
-        .gap(8.0)
+        .gap(CAPSULE.button_inset)
         .child(button(
             p,
             "keep-recording",
@@ -136,6 +151,7 @@ pub(super) fn view(
         .key("lines")
         .grow(1.0)
         .min_w(0.0)
+        .pb(LINES_LIFT)
         .child(
             text(title.clone())
                 .key("title")
@@ -151,14 +167,22 @@ pub(super) fn view(
                 .font(status_font)
                 .color(p.faint()),
         );
-    // With no countdown the icon keeps its place, without a ring.
-    let mut badge = row().key("ring").size(RING_SIZE, RING_SIZE).center();
-    if let Some((countdown, left)) = content.countdown {
-        badge = badge
-            .child(track(p))
-            .child(drain(p, countdown, left, reduced));
-    }
-    badge = badge.child(app_icon(p, content.app, content.icon));
+    // With no countdown there is no ring, and no empty slot for one: the
+    // icon stands where the ring kept it from the walls, and the lines
+    // start the same 12 pt after it.
+    let (badge, body_pl) = match content.countdown {
+        Some((countdown, left)) => (
+            row()
+                .key("ring")
+                .size(RING_SIZE, RING_SIZE)
+                .center()
+                .child(track(p))
+                .child(drain(p, countdown, left, reduced))
+                .child(app_icon(p, content.app, content.icon)),
+            BODY_PL,
+        ),
+        None => (app_icon(p, content.app, content.icon), ICON_INSET),
+    };
     let body = row()
         .key("pill")
         .role("status")
@@ -166,9 +190,9 @@ pub(super) fn view(
         .w_full()
         .h_full()
         .center_y()
-        .pl(BODY_PL)
+        .pl(body_pl)
         .pr(ACTIONS_INSET)
-        .gap(12.0)
+        .gap(BODY_GAP)
         .radius(panel_radius(p))
         .fill(c.bg_base)
         .border(p.hair, c.border_base)
@@ -183,7 +207,7 @@ pub(super) fn view(
         .w_full()
         .h_full()
         .px(CAPSULE_INSET)
-        .py(CAPSULE_INSET)
+        .py(BODY_PY)
         .child(presence::anchored(capsule, body))
 }
 
@@ -240,8 +264,9 @@ fn track(p: Paint) -> El {
     layer(Shape::new().stroke_with(path, false, RING_STROKE, LineCap::Round, ink)).key("track")
 }
 
-/// The line from the drain's moving end to its finish, and its bright head.
-/// Under Reduce Motion it steps once a second, with the count, and has no head.
+/// The line from the drain's moving end to its finish, in one calm tone
+/// blended with the capsule's chrome: no bright head. Under Reduce Motion it
+/// steps once a second, with the count.
 fn drain(p: Paint, countdown: &Countdown, left: Duration, reduced: bool) -> El {
     let path = rounded_rect(RING_SIZE, STROKE_INSET, STROKE_RADIUS);
     let ground = p.k.c.bg_base;
@@ -269,13 +294,12 @@ fn drain(p: Paint, countdown: &Countdown, left: Duration, reduced: bool) -> El {
     drain
         .live_opacity(&countdown.fade)
         .child(stroke(p.muted()).key("line").live_trim(&countdown.line))
-        .child(stroke(p.text()).key("head").live_trim(&countdown.head))
 }
 
 /// A `size` × `size` rounded rectangle's stroke centreline, `inset` in from
 /// the canvas edge with corner radius `stroke_radius`, from the top centre
 /// clockwise and back.
-fn rounded_rect(size: f32, inset: f32, stroke_radius: f32) -> Vec<[f32; 2]> {
+pub(super) fn rounded_rect(size: f32, inset: f32, stroke_radius: f32) -> Vec<[f32; 2]> {
     let (x0, y0, x1, y1) = (inset, inset, size - inset, size - inset);
     let r = stroke_radius
         .min((x1 - x0) * 0.5)

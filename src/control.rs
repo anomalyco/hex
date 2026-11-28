@@ -27,7 +27,7 @@ use crate::dictation::vocabulary::{self, VocabularyEntry};
 
 /// The wire version of [`ControlRequest`] and [`ControlResponse`]. A change
 /// that breaks either shape increments it.
-pub const CONTROL_VERSION: u32 = 4;
+pub const CONTROL_VERSION: u32 = 5;
 
 /// What a capture command does. Commands are idempotent: starting while
 /// recording or stopping while idle changes nothing and succeeds.
@@ -1210,9 +1210,9 @@ mod tests {
             PRINT_WAIT + Duration::from_secs(5)
         );
         assert_eq!(
-            serde_json::from_str::<ControlRequest>(
-                r#"{"version":4,"command":"dictation","action":"stop"}"#
-            )
+            serde_json::from_str::<ControlRequest>(&format!(
+                r#"{{"version":{CONTROL_VERSION},"command":"dictation","action":"stop"}}"#
+            ))
             .unwrap()
             .command,
             ControlCommand::Dictation {
@@ -1226,9 +1226,9 @@ mod tests {
     /// `cancel` discards the recording, and takes neither flag.
     #[test]
     fn cancel_parses_and_takes_no_flags() {
-        let cancel = serde_json::from_str::<ControlRequest>(
-            r#"{"version":4,"command":"dictation","action":"cancel"}"#,
-        )
+        let cancel = serde_json::from_str::<ControlRequest>(&format!(
+            r#"{{"version":{CONTROL_VERSION},"command":"dictation","action":"cancel"}}"#
+        ))
         .unwrap();
         let ControlCommand::Dictation { action, .. } = cancel.command else {
             panic!("a dictation command");
@@ -1326,9 +1326,10 @@ mod tests {
         ] {
             round_trip_request(command);
         }
-        let request: ControlRequest =
-            serde_json::from_str(r#"{"version":4,"command":"vocabulary-add","term":"Rune"}"#)
-                .unwrap();
+        let request: ControlRequest = serde_json::from_str(&format!(
+            r#"{{"version":{CONTROL_VERSION},"command":"vocabulary-add","term":"Rune"}}"#
+        ))
+        .unwrap();
         assert_eq!(
             request.command,
             ControlCommand::VocabularyAdd {
@@ -1382,7 +1383,8 @@ mod tests {
         .unwrap();
         assert_eq!(
             json,
-            serde_json::json!({"version": 4, "command": "meeting-record", "title": "Standup"})
+            serde_json::json!({"version": CONTROL_VERSION, "command": "meeting-record",
+                "title": "Standup"})
         );
         // A meeting delete names its id, and nothing else.
         let json = serde_json::to_value(ControlRequest::new(ControlCommand::MeetingDelete {
@@ -1391,26 +1393,34 @@ mod tests {
         .unwrap();
         assert_eq!(
             json,
-            serde_json::json!({"version": 4, "command": "meeting-delete",
+            serde_json::json!({"version": CONTROL_VERSION, "command": "meeting-delete",
                 "id": "1790000500000-1002"})
         );
         // Optional fields may be left out.
-        let request: ControlRequest =
-            serde_json::from_str(r#"{"version":4,"command":"quit"}"#).unwrap();
+        let request: ControlRequest = serde_json::from_str(&format!(
+            r#"{{"version":{CONTROL_VERSION},"command":"quit"}}"#
+        ))
+        .unwrap();
         assert_eq!(request.command, ControlCommand::Quit { force: false });
-        assert!(serde_json::from_str::<ControlRequest>(r#"{"version":4,"command":"x"}"#).is_err());
-        let capture: ControlRequest =
-            serde_json::from_str(r#"{"version":4,"command":"scrawl-capture","action":"stop"}"#)
-                .unwrap();
+        assert!(
+            serde_json::from_str::<ControlRequest>(&format!(
+                r#"{{"version":{CONTROL_VERSION},"command":"x"}}"#
+            ))
+            .is_err()
+        );
+        let capture: ControlRequest = serde_json::from_str(&format!(
+            r#"{{"version":{CONTROL_VERSION},"command":"scrawl-capture","action":"stop"}}"#
+        ))
+        .unwrap();
         assert_eq!(
             capture.command,
             ControlCommand::ScrawlCapture {
                 action: ScrawlCaptureAction::Stop
             }
         );
-        let send: ControlRequest = serde_json::from_str(
-            r#"{"version":4,"command":"scrawl-capture-send","capture":"latest"}"#,
-        )
+        let send: ControlRequest = serde_json::from_str(&format!(
+            r#"{{"version":{CONTROL_VERSION},"command":"scrawl-capture-send","capture":"latest"}}"#
+        ))
         .unwrap();
         assert_eq!(
             send.command,
@@ -1538,13 +1548,15 @@ mod tests {
         .unwrap();
         assert_eq!(
             json,
-            serde_json::json!({"version": 4, "status": "transcript", "text": "Ship it."})
+            serde_json::json!({"version": CONTROL_VERSION, "status": "transcript",
+                "text": "Ship it."})
         );
         let json =
             serde_json::to_value(ControlResponse::from(ControlReply::error("busy", "x"))).unwrap();
         assert_eq!(
             json,
-            serde_json::json!({"version": 4, "status": "error", "code": "busy", "message": "x"})
+            serde_json::json!({"version": CONTROL_VERSION, "status": "error", "code": "busy",
+                "message": "x"})
         );
     }
 

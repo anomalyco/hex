@@ -81,94 +81,8 @@ use placement::{place_capsule, place_on};
 use screen::{Anchor, primary_screen_size};
 use state::{OfferChoices, ReadyHover, State};
 
-/// The offer, call ended, and ready capsules.
-const MEETING_PANEL_WIDTH: f32 = 420.0;
-/// The offer's "…" choices need room for three buttons beside the name.
-#[cfg(test)]
-const MEETING_MENU_WIDTH: f32 = 560.0;
-const MEETING_PANEL_HEIGHT: f32 = 64.0;
-/// Between a capsule's buttons and its right edge.
-const ACTIONS_INSET: f32 = CAPSULE.button_inset;
-/// The reminder: the meeting's title beside up to three buttons.
-const REMINDER_PANEL_WIDTH: f32 = 520.0;
-/// The call-ended capsule's width, beside Keep recording and Stop now /
-/// Stop & transcribe (#835).
-const CALL_ENDED_PANEL_WIDTH: f32 = call_ended::PANEL_WIDTH;
-/// How often an open reminder recounts "Starts in N min".
-const REMINDER_TICK: Duration = Duration::from_secs(5);
-/// Between a capsule's window edges and what it draws.
-const CAPSULE_INSET: f32 = CAPSULE.window_inset;
-/// Same header at rest and open so the waveform and timer stay put.
-const REST_HEIGHT: f32 = HEADER_HEIGHT;
-const REST_WIDTH: f32 = 2.0 * REST_PX + waveform::WIDTH + METER_GAP + TIMER_WIDTH;
-/// The header's sides, at rest and open, so the timer stays put as the pill
-/// opens: the inset the rows' labels, the title and the summary keep.
-const REST_PX: f32 = CAPSULE.text_rail();
-/// Between the listening field and the time.
-const METER_GAP: f32 = 6.0;
-/// "00:00" in `Paint::clock()` (13 pt tabular medium), reserved as an exact
-/// integer width so layout matches across macOS, Linux, and Windows.
-const TIMER_TEXT_WIDTH: f32 = 38.0;
-/// `TIMER_TEXT_WIDTH` plus the recording dot and its gap before it.
-const TIMER_WIDTH: f32 = TIMER_TEXT_WIDTH + REC_DOT + METER_GAP;
-/// The recording dot before the elapsed time, a status dot's size.
-const REC_DOT: f32 = 8.0;
-/// The open recording pill and the ready panel.
-const PANEL_WIDTH: f32 = CAPSULE.panel_w;
-const PANEL_RADIUS: f32 = CAPSULE.radius;
-/// Around the open panel's rows.
-const PANEL_PAD: f32 = CAPSULE.row_inset;
-const HEADER_HEIGHT: f32 = CAPSULE.header_h;
-const ROW_HEIGHT: f32 = CAPSULE.row_h;
-const OPEN_HEADER: f32 = REST_HEIGHT + ROW_HEIGHT;
-/// The two copies and the gap under the first.
-const COPIES_HEIGHT: f32 = 2.0 * ROW_HEIGHT + ROW_GAP;
-/// Concentric with the panel across [`PANEL_PAD`].
-const ROW_RADIUS: f32 = CAPSULE.inner(CAPSULE.row_inset);
-/// A row's icon and label inset; titles and summaries share it.
-const ROW_PX: f32 = CAPSULE.row_px;
-/// Between two rows, which both fill under the pointer: under the first
-/// copy, and between Stop and the copies.
-const ROW_GAP: f32 = CAPSULE.row_gap;
-/// "Microphone is silent" or "Started automatically" under the header.
-const NOTICE_HEIGHT: f32 = 20.0;
-/// The ready panel's summary: the notes writer's two sentences.
-const SUMMARY_LINES: usize = 3;
-const TITLE_LINES: usize = 3;
-const TITLE_INSET: f32 = (REST_HEIGHT - 20.) / 2.;
-const RESULT_HEADER_MAX: f32 = REST_HEIGHT + TITLE_LINES as f32 * 20. + 2. * TITLE_INSET;
-const SUMMARY_LINE: f32 = 19.5;
-/// One transparent window with room for the finished panel's longest summary.
-const RECORDING_WINDOW: (f32, f32) = (
-    PANEL_WIDTH + 2.0 * CAPSULE_INSET,
-    RESULT_HEADER_MAX
-        + SUMMARY_LINE * SUMMARY_LINES as f32
-        + ROW_PX
-        + ROW_GAP
-        + ROW_GAP
-        + COPIES_HEIGHT
-        + PANEL_PAD
-        + 2.0 * CAPSULE_INSET,
-);
-/// The finished meeting's title and summary grow the panel on this.
-const RECORDING_OPEN: Spring = Spring::new(0.42, 0.0);
-/// A start this quick never says "Starting…": the offer contracts straight
-/// into the live pill.
-const PENDING_LABEL_AFTER: f64 = 0.18;
-/// How long a copy says "Copied".
-const COPIED_FEEDBACK: Duration = Duration::from_millis(1_500);
-const OFFER_TIMEOUT: Duration = Duration::from_secs(20);
-const READY_TIMEOUT: Duration = Duration::from_secs(15);
-/// How long after an offer Linux checks that its overlay opened.
-#[cfg(target_os = "linux")]
-const OFFER_CHECK: Duration = Duration::from_secs(2);
-/// How long an automatic recording says so before showing its elapsed time.
-const AUTOMATIC_LABEL: Duration = Duration::from_secs(10);
-const WINDOW_MARGIN: f32 = 12.0;
-/// Below the menu bar.
-const MENU_BAR: f32 = 28.0;
-/// Above the Dock.
-const DOCK: f32 = 24.0;
+mod metrics;
+use metrics::*;
 
 #[derive(Clone)]
 enum Kind {
@@ -587,7 +501,8 @@ impl Capsule {
             State::Offer { .. } => self.presentation.window(),
             State::Reminder { .. } => (REMINDER_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
             State::CallEnded { .. } => (CALL_ENDED_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
-            State::AutoStarted { .. } | State::Empty => (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
+            State::AutoStarted { .. } => (AUTO_STARTED_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
+            State::Empty => (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
         }
     }
 }
@@ -1194,6 +1109,10 @@ fn button(
         })
         .build_push(p.k)
         .key(key)
+        // A 32 pt row (the kit's button is 28): 6 pt from the top, the bottom
+        // and the end wall, its corners concentric with the capsule's.
+        .h(CAPSULE.row_h)
+        .radius(CAPSULE.inner(CAPSULE.button_inset))
         // The capsule's body drags; its buttons are buttons.
         .cursor(Cursor::Pointer)
         // The surface answers in the frame of the press.
@@ -1335,6 +1254,7 @@ fn panel_width(kind: &Kind) -> f32 {
     match kind {
         Kind::Reminder { .. } => REMINDER_PANEL_WIDTH,
         Kind::CallEnded { .. } => CALL_ENDED_PANEL_WIDTH,
+        Kind::AutoStarted { .. } => AUTO_STARTED_PANEL_WIDTH,
         _ => MEETING_PANEL_WIDTH,
     }
 }
@@ -1523,6 +1443,7 @@ mod tests {
     type Chosen = Arc<Mutex<Vec<MeetingProviderChoice>>>;
 
     const PANEL: (f32, f32) = (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT);
+    const AUTO: (f32, f32) = (AUTO_STARTED_PANEL_WIDTH, MEETING_PANEL_HEIGHT);
     const MENU: (f32, f32) = (MEETING_MENU_WIDTH, MEETING_PANEL_HEIGHT);
     const RECORDING: (f32, f32) = RECORDING_WINDOW;
     const REMINDER: (f32, f32) = (REMINDER_PANEL_WIDTH, MEETING_PANEL_HEIGHT);
@@ -2440,7 +2361,6 @@ mod tests {
         ] {
             assert!(shown.contains(&expected.to_string()), "{shown:?}");
         }
-        assert!(shown.iter().any(|text| text.starts_with("March 26")));
         let (_, prompt_y) = rt.find("copy-prompt").unwrap();
         let (_, transcript_y) = rt.find("copy-all").unwrap();
         assert!(
@@ -2926,8 +2846,8 @@ mod tests {
     }
 
     #[test]
-    fn call_ended_drain_omits_head_under_reduce_motion_and_omits_ring_when_manual() {
-        // Countdown: ring has track, line, and head.
+    fn call_ended_drain_has_no_bright_head_and_omits_ring_when_manual() {
+        // Countdown: ring has track and line, and never a bright head.
         let (mut rt, _, _) = runtime(call_ended_countdown(23), false, true, CALL_ENDED);
         landed(&mut rt);
         let keys = |rt: &Runtime<Capsule>| -> Vec<String> {
@@ -2936,9 +2856,9 @@ mod tests {
         let normal = keys(&rt);
         assert!(normal.contains(&"track".to_string()));
         assert!(normal.contains(&"line".to_string()));
-        assert!(normal.contains(&"head".to_string()));
+        assert!(!normal.contains(&"head".to_string()));
 
-        // Reduce Motion: keeps track and line, drops bright head.
+        // Reduce Motion: keeps track and line.
         let (mut rt_reduced, _, _) = runtime(call_ended_countdown(23), false, true, CALL_ENDED);
         rt_reduced.set_system_reduced_motion(true);
         rt_reduced.update(|_, tx| tx.instant());
@@ -3003,7 +2923,7 @@ mod tests {
                 false,
                 RECORDING,
             ),
-            ("auto-started", auto_started(), false, PANEL),
+            ("auto-started", auto_started(), false, AUTO),
             ("ready", ready_transcript(), false, ready_size()),
             (
                 "ready-summary",
@@ -3326,7 +3246,7 @@ mod tests {
             ("call-ended", call_ended_countdown(23), CALL_ENDED),
             ("call-ended-manual", call_ended(), CALL_ENDED),
             ("ready", ready_transcript(), ready_size()),
-            ("auto-started", auto_started(), PANEL),
+            ("auto-started", auto_started(), AUTO),
             ("recording-rest", live_recording("fixture"), RECORDING),
             ("recording-open", live_recording("fixture"), RECORDING),
         ];
@@ -3349,6 +3269,17 @@ mod tests {
                         *at = Instant::now() + Duration::from_secs(23);
                     }
                 });
+            }
+            // The ready panel shows its first row under the pointer, so its
+            // 8 pt hover fill is in the picture.
+            if name == "ready" {
+                settle_stage(&mut rt);
+                rt.settle_all();
+                rt.frame(0.0);
+                if let Some((x, y)) = rt.find("copy-prompt") {
+                    rt.pointer_move(x, y);
+                    rt.frame(0.0);
+                }
             }
             if name.starts_with("recording-") {
                 rt.update(move |c, _| {

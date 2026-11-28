@@ -172,10 +172,6 @@ impl Flow {
                 what,
                 why: why.as_deref().and_then(plain_reason),
             },
-            (Phase::Recording { discard_until, .. }, Input::Chips) => Phase::Recording {
-                chips_until: Some(now + tuning::get().chips_open_s),
-                discard_until,
-            },
             (
                 Phase::Recording {
                     chips_until,
@@ -240,24 +236,13 @@ impl Flow {
                 Phase::Routed(routes::refine(routed, route, now, self.suggest_on_route))
             }
             (_, Input::Routed(route)) => {
-                // In the default List flow, finished capsules stay compact
-                // (`Copied [→ ACME ⌄] ✕` with a suggestion, or `Annotation copied
-                // [Paste] ✕` without one) until `⌄` or `Send to…` is clicked.
-                // Experimental flows (Toast, MenuBar, Cursor, Notch) keep
-                // auto-opening their suggestions.
-                let suggests = self.suggest_on_route
-                    && tuning::get().flow != CapsuleFlow::List
-                    && !matches!(
-                        route,
-                        Route::Rule { .. }
-                            | Route::ResolvingRule { .. }
-                            | Route::Unreachable { .. }
-                    )
-                    && sections(&route) != (&[][..], &[][..]);
+                // Finished capsules stay compact (`Copied [→ ACME ⌄] ✕` with a
+                // suggestion, or `Annotation copied [Paste] ✕` without one)
+                // until `⌄` or `Send to…` is clicked.
                 Phase::Routed(Routed {
                     route,
                     at: now,
-                    open: suggests.then(Open::suggesting),
+                    open: None,
                     taken_back: false,
                     already_with: None,
                     taken_from: None,

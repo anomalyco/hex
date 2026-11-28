@@ -11,7 +11,7 @@ use crate::capture_host::routing::rule_match::shorten_home;
 use crate::capture_host::{AskedBy, AutoSendBy, CaptureNeed, RuleMatch};
 use crate::desktop::i18n::{tr, tr_fill};
 
-use super::tuning::{self, CapsuleFlow};
+use super::tuning;
 mod done;
 mod press;
 mod routes;
@@ -52,9 +52,6 @@ pub(crate) const DISCARD_LINGER_S: f64 = 1.5;
 /// The rows a finished capture's suggestions show under it, when the
 /// router has that many, and the most a search shows.
 pub(crate) const SUGGEST_ROWS: usize = 5;
-/// The menu-bar flow's hint of the guesses stays this long, then the
-/// capsule folds into Hex's menu-bar item, where the capture waits.
-pub(crate) const MENU_HINT_S: f64 = 4.0;
 /// The permission helper waits this long for a grant, then folds; the
 /// capture shortcut brings it back.
 pub(crate) const PERMISSION_HOLD_S: f64 = 120.0;
@@ -255,10 +252,6 @@ pub(crate) enum Input {
     Failed(Failure, Option<String>),
     /// An iPhone was cabled (true) or unplugged.
     Phone(bool),
-    /// The target chips spring open: only the playground's stories now;
-    /// a recording's capsule shows its toolbar instead.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    Chips,
     /// Annotate started (true) or stopped drawing: the pen lights.
     Drawing(bool),
     /// The recording got its first click, scroll, or stroke: the chips
@@ -430,6 +423,9 @@ pub(crate) struct List {
     pub(crate) always: Option<(String, bool)>,
     /// Opened from a queued send via `⌄`, so the footer also offers Cancel send.
     pub(crate) queued: bool,
+    /// How many of `rows`, from the top, are suggestions; the rest are
+    /// recent sessions, under their own header.
+    pub(crate) suggested: usize,
 }
 
 impl List {
@@ -442,10 +438,6 @@ impl List {
 impl List {
     pub(crate) fn rows(&self) -> impl Iterator<Item = &Dest> {
         self.rows.iter()
-    }
-
-    pub(crate) fn selected_dest(&self) -> Option<&Dest> {
-        self.rows().nth(self.selected)
     }
 
     pub(crate) fn target_dest(&self) -> Option<&Dest> {
@@ -592,14 +584,6 @@ pub(crate) struct Done {
     pub(crate) open: Option<(TextEdit, List)>,
     pub(crate) inspect: bool,
     pub(crate) paste: bool,
-    /// The guesses in the capsule itself, picked with a click: chips
-    /// in the menu-bar flow, rows in the cursor's card and the notch.
-    /// Each is a name and its quiet reason.
-    pub(crate) picks: Vec<(String, String)>,
-    /// The toast's "Next ⇥": more than one guess to go through.
-    pub(crate) cycle: bool,
-    /// The label is the toast's one guess: a click on it sends there.
-    pub(crate) sends: bool,
     /// About no capture (the permission helper): its glyph never gives
     /// way to an earlier capture's frame.
     pub(crate) no_frame: bool,
@@ -630,9 +614,6 @@ impl Done {
             open: None,
             inspect: false,
             paste: false,
-            picks: Vec::new(),
-            cycle: false,
-            sends: false,
             no_frame: false,
         }
     }
@@ -1275,7 +1256,7 @@ impl Flow {
                 CapsuleKeys::List
             } else {
                 CapsuleKeys::Suggest {
-                    cycle: tuning::get().flow == CapsuleFlow::Toast,
+                    cycle: false,
                     search: self.aimed,
                 }
             }),
@@ -1603,77 +1584,6 @@ mod tests {
         }
     }
 
-    /// The toast offers one guess at a time: ⇥ moves on, ⏎ (or a click
-    /// on the line) sends the one it shows.
-    #[test]
-    fn the_toast_cycles_its_guesses_and_return_sends_the_one_shown() {
-        use crate::capture_host::CapsuleKeys;
-        tuning::with_flow(CapsuleFlow::Toast, || {
-            let mut flow = Flow::new();
-            flow.input(Input::Stage(Stage::Done), 0.0);
-            flow.input(Input::Routed(guess()), 0.0);
-            let shown = done(&flow, 0.1);
-            assert_eq!(shown.text, "Send to SEER");
-            assert_eq!(shown.why.as_deref(), Some("⏎"));
-            assert!(shown.cycle && shown.sends && shown.open.is_none());
-            assert_eq!(
-                flow.keys(),
-                Some(CapsuleKeys::Suggest {
-                    cycle: true,
-                    search: false
-                })
-            );
-            flow.input(Input::Cycle(1), 0.5);
-            assert_eq!(done(&flow, 0.5).text, "Send to HEX");
-            flow.input(Input::Cycle(-1), 0.6);
-            flow.input(Input::Cycle(-1), 0.7);
-            assert_eq!(
-                done(&flow, 0.7).text,
-                "Send to HOME",
-                "round past the first"
-            );
-            flow.input(Input::Cycle(1), 0.8);
-            let sent = flow.input(Input::Send { always: false }, 1.0);
-            assert_eq!(
-                sent,
-                [Action::Send {
-                    to: "SEER".into(),
-                    always: None
-                }]
-            );
-        });
-    }
-
-    /// The menu-bar flow's guesses are chips for a moment, then the capsule
-    /// goes.
-    #[test]
-    fn the_menu_bar_hint_is_brief_and_its_chips_send() {
-        tuning::with_flow(CapsuleFlow::MenuBar, || {
-            let mut flow = Flow::new();
-            flow.input(Input::Stage(Stage::Done), 0.0);
-            flow.input(Input::Routed(guess()), 0.0);
-            let shown = done(&flow, 0.1);
-            let names: Vec<&str> = shown.picks.iter().map(|(n, _)| n.as_str()).collect();
-            assert_eq!(names, ["SEER", "HEX", "HOME"]);
-            assert!(shown.open.is_none());
-            flow.tick(MENU_HINT_S + 0.1);
-            assert_eq!(flow.pres(MENU_HINT_S + 0.1), Pres::Hidden);
-            assert_eq!(flow.keys(), None, "no key is Hex's once it's gone");
-
-            let mut flow = Flow::new();
-            flow.input(Input::Stage(Stage::Done), 0.0);
-            flow.input(Input::Routed(guess()), 0.0);
-            let sent = flow.click(super::super::surface::Id::Pick(1), 1.0);
-            assert_eq!(
-                sent,
-                [Action::Send {
-                    to: "HEX".into(),
-                    always: None
-                }]
-            );
-        });
-    }
-
     #[test]
     fn paste_only_hands_off_the_shown_written_annotation_once() {
         use super::super::surface::Id;
@@ -1717,7 +1627,7 @@ mod tests {
         let mut flow = Flow::new();
         flow.input(Input::Stage(Stage::Recording), 0.0);
         assert_eq!(flow.keys(), None);
-        flow.input(Input::Chips, 0.5);
+        flow.click(super::super::surface::Id::Source, 0.5);
         flow.click(super::super::surface::Id::Mode(Mode::Window), 1.0);
         assert_eq!(flow.keys(), Some(CapsuleKeys::Picker));
 
@@ -1775,7 +1685,7 @@ mod tests {
         assert_eq!(flow.pres(1.0), Pres::Hidden);
 
         flow.input(Input::Stage(Stage::Recording), 2.0);
-        flow.input(Input::Chips, 2.1);
+        flow.click(super::super::surface::Id::Source, 2.1);
         flow.click(super::super::surface::Id::Mode(Mode::Area), 2.5);
         flow.input(Input::Gone, 2.6);
         assert!(matches!(flow.pres(2.6), Pres::Selecting { .. }));
@@ -1794,7 +1704,7 @@ mod tests {
                 pen: Pen::Off,
             }
         );
-        flow.input(Input::Chips, 1.0);
+        flow.click(super::super::surface::Id::Source, 1.0);
         assert_eq!(
             flow.pres(1.0),
             Pres::Recording {
@@ -1853,7 +1763,7 @@ mod tests {
     fn chips_fold_once_seen_when_work_starts_but_never_under_the_pointer() {
         let mut flow = Flow::new();
         flow.input(Input::Stage(Stage::Recording), 0.0);
-        flow.input(Input::Chips, 0.0);
+        flow.click(super::super::surface::Id::Source, 0.0);
         flow.input(Input::Worked, 0.2);
         assert!(!flow.tick(0.5), "seen for CHIPS_MIN_S first");
         assert!(flow.tick(CHIPS_MIN_S));
@@ -1867,7 +1777,7 @@ mod tests {
             }
         );
 
-        flow.input(Input::Chips, 2.0);
+        flow.click(super::super::surface::Id::Source, 2.0);
         flow.hover(true, 3.0);
         assert_eq!(flow.next_due(5.0), None);
         assert!(!flow.tick(2.0 + tuning::get().chips_open_s + 1.0));
@@ -1890,7 +1800,7 @@ mod tests {
         use super::super::surface::Id;
         let mut flow = Flow::new();
         flow.input(Input::Stage(Stage::Recording), 0.0);
-        flow.input(Input::Chips, 0.0);
+        flow.click(super::super::surface::Id::Source, 0.0);
         flow.click(Id::Mode(Mode::Window), 0.2);
         flow.click(Id::Mode(Mode::Screen), 0.3);
         assert_eq!(
@@ -1904,7 +1814,7 @@ mod tests {
         );
         let mut flow = Flow::new();
         flow.input(Input::Stage(Stage::Recording), 0.0);
-        flow.input(Input::Chips, 0.0);
+        flow.click(super::super::surface::Id::Source, 0.0);
         assert_eq!(
             flow.click(super::super::surface::Id::Mode(Mode::Window), 0.5),
             [Action::Discard]
@@ -1929,7 +1839,7 @@ mod tests {
         assert_eq!(done(&flow, 10.0).lead, Lead::Check);
         assert_eq!(done(&flow, 10.0).ask, None, "Undo, as a pick has");
         assert_eq!(done(&flow, 15.0).ask, None, "nothing after the window");
-        // Subtle muted provenance names why it auto-sends ("Rule" or "Jev");
+        // Subtle muted provenance names why it auto-sends ("Rule" or "Smart");
         // the Undo chip's ring drains to the window's end.
         assert_eq!(done(&flow, 10.0).why.as_deref(), Some("Rule"));
         assert!(done(&flow, 10.0).strong_text);
@@ -2802,7 +2712,7 @@ mod tests {
         use super::super::surface::Id;
         let mut flow = Flow::new();
         flow.input(Input::Stage(Stage::Recording), 0.0);
-        flow.input(Input::Chips, 0.0);
+        flow.click(super::super::surface::Id::Source, 0.0);
         assert_eq!(
             flow.pres(0.1),
             Pres::Recording {
@@ -2824,7 +2734,7 @@ mod tests {
         );
 
         flow.input(Input::Phone(true), 1.0);
-        flow.input(Input::Chips, 1.0);
+        flow.click(super::super::surface::Id::Source, 1.0);
         assert_eq!(
             flow.pres(1.1),
             Pres::Recording {
@@ -2850,7 +2760,7 @@ mod tests {
 
         // Unplugged while the picker is on it: back to Screen.
         flow.input(Input::Stage(Stage::Recording), 1.8);
-        flow.input(Input::Chips, 1.8);
+        flow.click(super::super::surface::Id::Source, 1.8);
         flow.click(Id::Mode(Mode::Window), 1.9);
         flow.click(Id::Mode(Mode::Iphone), 2.0);
         flow.input(Input::Phone(false), 2.5);
@@ -2878,7 +2788,7 @@ mod tests {
         let open = done(&flow, 1.0);
         let (query, list) = open.open.expect("open");
         assert_eq!(query.text, "");
-        assert_eq!(list.selected_dest().unwrap().name, "SEER");
+        assert_eq!(list.rows().nth(list.selected).unwrap().name, "SEER");
         assert_eq!(list.footer, Footer::Search { remember: true });
         assert_eq!(list.title, "All sessions");
         assert!(open.ask.is_none(), "the field takes the chips' place");
@@ -3456,7 +3366,7 @@ mod tests {
         flow.input(Input::OpenList, 6.0);
         let (_, list) = done(&flow, 6.0).open.unwrap();
         assert_eq!(
-            list.selected_dest().unwrap().name,
+            list.rows().nth(list.selected).unwrap().name,
             "HOME",
             "a rule opens on the next"
         );
@@ -3611,7 +3521,7 @@ mod tests {
 
         // Never under the pointer, and a moment after it leaves; the
         // chips' ✕ asks too.
-        flow.input(Input::Chips, 9.0);
+        flow.click(super::super::surface::Id::Source, 9.0);
         assert!(flow.click(Id::Close, 10.0).is_empty());
         flow.hover(true, 10.0);
         assert!(!flow.tick(20.0));
@@ -3635,7 +3545,7 @@ mod tests {
         for close in [Input::Escape, Input::Dismiss] {
             let mut flow = Flow::new();
             flow.input(Input::Stage(Stage::Recording), 0.0);
-            flow.input(Input::Chips, 0.5);
+            flow.click(super::super::surface::Id::Source, 0.5);
             flow.click(Id::Mode(Mode::Window), 1.0);
             assert_eq!(flow.keys(), Some(crate::capture_host::CapsuleKeys::Picker));
             if close == Input::Escape {
@@ -3873,7 +3783,7 @@ mod tests {
         let pre = done(&flow, 0.0);
         assert_eq!(pre.text, "Sending to ACME");
         assert!(pre.strong_text);
-        assert_eq!(pre.why.as_deref(), Some("Jev"));
+        assert_eq!(pre.why.as_deref(), Some("Smart"));
         assert!(pre.undo);
 
         flow.input(Input::Settled, 0.5);

@@ -15,67 +15,16 @@ pub(super) fn tone(cue: Cue) -> crate::feedback::Tone {
 }
 
 pub(super) fn view(s: &CapsuleState, cx: &mut Cx<CapsuleState>) -> El {
-    #[cfg(target_os = "macos")]
-    if s.playground.is_some() {
-        return playground::view(s, cx);
-    }
     s.reduced.set(cx.is_reduced_motion());
     let p = Paint::new(cx.system_dark(), cx.env().scale);
     let capsule = capsule(p, &s.surface, &s.live, cx);
     if s.backdrop {
-        let mut backdrop = el().size(PANEL_W, PANEL_H).fill(p.k.c.layer_03);
-        // Stills and clips have no pointer: the cursor's card draws one
-        // where the app would find it.
-        if s.surface.anchor == surface::Anchor::Cursor {
-            backdrop = backdrop.child(pointer(p));
-        }
-        if tuning::get().flow == tuning::CapsuleFlow::MenuBar {
-            backdrop = backdrop.child(menu_item(p));
-        }
-        return backdrop.child(capsule);
+        return el()
+            .size(PANEL_W, PANEL_H)
+            .fill(p.k.c.layer_03)
+            .child(capsule);
     }
     capsule
-}
-
-/// Hex's menu-bar item where the menu-bar flow folds the capsule, for
-/// stills and clips, which have no menu bar.
-pub(super) fn menu_item(p: Paint) -> El {
-    let [x, y, w, h] = surface::MENU_FOLD;
-    el().key("menu-item")
-        .absolute(x, y)
-        .size(w, h)
-        .radius(h * 0.5)
-        .border(1.2, p.muted())
-        .child(
-            el().absolute(w * 0.5 - 2.5, h * 0.5 - 2.5)
-                .size(5.0, 5.0)
-                .radius(2.5)
-                .fill(p.muted()),
-        )
-}
-
-/// The arrow pointer just above and left of the cursor's card.
-pub(super) fn pointer(p: Paint) -> El {
-    let arrow = Path::new()
-        .move_to([1.0, 1.0])
-        .line_to([1.0, 16.0])
-        .line_to([5.0, 12.5])
-        .line_to([7.6, 18.2])
-        .line_to([10.2, 17.0])
-        .line_to([7.7, 11.6])
-        .line_to([12.6, 11.2])
-        .close();
-    let shape = Shape::new()
-        .view_box(14.0, 20.0)
-        .fill_path(&arrow, p.k.c.text_base)
-        .stroke_path(&arrow, 1.2, LineCap::Round, p.k.c.bg_base);
-    canvas(shape)
-        .key("pointer")
-        .absolute(
-            surface::CURSOR_X - surface::POINTER_OFFSET[0],
-            surface::CURSOR_Y - surface::POINTER_OFFSET[1],
-        )
-        .size(14.0, 20.0)
 }
 
 /// How content comes and goes, all of it together over the walls' move:
@@ -108,12 +57,6 @@ pub(super) fn capsule(
     live: &Animated,
     cx: &mut Cx<CapsuleState>,
 ) -> El {
-    // The notch is black in either appearance, so what's on it is dark's.
-    let p = if surface.anchor == surface::Anchor::Notch {
-        Paint::new(true, 1.0 / p.hair)
-    } else {
-        p
-    };
     let reduced = cx.is_reduced_motion() || surface.reduced;
     if surface.reduced {
         cx.reduced_motion(true);
@@ -133,10 +76,17 @@ pub(super) fn capsule(
         .size(PANEL_W, PANEL_H)
         .motion(surface.shell_motion);
     if let Some(highlight) = &surface.highlight {
+        // The lit segment is a button box like every other fill in the line:
+        // 2 pt inside its chip, so 6 pt in from the walls on 8 pt corners.
+        let [hx, hy, hw, hh] = highlight.rect;
+        let inset = surface::BUTTON_INSET;
         inner = inner.child(
-            placed(el(), highlight)
+            el().key(highlight.key.clone())
+                .absolute(hx + inset, hy + inset)
+                .size(hw - 2.0 * inset, hh - 2.0 * inset)
+                .motion(highlight.motion)
                 .trace_name("highlight")
-                .radius(surface::CHIP_RADIUS)
+                .radius(ICON_BUTTON_RADIUS)
                 .fill(p.k.c.layer_02)
                 .box_shadow(rune::Shadow {
                     spread: p.hair,
@@ -168,18 +118,18 @@ pub(super) fn capsule(
         .on_pointer_move_local(|s: &mut CapsuleState, _, tx| s.pointer_moved(tx));
     root = root.child(clip.child(inner.child(content)));
     if let Pres::Done(Done {
-        open: Some((_, list)),
+        open: Some((typed, list)),
         ..
     }) = &surface.pres
     {
-        root = root.child(list_view(p, list, x, w, reduced));
+        root = root.child(list_view(p, list, typed, x, w, reduced));
     }
     if let Pres::Done(Done {
         always_popover: Some(config),
         ..
     }) = &surface.pres
     {
-        root = root.child(always_view::always_view(p, config, reduced));
+        root = root.child(always_view::always_view(p, config, x, w, reduced));
     }
     root
 }
@@ -211,18 +161,6 @@ pub(super) fn shell(p: Paint, surface: &Surface, meter: &Meter) -> El {
         .absolute(x, y)
         .size(w, h)
         .radius(corner(h));
-    // At the notch it's the notch: black, with no edge or shadow, and
-    // tucked into the notch rather than gone when hidden. Under Reduce
-    // Motion it never travels, so it fades at rest instead.
-    if surface.anchor == surface::Anchor::Notch {
-        body = body.fill(k.c.black).motion(surface.shell_motion);
-        if surface.reduced {
-            body = body
-                .opacity(if surface.shell_on { 1.0 } else { 0.0 })
-                .opacity_motion(surface.shell_fade);
-        }
-        return body.role("group").label(tr("Annotate"));
-    }
     body = body.fill(k.c.bg_base);
     for shadow in &k.elevation.overlay {
         body = body.box_shadow(*shadow);
@@ -269,8 +207,11 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
     match id {
         Id::Mode(mode) => {
             let fg = if shown.active { p.text() } else { p.muted() };
-            let mut chip = base
-                .radius(surface::CHIP_RADIUS)
+            // The icon side is trimmed: its ink sits inside its square, so
+            // 8 pt before it reads as the 10 pt after the word.
+            let mut chip = plain_box(boxed(shown))
+                .pl(surface::SEG_PL)
+                .pr(surface::SEG_PR)
                 .gap(SEG_ICON_GAP)
                 .child(mark(id, SEG_ICON, fg))
                 .child(label(mode.label(), medium(), fg))
@@ -278,7 +219,8 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             if !shown.active {
                 chip = chip.hover(c.hover);
             }
-            chip.role("button")
+            base.child(chip)
+                .role("button")
                 .label(mode.label())
                 .hit()
                 .on_press_tx(press(id))
@@ -300,7 +242,16 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                     .on_press_tx(press(id)),
             )
         }
-        Id::Divider => base.child(el().size(surface::DIVIDER_W, 16.0).fill(c.border_base)),
+        // Beside the pen: Area, Window, Screen and iPhone on demand, so
+        // recording starts at once and another target is one click away.
+        Id::Source => base.child(
+            icon_button(p, mark(id, 16.0, p.muted()))
+                .role("button")
+                .label(tr("Source"))
+                .help(tr("Source"))
+                .hit()
+                .on_press_tx(press(id)),
+        ),
         // Stop: a filled square, Finish's icon.
         Id::Finish => {
             let side = 10.0;
@@ -327,22 +278,21 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
         ),
         Id::Record => {
             let name = tr("Record");
-            base.radius(surface::CHIP_RADIUS)
-                .fill(c.bg_contrast)
-                .hover(c.contrast_hover)
-                .press(c.contrast_pressed)
-                .child(label(name, medium(), c.text_contrast))
-                .role("button")
-                .label(name)
-                .hit()
-                .on_press_tx(press(id))
+            base.child(
+                plain_box(boxed(shown))
+                    .fill(c.bg_contrast)
+                    .hover(c.contrast_hover)
+                    .press(c.contrast_pressed)
+                    .child(label(name, medium(), c.text_contrast)),
+            )
+            .role("button")
+            .label(name)
+            .hit()
+            .on_press_tx(press(id))
         }
         Id::Keep => {
             let name = surface::keep_label();
-            base.radius(surface::CHIP_RADIUS)
-                .hover(c.hover)
-                .press(c.pressed)
-                .child(label(name, medium(), p.muted()))
+            base.child(button_box(p, boxed(shown)).child(label(name, medium(), p.muted())))
                 .role("button")
                 .label(name)
                 .hit()
@@ -351,11 +301,11 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
         // Destructive, so the danger ink on the neutral chip, never the
         // accent.
         Id::Discard => base
-            .radius(surface::CHIP_RADIUS)
-            .fill(c.layer_02)
-            .hover(c.hover)
-            .press(c.pressed)
-            .child(label(surface::discard_label(), medium(), p.danger()))
+            .child(button_box(p, boxed(shown)).fill(c.layer_02).child(label(
+                surface::discard_label(),
+                medium(),
+                p.danger(),
+            )))
             .role("button")
             .label(surface::discard_label())
             .hit()
@@ -389,14 +339,7 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 _ => Lead::Check,
             };
             let strong = matches!(&surface.pres, Pres::Done(done) if done.strong_text);
-            let ink = if strong {
-                p.text()
-            } else {
-                match tuning::get().top_line {
-                    tuning::TopLine::Quiet => p.muted(),
-                    tuning::TopLine::Icons => p.text(),
-                }
-            };
+            let ink = if strong { p.text() } else { p.muted() };
             let mut done = placed(el(), shown).trace_name("done").child(glyph(
                 p,
                 lead,
@@ -410,17 +353,6 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                         .h(CHIP_H)
                         .child(label(&shown.ident, done_style(), ink)),
                 );
-            }
-            let sends = matches!(&surface.pres, Pres::Done(done) if done.sends);
-            if sends {
-                return done
-                    .radius(surface::CHIP_RADIUS)
-                    .hover(c.hover)
-                    .press(c.pressed)
-                    .role("button")
-                    .label(shown.ident.clone())
-                    .hit()
-                    .on_press_tx(press(id));
             }
             if matches!(&surface.pres, Pres::Done(d) if d.inspect_preview() && d.lead == Lead::Thumbnail)
             {
@@ -436,18 +368,6 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             }
             done.role("text").label(shown.ident.clone())
         }
-        Id::Next => keyed(p, base, &["⇥"], tr("Next"), medium()).on_press_tx(press(id)),
-        // A chip beside the frame in the menu-bar flow.
-        Id::Pick(_) if tuning::get().flow == tuning::CapsuleFlow::MenuBar => {
-            keyed(p, base, &[], shown.text(), medium()).on_press_tx(press(id))
-        }
-        Id::Pick(row) => pick_row(p, base, shown, row),
-        Id::CardHints => base
-            .justify_start()
-            .px(ROW_PX)
-            .child(hint(p, tr("Search"), &surface::shortcut_keycaps()))
-            .role("text")
-            .label(tr_fill("Search {}", shown.text())),
         Id::Why => placed(row().center_y(), shown)
             .trace_name("why")
             .child(quiet(p, shown.text(), done_style())),
@@ -456,16 +376,11 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
         // Click only: Escape meant for another app was taking sends back.
         Id::Undo => {
             let bw = shown.rect[2] - 2.0 * surface::BUTTON_INSET;
-            let ground = if surface.anchor == surface::Anchor::Notch {
-                c.black
-            } else {
-                c.bg_base
-            };
             base.child(undo_ring::chip(
                 p,
                 button_box(p, bw),
                 [bw, BUTTON_H],
-                ground,
+                c.bg_base,
                 live.ring.as_ref(),
             ))
             .role("button")
@@ -473,8 +388,9 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             .hit()
             .on_press_tx(press(id))
         }
-        // Unified destination split chip: one fill, no vertical divider,
-        // each half its own clickable target.
+        // The destination: two buttons side by side, 4 pt apart, with no
+        // rule between them. Quick-send is the filled one; ⌄ is a quieter
+        // tinted square that opens the picker.
         Id::Split => {
             let queued = shown.active;
             let help = match &surface.pres {
@@ -489,14 +405,14 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 &rune_theme_opencode::icons::ARROW_RIGHT
             };
             let send_w = surface::split_send_width(&shown.ident);
-            let inner_w = send_w + surface::CHEVRON_W;
             let mut left = row()
                 .key("send")
                 .size(send_w, BUTTON_H)
-                .pl(8.0)
-                .gap(4.0)
+                .pl(surface::SEND_PL)
+                .gap(surface::SEND_ICON_GAP)
                 .center_y()
                 .radius(ICON_BUTTON_RADIUS)
+                .fill(c.layer_02)
                 .hover(c.hover)
                 .press(c.pressed)
                 .role("button")
@@ -512,13 +428,18 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             if let Some(tip) = help {
                 left = left.help(tip);
             }
+            // Open, the picker half stays pressed while its list hangs under it.
+            let open = matches!(&surface.pres, Pres::Done(Done { open: Some(_), .. }));
+            let tint = p.k.alpha(c.text_base, if p.k.dark { 0.05 } else { 0.04 });
             let more = row()
                 .key("more")
                 .size(surface::CHEVRON_W, BUTTON_H)
                 .center()
                 .radius(ICON_BUTTON_RADIUS)
+                .fill(if open { c.layer_02 } else { tint })
                 .hover(c.hover)
-                .press(c.pressed)
+                .press(c.pressed);
+            let more = more
                 .role("button")
                 .label(tr("Send to…"))
                 .help(tr("Choose another session"))
@@ -530,9 +451,8 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             base.child(
                 row()
                     .key("split-fill")
-                    .size(inner_w, BUTTON_H)
-                    .radius(ICON_BUTTON_RADIUS)
-                    .fill(c.layer_02)
+                    .gap(surface::SPLIT_GAP)
+                    .h(BUTTON_H)
                     .child(left)
                     .child(more),
             )
@@ -572,31 +492,27 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             .hit()
             .on_press_tx(press(id))
         }
-        // A permission helper's Capture action retains its keycaps.
+        // A permission helper's Annotate action: a filled button, as Allow
+        // is, its keycaps inside it.
         Id::Ask
             if matches!(
                 &surface.pres,
                 Pres::Done(Done { ask: Some(ask), ask_keys: true, .. }) if *ask == shown.ident
             ) =>
         {
-            base.justify_start()
-                .pl(CHIP_PX)
-                .pr(surface::keycaps_inset())
-                .gap(surface::KEYCAPS_GAP)
-                .radius(surface::CHIP_RADIUS)
-                .hover(c.hover)
-                .press(c.pressed)
-                .child(label(&shown.ident, medium(), p.muted()))
-                .child(el().grow(1.0))
-                .child(super::super::controls::keycaps(
-                    p,
-                    "ask-keys",
-                    &surface::shortcut_keycaps(),
-                ))
-                .role("button")
-                .label(shown.ident.clone())
-                .hit()
-                .on_press_tx(press(id))
+            let bw = shown.rect[2] - 2.0 * surface::BUTTON_INSET;
+            let keys = chord(&surface::shortcut_keycaps());
+            base.child(
+                button_box(p, bw)
+                    .gap(HINT_GAP)
+                    .fill(c.layer_02)
+                    .child(label(&shown.ident, medium(), p.text()))
+                    .child(quiet(p, &keys, medium()).key("ask-keys")),
+            )
+            .role("button")
+            .label(shown.ident.clone())
+            .hit()
+            .on_press_tx(press(id))
         }
         Id::Ask if shown.active => base
             .child(
@@ -608,7 +524,7 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             .label(shown.ident.clone())
             .hit()
             .on_press_tx(press(id)),
-        Id::Ask => keyed(p, base, &[], &shown.ident, medium()).on_press_tx(press(id)),
+        Id::Ask => keyed(p, base, boxed(shown), &[], &shown.ident, medium()).on_press_tx(press(id)),
         // The line's one worded action: a filled button the height of the
         // icon buttons beside it, so the three are one row of boxes 6 pt
         // apart and 6 pt in from the walls. The chip around it is its target.
@@ -666,46 +582,23 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
     }
 }
 
-/// A guess in the cursor's or the notch's card, as the list's rows read:
-/// its name and its reason, the best one's in the accent.
-pub(super) fn pick_row(p: Paint, base: El, shown: &Shown, row: usize) -> El {
-    let c = &p.k.c;
-    let room = shown.rect[2] - 4.0 * ROW_PX - measure(shown.text(), medium());
-    let note = ellipsize(shown.note(), small(), room.max(24.0));
-    base.justify_start()
-        .px(ROW_PX)
-        .gap(ROW_PX)
-        .radius(ROW_RADIUS + 2.0)
-        .hover(c.hover)
-        .press(c.pressed)
-        .child(label(shown.text(), medium(), p.text()))
-        .child(el().grow(1.0))
-        .child(
-            label(
-                &note,
-                small(),
-                if row == 0 { p.accent() } else { p.muted() },
-            )
-            .offset(0.0, (medium().size - small().size) * BASELINE_DROP),
-        )
-        .role("button")
-        .label(shown.text().to_owned())
-        .hit()
-        .on_press_tx(press(Id::Pick(row)))
-}
-
-/// A chip's label, then its shortcut, if any, as one quiet word.
-pub(super) fn keyed(p: Paint, base: El, keys: &[&str], name: &str, style: rune::TextStyle) -> El {
-    let mut chip = base
-        .radius(surface::CHIP_RADIUS)
+/// A chip's label, then its shortcut, if any, as one quiet word, in a
+/// button box `w` wide that lights under the pointer.
+pub(super) fn keyed(
+    p: Paint,
+    base: El,
+    w: f32,
+    keys: &[&str],
+    name: &str,
+    style: rune::TextStyle,
+) -> El {
+    let mut chip = button_box(p, w)
         .gap(HINT_GAP)
-        .hover(p.k.c.hover)
-        .press(p.k.c.pressed)
         .child(label(name, style, p.muted()));
     if !keys.is_empty() {
         chip = chip.child(quiet(p, &chord(keys), style));
     }
-    chip.role("button").label(name.to_owned()).hit()
+    base.child(chip).role("button").label(name.to_owned()).hit()
 }
 
 /// Small faint text (a shortcut, a note) beside words in `beside`, on
@@ -809,13 +702,22 @@ pub(super) const ICON_BUTTON_RADIUS: f32 = surface::CHIP_RADIUS - 2.0;
 
 /// One of those buttons, `w` wide, its content centred.
 pub(super) fn button_box(p: Paint, w: f32) -> El {
+    plain_box(w).hover(p.k.c.hover).press(p.k.c.pressed)
+}
+
+/// A button's box with no fill of its own: every fill, hover and lit
+/// segment in the line is this one shape, 28 pt tall on 8 pt corners.
+pub(super) fn plain_box(w: f32) -> El {
     row()
         .key("box")
         .center()
         .size(w, BUTTON_H)
         .radius(ICON_BUTTON_RADIUS)
-        .hover(p.k.c.hover)
-        .press(p.k.c.pressed)
+}
+
+/// The width of the box inside `shown`'s chip.
+pub(super) fn boxed(shown: &Shown) -> f32 {
+    shown.rect[2] - 2.0 * surface::BUTTON_INSET
 }
 
 /// The capture's first frame, cropped to fill a small rounded card, with a

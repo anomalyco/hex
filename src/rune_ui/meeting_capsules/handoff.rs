@@ -15,7 +15,9 @@ impl Capsule {
         }
     }
 
-    /// The ✕'s first step: ask before anything is lost.
+    /// The ✕'s first step: ask before anything is lost. The prototype's
+    /// open header has no ✕; Discard moves behind Stop in a follow-up.
+    #[allow(dead_code)]
     pub(super) fn ask_discard(&mut self) {
         if let State::Recording {
             stopping: false,

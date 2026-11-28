@@ -1102,12 +1102,6 @@ pub(super) const CAPTURE_KEYS: &[Key] = &[
         "Days a capture is kept; none keeps it",
     ),
     key(
-        "capture.capsule_flow",
-        Kind::Choice(&["list", "toast", "menu_bar", "cursor", "notch"]),
-        "How the capture capsule offers where to send a capture (prototypes): a list, a \
-         one-line toast, the menu bar, a card at the pointer, or a notch",
-    ),
-    key(
         "capture.routing",
         Kind::Json,
         "Where captures go among OpenCode sessions: Scrawl's router settings (autoSend, sites, apps, smartRouting, …) as a JSON object",

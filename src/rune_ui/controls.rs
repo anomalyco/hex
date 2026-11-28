@@ -161,12 +161,14 @@ pub(crate) const CAPSULE: Capsule = Capsule {
     window_inset: 4.0,
     chip_inset: 4.0,
     row_inset: 6.0,
-    button_inset: 8.0,
+    // One 6 pt inset for rows, buttons and the ✕ box: every inner shape
+    // rounds 8 pt (14 − 6), the capsules' one concentric rule.
+    button_inset: 6.0,
     row_px: 10.0,
     icon: 16.0,
     icon_gap: 8.0,
     header_h: 36.0,
-    row_h: 44.0,
+    row_h: 32.0,
     row_gap: 2.0,
     island_h: 40.0,
     banner_h: 44.0,
@@ -193,7 +195,7 @@ impl Capsule {
 // The concentric radius table, checked at compile time.
 const _: () = assert!(CAPSULE.inner(CAPSULE.chip_inset) == 10.0); // radius.xl
 const _: () = assert!(CAPSULE.inner(CAPSULE.row_inset) == 8.0); // radius.lg
-const _: () = assert!(CAPSULE.inner(CAPSULE.button_inset) == 6.0); // radius.md
+const _: () = assert!(CAPSULE.inner(CAPSULE.button_inset) == 8.0); // radius.lg
 const _: () = assert!(CAPSULE.text_rail() == METRICS.row_px);
 
 /// A settings page's column of sections: cards hang `row_px` past the

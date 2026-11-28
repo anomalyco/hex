@@ -109,9 +109,6 @@ static CAPTURE_SETTINGS: OnceLock<RwLock<CaptureSettings>> = OnceLock::new();
 static SCRAWL_APP_RUNNING: AtomicBool = AtomicBool::new(false);
 #[cfg(hex_capture)]
 static CAPTURE_ON: AtomicBool = AtomicBool::new(false);
-/// [`CaptureSettings::capsule_flow`] for the capsule, without a lock.
-#[cfg(hex_capture)]
-static CAPSULE_FLOW: AtomicU8 = AtomicU8::new(0);
 
 #[derive(Default)]
 struct RuntimeTranscriptionSelection {
@@ -862,11 +859,6 @@ impl AppSettings {
                 .unwrap_or_else(|error| error.into_inner()) = self.capture.clone();
             CAPTURE_ON.store(self.capture_on(), Ordering::Release);
             crate::capture_host::record_own_windows(self.capture.show_overlays_in_recordings);
-            let flow = CapsuleFlow::ALL
-                .iter()
-                .position(|flow| *flow == self.capture.capsule_flow)
-                .unwrap_or_default();
-            CAPSULE_FLOW.store(flow as u8, Ordering::Release);
         }
         HEX_MICROPHONE_ENABLED.store(self.experimental.hex_microphone, Ordering::Release);
         crate::audio::hex_microphone::sync_from_settings(

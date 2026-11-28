@@ -49,14 +49,9 @@ impl Notice {
 /// A capsule ✕'s hit box: the open recording's discard and the ready
 /// panel's close.
 const CLOSE_BOX: f32 = CAPSULE.close;
-/// The panel's icon spine: the centre of its rows' 16 pt glyphs, where every
-/// ✕ is centred too.
-pub(super) const SPINE: f32 = CAPSULE.icon_spine();
-/// How far the discard ✕ hangs past the header's inset, so its centre lands
-/// on the spine.
-const CLOSE_NUDGE: f32 = REST_PX + CLOSE_BOX / 2.0 - SPINE;
-/// What the discard ✕ takes from the open header's field, on its free side.
-pub(super) const DISCARD_ROOM: f32 = CLOSE_BOX - CLOSE_NUDGE;
+/// What a discard ✕ would take from the open header's field. The open
+/// header is the waveform and the time alone: no bare ✕ beside them.
+pub(super) const DISCARD_ROOM: f32 = 0.0;
 /// The panel while it asks "Discard recording?": its header, the question
 /// and its consequence, and Keep and Discard (§2.4 of the design spec).
 pub(super) const CONFIRM_HEIGHT: f32 = REST_HEIGHT + CONFIRM_BODY;
@@ -66,12 +61,6 @@ const CONFIRM_BODY: f32 = 4.0 + 20.0 + 2.0 + 16.0 + 12.0 + CONFIRM_BUTTON + CONF
 const CONFIRM_BUTTON: f32 = 28.0;
 /// Keep and Discard sit this far in from the panel's sides and its edge.
 const CONFIRM_INSET: f32 = CAPSULE.button_inset;
-/// The ready panel's title band: its link's padding round the title and length.
-const TITLE_PY: f32 = 8.0;
-/// Clear space under the title link's hover fill.
-const TITLE_CLEAR: f32 = 8.0;
-/// Between the summary and the copies.
-const SUMMARY_GAP: f32 = 12.0;
 
 pub(super) fn recording_notice(shown: &Recording) -> Option<Notice> {
     // The microphone's own switch says more than the silence warning that
@@ -147,11 +136,12 @@ fn panel_row(
     label: &str,
     hint: Option<El>,
     first: bool,
+    lead: bool,
     enabled: bool,
     presence: f32,
     press: impl Fn(&mut Capsule, &mut Tx) + 'static,
 ) -> El {
-    let (ink, font) = if first {
+    let (ink, font) = if lead {
         (p.text(), p.k.ty.ui_medium)
     } else {
         (p.muted(), p.k.ty.ui)
@@ -233,10 +223,12 @@ fn copy_rows(p: Paint, capsule: &Capsule, recording: bool) -> Vec<El> {
         panel_row(
             p,
             "copy-prompt",
-            &icons::OUTLINE_CONSOLE,
+            &crate::rune_ui::icons::SPARKLES_OUTLINE,
             tr("Copy agent prompt"),
             copied(LiveCopy::Prompt),
             true,
+            // While recording, Stop leads; the copies follow it.
+            !recording,
             true,
             presence(1),
             |c, tx| c.copy_prompt(tx),
@@ -247,6 +239,7 @@ fn copy_rows(p: Paint, capsule: &Capsule, recording: bool) -> Vec<El> {
             &icons::OUTLINE_COPY,
             tr("Copy transcript"),
             copied(LiveCopy::All),
+            false,
             false,
             !recording || !live.entries.is_empty(),
             presence(2),
@@ -384,7 +377,7 @@ fn result(
                     .key("clock")
                     .gap(METER_GAP)
                     .center_y()
-                    .child(rec_dot(p).opacity(0.))
+                    .children(SHOWS_REC_DOT.then(|| rec_dot(p).opacity(0.)))
                     .child(
                         text(meeting::format_duration(duration))
                             .key("elapsed")
@@ -400,7 +393,7 @@ fn result(
         .w(CLOSE_WIDTH)
         .h(REST_HEIGHT)
         .center()
-        .children(manifest.map(|_| dismiss_button(p).transition(replace(capsule))));
+        .children(manifest.map(|_| dismiss_button(p, CLOSE_BOX).transition(replace(capsule))));
     let meta = meter_band();
     let space = el().key("space").grow(1.);
     // ✕ sits before the time in every corner. In a left corner the time
@@ -422,6 +415,7 @@ fn result(
             tr("Stopping…"),
             None,
             false,
+            true,
             false,
             stop.opacity,
             |_, _| {},
@@ -569,7 +563,8 @@ fn meter_band() -> El {
     row()
         .key("meta")
         .h(REST_HEIGHT)
-        .px(REST_PX)
+        .pl(REST_PL)
+        .pr(REST_PX)
         .center_y()
         .transition(Transition::none())
         .cursor(Cursor::Grab)
@@ -597,7 +592,7 @@ fn timer_text_width(minutes: u64) -> f32 {
 
 /// The time's width after `minutes`, dot and gap included.
 fn timer_width(minutes: u64) -> f32 {
-    timer_text_width(minutes) + REC_DOT + METER_GAP
+    timer_text_width(minutes) + DOT_ROOM
 }
 
 /// Only grow the compact header for a notice or another minute digit.
@@ -624,7 +619,7 @@ fn minutes_shown(capsule: &Capsule) -> u64 {
 /// The header's room for the field in a surface `width` wide: from the
 /// rows' inset to the time. Another digit on the time takes three columns.
 fn field_room(capsule: &Capsule, width: f32) -> f32 {
-    let room = width - 2. * REST_PX - METER_GAP - timer_width(minutes_shown(capsule));
+    let room = width - REST_PL - REST_PX - METER_GAP - timer_width(minutes_shown(capsule));
     room - discard_room(capsule).min((room - waveform::WIDTH).max(0.))
 }
 
@@ -667,7 +662,8 @@ pub(super) fn field_wanted(capsule: &Capsule) -> f32 {
         _ => false,
     };
     if open {
-        let room = PANEL_WIDTH - 2. * REST_PX - METER_GAP - timer_width(minutes_shown(capsule));
+        let room =
+            PANEL_WIDTH - REST_PL - REST_PX - METER_GAP - timer_width(minutes_shown(capsule));
         (room - DISCARD_ROOM).max(waveform::WIDTH)
     } else {
         waveform::WIDTH
@@ -711,7 +707,7 @@ pub(super) fn meter(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
                 .key("clock")
                 .gap(METER_GAP)
                 .center_y()
-                .child(rec_dot(p))
+                .children(SHOWS_REC_DOT.then(|| rec_dot(p)))
                 .child(
                     text(elapsed)
                         .key("elapsed")
@@ -760,6 +756,13 @@ fn notice_height(shown: &Recording) -> f32 {
 /// The open panel a finished meeting grows from: no notice and no foot.
 pub(super) fn open_height_without_notice() -> f32 {
     OPEN_HEADER + ROW_GAP + COPIES_HEIGHT + PANEL_PAD
+}
+
+/// The transcribing and finished panel: the title band over the copies,
+/// without the recording's foot, as the replay checks its rests.
+#[cfg(test)]
+pub(super) fn result_height() -> f32 {
+    ready_height()
 }
 
 /// Where Stop is while recording and where the title is afterwards: the same
@@ -842,7 +845,8 @@ pub(super) fn arriving_header(
     let meta = row()
         .key("meta")
         .h(REST_HEIGHT)
-        .px(REST_PX)
+        .pl(REST_PL)
+        .pr(REST_PX)
         .center_y()
         .transition(Transition::none());
     let meta = if right {
@@ -909,7 +913,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording, held: Op
     // The notice is measured against the resting header, so the ✕ arriving
     // never recuts it; it has gone once the field is as wide as it opens.
     let field = field_width(capsule);
-    let wide = PANEL_WIDTH - 2. * REST_PX - METER_GAP - timer_width(minutes_shown(capsule));
+    let wide = PANEL_WIDTH - REST_PL - REST_PX - METER_GAP - timer_width(minutes_shown(capsule));
     let widest = wide - DISCARD_ROOM;
     let covered = if widest > waveform::WIDTH {
         ((field - waveform::WIDTH) / (widest - waveform::WIDTH)).clamp(0., 1.)
@@ -955,6 +959,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording, held: Op
             },
             None,
             false,
+            true,
             !stopping && open && stop.takes_input(),
             stop.opacity,
             |c, tx| {
@@ -993,41 +998,9 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording, held: Op
         });
     let header = meter_band();
     let spacer = el().key("space").grow(1.0);
-    // The ✕ keeps its place on the icon spine, over the header rather than
-    // in its row, so nothing beside it moves as it arrives; while the
-    // question is asked (or the discard is under way) it fades and takes no
-    // input.
-    let discard = (open && (!stopping || confirming)).then(|| {
-        let x = if right {
-            SPINE - CLOSE_BOX / 2.
-        } else {
-            PANEL_WIDTH - SPINE - CLOSE_BOX / 2.
-        };
-        let slot = row()
-            .key("discard-slot")
-            .size(CLOSE_BOX, CLOSE_BOX)
-            .absolute(x, (REST_HEIGHT - CLOSE_BOX) / 2.)
-            .center()
-            .child(
-                IconButton::new(&icons::CLOSE_SMALL)
-                    .variant(IconButtonVariant::GhostMuted)
-                    .control_size(ControlSize::Small)
-                    .label(tr("Discard recording"))
-                    .build(p.k)
-                    .key("discard")
-                    .cursor(Cursor::Pointer)
-                    .no_window_drag()
-                    .on_press_tx(|c: &mut Capsule, tx| {
-                        c.ask_discard();
-                        c.stir(tx);
-                    }),
-            );
-        if asking {
-            slot.opacity(0.0).inert()
-        } else {
-            slot.opacity(stop.opacity)
-        }
-    });
+    // The open header is the waveform and the time alone; Discard waits
+    // behind Stop's confirmation rather than a bare ✕ beside them.
+    let discard: Option<El> = None;
     let header = if right {
         header
             .children(discard)
@@ -1357,10 +1330,10 @@ pub(super) fn ready_window_size(manifest: &MeetingManifest) -> (f32, f32) {
 
 /// What the ready panel draws, on every OS: its header, a summary while there
 /// is one or one is being written, and the two copies, with the inset.
-pub(super) fn ready_body(manifest: &MeetingManifest) -> (f32, f32) {
+pub(super) fn ready_body(_manifest: &MeetingManifest) -> (f32, f32) {
     (
         PANEL_WIDTH + 2.0 * CAPSULE_INSET,
-        ready_height(manifest).max(open_height_without_notice()) + 2.0 * CAPSULE_INSET,
+        ready_height().max(open_height_without_notice()) + 2.0 * CAPSULE_INSET,
     )
 }
 
@@ -1486,18 +1459,18 @@ mod tests {
 
     #[test]
     fn the_resting_window_is_the_pill_and_the_open_one_the_panel() {
-        // The 168 pt pill (its field, the red dot, and the time) and its inset.
-        assert_eq!(rest(), (176., 44.));
-        assert_eq!(open(), (260., 224.));
+        // The 150 pt pill (its field and the time) and its inset.
+        assert_eq!(rest(), (158., 44.));
+        assert_eq!(open(), (260., 184.));
         // With words, the foot is their last lines.
-        assert_eq!(open_window(None, peek::PEEK_FOOT), (260., 252.));
+        assert_eq!(open_window(None, peek::PEEK_FOOT), (260., 216.));
         // The discard question fits inside the open window.
         assert!(CONFIRM_HEIGHT + 2. * CAPSULE_INSET <= open().1);
         // A notice widens the resting pill to the panel, and adds its line
         // to the open one.
         let noticed = noticed();
         assert_eq!(rest_window(Some(&noticed)), (260., 44.));
-        assert_eq!(open_window(Some(&noticed), peek::LINK_FOOT), (260., 244.));
+        assert_eq!(open_window(Some(&noticed), peek::LINK_FOOT), (260., 204.));
     }
 
     #[test]

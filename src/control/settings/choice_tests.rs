@@ -143,8 +143,6 @@ fn every_choice_key_matches_its_enum_serde_names() {
             "updates.channel" => serde_names(&UpdateChannel::ALL),
             #[cfg(hex_capture)]
             "capture.transcriber" => serde_names(&crate::app_settings::CaptureTranscriber::ALL),
-            #[cfg(hex_capture)]
-            "capture.capsule_flow" => serde_names(&crate::app_settings::CapsuleFlow::ALL),
             other => panic!(
                 "Kind::Choice key `{other}` is missing from every_choice_key_matches_its_enum_serde_names"
             ),

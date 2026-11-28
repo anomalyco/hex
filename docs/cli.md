@@ -500,11 +500,11 @@ audio/wav`. The route answers each piece's transcript
 Requests are flat objects tagged by `command` (kebab-case):
 
 ```json
-{"version": 4, "command": "meeting-record", "title": "Design sync"}
-{"version": 4, "command": "settings-set", "key": "sound_effects", "value": "off"}
-{"version": 4, "command": "dictation", "action": "start"}
-{"version": 4, "command": "dictation", "action": "start", "print": true}
-{"version": 4, "command": "dictation", "action": "stop", "print": true}
+{"version": 5, "command": "meeting-record", "title": "Design sync"}
+{"version": 5, "command": "settings-set", "key": "sound_effects", "value": "off"}
+{"version": 5, "command": "dictation", "action": "start"}
+{"version": 5, "command": "dictation", "action": "start", "print": true}
+{"version": 5, "command": "dictation", "action": "stop", "print": true}
 ```
 
 ```ts
@@ -533,28 +533,28 @@ it sends the WAV itself to `POST /transcriptions` (see Transport above).
 Replies are tagged by `status`:
 
 ```json
-{"version": 4, "status": "done", "message": "Recording “Design sync”; …", "changed": true}
-{"version": 4, "status": "error", "code": "feature-off", "message": "Meetings are off; …"}
-{"version": 4, "status": "settings", "settings": [{"key": "sound_effects", "value": true,
+{"version": 5, "status": "done", "message": "Recording “Design sync”; …", "changed": true}
+{"version": 5, "status": "error", "code": "feature-off", "message": "Meetings are off; …"}
+{"version": 5, "status": "settings", "settings": [{"key": "sound_effects", "value": true,
   "kind": "bool", "writable": true, "about": "Play recording and error tones"}]}
-{"version": 4, "status": "models", "models": [{"id": "parakeet_v3", "name": "…",
+{"version": 5, "status": "models", "models": [{"id": "parakeet_v3", "name": "…",
   "languages": ["en", "…"], "size": "…", "installed": true, "selected": true,
   "streams": true, "vocabulary": "bias", "supports_recognition_hints": false}]}
-{"version": 4, "status": "vocabulary", "entries": [{"term": "OpenCode",
+{"version": 5, "status": "vocabulary", "entries": [{"term": "OpenCode",
   "sounds_like": ["open code"]}, {"term": "Rune"}]}
-{"version": 4, "status": "scrawl-capture", "changed": true, "state": "idle",
+{"version": 5, "status": "scrawl-capture", "changed": true, "state": "idle",
   "bundle": "…/captures/1792933491953.scrawl", "elapsed_ms": null,
   "finishing": ["…/captures/1792933491953.scrawl"], "last": null}
-{"version": 4, "status": "scrawl-captures", "captures": [{"id": "1792933491953.scrawl",
+{"version": 5, "status": "scrawl-captures", "captures": [{"id": "1792933491953.scrawl",
   "bundle": "…", "created_at_ms": 1792933491953, "duration_ms": 4000, "mode": "window",
   "app": "Brave", "words": 12, "sent_to": {"session": "ses_…", "title": "Hex"},
   "queued": false}]}
-{"version": 4, "status": "scrawl-capture-detail", "id": "…", "…": "the list's fields",
+{"version": 5, "status": "scrawl-capture-detail", "id": "…", "…": "the list's fields",
   "window_title": "…", "transcript": "…", "note": null, "missing_transcript": null,
   "marks": 2, "keyframes": 3, "video": "…/video.mp4", "audio": null,
   "contact_sheet": "…/contact-sheet.jpg"}
-{"version": 4, "status": "scrawl-capture-route", "explanation": "Capture   …"}
-{"version": 4, "status": "transcript", "text": "Ship it."}
+{"version": 5, "status": "scrawl-capture-route", "explanation": "Capture   …"}
+{"version": 5, "status": "transcript", "text": "Ship it."}
 ```
 
 `done.changed` is `false` when the command found things already so ("Already
@@ -566,7 +566,7 @@ recording", "The window isn't open"). Setting `kind` is one of `bool`,
 
 ```json
 {
-  "version": 4, "status": "status",
+  "version": 5, "status": "status",
   "app_version": "2.3.1", "pid": 31708, "memory_footprint_bytes": 412000000,
   "listener": {"running": true, "status": "Listening"},
   "capture": {"state": "idle", "recording": null, "pending_jobs": 0},
@@ -763,8 +763,6 @@ support this lab.
   `capture.media_days`, `capture.bundle_days`, `capture.routing`,
   `capture.show_overlays_in_recordings` (default off; on lets screen
   recordings, Hex's captures included, show its overlays), and
-  `capture.capsule_flow` (`list`, the default, `toast`, `menu_bar`, `cursor`
-  or `notch`: the capsule's flow after a capture, prototypes to compare). Both
   capture shortcuts need a key, and `capture.enabled on` needs both free; on
   a Mac whose Paste Last is still ⌥⇧V, rebind one of the two first.
 - `meetings.retention` is `day`, `week`, `month`, `forever`, or `none` (the
@@ -836,11 +834,12 @@ fails when a new persisted setting has no key here.
 
 ## Compatibility
 
-`CONTROL_VERSION` is 4. A change that breaks a request or reply shape
+`CONTROL_VERSION` is 5. A change that breaks a request or reply shape
 increments it; adding a command, an optional request field, or a reply field
 does not. A `hex` from a different version gets `version-mismatch`; use the
 `hex` inside the running Hex.app, or restart Hex after updating. Version 2
 removed `permissions.input_monitoring` from the status reply; version 3 removed
 `voice-action` and `features.voice_action`; version 4 removed `commands-retry`,
 `settings-set.confirm`, `window-show` `commands`, `capture.recording` `voice`,
-`features.commands`, and `features.command_model`.
+`features.commands`, and `features.command_model`; version 5 removed
+`capture.capsule_flow`, the capsule prototypes' switch.

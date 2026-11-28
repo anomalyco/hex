@@ -1318,9 +1318,9 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   │   `either_track_can_interrupt_the_release_in_place` (synthetic levels)
      │   ├── Its corners are the capsules' 14 pt at rest and open, so opening
      │   │   changes its size and never its silhouette
-     │   ├── The pill is 165 × 36 pt: its field 78 pt wide (31 columns), then
-     │   │   an 8 pt red dot 6 pt before the time, with the rows' 14 pt inset on
-     │   │   both sides (`the_header_keeps_the_rows_inset_at_rest_open_and_finished`)
+     │   ├── The pill is 150 × 36 pt: its field 78 pt wide (31 columns) and
+     │   │   the time, with the rows' inset on both sides and no recording dot
+     │   │   (`the_header_keeps_the_rows_inset_at_rest_open_and_finished`)
      │   └── "Microphone is silent" (warning), "Microphone muted" (Labs ›
      │       Mute the microphone while recording, in its place), or, for its
      │       first 10 s, "Started automatically" shows beside the meter
@@ -1336,23 +1336,23 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   │   oldest fading out, and the panel grows 28 pt for them
      │   │   (panel/peek.rs; `the_open_recordings_foot_opens_the_live_meeting`;
      │   │   not observed on a real call)
-     │   ├── A quiet 28 pt ✕ (Discard recording) on the rows' icon spine, on
-     │   │   the field's free side -> "Discard recording?" / "Deletes its
-     │   │   audio and transcript" over Keep and Discard (Danger), equal
-     │   │   width; the panel hugs it (126 pt) and the ✕ fades and takes no
-     │   │   input while asked. Discard stops capture, skips the final pass,
-     │   │   and moves the recording folder to the Trash; no finished panel.
-     │   │   Leaving the pill answers Keep
+     │   ├── No bare ✕ sits in the open header: Discard waits behind Stop's
+     │   │   confirmation -> "Discard recording?" / "Deletes its audio and
+     │   │   transcript" over Keep and Discard (Danger), equal width; the panel
+     │   │   hugs it (126 pt) and takes no other input while asked. Discard
+     │   │   stops capture, skips the final pass, and moves the recording
+     │   │   folder to the Trash; no finished panel. Leaving the pill answers
+     │   │   Keep
      │   │   (`a_discarded_recording_dismisses_the_pill_and_shows_no_finished_panel`)
-     │   ├── The field widens with the wall, from the rows' 14 pt inset to the
-     │   │   time, clear of the ✕: 143 pt, 56 columns at the same 2.6 pt
-     │   │   pitch, 8 pt fewer for each further digit on the time. It is one field: its free end
+     │   ├── The field widens with the wall, from its resting 12 pt tuck to the
+     │   │   time: 180 pt, 70 columns at the same 2.6 pt pitch, 8 pt fewer for
+     │   │   each further digit on the time. It is one field: its free end
      │   │   is the wall's motion every frame, in whole columns counted from
      │   │   the held end, no dot is drawn outside its place, the dots that
      │   │   stay keep their light, and a column that arrives is lit from the
      │   │   voice's history. In a right corner it is held beside the time,
      │   │   which stays put; in a left corner it is held at the wall and the
-     │   │   time rides the moving wall 14 pt inside it, with the ✕ beyond. A
+     │   │   time rides the moving wall inside it. A
      │   │   notice in the header keeps its place and its cut while the
      │   │   field's end, or on the left the time, wipes over it, and has gone
      │   │   by the time the field is halfway.
@@ -1376,7 +1376,7 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │       `an_interrupted_panel_turns_round_without_a_stop_or_a_jump`,
      │       `reduced_motion_lands_the_surface_and_only_fades`). Offscreen
      │       Rune with a synthetic pointer; not seen in a native window
-     ├── Stop -> the icon, label and whitespace use the same 242 × 44 pt row
+     ├── Stop -> the icon, label and whitespace use the same 240 × 32 pt row
      │   and hover/focus bounds as the copies. An enabled row shows the
      │   pointer, a row with nothing to do keeps the arrow, and the meter
      │   band shows the grab hand. Dragging the band repositions the
@@ -1413,8 +1413,8 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   │   whatever the meters read. Check:
      │   │   `after_capture_ends_the_time_holds_and_the_field_only_cools`
      │   └── Not done: the length can change by a second, in one frame, when
-     │       the finished meeting's own length replaces the recording's; a
-     │       summary line's first words wipe on but its removal is one frame.
+     │       the finished meeting's own length replaces the recording's. The
+     │       notes' summary is not drawn, so their arrival moves nothing.
      ├── Closing any capsule (✕, Not now, the offer's timeout, a refused
      │   start, a withdrawn reminder or call-ended notice, the indicator
      │   turned off) -> it is closed at once: nothing in it takes input and
@@ -2470,7 +2470,7 @@ Agents -> hex meetings delete <id>                 // exact `meetings list --jso
   -> done -> "Deleted “<title>”; moved to the Trash"; an open pane drops the
      row at its next 1 s rescan
   // checks: deleting_a_meeting_answers_its_refusal_code; JSON shape
-  // {"version":4,"command":"meeting-delete","id":"…"} (control.rs)
+  // {"version":5,"command":"meeting-delete","id":"…"} (control.rs)
 ```
 
 Choice: Delete trashes the Markdown copy too, since it holds the transcript;

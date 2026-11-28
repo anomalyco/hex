@@ -1488,7 +1488,7 @@ mod tests {
 
     #[test]
     fn control_requests_are_authenticated_versioned_and_typed() {
-        use crate::control::{ControlCommand, ControlReply, ControlResponse};
+        use crate::control::{CONTROL_VERSION, ControlCommand, ControlReply, ControlResponse};
 
         let directory = temp_directory();
         let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
@@ -1519,7 +1519,9 @@ mod tests {
             post_to(
                 port,
                 &client_token,
-                r#"{"version":4,"command":"meeting-record","title":"Standup"}"#,
+                &format!(
+                    r#"{{"version":{CONTROL_VERSION},"command":"meeting-record","title":"Standup"}}"#
+                ),
             )
         });
         let call = controls.recv_timeout(Duration::from_secs(2)).unwrap();
@@ -1541,9 +1543,15 @@ mod tests {
             ControlReply::done("Started recording")
         );
 
-        let unauthorized = post("hex_wrong", r#"{"version":4,"command":"status"}"#);
+        let unauthorized = post(
+            "hex_wrong",
+            &format!(r#"{{"version":{CONTROL_VERSION},"command":"status"}}"#),
+        );
         assert!(unauthorized.starts_with("HTTP/1.1 401"));
-        let unknown = post(&token, r#"{"version":4,"command":"explode"}"#);
+        let unknown = post(
+            &token,
+            &format!(r#"{{"version":{CONTROL_VERSION},"command":"explode"}}"#),
+        );
         assert!(unknown.starts_with("HTTP/1.1 400"));
         // Another protocol version is answered without reaching the app.
         for body in [

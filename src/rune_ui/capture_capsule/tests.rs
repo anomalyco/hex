@@ -120,7 +120,7 @@ fn picking(mode: Mode) -> Vec<Beat> {
     let mut beats = vec![
         In(Input::Phone(mode == Mode::Iphone)),
         In(Input::Stage(Stage::Recording)),
-        In(Input::Chips),
+        Click(Id::Source),
         Click(Id::Mode(Mode::Window)),
     ];
     if mode != Mode::Window {
@@ -159,14 +159,14 @@ fn stills() -> Vec<(&'static str, Pres)> {
         ),
         (
             "recording-chips",
-            after(&[In(Input::Stage(Stage::Recording)), In(Input::Chips)]),
+            after(&[In(Input::Stage(Stage::Recording)), Click(Id::Source)]),
         ),
         (
             "recording-chips-iphone",
             after(&[
                 In(Input::Phone(true)),
                 In(Input::Stage(Stage::Recording)),
-                In(Input::Chips),
+                Click(Id::Source),
             ]),
         ),
         ("processing", after(&[processing()])),
@@ -201,7 +201,7 @@ fn stills() -> Vec<(&'static str, Pres)> {
         ),
         ("rule-sent", after(&routed(rule()))),
         ("rule-jev", {
-            let to = Dest::new("ACME", "sent · Jev");
+            let to = Dest::new("ACME", "suggested");
             after(&routed(Route::Rule {
                 to: to.clone(),
                 suggested: vec![to],
@@ -479,8 +479,9 @@ fn every_state_draws_its_pieces() {
         ("guess", &["done", "split", "send", "more", "close"]),
         ("guess-five", &["done", "split", "send", "more", "close"]),
         ("no-answer", &["done", "why", "ask", "close"]),
-        ("hover", &["shift-hint"]),
-        ("shift", &["shift-hint"]),
+        // The suggestions' footer keeps the rules; Send is on a row.
+        ("hover", &["footer", "all-rules"]),
+        ("shift", &["footer"]),
         (
             "list-guess",
             &["done", "field", "list", "row-SEER", "footer"],
@@ -577,7 +578,7 @@ fn the_widest_states_fit_the_panel() {
     let chips = [
         In(Input::Phone(true)),
         In(Input::Stage(Stage::Recording)),
-        In(Input::Chips),
+        Click(Id::Source),
     ];
     for pres in [
         after(&[processing(), In(Input::Routed(rule))]),
@@ -698,7 +699,7 @@ fn the_ready_line_and_its_list_share_their_edges() {
 
     // The margin is for words: the preview nests in the corner instead
     // (`the_preview_nests_in_the_capsules_left_corners`).
-    for text in ["Send to", "HOME", "SEER"] {
+    for text in ["Recent", "HOME", "SEER"] {
         assert!(
             near(worded(text)[0] - shell[0], 16.0),
             "{text} off the list's margin"
@@ -769,6 +770,145 @@ fn the_ready_line_and_its_list_share_their_edges() {
         near(right - (fill[0] + fill[2]), 6.0 + 28.0 + 6.0),
         "{found:?}"
     );
+}
+
+/// Every fill in the line is one shape: a 28 pt box 6 pt in from the top and
+/// bottom walls, whether it is a button, a hover, the lit mode or a half of
+/// the split chip. A chip-sized fill (32 pt, 4 pt in) beside them reads as a
+/// second, bigger kind of button.
+#[test]
+fn every_fill_in_the_line_is_the_same_28_pt_box() {
+    let near = |a: f32, b: f32| (a - b).abs() < 0.26;
+    let mut seen = 0;
+    for (name, pres) in stills() {
+        let rt = runtime(pres, true);
+        let elements = rt.elements();
+        let bare = |e: &rune::ElementInfo| {
+            e.key
+                .as_deref()
+                .map(|k| k.split('#').next().unwrap_or(k).to_owned())
+        };
+        let Some(shell) = elements
+            .iter()
+            .find(|e| bare(e).as_deref() == Some("shell"))
+            .map(|e| e.rect)
+        else {
+            continue;
+        };
+        for e in elements.iter().filter(|e| !e.exiting) {
+            let key = bare(e).unwrap_or_default();
+            if !matches!(key.as_str(), "box" | "send" | "more" | "highlight") {
+                continue;
+            }
+            if !e.path.contains("content") && key != "highlight" {
+                continue;
+            }
+            let [_, y, _, h] = e.rect;
+            assert!(
+                near(h, 28.0) && near(y - shell[1], 6.0),
+                "{name}: {key} is {h} tall, {} under the wall",
+                y - shell[1]
+            );
+            seen += 1;
+        }
+    }
+    assert!(seen > 60, "only {seen} boxes drawn across the stills");
+}
+
+/// The recording's pen, source, stop and ✕ are one even row of boxes 6 pt
+/// apart, the last 6 pt from the wall; the split chip's name stands as far
+/// from its button's end as its arrow's ink does from its start, 4 pt from
+/// the ⌄ button; and the Always… configurator shares its capsule's walls,
+/// each option holding both of its lines.
+#[test]
+fn the_tools_the_split_chip_and_the_configurator_keep_their_spacing() {
+    use super::surface::{SEND_PR, SPLIT_GAP};
+    let near = |a: f32, b: f32| (a - b).abs() < 0.26;
+    let still = |name: &str| {
+        let pres = stills().into_iter().find(|(n, _)| *n == name).unwrap().1;
+        runtime(pres, true)
+    };
+    let bare = |e: &rune::ElementInfo| {
+        e.key
+            .as_deref()
+            .map(|k| k.split('#').next().unwrap_or(k).to_owned())
+            .unwrap_or_default()
+    };
+
+    let rt = still("recording");
+    let elements = rt.elements();
+    let shell = elements.iter().find(|e| bare(e) == "shell").unwrap().rect;
+    let boxes: Vec<[f32; 4]> = ["pen", "source", "finish", "cancel"]
+        .iter()
+        .map(|chip| {
+            elements
+                .iter()
+                .find(|e| bare(e) == "box" && e.path.contains(chip))
+                .unwrap_or_else(|| panic!("no box in {chip}"))
+                .rect
+        })
+        .collect();
+    for pair in boxes.windows(2) {
+        let gap = pair[1][0] - (pair[0][0] + pair[0][2]);
+        assert!(near(gap, 6.0), "tools {gap} apart");
+    }
+    let last = boxes[3];
+    assert!(near(shell[0] + shell[2] - (last[0] + last[2]), 6.0));
+
+    // The picker's lit mode, Record and ✕ keep the same step.
+    let rt = still("picker-screen");
+    let elements = rt.elements();
+    let shell = elements.iter().find(|e| bare(e) == "shell").unwrap().rect;
+    let lit = elements
+        .iter()
+        .find(|e| bare(e) == "highlight")
+        .unwrap()
+        .rect;
+    let boxed = |chip: &str| {
+        elements
+            .iter()
+            .find(|e| bare(e) == "box" && e.path.contains(chip))
+            .unwrap_or_else(|| panic!("no box in {chip}"))
+            .rect
+    };
+    let (record, close) = (boxed("record"), boxed("close"));
+    assert!(near(record[0] - (lit[0] + lit[2]), 6.0));
+    assert!(near(close[0] - (record[0] + record[2]), 6.0));
+    assert!(near(shell[0] + shell[2] - (close[0] + close[2]), 6.0));
+
+    let rt = still("guess");
+    let elements = rt.elements();
+    let rect = |key: &str| elements.iter().find(|e| bare(e) == key).unwrap().rect;
+    let (send, more) = (rect("send"), rect("more"));
+    assert!(near(more[0] - (send[0] + send[2]), SPLIT_GAP));
+    let name = elements
+        .iter()
+        .find(|e| e.text.as_deref() == Some("SEER") && e.path.contains("send"))
+        .unwrap()
+        .rect;
+    assert!(
+        near(send[0] + send[2] - (name[0] + name[2]), SEND_PR),
+        "the name is {} from its button's end",
+        send[0] + send[2] - (name[0] + name[2])
+    );
+
+    let rt = still("always-open");
+    let elements = rt.elements();
+    let rect = |key: &str| elements.iter().find(|e| bare(e) == key).unwrap().rect;
+    let (shell, popover) = (rect("shell"), rect("always-popover"));
+    assert!(near(shell[0], popover[0]) && near(shell[2], popover[2]));
+    for option in ["scope-narrow", "scope-wide", "to-session", "to-project"] {
+        let row = rect(option);
+        let copy = elements
+            .iter()
+            .find(|e| bare(e) == "copy" && e.path.contains(option))
+            .unwrap()
+            .rect;
+        assert!(
+            copy[1] >= row[1] + 4.0 && copy[1] + copy[3] <= row[1] + row[3] - 4.0,
+            "{option}'s two lines ({copy:?}) leave its row ({row:?})"
+        );
+    }
 }
 
 /// The preview nests in the capsule's left corners: the 28 × 20 card clears
@@ -859,9 +999,9 @@ fn the_preview_nests_in_the_capsules_left_corners() {
     assert!(near(words[0] - shell[0], ISLAND_INSET + DONE_TEXT_X));
 }
 
-/// Keycaps, as Settings draws a shortcut, are for Search's chip and the
-/// hints under the list; a chip on the top line says its shortcut in quiet
-/// text ("Next ⇥").
+/// Keycaps, as Settings draws a shortcut, are for Search's chip, the hints
+/// under the list and the highlighted row's Send; a chip on the top line
+/// says its shortcut in quiet text ("Next ⇥").
 #[test]
 fn the_capsule_draws_keycaps_only_on_search_and_hints() {
     for (name, pres) in stills() {
@@ -873,7 +1013,7 @@ fn the_capsule_draws_keycaps_only_on_search_and_hints() {
                 .is_some_and(|k| k == "keys" || k.starts_with("keycap"));
             assert!(
                 !keycap
-                    || ["ask-keys", "footer", "card-hints"]
+                    || ["ask-keys", "footer", "send-hint"]
                         .iter()
                         .any(|at| e.path.contains(at)),
                 "{name}: {} is a keycap",
@@ -934,15 +1074,7 @@ fn render(gpu: &rune::render::Gpu, pres: Pres, dark: bool) -> (u32, u32, Vec<u8>
             ..
         }) => super::surface::LIST_Y + super::always_view::always_height(config) + 28.0,
         _ => {
-            // A card's guesses hang under the line.
-            use super::surface::{Anchor, anchor_for, layout_at};
-            let (shell, _) = layout_at(
-                &pres,
-                "0:00",
-                false,
-                anchor_for(&pres, Anchor::Top),
-                super::notch::Geometry::default(),
-            );
+            let (shell, _) = super::surface::layout_at(&pres, "0:00", false);
             (shell[1] + shell[3] + 36.0).max(TOP + 40.0 + 36.0)
         }
     };
@@ -1042,41 +1174,14 @@ fn capture_capsule_goldens() {
     assert!(misses.is_empty(), "{}", misses.join("\n"));
 }
 
-/// `HEX_CAPSULE_TOP_LINE=quiet|icons` draws the finished capsule's top
-/// line that way and `HEX_CAPSULE_FOOTER=band|well` the list's footer, to
-/// compare them.
-fn top_line_from_env() {
+/// `HEX_CAPSULE_UNDO_S` shortens Undo's window for a short clip.
+fn undo_from_env() {
+    let Ok(secs) = std::env::var("HEX_CAPSULE_UNDO_S") else {
+        return;
+    };
     let mut tuning = super::tuning::DEFAULT;
-    if let Ok(name) = std::env::var("HEX_CAPSULE_TOP_LINE") {
-        tuning.top_line = super::tuning::TopLine::ALL
-            .into_iter()
-            .find(|m| format!("{m:?}").eq_ignore_ascii_case(&name))
-            .expect("HEX_CAPSULE_TOP_LINE is quiet or icons");
-    }
-    if let Ok(name) = std::env::var("HEX_CAPSULE_FOOTER") {
-        tuning.list_footer = super::tuning::ListFooter::ALL
-            .into_iter()
-            .find(|m| format!("{m:?}").eq_ignore_ascii_case(&name))
-            .expect("HEX_CAPSULE_FOOTER is band or well");
-    }
-    // `HEX_CAPSULE_FLOW=list|toast|menu_bar|cursor|notch` plays that flow,
-    // and `HEX_CAPSULE_UNDO_S` shortens Undo's window for a short clip.
-    if let Ok(name) = std::env::var("HEX_CAPSULE_FLOW") {
-        tuning.flow = super::tuning::CapsuleFlow::ALL
-            .into_iter()
-            .find(|f| {
-                format!("{f:?}")
-                    .replace('_', "")
-                    .eq_ignore_ascii_case(&name.replace('_', ""))
-            })
-            .expect("HEX_CAPSULE_FLOW is list, toast, menu_bar, cursor or notch");
-    }
-    if let Ok(secs) = std::env::var("HEX_CAPSULE_UNDO_S") {
-        tuning.undo_s = secs.parse().expect("HEX_CAPSULE_UNDO_S is seconds");
-    }
-    if tuning != super::tuning::DEFAULT {
-        super::tuning::set(tuning);
-    }
+    tuning.undo_s = secs.parse().expect("HEX_CAPSULE_UNDO_S is seconds");
+    super::tuning::set(tuning);
 }
 
 /// `HEX_CAPSULE_SNAPS=<folder>` writes every state, light and dark;
@@ -1087,7 +1192,7 @@ fn capture_capsule_snapshots() {
     let Some(folder) = std::env::var_os("HEX_CAPSULE_SNAPS") else {
         return;
     };
-    top_line_from_env();
+    undo_from_env();
     if let Ok(language) = std::env::var("HEX_CAPSULE_LANGUAGE") {
         crate::desktop::i18n::apply(Some(&language));
     }

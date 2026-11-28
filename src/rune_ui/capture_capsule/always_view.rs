@@ -8,7 +8,7 @@ use rune::{El, Icon, SpringPair, Transition, col, el, row, text};
 use rune_theme_opencode::icons as oc;
 
 use super::flow::AlwaysConfig;
-use super::surface::{Id, LIST_Y, PANEL_W, ellipsize, measure, medium, small};
+use super::surface::{Id, LIST_Y, ellipsize, measure, medium, small};
 use super::view::{BUTTON_H, ICON_BUTTON_RADIUS, press, rim};
 use super::{CapsuleState, LIST_DROP, PRESENCE_BLUR, Part, tuning};
 use crate::capture_host::RuleMatch;
@@ -16,12 +16,21 @@ use crate::desktop::i18n::tr;
 use crate::rune_ui::controls::{CAPSULE, Paint};
 use crate::rune_ui::icons;
 
+/// The least the configurator is wide. Its capsule is never narrower while
+/// it is open, and it follows a wider one.
 pub(crate) const POP_W: f32 = 320.0;
 const POP_PAD: f32 = CAPSULE.row_inset;
 const POP_RADIUS: f32 = CAPSULE.radius;
-const OPTION_H: f32 = CAPSULE.row_h;
-const HEADER_H: f32 = 26.0;
-const FOOTER_H: f32 = 44.0;
+/// An option is two lines, a name over what it covers: taller than the
+/// capsules' one-line 32 pt row, on the same inset and corners.
+const OPTION_H: f32 = 44.0;
+/// A section's header, as the Send-to list draws its own.
+const HEADER_H: f32 = super::surface::HEADER_H;
+/// The footer: 28 pt buttons on the popover's 6 pt inset, so Save's corners
+/// turn about the popover's.
+const FOOTER_H: f32 = BUTTON_H + 2.0 * POP_PAD;
+/// Beside a footer button's words: All rules… starts on the options' rail.
+const FOOTER_BUTTON_PX: f32 = CAPSULE.row_px;
 
 fn scope_count(rule_match: &RuleMatch) -> usize {
     match rule_match {
@@ -41,20 +50,23 @@ fn to_count(config: &AlwaysConfig) -> usize {
 /// Height of the inline `Always…` configurator panel in points.
 pub(crate) fn always_height(config: &AlwaysConfig) -> f32 {
     let options = (scope_count(&config.rule_match) + to_count(config)) as f32;
-    2.0 * POP_PAD + 2.0 * HEADER_H + 4.0 + options * OPTION_H + FOOTER_H
+    2.0 * POP_PAD + 2.0 * HEADER_H + options * OPTION_H + FOOTER_H
 }
 
 fn header(p: Paint, key: &str, copy: &str) -> El {
     row()
         .key(key.to_owned())
+        .items_end()
         .h(HEADER_H)
         .px(CAPSULE.row_px)
-        .center_y()
-        .child(text(copy).font(small()).color(p.muted()))
+        .pb(super::HEADER_PB)
+        .child(text(copy).font(small()).color(p.faint()))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn option(
     p: Paint,
+    w: f32,
     key: &str,
     id: Id,
     glyph: &'static Icon,
@@ -63,8 +75,7 @@ fn option(
     on: bool,
 ) -> El {
     let c = &p.k.c;
-    let max_w =
-        POP_W - 2.0 * POP_PAD - 2.0 * CAPSULE.row_px - CAPSULE.icon - CAPSULE.icon_gap - 24.0;
+    let max_w = w - 2.0 * POP_PAD - 2.0 * CAPSULE.row_px - CAPSULE.icon - CAPSULE.icon_gap - 24.0;
     let name_fit = ellipsize(name, medium(), max_w.max(60.0));
     let detail_fit = ellipsize(detail, small(), max_w.max(60.0));
     let base = row().key(key.to_owned());
@@ -90,7 +101,6 @@ fn option(
                 .key("copy")
                 .grow(1.0)
                 .shrink()
-                .gap(1.0)
                 .child(text(name_fit).font(medium()).color(p.text()))
                 .child(text(detail_fit).font(small()).color(p.muted())),
         )
@@ -101,14 +111,16 @@ fn option(
         }))
 }
 
-/// Renders the inline `Always…` rule configurator right under the capsule.
-pub(super) fn always_view(p: Paint, config: &AlwaysConfig, reduced: bool) -> El {
+/// Renders the inline `Always…` rule configurator right under the capsule,
+/// `x` and `w` its shell's, so the two share their side walls as the
+/// Send-to list and its capsule do.
+pub(super) fn always_view(p: Paint, config: &AlwaysConfig, x: f32, w: f32, reduced: bool) -> El {
     let k = p.k;
     let c = &k.c;
     let mut body = col()
         .key("body")
         .absolute(0.0, 0.0)
-        .w(POP_W)
+        .w(w)
         .px(POP_PAD)
         .py(POP_PAD)
         .child(header(p, "from", tr("When I annotate")));
@@ -122,6 +134,7 @@ pub(super) fn always_view(p: Paint, config: &AlwaysConfig, reduced: bool) -> El 
             body = body
                 .child(option(
                     p,
+                    w,
                     "scope-narrow",
                     Id::AlwaysScopeNarrow,
                     &icons::GLOBE,
@@ -131,6 +144,7 @@ pub(super) fn always_view(p: Paint, config: &AlwaysConfig, reduced: bool) -> El 
                 ))
                 .child(option(
                     p,
+                    w,
                     "scope-wide",
                     Id::AlwaysScopeWide,
                     &icons::GLOBE,
@@ -146,6 +160,7 @@ pub(super) fn always_view(p: Paint, config: &AlwaysConfig, reduced: bool) -> El 
         } => {
             body = body.child(option(
                 p,
+                w,
                 "scope-wide",
                 Id::AlwaysScopeWide,
                 &icons::GLOBE,
@@ -157,6 +172,7 @@ pub(super) fn always_view(p: Paint, config: &AlwaysConfig, reduced: bool) -> El 
         RuleMatch::Terminal { display, .. } => {
             body = body.child(option(
                 p,
+                w,
                 "scope-narrow",
                 Id::AlwaysScopeNarrow,
                 &icons::FOLDER,
@@ -168,6 +184,7 @@ pub(super) fn always_view(p: Paint, config: &AlwaysConfig, reduced: bool) -> El 
         RuleMatch::App { name, .. } => {
             body = body.child(option(
                 p,
+                w,
                 "scope-narrow",
                 Id::AlwaysScopeNarrow,
                 &oc::MONITOR,
@@ -178,21 +195,20 @@ pub(super) fn always_view(p: Paint, config: &AlwaysConfig, reduced: bool) -> El 
         }
     }
 
-    body = body
-        .child(el().h(4.0))
-        .child(header(p, "to", tr("Send to")))
-        .child(option(
-            p,
-            "to-session",
-            Id::AlwaysToSession,
-            &oc::SPEECH_BUBBLE,
-            &config.session_name,
-            tr("This session, always"),
-            config.to_session || config.project_dir.is_none(),
-        ));
+    body = body.child(header(p, "to", tr("Send to"))).child(option(
+        p,
+        w,
+        "to-session",
+        Id::AlwaysToSession,
+        &oc::SPEECH_BUBBLE,
+        &config.session_name,
+        tr("This session, always"),
+        config.to_session || config.project_dir.is_none(),
+    ));
     if let Some((_, folder_name)) = &config.project_dir {
         body = body.child(option(
             p,
+            w,
             "to-project",
             Id::AlwaysToProject,
             &oc::FOLDER,
@@ -205,18 +221,18 @@ pub(super) fn always_view(p: Paint, config: &AlwaysConfig, reduced: bool) -> El 
     let h = always_height(config);
     let body_h = h - FOOTER_H;
     let save_label = tr("Save rule");
-    let save_w = measure(save_label, medium()) + 24.0;
+    let save_w = measure(save_label, medium()) + 2.0 * FOOTER_BUTTON_PX;
     let footer = row()
         .key("footer")
         .absolute(0.0, body_h)
-        .size(POP_W, FOOTER_H)
-        .px(POP_PAD + 2.0)
+        .size(w, FOOTER_H)
+        .px(POP_PAD)
         .center_y()
         .child(
             row()
                 .key("all")
                 .h(BUTTON_H)
-                .px(8.0)
+                .px(FOOTER_BUTTON_PX)
                 .center_y()
                 .radius(ICON_BUTTON_RADIUS)
                 .hover(c.hover)
@@ -246,15 +262,14 @@ pub(super) fn always_view(p: Paint, config: &AlwaysConfig, reduced: bool) -> El 
     let line = el()
         .key("footer-line")
         .absolute(0.0, body_h)
-        .size(POP_W, p.hair)
+        .size(w, p.hair)
         .fill(c.border_weak);
-    let x = ((PANEL_W - POP_W) * 0.5).round();
     let blur = if reduced { 0.0 } else { PRESENCE_BLUR };
     let mut panel = el()
         .key("always-popover")
         .trace_name("always-popover")
         .absolute(x, LIST_Y)
-        .size(POP_W, h)
+        .size(w, h)
         .radius(POP_RADIUS)
         .fill(c.bg_base);
     for shadow in &k.elevation.overlay {
@@ -262,7 +277,7 @@ pub(super) fn always_view(p: Paint, config: &AlwaysConfig, reduced: bool) -> El 
     }
     panel = panel.child(body).child(line).child(footer);
     if k.dark {
-        panel = panel.child(rim(k, POP_W, h, POP_RADIUS));
+        panel = panel.child(rim(k, w, h, POP_RADIUS));
     }
     panel
         .motion(tuning::get().island)
