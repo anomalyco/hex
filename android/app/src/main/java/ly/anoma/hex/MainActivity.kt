@@ -92,7 +92,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        capture = MicCapture(LocalSpeech(applicationContext), DictationPlace.Home,
+        capture = MicCapture(applicationContext, LocalSpeech(applicationContext), DictationPlace.Home,
             // Home's Dictate bar too: onStop cancels, so the screen mustn't sleep mid-dictation.
             update = { next, reason -> phase = next; notice = speechNote(reason); window.keepAwake(next) },
             meter = {}, insert = { text, _, _, _ -> transcript = text })
@@ -123,7 +123,7 @@ class MainActivity : ComponentActivity() {
                 BackHandler(page == 1 && setup.ready) { go(3) }
                 val model = ModelStore.small.state.collectAsState().value
                 if (page == 3) HexSettings(setup, speech, typing, model, ::modelRowAction,
-                    phase, transcript, notice, ::dictate, capture::cancel, { transcript = "" }, { go(it) },
+                    phase, transcript, notice, ::dictate, { capture.cancel(sound = true) }, { transcript = "" }, { go(it) },
                     { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) },
                     startPage = startPage)
                 else SetupScreen(page, setup, ::go, ::askForMic,

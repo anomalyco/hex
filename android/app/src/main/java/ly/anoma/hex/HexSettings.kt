@@ -65,9 +65,10 @@ private enum class Page(val title: Int) {
     Styles(R.string.settings_style),
     Policy(R.string.settings_privacy_policy), Licences(R.string.settings_licences), Licence(R.string.settings_licences),
     Feedback(R.string.feedback_send_feedback), Diagnostics(R.string.diagnostics),
-    Replacements(R.string.words_replacements), WordsFile(R.string.words_file), KeyColors(R.string.key_color);
+    Replacements(R.string.words_replacements), WordsFile(R.string.words_file), KeyColors(R.string.key_color),
+    Sounds(R.string.dictation_sound);
     val parent get() = when (this) {
-        Diagnostics, KeyColors -> Labs
+        Diagnostics, KeyColors, Sounds -> Labs
         Language, Styles, Replacements, WordsFile -> Dictation
         Layout, Height -> Keyboard
         Policy, Licences -> Privacy
@@ -193,6 +194,8 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     var quickDictation by remember { mutableStateOf(QuickDictation.enabled(context)) }
     // Labs › Keyboard › Answer apps' speech requests is the speech activity's enabled state, not a preference.
     var speechRequests by remember { mutableStateOf(SpeechRequests.enabled(context)) }
+    val dictationSounds = remember(revision) { speech.dictationSounds }
+    val soundSet = remember(revision) { speech.soundSet }
     val keyColors = remember(revision) { typing.keyColors }
     val keyColor = remember(revision) { typing.keyColor }
     val testOnHome = remember(revision) { typing.testKeyboardOnHome }
@@ -540,6 +543,9 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                     quickDictation, noteLines = Int.MAX_VALUE) {
                                     QuickDictation.setEnabled(context, it); quickDictation = it
                                 }
+                                Rule()
+                                // Labs › Dictation sounds: off, dictation is silent and no sound is loaded.
+                                DictationSoundRows(dictationSounds, soundSet, { speech.dictationSounds = it }) { open(Page.Sounds) }
                             }
                             Label(stringResource(R.string.labs_output), muted = true, size = 14,
                                 mod = Modifier.padding(start = 16.dp))
@@ -705,6 +711,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             Entry(stringResource(it.label), value = if (it == keyColor) "✓" else "", action = { typing.keyColor = it; open(Page.Labs) })
                         }
                     }
+                    Page.Sounds -> SoundSetPage(soundSet) { speech.soundSet = it }
                     Page.Styles -> Card {
                         Style.entries.forEachIndexed { i, it ->
                             if (i != 0) Rule()

@@ -275,6 +275,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
             }
             MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(hold)
+                // A cancelled hold that discards plays Labs › Dictation sounds' cancel sound, as ✕ does: it is a discard.
                 if (held) { if (DictationField.cancelledHoldFinishes(ime.isInputViewShown && isShown)) ime.finishSpeech() else ime.cancelSpeech() }
                 held = false; tracking = false; v.isPressed = false
             }

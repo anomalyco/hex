@@ -83,22 +83,22 @@ class SpeechRequestActivity : Activity(), OfflineScreen {
         if (!SpeechRequests.enabled(this)) { finish(); return }
         window.setDecorFitsSystemWindows(false)
         window.addFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
-        bar = VoiceBarView(this, ::primary, ::close).apply { isClickable = true }
-        capture = MicCapture(LocalSpeech(applicationContext), DictationPlace.SpeechRequest,
+        bar = VoiceBarView(this, ::primary, cancel = { close(sound = true) }).apply { isClickable = true }
+        capture = MicCapture(applicationContext, LocalSpeech(applicationContext), DictationPlace.SpeechRequest,
             update = ::status, meter = { bar.setLevel(it) }, insert = { text, _, _, _ -> answer(text) })
         // A tap outside the bar returns nothing, as Back does.
         setContentView(FrameLayout(this).apply {
-            setOnClickListener { close() }
+            setOnClickListener { close(sound = true) }
             addView(bar, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
         })
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
-            onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) { close() }
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) { close(sound = true) }
         begin()
     }
 
     @Deprecated("Android 12's Back; 13 and later use the callback registered in onCreate.")
-    override fun onBackPressed() = close()
+    override fun onBackPressed() = close(sound = true)
 
     private fun begin() {
         if (answered) return
@@ -159,10 +159,11 @@ class SpeechRequestActivity : Activity(), OfflineScreen {
 
     private fun done() { if (!isFinishing) finish() }
 
-    /** ✕, Back, a tap outside or leaving: nothing goes back. A text already returned is still handed back. */
-    private fun close() {
+    /** ✕, Back, a tap outside or leaving: nothing goes back. A text already returned is still handed back. [sound]: the
+     * person discarded it (not leaving), which plays Labs › Dictation sounds' cancel sound. */
+    private fun close(sound: Boolean = false) {
         if (answered) return
-        if (::capture.isInitialized) capture.cancel()
+        if (::capture.isInitialized) capture.cancel(sound)
         setResult(RESULT_CANCELED)
         finish()
     }

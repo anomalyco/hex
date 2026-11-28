@@ -381,6 +381,24 @@
     <!-- Labs › Dictate from Quick Settings: the Labs row, the tile's label and the sheet's lines. -->
     <string name="quick_dictation">Dictate from Quick Settings</string>
     <string name="quick_dictation_detail">Adds a Hex tile to Quick Settings. Tap it in any app, speak, and Hex copies the text for you to paste. For apps where Hex can’t be your keyboard, such as work apps.</string>
+    <!-- Labs › Dictation sounds: desktop Hex's sound sets, with its names. -->
+    <string name="dictation_sounds">Dictation sounds</string>
+    <string name="dictation_sounds_detail">A sound when Hex starts listening, when you finish, when you cancel and when a dictation fails, and another when slow text arrives. Silent and vibrate mute them.</string>
+    <string name="dictation_sound">Sound</string>
+    <string name="sound_set_classic">Classic keys</string>
+    <string name="sound_set_classic_detail">Two clicks to start, a swish to stop</string>
+    <string name="sound_set_signature">Kalimba</string>
+    <string name="sound_set_signature_detail">A kalimba motif that rises and comes home</string>
+    <string name="sound_set_click">Click</string>
+    <string name="sound_set_click_detail">Mechanical key clicks</string>
+    <string name="sound_set_soft">Soft tone</string>
+    <string name="sound_set_soft_detail">Warm, rounded blips</string>
+    <string name="sound_set_wood">Wood</string>
+    <string name="sound_set_wood_detail">Soft marimba and hollow wood blocks</string>
+    <string name="sound_set_analog">Warm synth</string>
+    <string name="sound_set_analog_detail">A mellow analogue synth</string>
+    <string name="sound_set_thock">Thock</string>
+    <string name="sound_set_thock_detail">A deep, creamy keyboard key</string>
     <string name="quick_tile">Hex dictation</string>
     <string name="quick_hint">Speak, then tap Finish dictation</string>
     <string name="quick_copied">Copied. Paste it where you were typing.</string>
