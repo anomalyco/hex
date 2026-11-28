@@ -678,7 +678,12 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                     if (shown != null && ime.feedback.popups && ime.previewAllowed) feedback.present(k.face, listOf(shown))
                     val options = holds()
                     if (options.firstOrNull().isNullOrEmpty().not()) {
-                        pendingAccents = Runnable { if (v.isPressed) feedback.hold(k.face, options, default()) }
+                        pendingAccents = Runnable {
+                            if (!v.isPressed) return@Runnable
+                            feedback.hold(k.face, options, default())
+                            // Labs › Keyboard › Click when a hold opens: the press's click, felt as the options appear.
+                            if (ime.feedback.holdClick && ime.feedback.haptics) tap(context, true, Tap.Press)
+                        }
                         postDelayed(pendingAccents!!, KeyboardMetrics.HOLD_MS)
                     }
                 }
