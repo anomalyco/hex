@@ -208,6 +208,14 @@ pub fn cleanup_tagger() -> bool {
     feature_on(Feature::CleanupTagger)
 }
 
+/// Labs › Clean up what I say v2: the next cleanup tagger cleans each
+/// English dictation in place of v1, from the model folder on this Mac
+/// (macOS developer builds; read as each capture starts, which loads the
+/// model, and as each dictation's processing starts).
+pub fn cleanup_tagger_v2() -> bool {
+    feature_on(Feature::CleanupTaggerV2)
+}
+
 /// A pasted dictation gets one leading space when the character before the
 /// cursor asks for one (macOS; read as each paste commits).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]

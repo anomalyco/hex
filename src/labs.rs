@@ -367,8 +367,9 @@ pub(crate) fn apply(settings: &LabsSettings) {
     // Labs › Pause from menu bar: turning it off resumes at once, without
     // waiting for the menu to refresh; the menu row hides itself there.
     crate::shortcut_pause::reconcile(pause_menu());
-    // Labs › Clean up what I say: turning it off frees the loaded model.
-    crate::dictation::cleanup::reconcile(cleanup_tagger());
+    // Labs › Clean up what I say and its v2: turning one off frees its
+    // loaded model.
+    crate::dictation::cleanup::reconcile(cleanup_tagger(), cleanup_tagger_v2());
 }
 
 #[cfg(test)]
@@ -612,6 +613,20 @@ mod tests {
         assert!(!feature.on(&AppSettings::default()));
         assert_eq!(feature.on_this_os(), cfg!(target_os = "macos"));
         assert_eq!(Feature::from_name("clean-up-what-i-say"), Some(feature));
+    }
+
+    #[test]
+    fn the_cleanup_tagger_v2_is_a_macos_dev_output_lab_off_by_default() {
+        let feature = Feature::CleanupTaggerV2;
+        assert_eq!(feature.name(), "clean-up-what-i-say-v2");
+        assert_eq!(feature.settings_key(), "labs.cleanup_tagger_v2");
+        assert_eq!(feature.group(), Group::Output);
+        assert_eq!(feature.audience(), Audience::Dev);
+        assert_eq!(feature.oses(), &[Os::Macos]);
+        assert_eq!(feature.added(), 20261127);
+        assert!(!feature.on(&AppSettings::default()));
+        assert!(resolve(feature.name(), |f| f.audience().reaches(false)).is_err());
+        assert_eq!(Feature::from_name("clean-up-what-i-say-v2"), Some(feature));
     }
 
     #[test]

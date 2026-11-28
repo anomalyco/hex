@@ -39,13 +39,15 @@ struct CompiledAt(PathBuf);
 
 impl Runtime for CompiledAt {
     type Model = Loaded;
+    type Input = super::Chunk;
+    type Output = Vec<f32>;
 
     fn load(&self) -> Result<Loaded, Skip> {
         load(&self.0).map_err(Skip::Failed)
     }
 
-    fn logits(model: &Loaded, input_ids: &[i32], length: usize) -> Result<Vec<f32>, String> {
-        run(model, input_ids, length)
+    fn run(model: &Loaded, chunk: &super::Chunk) -> Result<Vec<f32>, String> {
+        run(model, &chunk.input_ids(), chunk.length())
     }
 
     fn idle(&self) -> Option<Duration> {

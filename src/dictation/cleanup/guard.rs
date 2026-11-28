@@ -476,6 +476,15 @@ impl CleanupGuard<'_> {
         goes.then_some(Disfluency::Filler)
     }
 
+    /// Why each word of `words` would stay if a proposer outside a
+    /// correction or a repeat asked to remove it, or None.
+    pub(crate) fn protections(&self, words: &Words) -> Vec<Option<Protection>> {
+        let heard = Heard::new(words, &[]);
+        (0..heard.words.len())
+            .map(|index| self.protection(&heard, index))
+            .collect()
+    }
+
     fn protection(&self, heard: &Heard<'_>, index: usize) -> Option<Protection> {
         let word = heard.words[index];
         let bare = heard.bares[index].as_str();
