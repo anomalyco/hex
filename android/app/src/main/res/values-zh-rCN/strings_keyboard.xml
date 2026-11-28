@@ -17,6 +17,7 @@
     <string name="keyboard_note_minute">已录满 1 分钟，录音停止</string>
     <string name="keyboard_note_swipe">%1$s 暂不支持滑行输入</string>
     <string name="keyboard_note_dismiss">关闭</string>
+    <string name="keyboard_note_learned">已将“%1$s”添加到你的词典。轻点可移除</string>
     <string name="keyboard_note_low_memory">手机内存不足，本次使用了标准听写。</string>
     <string name="keyboard_cancel_dictation">取消听写</string>
     <string name="keyboard_finish_dictation">完成听写</string>

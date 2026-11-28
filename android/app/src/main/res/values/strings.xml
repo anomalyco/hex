@@ -143,6 +143,7 @@
     <string name="settings_privacy_lab_model">Only how long your recent dictations took to transcribe against how long you spoke, and a few counts, never words or audio. Turning it off deletes them.</string>
     <string name="settings_privacy_lab_clipboard">Reads what you copy and keeps the last 20 texts, each for an hour unless you pin it, skipping text an app marks as sensitive and anything copied while a password field is open. Turning it off deletes them.</string>
     <string name="settings_privacy_lab_words">The words from a file you choose to import. Turning it off stops the suggestions; Remove imported words deletes them.</string>
+    <string name="settings_privacy_lab_learned">Words you keep as typed, added to Android’s personal dictionary, which other keyboards can read too. Remove them there, or tap the line Hex shows when it adds one; uninstalling Hex leaves them.</string>
     <string name="settings_privacy_feedback">Feedback leaves the phone only when you tap Send in Send feedback: then your message, the pictures you keep, your email if you add one and details about Hex and this phone go to Anomaly’s feedback inbox (Bellhop). Your dictations, recordings, vocabulary and corrections are never included.</string>
     <string name="settings_privacy_updates"></string>
     <string name="settings_privacy_policy">Privacy policy</string>
@@ -243,6 +244,8 @@
     <string name="closing_quote_takes_space_detail">A closing quote typed while a quote is open goes against the word before it</string>
     <string name="swiftkey_layout">SwiftKey layout</string>
     <string name="swiftkey_layout_detail">SwiftKey\'s held symbols, bottom row and symbol pages; hold comma to talk</string>
+    <string name="learn_words">Learn new words</string>
+    <string name="learn_words_detail">A word you keep as typed, when no dictionary knows it, joins your personal dictionary</string>
     <string name="adaptive_touch">Adaptive touch</string>
     <string name="adaptive_touch_detail">Learns where you tap each key. Stays on this phone and keeps averages, never what you type.</string>
     <string name="adaptive_touch_learning">Learning: %1$d of %2$d taps</string>

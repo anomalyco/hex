@@ -340,6 +340,8 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
     }
     /** Undo dictation shows in the slots' place, or goes. */
     fun undo(shown: Boolean) { undoing = shown; update() }
+    /** The notice showing now, if any. */
+    val shownNotice get() = notice
     /** Shows [notice] (or none) in the hint's place until typing starts, a tap or its ✕. */
     fun notice(notice: StripNotice?) {
         this.notice = notice

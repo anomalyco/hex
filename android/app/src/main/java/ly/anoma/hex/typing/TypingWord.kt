@@ -467,7 +467,8 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         return if (addsCapitals || text.first().isUpperCase()) choice else choice.lowercase().takeIf { it != key }
     }
 
-    private fun knows(spelling: String) = lookup(spelling.lowercase()).let {
+    /** Whether a dictionary has this spelling: the model's words, its spellings list, its shorthand or your own words. */
+    fun knows(spelling: String) = lookup(spelling.lowercase()).let {
         model.index(it) >= 0 || model.known(it) || it in shorthand || (decoder.personal?.index(it) ?: -1) >= 0
     }
 

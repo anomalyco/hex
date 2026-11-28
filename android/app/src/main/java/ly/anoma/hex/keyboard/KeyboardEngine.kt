@@ -16,6 +16,8 @@ import ly.anoma.hex.typing.AdaptiveTouch
 import ly.anoma.hex.typing.Correction
 import ly.anoma.hex.typing.KeyGrid
 import ly.anoma.hex.typing.KeyPoint
+import ly.anoma.hex.typing.LearnedWords
+import ly.anoma.hex.typing.PendingKeep
 import ly.anoma.hex.typing.PersonalWords
 import ly.anoma.hex.typing.SmartQuotes
 import ly.anoma.hex.typing.SpatialDecoder
@@ -91,6 +93,8 @@ internal class KeyboardEngine(
     private val learned: ((DictationEdit) -> Unit)? = null,
     /** Labs › Keyboard › Adaptive touch while it is on, else null. */
     private val adaptiveTouch: () -> AdaptiveTouch? = { null },
+    /** Labs › Keyboard › Learn new words: adds a spelling (and its model's language) to Android's personal dictionary. */
+    private val learnWord: ((String, String) -> Unit)? = null,
 ) {
     private companion object {
         /** The fix and the decoder's readings wait for this pause in typing: working them out costs a
@@ -123,6 +127,10 @@ internal class KeyboardEngine(
     private var expectedCaret = -1
     private data class Undo(val language: String, val original: String, val replacement: String)
     private var undo: Undo? = null
+    // Labs › Keyboard › Learn new words: the spelling an undone autocorrection put back, the text before it then
+    // ([before]) and right after it ([anchor]). It is learned only once that same word ends unchanged (space or a
+    // closing mark); any delete, letter or other edit drops it, so holding Delete never teaches a typo.
+    private val kept = PendingKeep()
     private val shift = ShiftState()
     private var symbols = false
     private var more = false
@@ -323,7 +331,7 @@ internal class KeyboardEngine(
     /** The symbol pad's !?#: back to the symbol page. */
     fun symbolsPage() { adaptive?.forget(); resetTyping(); pad = null; symbols = true; more = false; showPlane() }
     private fun resetTyping() {
-        cancelChip(); word?.reset(); undo = null; expectedCaret = -1; prefix = ""
+        cancelChip(); word?.reset(); undo = null; expectedCaret = -1; prefix = ""; kept.drop()
     }
     private fun clearSpaces() { spaceAnchor = null; pickedAnchor = null; fixedAnchor = null; heldAnchor = null; swipeAnchor = null }
 
@@ -483,7 +491,7 @@ internal class KeyboardEngine(
      * touch slid onto the key, so where it went down says nothing of where you aim. */
     fun letter(text: String, x: Double, y: Double, grid: KeyGrid, explicit: Boolean = false, aimed: Boolean = true) {
         if (!target.connected) return
-        edited()
+        edited(); kept.drop()
         val w = word
         if (w == null || symbols || !text.single().isLetter()) { type(text); return }
         undo = null
@@ -549,13 +557,37 @@ internal class KeyboardEngine(
             if (old.isNotEmpty()) t.picked(old, text, overCorrection = text == old && feedback.autocorrect && correctingField &&
                 w.replacement() != null, before = before())
         }
+        // Labs › Keyboard › Learn new words: what was typed, tapped as typed, is a spelling you keep.
+        val keptBefore = if (old.isNotEmpty() && sameSpelling(text, old)) before().dropLast(old.length) else null
         if (replace(old, (if (lead) " " else "") + (if (holds) committed else "$committed "))) {
+            if (keptBefore != null) learn(w, old, keptBefore)
             resetTyping()
             val b = before()
             if (holds) heldAnchor = b else pickedAnchor = b
             showPredictions(b)
             inputDone()
         }
+    }
+
+    private fun sameSpelling(a: String, b: String) = a.replace('\u2019', '\'') == b.replace('\u2019', '\'')
+
+    /** Labs › Keyboard › Learn new words: the word an undone autocorrection put back ends unchanged here, [b] the text
+     * before the cursor as it ends: it is a spelling you kept. */
+    private fun learnKept(b: String) {
+        val w = word
+        val k = kept.ended(b, w?.token, w?.decoder?.model?.language) ?: return
+        learn(w ?: return, k.word, k.before)
+    }
+
+    /** Labs › Keyboard › Learn new words: [typed], kept as typed after [before], joins the personal dictionary when no
+     * dictionary knows it. Only in a field Hex may learn from that reads words with a model of its own: never a
+     * password, URL or incognito field, nor a stand-in's keys. */
+    private fun learn(w: TypingWord, typed: String, before: String) {
+        val add = learnWord ?: return
+        if (!LearnedWords.allowed(feedback.learnWords, secure, exactField, keyEventEditor, learnsTyping, w.standIn)) return
+        val spelling = LearnedWords.candidate(typed, before, { w.decoder.model.code(it) != 0 }, w::knows,
+            blocked = { w.decoder.model.neverSuggest.blocks(it, false, -1) }) ?: return
+        add(spelling, w.decoder.model.language)
     }
 
     /** A word a pick, autocorrection or swipe commits: with Labs › Keyboard › Smart quotes on, its
@@ -634,7 +666,7 @@ internal class KeyboardEngine(
                 }
             }
         }
-        teachEnd(b); target.commit(" "); resetTyping(); afterSpace(now)
+        teachEnd(b); learnKept(b); target.commit(" "); resetTyping(); afterSpace(now)
     }
     private fun afterSpace(now: Long) {
         val b = before()
@@ -693,11 +725,13 @@ internal class KeyboardEngine(
         }
         // A mark, digit or Return ends the word as typed; a letter outside a word, or an emoji, is nothing to follow.
         if (value.length == 1 && !value[0].isLetter()) teachEnd(text) else adaptive?.forget()
+        if (mark) learnKept(b)
         resetTyping(); target.commit(value); showPredictions(if (w != null) before() else null)
         inputDone()
     }
     fun delete() {
         if (!target.connected) return
+        kept.drop()
         // Hex's own Delete is the person removing text, so a field that then empties was cleared by them.
         tracker.keyboardRemoved()
         // A TYPE_NULL field's text can't be read back, and its editor takes no surrounding-text delete: a
@@ -883,6 +917,9 @@ internal class KeyboardEngine(
         teacher?.undone(last.original)
         val typed = last.original.substringAfterLast(' ')
         prefix = before().dropLast(typed.length).takeLast(40); word?.restored(typed, prefix)
+        // Labs › Keyboard › Learn new words: kept only once the word ends unchanged ([learnKept]); one of two words a
+        // missed space joined is not a word the person kept.
+        kept.undone(last.original, typed, last.language, prefix, before())
         if (expectedCaret >= 0) expectedCaret += last.original.length - last.replacement.length - 1
         return true
     }

@@ -130,6 +130,7 @@
     <string name="settings_privacy_lab_model">只保存你最近几次听写的转写用时与说话时长之比以及几项计数，绝不保存文字或音频。关闭后即删除。</string>
     <string name="settings_privacy_lab_clipboard">读取你复制的内容，并保留最近 20 条文字，未固定的保留一小时；跳过应用标记为敏感的内容和在密码栏打开时复制的内容。关闭后会全部删除。</string>
     <string name="settings_privacy_lab_words">你选择导入的文件中的词语。关闭后不再用于建议；点按“移除导入的词语”即可删除。</string>
+    <string name="settings_privacy_lab_learned">你保留原样输入的词，会加入 Android 的个人词典，其他键盘也能读取。可在那里删除，或在 Hex 添加时轻点提示行删除；卸载 Hex 不会删除它们。</string>
     <string name="settings_privacy_updates"></string>
     <string name="settings_privacy_feedback">只有在“发送反馈”中点按“发送”时，反馈才会离开这台手机：你的留言、保留的图片、你填写的邮箱（如有），以及 Hex 和这台手机的相关信息会发送到 Anomaly 的反馈收件箱（Bellhop）。你的听写、录音、词汇和更正都不会包含在内。</string>
     <string name="settings_privacy_policy">隐私政策</string>
@@ -215,6 +216,8 @@
     <string name="closing_quote_takes_space_detail">引号未闭合时输入的右引号直接跟在前面的单词后面</string>
     <string name="swiftkey_layout">SwiftKey 布局</string>
     <string name="swiftkey_layout_detail">使用 SwiftKey 的长按符号、底行和符号页；长按逗号说话</string>
+    <string name="learn_words">学习新词</string>
+    <string name="learn_words_detail">你保留原样输入、且词典中没有的词会加入你的个人词典</string>
     <string name="adaptive_touch">自适应触控</string>
     <string name="adaptive_touch_detail">学习你点击每个按键的位置。内容只留在这台手机上，只保存平均位置，不保存你输入的内容。</string>
     <string name="adaptive_touch_learning">正在学习：已有 %1$d/%2$d 次轻点</string>
