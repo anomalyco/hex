@@ -335,6 +335,247 @@ extension FullKeyboardEngineTests {
         settings.summary = (900, false)
         XCTAssertEqual(AdaptiveTouchStatus.current(settings: settings, fullAccessConfirmed: true), .learning(taps: 400))
     }
+
+    // MARK: Typing configs (Settings › Experiments › Typing configs)
+
+    /// A format-0 file for `layout`'s keyboard: `words` and `keys` as JSON fragments.
+    private func configData(words: String = "{}", keys: String = "[]", extra: String = "") -> Data {
+        Data("""
+        {"format": "hex.typing-config", "version": 0, "id": "cfg-0000000000000000", "basedOn": null,
+         "madeFrom": {"exportId": "export-test", "hexVersion": "9.0.0", "hexBuild": "1", "logDays": [], "heldOut": {"tunedOn": "A", "checkedOn": "B"}},
+         "madeFor": {"device": "iPhone19,2", "language": "en"}, "note": "test", \(extra)
+         "words": \(words), "keys": \(keys)}
+        """.utf8)
+    }
+
+    private func contextJSON(_ layout: KeyboardLayout, width: Double? = nil, hitModel: Int = KeyboardZone.hitModel) throws -> String {
+        var c = TypingConfigFile.Context(layout: layout)
+        c.width = width ?? c.width
+        c.hitModel = hitModel
+        return try XCTUnwrap(String(data: JSONEncoder().encode(c), encoding: .utf8))
+    }
+
+    private var zoneProof: String { #""evidence": {"tuned": {"taps": 30, "gained": 14, "lost": 2, "wordsRight": 12.5, "wordsWrong": 1.3}, "checked": {"taps": 24, "gained": 11, "lost": 1, "wordsRight": 9.6, "wordsWrong": 0.7}}"# }
+    private var aimProof: String { #""evidence": {"tuned": {"taps": 200, "gained": 20, "lost": 4}, "checked": {"taps": 150, "gained": 18, "lost": 3}}"# }
+
+    private func outcome(_ review: TypingConfigReview, _ path: String) -> TypingConfigReview.Outcome? {
+        review.items.first { $0.path == path }?.outcome
+    }
+
+    func testTypingConfigReviewNamesWhatItAppliesClampsAndSkips() throws {
+        let layout = KeyboardLayout(width: 402)
+        let here = try contextJSON(layout), elsewhere = try contextJSON(layout, width: 375)
+        let words = """
+        {"keep": [{"word": "eepy", "evidence": {"times": 3, "sessions": 3}}, {"word": "zork", "evidence": {"times": 1, "sessions": 1}},
+                  {"word": "x", "evidence": {"times": 9, "sessions": 9}}, {"word": "eepy", "evidence": {"times": 3, "sessions": 3}}],
+         "neverCorrectTo": [{"word": "DONT", "evidence": {"takenBack": 2}}],
+         "fixes": [{"typo": "thus", "word": "this", "mode": "suggest", "evidence": {"times": 2, "sessions": 2}}],
+         "dictation": [{"heard": "hacks", "meant": "Hex", "evidence": {"times": 2}}]}
+        """
+        let keys = """
+        [{"context": \(here), "aim": {"o": {"offset": [0.0, 0.5], \(aimProof)}, "1": {"offset": [0, 0], \(aimProof)}},
+          "zones": [{"key": "space", "edge": "top", "move": 0.1, \(zoneProof)}, {"key": "space", "edge": "bottom", "move": 0.1, \(zoneProof)},
+                    {"key": "n", "edge": "bottom", "move": -0.1, \(zoneProof)}, {"key": "o", "edge": "bottom", "move": 0.4, \(zoneProof)},
+                    {"key": "e", "edge": "right", "move": 0.1, "evidence": {"tuned": {"taps": 30, "gained": 14, "lost": 2}, "checked": {"gained": 11, "lost": 1}}}]},
+         {"context": \(elsewhere), "aim": {"e": {"offset": [0.1, 0.0], \(aimProof)}}}]
+        """
+        let review = TypingConfigReview(data: configData(words: words, keys: keys, extra: #""colour": "blue","#), keyboard: layout)
+        XCTAssertNil(review.refused)
+        XCTAssertEqual(outcome(review, "colour"), .skipped(.unknownField))
+        XCTAssertEqual(outcome(review, "words.keep[0]"), .applied)
+        XCTAssertEqual(outcome(review, "words.keep[1]"), .skipped(.notEnoughEvidence))
+        XCTAssertEqual(outcome(review, "words.keep[2]"), .skipped(.invalidValue))
+        let sixth = try XCTUnwrap(review.items.first { $0.path == "words.keep[2]" })
+        XCTAssertEqual(sixth.list, .keep)
+        XCTAssertEqual(sixth.position, 2, "the sheet can say which entry, from the result alone")
+        XCTAssertEqual(review.items.first { $0.path == "words.keep[0]" }?.evidence?.times, 3)
+        XCTAssertEqual(review.items.first { $0.path == "keys[0].zones[3]" }?.evidence?.tuned?.taps, 30)
+        XCTAssertEqual(review.items.first { $0.path == "colour" }?.list, .file)
+        XCTAssertEqual(outcome(review, "words.keep[3]"), .skipped(.duplicate))
+        XCTAssertEqual(review.applied.keep, ["eepy"])
+        XCTAssertEqual(review.applied.neverCorrectTo, ["DONT"])
+        XCTAssertEqual(review.applied.fixes.map(\.mode), [.suggest])
+        XCTAssertEqual(review.applied.dictation, [DictationCorrection(heard: "hacks", meant: "Hex")])
+        XCTAssertEqual(outcome(review, "keys[0].aim.o"), .clamped(from: [0, 0.5], to: [0, 0.3]))
+        XCTAssertEqual(outcome(review, "keys[0].aim.1"), .skipped(.invalidValue))
+        XCTAssertEqual(outcome(review, "keys[0].zones[1]"), .skipped(.edgeNotAllowed), "the space bar's bottom is the keyboard's edge")
+        // The space bar growing up and n giving its bottom away claim the same strip.
+        XCTAssertEqual(outcome(review, "keys[0].zones[0]"), .skipped(.twoZonesClaimPoint))
+        XCTAssertEqual(outcome(review, "keys[0].zones[2]"), .skipped(.twoZonesClaimPoint))
+        XCTAssertEqual(outcome(review, "keys[0].zones[3]"), .clamped(from: [0.4], to: [0.25]))
+        XCTAssertEqual(outcome(review, "keys[0].zones[4]"), .skipped(.notEnoughEvidence), "taps alone don't say what the words gain")
+        XCTAssertFalse(review.items.contains { $0.path.contains(".evidence.") }, "a zone's word counts are evidence Hex knows")
+        XCTAssertEqual(outcome(review, "keys[1].aim.e"), .skipped(.forAnotherKeyboard))
+        XCTAssertEqual(review.contexts.map(\.differences), [[], ["width"]])
+        XCTAssertEqual(review.applied.aim, ["o": CGVector(dx: 0, dy: 0.3)])
+        XCTAssertEqual(review.items.map(\.path).filter { $0.hasPrefix("words") }.count, 7, "every entry has an item")
+
+        let newer = TypingConfigReview(data: Data(#"{"format": "hex.typing-config", "version": 1, "colour": 1}"#.utf8), keyboard: layout)
+        XCTAssertEqual(outcome(newer, "colour"), .skipped(.newerFormat))
+        XCTAssertEqual(TypingConfigReview(data: Data("[]".utf8), keyboard: layout).refused, .notAConfig)
+        XCTAssertEqual(TypingConfigReview(data: Data(count: TypingConfigLimits.maxBytes + 1), keyboard: layout).refused, .tooLarge)
+    }
+
+    func testTypingConfigZonesMoveWhereATapCountsAndKeepEveryKeycapCentre() throws {
+        let layout = KeyboardLayout(width: 402)
+        let keys = layout.keys
+        let b = try XCTUnwrap(keys.firstIndex { $0.character == "b" }), space = try XCTUnwrap(keys.firstIndex { $0.kind == .space })
+        func owner(_ map: KeyboardZoneMap, _ p: CGPoint) -> Int? {
+            keys.indices.first { k in (map.regions[k] ?? [keys[k].hitFrame] + (keys[k].gapHitFrame.map { [$0] } ?? [])).contains { $0.contains(p) } }
+        }
+        let low = CGPoint(x: keys[b].frame.midX, y: keys[b].frame.maxY - 3)
+        XCTAssertEqual(owner(KeyboardZoneMap(), low), b)
+        let up = layout.zoneMap([KeyboardZone(key: "space", edge: .top, move: 0.15)])
+        XCTAssertEqual(up.skipped, [nil])
+        XCTAssertEqual(owner(up, low), space, "3 pt above b's keycap bottom is now the space bar's")
+        XCTAssertEqual(owner(up, CGPoint(x: keys[b].frame.midX, y: keys[b].frame.midY)), b)
+        // Every point still has exactly one key.
+        for y in stride(from: layout.touchAreaFrame.minY + 0.25, to: layout.touchAreaFrame.maxY, by: 1.5) {
+            for x in stride(from: 0.25, to: layout.width, by: 1.5) {
+                let p = CGPoint(x: x, y: y)
+                let owners = keys.indices.filter { k in (up.regions[k] ?? [keys[k].hitFrame] + (keys[k].gapHitFrame.map { [$0] } ?? [])).contains { $0.contains(p) } }
+                XCTAssertLessThanOrEqual(owners.count, 1, "\(p)")
+            }
+        }
+        XCTAssertEqual(layout.zoneMap([KeyboardZone(key: "space", edge: .top, move: 0.25)]).skipped, [.keyTooSmall], "c, v, b, n and m would lose their centres")
+        XCTAssertEqual(layout.zoneMap([KeyboardZone(key: "q", edge: .top, move: 0.1)]).skipped, [.edgeNotAllowed])
+        XCTAssertEqual(layout.zoneMap([KeyboardZone(key: "ß", edge: .top, move: 0.1)]).skipped, [.keyNotOnKeyboard])
+        let old = try contextJSON(layout, hitModel: KeyboardZone.hitModel - 1)
+        let review = TypingConfigReview(data: configData(keys: #"[{"context": \#(old), "zones": [{"key": "space", "edge": "top", "move": 0.1, \#(zoneProof)}]}]"#), keyboard: layout)
+        XCTAssertEqual(outcome(review, "keys[0].zones[0]"), .skipped(.needsCheckingAgain))
+    }
+
+    func testTypingConfigCompilesTheSwitchedOnPartsAndTheStoreWritesThem() throws {
+        let layout = KeyboardLayout(width: 402)
+        let here = try contextJSON(layout)
+        let data = configData(
+            words: #"{"keep": [{"word": "eepy", "evidence": {"times": 3, "sessions": 2}}, {"word": "yoy", "evidence": {"times": 2, "sessions": 2}}]}"#,
+            keys: #"[{"context": \#(here), "aim": {"o": {"offset": [0.0, 0.2], \#(aimProof)}}, "zones": [{"key": "space", "edge": "top", "move": 0.15, \#(zoneProof)}]}]"#
+        )
+        let review = TypingConfigReview(data: data, keyboard: layout)
+        XCTAssertEqual(review.switchable.count, 4)
+        let compiled = try XCTUnwrap(review.compiled(switchedOn: Set(review.switchable).subtracting([.keep("yoy")])))
+        XCTAssertNil(compiled.note)
+        let suite = "typing-config-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = TypingConfigStore(settings: TypingConfigSettings(defaults: defaults),
+                                      directory: FileManager.default.temporaryDirectory.appendingPathComponent(suite))
+        try store.writeActive(compiled)
+        XCTAssertEqual(store.settings.generation, 1)
+        XCTAssertNil(store.activeData(fullAccess: true), "the experiment is off")
+        store.settings.isEnabled = true
+        XCTAssertNil(store.activeData(fullAccess: false), "no Full Access, no config")
+        let active = try XCTUnwrap(store.activeData(fullAccess: true))
+        let read = TypingConfigReview(data: active, keyboard: layout, checksEvidence: false)
+        XCTAssertEqual(read.applied.keep, ["eepy"])
+        XCTAssertEqual(read.applied.aim, ["o": CGVector(dx: 0, dy: 0.2)])
+        XCTAssertEqual(read.applied.zones, [KeyboardZone(key: "space", edge: .top, move: 0.15)])
+        store.removeActive()
+        XCTAssertEqual(store.settings.generation, 2)
+        XCTAssertNil(store.activeData(fullAccess: true))
+    }
+
+    func testATypingConfigMovesWhereTapsCountAndItsAimOnlyInTheKeyboard() throws {
+        engine.width = 402
+        let layout = engine.layout
+        let here = try contextJSON(layout)
+        let b = try XCTUnwrap(layout.keys.first { $0.character == "b" })
+        let low = CGPoint(x: b.frame.midX, y: b.frame.maxY - 3)
+        XCTAssertEqual(engine.layout.hitTest(low)?.kind, b.kind)
+        let before = try XCTUnwrap(engine.autocorrect.decoderKeys?.centres["o"])
+        let data = configData(keys: #"[{"context": \#(here), "aim": {"o": {"offset": [0.0, 0.2]}}, "zones": [{"key": "space", "edge": "top", "move": 0.15}]}]"#)
+        engine.typingConfig = TypingConfigActive(data: data)
+        XCTAssertEqual(engine.layout.hitTest(low)?.kind, .space, "the zone gives the space bar b's lowest 3 pt")
+        let o = try XCTUnwrap(layout.keys.first { $0.character == "o" })
+        let after = try XCTUnwrap(engine.autocorrect.decoderKeys?.centres["o"])
+        XCTAssertEqual(after.y - before.y, 0.2 * o.frame.height, accuracy: 0.01, "the aim replaces o's centre")
+        XCTAssertNotNil(engine.autocorrect.decoderBaselineKeys, "the baseline stays what Hex learned")
+        engine.typingConfig = nil
+        XCTAssertEqual(engine.layout, layout, "removing it puts every edge back")
+        XCTAssertEqual(engine.autocorrect.decoderKeys?.centres["o"], before)
+        XCTAssertNil(engine.autocorrect.decoderBaselineKeys)
+    }
+
+    func testATypingConfigsWordsAreTheirOwnLayerAndLeaveWithIt() throws {
+        func typed(_ word: String) -> String {
+            let start = target.text.count
+            type(word + " ")
+            return String(target.text.dropFirst(start))
+        }
+        XCTAssertEqual(typed("teh"), "the ", "autocorrect fixes it without a config")
+        engine.typingConfig = TypingConfigActive(data: configData(words: #"{"keep": [{"word": "teh"}]}"#))
+        XCTAssertTrue(engine.autocorrect.learning.keeps("teh"))
+        XCTAssertNil(engine.journal, "nothing was written into what Hex learned")
+        XCTAssertEqual(typed("teh"), "teh ", "a word of yours is left alone")
+        engine.typingConfig = TypingConfigActive(data: configData(words: #"{"neverCorrectTo": [{"word": "the"}]}"#))
+        XCTAssertEqual(typed("hte"), "hte ", "never corrected to a word the config rules out")
+        engine.typingConfig = nil
+        XCTAssertEqual(engine.autocorrect.learning, TypingLearning(), "removing the config removes exactly its words")
+        XCTAssertEqual(typed("teh"), "the ")
+    }
+
+    func testTypingConfigReviewChecksEveryKeyboardAndKeepsEachBlockThatApplies() throws {
+        let upright = KeyboardLayout(width: 402), sideways = KeyboardLayout(width: 874, orientation: .landscape)
+        let french = KeyboardLayout(width: 402, language: .french)
+        let keyboards = [TypingConfigKeyboard(layout: upright), TypingConfigKeyboard(layout: sideways)]
+        let keys = """
+        [{"context": \(try contextJSON(upright)), "aim": {"o": {"offset": [0.0, 0.2], \(aimProof)}}},
+         {"context": \(try XCTUnwrap(String(data: JSONEncoder().encode(TypingConfigFile.Context(layout: french)), encoding: .utf8))), "aim": {"e": {"offset": [0.1, 0.0], \(aimProof)}}},
+         {"context": \(try XCTUnwrap(String(data: JSONEncoder().encode(TypingConfigFile.Context(layout: sideways)), encoding: .utf8))), "zones": [{"key": "space", "edge": "top", "move": 0.1, \(zoneProof)}]},
+         {"context": \(try contextJSON(upright)), "aim": {"p": {"offset": [0.0, 0.2], \(aimProof)}}}]
+        """
+        let review = TypingConfigReview(data: configData(keys: keys), keyboards: keyboards)
+        XCTAssertEqual(review.contexts.map(\.keyboardIndex), [0, nil, 1, nil])
+        XCTAssertEqual(review.contexts[1].differences, ["language", "letters"], "against the nearest keyboard")
+        XCTAssertEqual(outcome(review, "keys[0].aim.o"), .applied)
+        XCTAssertEqual(outcome(review, "keys[1].aim.e"), .skipped(.forAnotherKeyboard))
+        XCTAssertEqual(outcome(review, "keys[2].zones[0]"), .applied)
+        XCTAssertEqual(outcome(review, "keys[3].aim.p"), .skipped(.duplicate), "a second block for the same keyboard")
+        XCTAssertEqual(review.applied.blocks.map(\.block), [0, 2])
+        let compiled = try XCTUnwrap(review.compiled(switchedOn: Set(review.switchable)))
+        XCTAssertEqual(compiled.keys?.count, 2, "every block for one of the person's keyboards")
+        let active = try XCTUnwrap(TypingConfigActive(data: JSONEncoder().encode(compiled)))
+        XCTAssertEqual(active.keys(on: upright)?.aim, ["o": CGVector(dx: 0, dy: 0.2)])
+        XCTAssertEqual(active.keys(on: sideways)?.zones, [KeyboardZone(key: "space", edge: .top, move: 0.1)])
+        XCTAssertNil(active.keys(on: french))
+
+        let suite = "typing-config-keyboards-\(UUID().uuidString)"
+        let settings = TypingConfigSettings(defaults: UserDefaults(suiteName: suite))
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+        settings.record(keyboards[0])
+        settings.record(keyboards[1])
+        settings.record(keyboards[0])
+        XCTAssertEqual(settings.keyboards.map(\.context.orientation), ["portrait", "landscape"], "most recent first, once each")
+    }
+
+    func testTypingConfigReviewCleansTheNoteAndEveryWord() throws {
+        let long = String(repeating: "a", count: 300)
+        let words = """
+        {"keep": [{"word": " eepy ", "evidence": {"times": 2, "sessions": 2}}, {"word": "ad\\u202Emin", "evidence": {"times": 2, "sessions": 2}},
+                  {"word": "pass\\u200Bword", "evidence": {"times": 2, "sessions": 2}}, {"word": "ab\\u200Dcd", "evidence": {"times": 2, "sessions": 2}},
+                  {"word": "\\u0645\\u06CC\\u200C\\u062E\\u0648\\u0627\\u0647\\u0645", "evidence": {"times": 2, "sessions": 2}},
+                  {"word": "\\u0915\\u094D\\u200D\\u0937\\u092E\\u093E", "evidence": {"times": 2, "sessions": 2}},
+                  {"word": "cafe\\u0301", "evidence": {"times": 2, "sessions": 2}}, {"word": "\\u200B\\u2066", "evidence": {"times": 2, "sessions": 2}}],
+         "fixes": [{"typo": "te\\u2067h", "word": "the", "mode": "apply", "evidence": {"times": 2, "sessions": 2}}]}
+        """
+        let data = Data(#"{"format": "hex.typing-config", "version": 0, "note": "line one\nline\u202Etwo \#(long)", "words": \#(words)}"#.utf8)
+        let review = TypingConfigReview(data: data, keyboard: KeyboardLayout(width: 402))
+        XCTAssertNil(review.refused)
+        XCTAssertEqual(review.note?.hasPrefix("line one linetwo "), true, "controls and overrides out of the note")
+        XCTAssertEqual(review.note?.count, TypingConfigLimits.noteMaxCharacters)
+        XCTAssertEqual(outcome(review, "words.keep[0]"), .applied)
+        XCTAssertEqual(outcome(review, "words.keep[1]"), .skipped(.hiddenCharacters), "a right-to-left override")
+        XCTAssertEqual(outcome(review, "words.keep[2]"), .skipped(.hiddenCharacters), "a zero-width space")
+        XCTAssertEqual(outcome(review, "words.keep[3]"), .skipped(.hiddenCharacters), "a joiner between Latin letters")
+        XCTAssertEqual(outcome(review, "words.keep[4]"), .applied, "Persian keeps its non-joiner")
+        XCTAssertEqual(outcome(review, "words.keep[5]"), .applied, "Devanagari keeps its joiner")
+        XCTAssertEqual(outcome(review, "words.keep[7]"), .skipped(.hiddenCharacters))
+        XCTAssertEqual(outcome(review, "words.fixes[0]"), .skipped(.hiddenCharacters))
+        XCTAssertEqual(review.applied.keep, ["eepy", "\u{0645}\u{06CC}\u{200C}\u{062E}\u{0648}\u{0627}\u{0647}\u{0645}", "\u{0915}\u{094D}\u{200D}\u{0937}\u{092E}\u{093E}", "caf\u{E9}"])
+        XCTAssertEqual(review.items.first { $0.path == "words.keep[6]" }?.text, "caf\u{E9}", "what the sheet shows is what the keyboard loads")
+        XCTAssertTrue(review.applied.fixes.isEmpty)
+    }
 }
 
 // MARK: - Adaptive touch (Settings › Labs)

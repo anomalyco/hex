@@ -647,9 +647,9 @@ final class KeyboardViewController: UIInputViewController {
         logDictationEdits.onResult = { [weak self] result in
             self?.typingLog?.dictationOutcome(result)
         }
-        localDictation.corrections = {
+        localDictation.corrections = { [weak self] in
             let language = LanguageLearning.dictationCode(LanguageSettings().effectiveDictationLanguage)
-            return TypingJournal.sharedIfEnabled()?.dictationCorrections(language: language) ?? []
+            return (TypingJournal.sharedIfEnabled()?.dictationCorrections(language: language) ?? []) + TypingConfigActive.dictationCorrections(fullAccess: self?.hasFullAccess == true)
         }
         localDictation.currentDocument = { [weak self] in self?.currentDocument }
         localDictation.liveText = viewModel.liveText

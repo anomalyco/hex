@@ -751,7 +751,7 @@ final class AutocorrectEngine {
         }
 
         if corrects, autoFix == nil {
-            if let learned = learning.typos[lower], mayOffer(learned, replacing: token) {
+            if let learned = learning.typos[lower] ?? learning.suggestedFixes[lower], mayOffer(learned, replacing: token) {
                 // A learned fix space won't apply (the typo is a real word, or you kept it) is still offered.
                 pool.append(cased(learned, typed: token))
             } else if language.usesEnglishFixes, let suggested = Self.suggestOnlyContractions[lower] {
@@ -858,7 +858,7 @@ final class AutocorrectEngine {
               !learnedWords.contains(lower) else { return nil }
         guard isEnabled, hasWords, !Self.shorthandAllowlist.contains(lower) else { return nil }
         guard let fix = cautiousReplacement(for: token) else { return nil }
-        return (token, fix)
+        return learning.blocksCorrection(to: fix) ? nil : (token, fix)
     }
 
     /// What space puts in place of `token`, if anything. With a partner (bilingual
@@ -981,7 +981,7 @@ final class AutocorrectEngine {
     /// doesn't count ("paris").
     func knowsAsTyped(_ token: String) -> Bool {
         let lower = token.lowercased()
-        return Self.shorthandAllowlist.contains(lower) || learnedWords.contains(lower)
+        return Self.shorthandAllowlist.contains(lower) || learnedWords.contains(lower) || learning.keeps(lower)
             || lexiconTerms.contains { $0.lowercased() == lower } || checker.isWordValid(token)
     }
 
@@ -1181,7 +1181,7 @@ final class AutocorrectEngine {
     /// common word ("Will", "World") stays lowercase mid-sentence either way.
     func isOwnSpelling(_ word: String) -> Bool {
         lexiconShortcuts.values.contains(word)
-            || ((lexiconTerms.contains(word) || learning.typos.values.contains(word) || learnedWords.words.contains(word))
+            || ((lexiconTerms.contains(word) || learning.typos.values.contains(word) || learnedWords.words.contains(word) || learning.keepWords.contains(word))
                 && withoutStrayCapital(word, typed: "") == word)
     }
 
@@ -1378,7 +1378,7 @@ final class AutocorrectEngine {
         guard let choice = contextChoice(
             for: word, previous: previous, next: nextWord.lowercased(),
             startsSentence: Self.startsSentence(before: before, token: word)
-        ), mayOffer(choice, after: previous) else { return nil }
+        ), mayOffer(choice, after: previous), !learning.blocksCorrection(to: choice) else { return nil }
         return addsCapitals || word.first?.isUppercase == true ? choice : choice.lowercased()
     }
 
@@ -1401,14 +1401,14 @@ final class AutocorrectEngine {
         guard let merged = decoder.merge(
             first: first, firstTaps: firstTaps, space: space, second: second, secondTaps: taps,
             previous: previous, firstIsValid: knowsAsTyped(first), secondIsValid: knowsAsTyped(second), keys: keys
-        ), mayOffer(merged, after: previous) else { return nil }
+        ), mayOffer(merged, after: previous), !learning.blocksCorrection(to: merged) else { return nil }
         return withoutAddedCapitals(Self.matchCase(of: first, onto: merged), typed: first + second)
     }
 
     /// Your own words for Swipe typing: Contacts names and other `UILexicon` terms, one-word
     /// text replacements, and words you kept twice that may be offered.
     var ownWords: [String] {
-        lexiconTerms + lexiconShortcuts.values.filter { !$0.contains(" ") } + learnedWords.words.filter { mayOffer($0) }
+        lexiconTerms + lexiconShortcuts.values.filter { !$0.contains(" ") } + (learnedWords.words + learning.keepWords).filter { mayOffer($0) }
     }
 
     /// The English contractions Hex corrects to or offers ("I'm", "don't", "we'll"), which
@@ -1428,7 +1428,7 @@ final class AutocorrectEngine {
         guard let model = decoder?.model else { return }
         let id = ObjectIdentifier(model)
         if let built = userWordsBuilt, built.revision == userWordsRevision, built.model == id { return }
-        let learned = (learnedWords.words + Array(learning.typos.values)).filter { mayOffer($0) }
+        let learned = (learnedWords.words + learning.keepWords + Array(learning.typos.values)).filter { mayOffer($0) }
         let words = lexiconTerms + Array(lexiconShortcuts.values) + learned
         decoder?.userWords = TypingDecoder.UserWords(words, model: model)
         decoder?.neverSuggest = TypingDecoder.NeverSuggest(offensiveWords.blocked(allowSwearing: allowsSwearing), model: model)

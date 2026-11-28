@@ -113,14 +113,16 @@ field is logged, including ones with autocorrection off.
 
 Written when the key layout or shift changes, and when a session starts.
 
-- `hash`: 16 hex digits over every key's id, frame and hit frame and the strip.
+- `hash`: 16 hex digits over every key's id, frame and hit frame (and zone rectangles, when a
+  typing config moved them) and the strip.
   Touches name it in `layout`.
 - `cause`: `session`, `field`, `layout` (width, orientation, globe), `geometry`
   (view size or safe area only), `layer_key` (123/#+=/ABC pressed),
   `layer_auto` (space or return went back to letters), `layer_slide` (hold 123,
   slide, let go), `shift_key`, `typed` (a one-shot shift turned off), `auto`
   (auto-capitalization), `cancel`, `language` (the keyboard layout changed),
-  `letters` (its letters' arrangement changed).
+  `letters` (its letters' arrangement changed), `typing_config` (Settings ›
+  Experiments › Typing configs: the active config changed).
 - `layer` (`letters`/`numbers`/`symbols`), `shift` (`off`/`on`/`locked`),
   `shiftHeld` (only when true), `field` (`text`/`url`/`email`), `orientation`,
   `width`, `height` (the keys' layout), `view` `[w, h]`, `safeArea`,
@@ -133,9 +135,13 @@ Written when the key layout or shift changes, and when a session starts.
     `stripHeight`, `keysBottom`, `cornerRadius`),
   - `strip`: the suggestion strip's rect, and `slots`: its three suggestion
     slots (left, centre, right),
-  - `keys`: `[{id, label, row, frame, hitFrame}]`. `frame` is the drawn keycap,
-    `hitFrame` the touch target; hit frames tile the key area (row 0 to 3) with
-    no gaps. The Hex key in the strip has row `-1`.
+  - `keys`: `[{id, label, row, frame, hitFrame, gapHitFrame?, zoneRects?}]`.
+    - `frame` is the drawn keycap and `hitFrame` the touch target.
+    - `gapHitFrame` is the space bar's band of the gap above it, under the bottom-row letters
+      over it.
+    - `zoneRects`: a typing config's zones replaced this key's touch area with these rectangles.
+    - Together they tile the key area (row 0 to 3) with no gaps. The Hex key in the strip has
+      row `-1`.
 
   Later lines with the same hash in that file say `"repeat": true` instead, so
   look the keys up by hash. Every touch's hash appears in full earlier in the
