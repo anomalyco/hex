@@ -17,7 +17,7 @@ use rune_kit::{
 };
 
 use super::controls::{
-    ButtonKind, DESCRIPTION, Paint, button, card, page, pulsing_dot, segmented_tx,
+    ButtonKind, DESCRIPTION, METRICS, Paint, button, card, page, pulsing_dot, segmented_tx,
 };
 use super::list_detail::{self as ld, Item};
 use super::lists::{Tone, dismissible_error_panel, error_panel, status_pill};
@@ -31,6 +31,7 @@ pub(in crate::rune_ui) mod audio_source;
 mod detail;
 mod fixture;
 mod selection;
+mod setup;
 
 use detail::*;
 
@@ -403,7 +404,7 @@ pub(super) fn cancel_edit(ui: &mut Ui) -> bool {
 pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
     if !available(ui) {
         if crate::labs::Feature::Meetings.managed().is_none() {
-            return (Vec::new(), off_state(p));
+            return (Vec::new(), setup::setup(ui, p, layer));
         }
         let content = page("content").child(card(
             p,
@@ -834,72 +835,15 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
     )
 }
 
-/// The pane while Meetings is off: what it does and its one
-/// action, Turn on Meetings.
-fn off_state(p: Paint) -> El {
-    col()
-        .key("meetings-off")
-        .grow(1.0)
-        .shrink()
-        .center()
-        .gap(6.0)
-        .pb(40.0)
-        .child(
-            rune::el()
-                .key("badge")
-                .size(40.0, 40.0)
-                .mb(6.0)
-                .radius(p.k.radius.lg)
-                .fill(p.k.c.layer_01)
-                .center()
-                .child(
-                    rune::icon(super::sidebar::Pane::Meetings.icon(), 20.0)
-                        .key("icon")
-                        .color(p.k.c.icon_faint),
-                )
-                .a11y_hidden(),
-        )
-        .child(
-            text(tr("Record your calls"))
-                .key("title")
-                .font(p.k.ty.ui_medium)
-                .color(p.text()),
-        )
-        .child(
-            text(tr("Local transcripts and notes for your calls."))
-                .key("hint")
-                .font(DESCRIPTION)
-                .color(p.muted())
-                .align(rune::Align::Center)
-                .wrap()
-                .w(300.0),
-        )
-        .child(row().key("cta").mt(12.0).child(button(
-            p,
-            "meetings-turn-on",
-            tr("Turn on Meetings"),
-            ButtonKind::Primary,
-            |ui: &mut Ui, _| {
-                ui.update(|settings| settings.meetings.enabled = true);
-            },
-        )))
-}
-
 /// The first-run pane, with Start recording as its one action
 /// and where meetings are kept.
 fn empty_state(ui: &Ui, p: Paint) -> El {
-    use crate::app_settings::MeetingRetention;
-    let kept = ui
-        .settings
-        .meetings
-        .retention
-        .unwrap_or(MeetingRetention::DEFAULT);
-    let where_kept = match kept {
-        MeetingRetention::Forever => tr("Meetings stay on this Mac.").to_owned(),
-        kept => tr_fill(
-            "Kept in Hex on this Mac for {}, then moved to the Trash. Exported Markdown stays.",
-            tr(kept.label()),
-        ),
+    use crate::app_settings::MeetingPolicy;
+    // Says what happens next, from the answer setup chose.
+    let hint = match ui.settings.meetings.default_policy {
+        MeetingPolicy::Ask => tr("Hex offers to record when a call starts."),
+        MeetingPolicy::AlwaysRecord => tr("Hex starts recording when a call starts."),
+        MeetingPolicy::NeverOffer => tr("Record a call to get its transcript and notes here."),
     };
     col()
         .key("meetings-empty")
@@ -930,7 +874,7 @@ fn empty_state(ui: &Ui, p: Paint) -> El {
                 .color(p.text()),
         )
         .child(
-            text(tr("Record a call to get its transcript and notes here."))
+            text(hint)
                 .key("hint")
                 .font(DESCRIPTION)
                 .color(p.muted())
@@ -945,15 +889,7 @@ fn empty_state(ui: &Ui, p: Paint) -> El {
             ButtonKind::Primary,
             |ui: &mut Ui, _| start(ui),
         )))
-        .child(
-            row()
-                .key("where-kept")
-                .mt(16.0)
-                .gap(6.0)
-                .center_y()
-                .child(rune::icon(&rune_theme_opencode::icons::LOCK, 12.0).color(p.k.c.icon_faint))
-                .child(text(where_kept).font(p.k.ty.small).color(p.faint())),
-        )
+        .child(setup::kept_note(ui, p).mt(METRICS.row_px))
 }
 
 /// The pane's notice while System Audio Recording is off, with

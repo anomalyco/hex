@@ -190,6 +190,7 @@ const PATHS: &[(&str, &str)] = &[
     ("meetings-audio-off", "Window/Meetings/System audio off"),
     ("meetings-off-sidebar", "Window/Meetings/Off in the sidebar"),
     ("meetings-off", "Window/Meetings/Off"),
+    ("meetings-setup-ready", "Window/Meetings/Setup ready"),
     ("meetings-settings", "Window/Meetings/Settings"),
     ("meetings-calls", "Window/Meetings/Calls"),
     (

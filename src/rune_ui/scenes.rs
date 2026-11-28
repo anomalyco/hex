@@ -726,9 +726,21 @@ pub(super) const SCENES: &[Scene] = &[
         ui.meetings.view = meetings::View::Settings;
         ui.pane = Pane::Meetings;
     }),
+    // Setup before anything is chosen: System audio to allow, Ask each
+    // time, and Calendar to connect.
     ("meetings-off", |ui| {
         *ui = mac_fixture();
         ui.settings.meetings.enabled = false;
+        ui.platform.system_audio = false;
+        ui.pane = Pane::Meetings;
+    }),
+    // Setup with System audio allowed and Calendar connected, its
+    // reminder offered beneath.
+    ("meetings-setup-ready", |ui| {
+        *ui = mac_fixture();
+        ui.settings.meetings.enabled = false;
+        ui.settings.meetings.calendar.connected = true;
+        ui.platform.calendar = platform::CalendarView::preview();
         ui.pane = Pane::Meetings;
     }),
     ("meetings-recording", |ui| {
