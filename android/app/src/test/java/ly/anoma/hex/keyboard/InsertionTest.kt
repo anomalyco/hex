@@ -426,6 +426,22 @@ class InsertionTest {
         shift.auto(true); assertEquals(true, shift.uppercase)
         shift.typed(); assertEquals(false, shift.uppercase)
     }
+    @Test fun aClosingQuoteTakesTheSpaceOnlyWhileAQuoteIsOpen() {
+        assertEquals(true, SpaceRules.closingQuoteTakesSpace("she said \"see you soon "))
+        assertEquals(true, SpaceRules.closingQuoteTakesSpace("she said “see you soon "))
+        assertEquals(true, SpaceRules.closingQuoteTakesSpace("\"a\" and “b, "))
+        // No quote open: an opening quote keeps its space.
+        assertEquals(false, SpaceRules.closingQuoteTakesSpace("she said "))
+        assertEquals(false, SpaceRules.closingQuoteTakesSpace("\"hi\" she said "))
+        assertEquals(false, SpaceRules.closingQuoteTakesSpace("“hi” she said "))
+        // Only this paragraph counts.
+        assertEquals(false, SpaceRules.closingQuoteTakesSpace("\"open\nnext line "))
+        // Only one space after a word, never right after the quote that opened.
+        assertEquals(false, SpaceRules.closingQuoteTakesSpace("\"soon  "))
+        assertEquals(false, SpaceRules.closingQuoteTakesSpace("say \" "))
+        assertEquals(false, SpaceRules.closingQuoteTakesSpace("\"soon"))
+        assertEquals(false, SpaceRules.closingQuoteTakesSpace(" "))
+    }
     @Test fun spacesAndMarksFollowGboard() {
         assertEquals(true, SpaceRules.periodFits("Hi "))
         assertEquals(true, SpaceRules.periodFits("at 5 "))
