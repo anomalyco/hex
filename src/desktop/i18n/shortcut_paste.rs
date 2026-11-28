@@ -12,7 +12,10 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
 ];
 
 pub(super) const FRENCH: &[(&str, &str)] = &[
-    ("Shortcut pastes a capture", "Le raccourci colle une capture"),
+    (
+        "Shortcut pastes a capture",
+        "Le raccourci colle une capture",
+    ),
     (
         "Press the Annotate shortcut again to paste a finished capture when its capsule shows Paste",
         "Appuyez de nouveau sur le raccourci d'annotation pour coller une capture terminée lorsque sa capsule affiche Coller",
@@ -36,7 +39,10 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
 ];
 
 pub(super) const HUNGARIAN: &[(&str, &str)] = &[
-    ("Shortcut pastes a capture", "A billentyűparancs beilleszti a rögzítést"),
+    (
+        "Shortcut pastes a capture",
+        "A billentyűparancs beilleszti a rögzítést",
+    ),
     (
         "Press the Annotate shortcut again to paste a finished capture when its capsule shows Paste",
         "Nyomja meg újra a jegyzetelés billentyűparancsát egy kész rögzítés beillesztéséhez, amikor a kapszula a Beillesztés gombot mutatja",

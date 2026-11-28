@@ -157,6 +157,14 @@ impl HeldState {
         }
     }
 
+    /// Whether a dictation with no live words to show should skip the held
+    /// model's stream. Unified English's stream must end in a closing mark to
+    /// be trusted, most don't, and the whole clip then runs after the stream's
+    /// own finalize, so decoding the clip once is faster (issue 1933).
+    pub(super) fn skips_stream_without_live_text(&self) -> bool {
+        crate::transcription::requires_closing_mark(self.selection().map(|held| held.model))
+    }
+
     pub(super) fn backend(&self) -> Option<SpeechBackend> {
         match self {
             Self::Loaded { backend, .. } => backend.clone(),

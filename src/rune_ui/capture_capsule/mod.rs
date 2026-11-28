@@ -668,7 +668,8 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
     }
     s.now = now;
     s.surface.reduced = s.reduced.get();
-    s.flow.set_shortcut_pastes(crate::labs::annotate_shortcut_pastes());
+    s.flow
+        .set_shortcut_pastes(crate::labs::annotate_shortcut_pastes());
     let mut changed = false;
     let mut replaced = false;
     for input in std::mem::take(&mut s.inbox) {

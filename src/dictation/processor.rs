@@ -2528,8 +2528,12 @@ mod tests {
 
     #[test]
     fn only_model_unavailability_is_retried() {
-        assert!(retryable_generation_error("Model unavailable: example/rewrite-model"));
-        assert!(retryable_generation_error("Model not found: example/rewrite-model"));
+        assert!(retryable_generation_error(
+            "Model unavailable: example/rewrite-model"
+        ));
+        assert!(retryable_generation_error(
+            "Model not found: example/rewrite-model"
+        ));
         assert!(!retryable_generation_error("Provider request failed"));
         assert!(!retryable_generation_error("processor returned empty text"));
     }
@@ -2720,7 +2724,9 @@ mod tests {
         let candidates = ranked_candidates_for(&service, Duration::from_secs(5), &cancelled);
 
         assert_eq!(
-            candidates.first().map(|model| (model.provider.as_str(), model.id.as_str())),
+            candidates
+                .first()
+                .map(|model| (model.provider.as_str(), model.id.as_str())),
             Some(("google", "gemini-3.1-flash-lite"))
         );
         assert_eq!(server.join().unwrap().len(), 2);

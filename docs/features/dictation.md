@@ -2053,6 +2053,8 @@ Model advertises streaming, GPU device             // dictate.streaming
   Shortcut capture passes the hold threshold (Toggle on Windows and Linux: on press)
     -> Open one live stream; feed the 16 kHz backlog, then every 160 ms
        // same audio as the final clip, pre-roll included; never blocks capture
+       └── Unified English with no live words to show (Live text, Stop phrase,
+           or a board asking for them) -> No stream; whole clip after release  // #1933
   Release -> Collect the release tail (40–200 ms when already quiet; up to 600 ms during speech)
     -> Finish with the complete clip
     -> Feed any unfed remainder
@@ -2414,6 +2416,24 @@ latency was not measured. Checks:
 `text_with_nothing_before_the_closers_fails_the_mark_check`, and
 `only_unified_english_streams_require_a_closing_mark` (synthetic text). Not
 measured on a real model or microphone.
+
+**Changed November 28, 2026 (issue 1933 latency):** in real dictation logs about
+80% of Unified English streams failed the mark check. A stream's finalize took
+about 100 ms at the median and the whole-clip run came after it, so a fallback
+dictation finished in about 220 ms at the median against 100 ms for an accepted
+stream. Replaying such clips whole put the mark back on about 58% of them, so
+the check stays. Decoding only the last 2–6 s did not reproduce the whole
+clip's mark reliably (a 4 s tail missed it on about a third of clips). A
+Unified English dictation now opens a stream only when it shows live words
+(Labs › Live text, Stop phrase, or a board that asks for them); otherwise it
+transcribes the whole clip once (`source=offline`): the same text the fallback
+gave, without the stream's finalize first. Other streaming models are
+unchanged. Checks:
+`a_unified_english_dictation_without_live_text_decodes_the_clip_once`,
+`a_unified_english_dictation_with_live_text_still_streams`, and
+`other_streaming_models_stream_without_live_text` (fake engine). Latency
+figures come from dictation logs and local-API replays on one Mac, not from a
+benchmark of this build.
 
 **Fixed November 22, 2026 (opening slack, Unified English):** the opening
 check used the trailing check's 400 ms slack, but Unified English's first-word

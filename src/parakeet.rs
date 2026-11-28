@@ -1794,12 +1794,13 @@ mod tests {
             Box::new(model),
         )))
         .unwrap();
-        // `HEX_STREAM_LIVE_TEXT=0` replays without reading live text.
-        let engine = if std::env::var("HEX_STREAM_LIVE_TEXT").is_ok_and(|value| value == "0") {
-            engine
-        } else {
-            engine.with_live_text()
-        };
+        // `HEX_STREAM_LIVE_TEXT=0` checks that a dictation without live text
+        // opens no Unified English stream and decodes the whole clip once.
+        if std::env::var("HEX_STREAM_LIVE_TEXT").is_ok_and(|value| value == "0") {
+            assert!(engine.begin().is_none(), "no stream without live text");
+            return;
+        }
+        let engine = engine.with_live_text();
         let speed = std::env::var("HEX_STREAM_SPEED")
             .ok()
             .and_then(|speed| speed.parse::<f64>().ok())
