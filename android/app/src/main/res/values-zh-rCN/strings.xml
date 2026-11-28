@@ -230,6 +230,9 @@
     <string name="hex_key_left_detail">把按住说话的 Hex 键移到建议栏的左端</string>
     <string name="volume_in_menu">Hex 菜单中的音量</string>
     <string name="volume_in_menu_detail">在 Hex 菜单中添加“音量”，用于打开手机的音量控制</string>
+    <string name="key_click_volume">按键音量</string>
+    <string name="key_click_volume_detail">按你设定的音量播放按键音，而不是手机的默认音量。仍遵循触摸提示音设置</string>
+    <string name="key_click_volume_percent">%1$d%%</string>
     <string name="key_colors">按键颜色</string>
     <string name="key_color">颜色</string>
     <string name="key_color_black">黑色</string>

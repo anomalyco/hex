@@ -21,7 +21,8 @@ import kotlin.math.roundToInt
 
 /** One key. The whole view is its touch target; its padding places the drawn keycap (KeyRowLayout sets it). */
 internal class KeyCap(context: Context, fill: Int, private val paints: KeyPaints, description: String,
-                      private val haptics: () -> Boolean, click: () -> Unit) : FrameLayout(context) {
+                      private val haptics: () -> Boolean, private val clickPercent: () -> Int?,
+                      click: () -> Unit) : FrameLayout(context) {
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
     var label: TextView? = null
     /** The label's size in dp at Gboard's letter keycap; the drawn size follows this key's keycap ([KeyLabels]). */
@@ -58,12 +59,12 @@ internal class KeyCap(context: Context, fill: Int, private val paints: KeyPaints
         }
     }
     // A tap as each key goes down, as on Gboard. The click is the system's own, so it follows Touch
-    // sounds as iPhone Hex's follows Keyboard clicks (AudioManager.playSoundEffect checks the setting).
+    // sounds as iPhone Hex's follows Keyboard clicks; Labs › Keyboard › Key click volume sets its level ([KeyClick]).
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
             downAt = event.eventTime
             tap(context, haptics(), Tap.Press)
-            context.getSystemService(AudioManager::class.java)?.playSoundEffect(sound)
+            KeyClick.play(context, sound, clickPercent())
         }
         if (event.actionMasked == MotionEvent.ACTION_UP) liftAt = event.eventTime
         return super.dispatchTouchEvent(event)
@@ -137,7 +138,7 @@ internal class KeyCap(context: Context, fill: Int, private val paints: KeyPaints
 
 /** Builds keys with the keyboard's colours and haptics setting. */
 internal class KeyCaps(private val context: Context, val paints: KeyPaints, private val labelBase: Float,
-                       private val haptics: () -> Boolean) {
+                       private val haptics: () -> Boolean, private val clickPercent: () -> Int? = { null }) {
     private fun dp(value: Int) = (value * context.resources.displayMetrics.density).roundToInt()
     val ink = paints.ink
     val key = paints.key
@@ -146,7 +147,7 @@ internal class KeyCaps(private val context: Context, val paints: KeyPaints, priv
     /** Letters are Gboard's size (19.4 dp capitals) on its Pixel 8 keycap; labels such as ?123 are smaller. [size]
      * is in dp at that keycap: the drawn size follows each key's own ([KeyLabels]). */
     fun cap(s: String, desc: String, fill: Int = key, size: Float = 26f, click: () -> Unit): KeyCap {
-        val c = KeyCap(context, fill, paints, desc, haptics, click)
+        val c = KeyCap(context, fill, paints, desc, haptics, clickPercent, click)
         c.labelSize = size; c.labelBase = labelBase
         c.label = TextView(context).apply {
             text = s; useInter(if (size >= 20f) 400 else 500)
@@ -157,7 +158,7 @@ internal class KeyCaps(private val context: Context, val paints: KeyPaints, priv
         return c
     }
     fun icon(res: Int, desc: String, fill: Int, click: () -> Unit, tint: Int = ink, size: Int = 24): KeyCap {
-        val c = KeyCap(context, fill, paints, desc, haptics, click)
+        val c = KeyCap(context, fill, paints, desc, haptics, clickPercent, click)
         val image = ImageView(context).apply {
             setImageResource(res); imageTintList = ColorStateList.valueOf(tint)
         }

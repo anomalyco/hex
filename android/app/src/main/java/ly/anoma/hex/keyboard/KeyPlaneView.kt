@@ -50,7 +50,8 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private val density = resources.displayMetrics.density
     private fun dp(value: Int) = (value * density).roundToInt()
     private fun px(value: Float) = (value * density).roundToInt()
-    private val caps = KeyCaps(context, host.paints, KeyRows.labelBase(resources)) { ime.feedback.haptics }
+    private val caps = KeyCaps(context, host.paints, KeyRows.labelBase(resources),
+        haptics = { ime.feedback.haptics }, clickPercent = { ime.feedback.clickPercent })
     private val ink = caps.ink
     private val modifier = caps.modifier
     private val quiet = caps.paints.quiet

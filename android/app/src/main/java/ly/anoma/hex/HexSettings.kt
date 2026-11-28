@@ -655,6 +655,9 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 Toggle(stringResource(R.string.volume_in_menu), stringResource(R.string.volume_in_menu_detail),
                                     volumeInMenu) { typing.volumeInMenu = it }
                                 Rule()
+                                // Labs › Keyboard › Key click volume: off, the keys click at the phone's own level.
+                                KeyClickRows(typing, revision)
+                                Rule()
                                 // Labs › Keyboard › Key colors: iPhone Hex's key themes, the keys only. Off, the keys are
                                 // Automatic's whatever Color says; the choice is kept for the next time it is on.
                                 Toggle(stringResource(R.string.key_colors), null, keyColors) { typing.keyColors = it }
