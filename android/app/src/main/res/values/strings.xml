@@ -241,6 +241,8 @@
     <string name="hold_click_detail">With Haptics on, a held key clicks as its symbols or accents appear</string>
     <string name="closing_quote_takes_space">Closing quotes take the space</string>
     <string name="closing_quote_takes_space_detail">A closing quote typed while a quote is open goes against the word before it</string>
+    <string name="shift_recases">Shift changes a word’s case</string>
+    <string name="shift_recases_detail">At a word, a shift tap cycles it: lowercase, Title, ALL CAPS</string>
     <string name="adaptive_touch">Adaptive touch</string>
     <string name="adaptive_touch_detail">Learns where you tap each key. Stays on this phone and keeps averages, never what you type.</string>
     <string name="adaptive_touch_learning">Learning: %1$d of %2$d taps</string>

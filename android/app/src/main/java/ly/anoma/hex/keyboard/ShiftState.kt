@@ -16,9 +16,12 @@ internal class ShiftState {
 
     val uppercase get() = mode != Mode.Off || held
     val locked get() = mode == Mode.Locked
+    /** Caps lock set by a word recased to capitals ([recased]), not by you: it lasts only as long as that word. */
+    var recaseLocked = false
+        private set
 
     fun down(now: Long) {
-        held = true; typedWhileHeld = false
+        held = true; typedWhileHeld = false; recaseLocked = false
         when {
             mode == Mode.Locked -> { mode = Mode.Off; lastTapDown = -1 }
             lastTapDown >= 0 && now - lastTapDown < DOUBLE_TAP_MS -> { mode = Mode.Locked; lastTapDown = -1 }
@@ -26,10 +29,27 @@ internal class ShiftState {
         }
     }
 
-    /** A chord (a letter typed while held) neither stays on nor counts towards a double tap. */
-    fun up() {
+    /** Shift went down at a word Labs › Keyboard › Shift changes a word's case recases: it only holds, so a letter
+     * typed while it is down is still a capital (a chord), and [up] says whether it was a tap instead. */
+    fun hold() { held = true; typedWhileHeld = false; lastTapDown = -1 }
+
+    /** A chord (a letter typed while held) neither stays on nor counts towards a double tap. Returns whether shift was
+     * tapped: nothing was typed while it was down. */
+    fun up(): Boolean {
         held = false
-        if (typedWhileHeld) { typedWhileHeld = false; lastTapDown = -1; if (mode != Mode.Locked) mode = Mode.Off }
+        if (typedWhileHeld) { typedWhileHeld = false; lastTapDown = -1; if (mode != Mode.Locked) mode = Mode.Off; return false }
+        return true
+    }
+
+    /** A word recased to capitals locks shift ([locked] true until [unlock]); any other case leaves it off. */
+    fun recased(capitals: Boolean) { mode = if (capitals) Mode.Locked else Mode.Off; recaseLocked = capitals; lastTapDown = -1 }
+    fun unlock() { if (mode == Mode.Locked) mode = Mode.Off; recaseLocked = false }
+
+    /** The recased word ended, or something that always starts a new word began (a swipe): caps lock a recase set goes
+     * off; caps lock you set stays. Returns whether shift went off. */
+    fun recasedWordEnded(): Boolean {
+        if (!recaseLocked) return false
+        unlock(); return true
     }
 
     /** A character went in. */
@@ -41,6 +61,6 @@ internal class ShiftState {
     /** Auto-capitalisation after an edit or a field change; leaves caps lock and a held shift alone. */
     fun auto(capitalize: Boolean) { if (mode != Mode.Locked && !held) mode = if (capitalize) Mode.On else Mode.Off }
 
-    fun reset() { mode = Mode.Off; held = false; typedWhileHeld = false; lastTapDown = -1 }
+    fun reset() { mode = Mode.Off; recaseLocked = false; held = false; typedWhileHeld = false; lastTapDown = -1 }
     fun forgetTap() { lastTapDown = -1 }
 }

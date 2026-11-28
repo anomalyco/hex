@@ -213,6 +213,8 @@
     <string name="hold_click_detail">开启触感反馈时，长按按键在符号或重音字母出现时轻振一下</string>
     <string name="closing_quote_takes_space">右引号吸收空格</string>
     <string name="closing_quote_takes_space_detail">引号未闭合时输入的右引号直接跟在前面的单词后面</string>
+    <string name="shift_recases">Shift 切换单词大小写</string>
+    <string name="shift_recases_detail">光标在单词处时，轻点 Shift 依次切换：小写、首字母大写、全部大写</string>
     <string name="adaptive_touch">自适应触控</string>
     <string name="adaptive_touch_detail">学习你点击每个按键的位置。内容只留在这台手机上，只保存平均位置，不保存你输入的内容。</string>
     <string name="adaptive_touch_learning">正在学习：已有 %1$d/%2$d 次轻点</string>

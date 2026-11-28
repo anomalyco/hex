@@ -355,7 +355,9 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                                 roll.up(v)
                                 val onto = slidOnto; endSlide()
                                 if (onto != null && e.actionMasked == MotionEvent.ACTION_UP) typeSlid(onto, e)
-                                if (v.isPressed) { v.isPressed = false; ime.engine.shiftUp() }
+                                // A cancelled touch only lifts shift: it never recases a word (Labs › Keyboard › Shift
+                                // changes a word's case).
+                                if (v.isPressed) { v.isPressed = false; if (e.actionMasked == MotionEvent.ACTION_UP) ime.engine.shiftUp() else ime.engine.shiftCancelled() }
                             }
                         }
                         true

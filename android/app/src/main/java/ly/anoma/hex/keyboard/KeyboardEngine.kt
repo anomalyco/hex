@@ -98,6 +98,8 @@ internal class KeyboardEngine(
         const val CHIP_PAUSE_MS = 100L
         /** Undo dictation stays this long unless something else happens first (iPhone Hex: 12 s). */
         const val UNDO_MS = 12_000L
+        /** How far either side of the cursor Shift changes a word's case reads for the word. */
+        const val RECASE_READ = 64
     }
     private var pendingChip: Runnable? = null
     private val steady = SteadyStrip()
@@ -124,6 +126,15 @@ internal class KeyboardEngine(
     private data class Undo(val language: String, val original: String, val replacement: String)
     private var undo: Undo? = null
     private val shift = ShiftState()
+    // Labs › Keyboard › Shift changes a word's case (WordCase.kt): shift went down at a word it recases, so it only
+    // holds; shift is locked because a word went to capitals, until the word ends; and the word in progress is one
+    // shift recased, which space and marks leave as cased.
+    private var recasing = false
+    private val recaseLock get() = shift.recaseLocked
+    // Where the word a recase to capitals locked shift for starts, as an offset in the field: the lock holds only while
+    // the cursor is still at the end of that word.
+    private var recaseStart = -1
+    private var recased = false
     private var symbols = false
     private var more = false
     // A number, phone or date field's pad, or the number pad the symbol page's 1234 key opens.
@@ -191,7 +202,7 @@ internal class KeyboardEngine(
         adaptive = adaptiveTouch(); adaptive?.beginSession()
         pad = Pad.of(attribute.inputType)
         symbols = pad != null
-        more = false; shift.reset()
+        more = false; shift.reset(); recasing = false; recaseStart = -1
         selStart = attribute.initialSelStart; selEnd = attribute.initialSelEnd
         refreshCaps(force = true)
     }
@@ -273,6 +284,7 @@ internal class KeyboardEngine(
     }
     private fun refreshCaps(force: Boolean = false) {
         val was = shift.uppercase
+        releaseRecaseLock(strict = true)
         shift.auto(capsWanted())
         if (force || was != shift.uppercase) showPlane()
     }
@@ -292,14 +304,103 @@ internal class KeyboardEngine(
     /** Shift went down: it acts at once, so a held shift and a letter type a capital. */
     fun shiftDown() {
         if (symbols) return
-        shift.down(clock()); showPlane()
+        releaseRecaseLock(strict = true)
+        // At a word Labs › Keyboard › Shift changes a word's case recases, shift only holds (a chord still types a
+        // capital) and a tap recases as it lifts; caps lock you set yourself still goes off with a tap.
+        recasing = (!shift.locked || recaseLock) && recaseSpan() != null
+        if (recasing) shift.hold() else shift.down(clock())
+        showPlane()
     }
     /** Shift lifted; on the symbol pages its key switches between them, on lifting. */
     fun shiftUp() {
         if (symbols) { more = !more; showPlane(); return }
         val was = shift.uppercase
-        shift.up()
+        val tapped = shift.up()
+        if (recasing) { recasing = false; if (tapped && recase()) return }
         if (was != shift.uppercase) showPlane()
+    }
+    /** The shift touch was cancelled: shift lifts as usual, but a word is never recased. */
+    fun shiftCancelled() {
+        if (symbols) { more = !more; showPlane(); return }
+        val was = shift.uppercase
+        shift.up(); recasing = false
+        if (was != shift.uppercase) showPlane()
+    }
+    /** The word Labs › Keyboard › Shift changes a word's case would recase: the cursor at its end or inside it, nothing
+     * selected, in a field whose text Hex reads, with a case to change; null where shift is as before. */
+    private fun recaseSpan(): WordCase.Span? {
+        if (!feedback.shiftRecases || secure || keyEventEditor || pad != null || swiping || !target.connected) return null
+        if (selStart < 0 || selStart != selEnd || target.selected()?.isNotEmpty() == true) return null
+        val b = target.before(RECASE_READ).orEmpty(); val a = target.after(RECASE_READ).orEmpty()
+        val span = WordCase.at(b, a) ?: return null
+        // A word longer than what was read isn't cut in two.
+        if ((span.before.length == b.length && b.length == RECASE_READ) || span.after.length == RECASE_READ) return null
+        return span.takeIf { WordCase.next(it.word) != it.word }
+    }
+    /** A shift tap at a word: it takes its next case. At the word's end it is the word being typed again (as an undone
+     * autocorrection is), the strip follows its case and space keeps it; capitals lock shift until the word ends.
+     * Inside it, the cursor stays where it was and shift goes off. */
+    private fun recase(): Boolean {
+        val span = recaseSpan() ?: return false
+        val next = WordCase.next(span.word)
+        // A swiped word recased is ordinary text from now on: its readings and retries would offer the old case and
+        // clear the strip once the cursor report no longer ends in it.
+        edited(); forgetSwipe(); retries.forget(); adaptive?.forget(); clearSpaces()
+        if (span.after.isEmpty()) {
+            // Right after a letter the editor may not have reported the cursor yet: the one typing expects comes first.
+            val cursor = if (expectedCaret >= 0) expectedCaret else selStart
+            if (!replace(span.before, next)) return false
+            resetTyping()
+            prefix = before().dropLast(next.length).takeLast(40)
+            word?.restored(next, prefix)
+            recased = true; expectedCaret = cursor
+            shift.recased(WordCase.allCaps(next))
+            recaseStart = cursor - span.before.length
+            showPlane()
+            // The strip is laid out afresh, so every word in it takes the new case.
+            steady.forget(); showSuggestions(word)
+            return true
+        }
+        // Inside a word the cursor is an offset in the field, which can lag the text just read: the word is selected and
+        // checked before anything is replaced, and a selection that isn't the word puts the cursor back untouched.
+        val cursor = selStart
+        // The selection is read back outside a batch edit, where every editor reports it.
+        var done = false
+        if (target.setSelection(cursor - span.before.length, cursor + span.after.length)) {
+            if (target.selected() == span.word) {
+                target.beginBatch()
+                try { done = target.commit(next); target.setSelection(cursor, cursor) } finally { target.endBatch() }
+            } else target.setSelection(cursor, cursor)
+        }
+        resetTyping(); showStrip(emptyList())
+        if (!done) { showPlane(); return false }
+        shift.recased(false)
+        showPlane()
+        return true
+    }
+    /** Caps lock a recase to capitals set goes off once the word ends (a space, a mark, the cursor leaving it) or shift
+     * already went off; returns whether it did. Right after a key ([strict] false, before the editor reports the new
+     * cursor) the word goes on while a letter is before the cursor; with the cursor reported ([strict]) it must still
+     * be at the end of the recased word, so a tap into another word ends it. */
+    private fun releaseRecaseLock(strict: Boolean = false): Boolean {
+        if (!recaseLock) return false
+        val keeps = shift.locked && if (strict) atRecasedWord() else before().lastOrNull()?.isLetter() == true
+        if (keeps) return false
+        recaseStart = -1; shift.unlock()
+        return true
+    }
+    /** Whether the cursor is still at the end of the word the recase locked shift for: the word right before the live
+     * cursor reaches back at least to where that word started ([WordCase.continues]). */
+    private fun atRecasedWord(): Boolean {
+        val start = recaseStart
+        if (start < 0 || selStart != selEnd) return false
+        // The cursor typing expects first: a reported one can lag letters already typed. Where typing tracks none, the
+        // live text decides, so a late report never ends the word early.
+        val cursor = if (expectedCaret >= 0) expectedCaret else selStart
+        val length = cursor - start
+        if (length <= 0) return false
+        val text = target.before(length + RECASE_READ) ?: return false
+        return WordCase.continues(text, length)
     }
     /** ?123 and ABC. A word being typed goes along, as on Gboard and iPhone Hex: its strip stays, a mark on the
      * symbol page ends it as on the letters ("teh" ?123 "?" is "the?"), and back on the letters it goes on. */
@@ -320,7 +421,7 @@ internal class KeyboardEngine(
     /** The symbol pad's !?#: back to the symbol page. */
     fun symbolsPage() { adaptive?.forget(); resetTyping(); pad = null; symbols = true; more = false; showPlane() }
     private fun resetTyping() {
-        cancelChip(); word?.reset(); undo = null; expectedCaret = -1; prefix = ""
+        cancelChip(); word?.reset(); undo = null; expectedCaret = -1; prefix = ""; recased = false
     }
     private fun clearSpaces() { spaceAnchor = null; pickedAnchor = null; fixedAnchor = null; heldAnchor = null; swipeAnchor = null }
 
@@ -458,6 +559,7 @@ internal class KeyboardEngine(
     } ?: true)
     private fun inputDone() {
         val was = shift.uppercase
+        if (releaseRecaseLock()) shift.auto(capsWanted())
         shift.typed()
         if (was != shift.uppercase) showPlane()
     }
@@ -485,6 +587,7 @@ internal class KeyboardEngine(
         if (w == null || symbols || !text.single().isLetter()) { type(text); return }
         undo = null
         if (w.token.isEmpty()) {
+            recased = false // A new word: it autocorrects as any other, whatever shift did to the one before.
             val b = takeHeldSpace(before())
             prefix = b.takeLast(40); w.reset(b)
             if (!w.startsWord(b) || !canEndWord()) { type(text); return }
@@ -613,7 +716,8 @@ internal class KeyboardEngine(
         val afterSwipe = swipeAnchor != null && swipeAnchor == b
         clearSpaces()
         val w = word
-        if (w != null && !symbols && !exactField && canEndWord() && !afterSwipe) {
+        // Nor a word shift recased: it goes in as cased.
+        if (w != null && !symbols && !exactField && canEndWord() && !afterSwipe && !recased) {
             val old = w.token; val lang = w.decoder.model.language
             // Your text replacements first, whatever autocorrect is set to; they never offer an undo.
             val swap = w.textReplacement(b)
@@ -675,7 +779,7 @@ internal class KeyboardEngine(
         val text = if (value.any { it in SpaceRules.JOINERS || it.isWhitespace() }) b else takeHeldSpace(b)
         clearSpaces()
         val w = word
-        if (mark && w != null && pad == null && !exactField && canEndWord() && !afterSwipe) {
+        if (mark && w != null && pad == null && !exactField && canEndWord() && !afterSwipe && !recased) {
             val swap = w.textReplacement(text)
             if (swap != null && replace(swap.original, smartWord(swap.replacement) + value)) {
                 teachEnd(text, swap); resetTyping(); showPredictions(before()); inputDone(); return
@@ -726,7 +830,7 @@ internal class KeyboardEngine(
             val cluster = if (track || secure) 1 else DeleteSlide.lastCharacter(target.before(32).orEmpty())
             // Drop the letter before the editor does: an editor in Hex's own process reports the new
             // selection during the delete call, and that report must find the word already shorter.
-            if (track) { w!!.pop(); if (expectedCaret >= 0) expectedCaret-- }
+            if (track) { w!!.pop(); if (expectedCaret >= 0) expectedCaret--; if (w.token.isEmpty()) recased = false }
             if (!(if (cluster > 1) target.deleteBefore(cluster) else target.deleteCodePointsBefore(1))) target.sendKey(KeyEvent.KEYCODE_DEL)
             if (!track) resetTyping()
         }
@@ -739,7 +843,7 @@ internal class KeyboardEngine(
     fun enter() {
         edited(); adaptive?.forget()
         // A text replacement that ends the text goes in before the line break or the editor's action.
-        word?.takeIf { canEndWord() }?.textReplacement(before())?.let { replace(it.original, smartWord(it.replacement)) }
+        word?.takeIf { canEndWord() && !recased }?.textReplacement(before())?.let { replace(it.original, smartWord(it.replacement)) }
         resetTyping(); clearSpaces(); showStrip(emptyList())
         val info = editor
         // Before any action or key press: a Return that ends a word teaches adaptive touch as a typed one does.
@@ -934,6 +1038,9 @@ internal class KeyboardEngine(
         // A word delete took back stays remembered for this swipe; anything else ends the Undo dictation offer.
         if (dictated != null) offerUndo(null)
         continuation.clear(); cancelChip(); forgetSwipe(); adaptive?.forget()
+        // A swipe always types a word of its own, so caps lock a recase to capitals set ends here and the swipe is cased
+        // as any other; caps lock you set still makes it capitals.
+        if (shift.recasedWordEnded()) { recaseStart = -1; shift.auto(capsWanted()); showPlane() }
         val reader = w.decoder.swipe.also { it.prepare(feedback.suggestSwearWords) }
         swiping = true
         showStrip(emptyList())

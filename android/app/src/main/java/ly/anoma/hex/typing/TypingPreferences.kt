@@ -97,6 +97,11 @@ internal class TypingPreferences(context: Context) {
     var closingQuoteTakesSpace: Boolean
         get() = prefs.getBoolean(CLOSING_QUOTE_TAKES_SPACE, false)
         set(value) { prefs.edit().putBoolean(CLOSING_QUOTE_TAKES_SPACE, value).apply() }
+    /** Labs › Keyboard › Shift changes a word's case: with the cursor at the end of a word or inside one, a shift tap
+     * cycles it lowercase → Title → ALL CAPS ([ly.anoma.hex.keyboard.WordCase], #3008). Off by default. */
+    var shiftRecases: Boolean
+        get() = prefs.getBoolean(SHIFT_RECASES, false)
+        set(value) { prefs.edit().putBoolean(SHIFT_RECASES, value).apply() }
     /** Labs › Keyboard › Adaptive touch: the decoder reads taps with your own key centres once it has learned them
      * ([AdaptiveTouch], kept by [AdaptiveTouchStore]). Off by default. */
     var adaptiveTouch: Boolean
@@ -189,6 +194,7 @@ internal class TypingPreferences(context: Context) {
         const val MARKS_KEEP_SPACE = "marksKeepSpace"
         const val HOLD_CLICK = "holdClick"
         const val CLOSING_QUOTE_TAKES_SPACE = "closingQuoteTakesSpace"
+        const val SHIFT_RECASES = "shiftRecases"
         const val ADAPTIVE_TOUCH = "adaptiveTouch"
         const val USE_IMPORTED_WORDS = "importedWords"
         /** A counter [ImportedWords] bumps whenever the imported list changes, so the keyboard reads it again. */

@@ -176,6 +176,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val marksKeepSpace = remember(revision) { typing.marksKeepSpace }
     val holdClick = remember(revision) { typing.holdClick }
     val closingQuoteTakesSpace = remember(revision) { typing.closingQuoteTakesSpace }
+    val shiftRecases = remember(revision) { typing.shiftRecases }
     val adaptiveTouch = remember(revision) { typing.adaptiveTouch }
     // Labs › Keyboard › Adaptive touch: how far it has learned (labelled taps on one key plane, and whether any reads your
     // own centres), and whether the phone keeps averages, which Reset touch learning removes even with the lab off.
@@ -608,6 +609,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 Rule()
                                 Toggle(stringResource(R.string.closing_quote_takes_space), stringResource(R.string.closing_quote_takes_space_detail),
                                     closingQuoteTakesSpace) { typing.closingQuoteTakesSpace = it }
+                                Rule()
+                                // Labs › Keyboard › Shift changes a word's case (#3008): off, shift is exactly as before.
+                                Toggle(stringResource(R.string.shift_recases), stringResource(R.string.shift_recases_detail),
+                                    shiftRecases) { typing.shiftRecases = it }
                                 Rule()
                                 // Labs › Keyboard › Adaptive touch: off, the keys read the drawn centres and learn nothing;
                                 // what was learned stays on the phone until Reset touch learning or Delete what Hex learned.

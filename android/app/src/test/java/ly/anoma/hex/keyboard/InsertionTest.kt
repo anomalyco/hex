@@ -448,6 +448,33 @@ class InsertionTest {
         assertEquals(false, SpaceRules.closingQuoteTakesSpace("\"soon"))
         assertEquals(false, SpaceRules.closingQuoteTakesSpace(" "))
     }
+    // Labs › Keyboard › Shift changes a word's case (#3008): at a word shift only holds, so a tap is told from a chord.
+    @Test fun shiftHoldsAtAWordAndRecasingLocksOnlyForCapitals() {
+        val shift = ShiftState()
+        shift.hold(); assertEquals(true, shift.uppercase)    // held: a chord still types a capital
+        assertEquals(true, shift.up())                       // nothing typed: a tap, which recases
+        assertEquals(false, shift.uppercase)
+        shift.hold(); shift.typed()
+        assertEquals(false, shift.up())                      // a chord: no recase, and shift goes off
+        assertEquals(false, shift.uppercase)
+        shift.hold(); shift.up(); shift.hold(); shift.up()
+        assertEquals(false, shift.locked)                    // two quick taps at a word never lock caps
+        shift.recased(true); assertEquals(true, shift.locked)
+        shift.typed(); assertEquals(true, shift.uppercase)   // letters after a word in capitals are capitals too
+        shift.unlock(); assertEquals(false, shift.locked); assertEquals(false, shift.uppercase)
+        shift.recased(false); assertEquals(false, shift.locked); assertEquals(false, shift.uppercase)
+        shift.down(0); shift.up(); shift.recased(false)
+        assertEquals(false, shift.uppercase)                 // Title or lowercase leaves shift off
+        // The recased word ends (a swipe always starts a new one): only caps lock the recase set goes off.
+        shift.recased(true); assertEquals(true, shift.recaseLocked)
+        assertEquals(true, shift.recasedWordEnded()); assertEquals(false, shift.locked); assertEquals(false, shift.recaseLocked)
+        assertEquals(false, shift.recasedWordEnded())
+        shift.down(10_000); shift.up(); shift.down(10_100); shift.up()
+        assertEquals(true, shift.locked); assertEquals(false, shift.recaseLocked)
+        assertEquals(false, shift.recasedWordEnded()); assertEquals(true, shift.locked)   // your caps lock stays
+        shift.recased(true); shift.down(11_000); shift.up()
+        assertEquals(false, shift.locked); assertEquals(false, shift.recaseLocked)        // a plain shift press unlocks it
+    }
     @Test fun spacesAndMarksFollowGboard() {
         assertEquals(true, SpaceRules.periodFits("Hi "))
         assertEquals(true, SpaceRules.periodFits("at 5 "))
