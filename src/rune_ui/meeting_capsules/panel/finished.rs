@@ -180,7 +180,7 @@ pub(in crate::rune_ui::meeting_capsules) fn ready(
 }
 
 /// The ready panel's height: the title band and the two copies.
-pub(super) fn ready_height(_: &MeetingManifest) -> f32 {
+pub(super) fn ready_height() -> f32 {
     // The title's 20 pt line, 2 pt, and the length's 12 pt line.
     let band = 2.0 * READY_TITLE_PY + 20.0 + 2.0 + 12.0;
     2.0 * PANEL_PAD + band + ROW_GAP + COPIES_HEIGHT

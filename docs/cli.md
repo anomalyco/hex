@@ -763,8 +763,6 @@ support this lab.
   `capture.media_days`, `capture.bundle_days`, `capture.routing`,
   `capture.show_overlays_in_recordings` (default off; on lets screen
   recordings, Hex's captures included, show its overlays), and
-  `capture.capsule_flow` (`list`, the default, `toast`, `menu_bar`, `cursor`
-  or `notch`: the capsule's flow after a capture, prototypes to compare). Both
   capture shortcuts need a key, and `capture.enabled on` needs both free; on
   a Mac whose Paste Last is still ⌥⇧V, rebind one of the two first.
 - `meetings.retention` is `day`, `week`, `month`, `forever`, or `none` (the
@@ -836,11 +834,12 @@ fails when a new persisted setting has no key here.
 
 ## Compatibility
 
-`CONTROL_VERSION` is 4. A change that breaks a request or reply shape
+`CONTROL_VERSION` is 5. A change that breaks a request or reply shape
 increments it; adding a command, an optional request field, or a reply field
 does not. A `hex` from a different version gets `version-mismatch`; use the
 `hex` inside the running Hex.app, or restart Hex after updating. Version 2
 removed `permissions.input_monitoring` from the status reply; version 3 removed
 `voice-action` and `features.voice_action`; version 4 removed `commands-retry`,
 `settings-set.confirm`, `window-show` `commands`, `capture.recording` `voice`,
-`features.commands`, and `features.command_model`.
+`features.commands`, and `features.command_model`; version 5 removed
+`capture.capsule_flow`, the capsule prototypes' switch.

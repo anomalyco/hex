@@ -30,40 +30,6 @@ pub struct CaptureSettings {
     /// overlays: the capture capsule, picker, and ink, the dictation HUD,
     /// and the meeting capsules. Off keeps them out (`capture_host`).
     pub show_overlays_in_recordings: bool,
-    /// How the capsule offers where to send a finished capture, while Kit
-    /// compares the directions.
-    pub capsule_flow: CapsuleFlow,
-}
-
-/// The capsule's flow after a capture stops, one of five prototypes.
-#[cfg(hex_capture)]
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CapsuleFlow {
-    /// (a) "Copied", and the suggestions in a list under the capsule.
-    #[default]
-    List,
-    /// (b) One quiet line, "Send to SEER ⏎"; ⇥ moves to the next guess.
-    Toast,
-    /// (c) A short hint of the guesses in the capsule, which then folds
-    /// into Hex's menu-bar item.
-    MenuBar,
-    /// (d) The guesses in a small card at the pointer.
-    Cursor,
-    /// (e) A pill hanging from the top edge that grows down into the
-    /// guesses.
-    Notch,
-}
-
-#[cfg(hex_capture)]
-impl CapsuleFlow {
-    pub const ALL: [Self; 5] = [
-        Self::List,
-        Self::Toast,
-        Self::MenuBar,
-        Self::Cursor,
-        Self::Notch,
-    ];
 }
 
 #[cfg(hex_capture)]
@@ -80,7 +46,6 @@ impl Default for CaptureSettings {
             bundle_days: week.bundle_days,
             routing: CaptureRouting::default(),
             show_overlays_in_recordings: false,
-            capsule_flow: CapsuleFlow::default(),
         }
     }
 }
@@ -205,15 +170,6 @@ pub fn capture_hotkey_keycaps() -> Vec<String> {
         .keycaps()
 }
 
-/// The saved [`CapsuleFlow`], without cloning the capture settings.
-#[cfg(hex_capture)]
-pub fn capsule_flow() -> CapsuleFlow {
-    CapsuleFlow::ALL
-        .get(usize::from(CAPSULE_FLOW.load(Ordering::Acquire)))
-        .copied()
-        .unwrap_or_default()
-}
-
 /// Annotate is on (`capture.enabled`).
 #[cfg(hex_capture)]
 pub fn capture_on() -> bool {
@@ -243,4 +199,15 @@ fn hex_annotation_location_respects_the_hex_data_root_and_an_explicit_folder() {
     settings.folder = Some(chosen.clone());
     assert_eq!(settings.captures_dir(), chosen);
     assert_eq!(settings.annotation_roots(), [chosen]);
+}
+
+#[cfg(all(test, hex_capture))]
+#[test]
+fn a_retired_capsule_flow_still_loads() {
+    // The prototype flows were retired; an old settings file naming one
+    // must load, with every other field kept.
+    let settings: CaptureSettings =
+        serde_json::from_str(r#"{"enabled":false,"capsule_flow":"notch"}"#).unwrap();
+    assert!(!settings.enabled);
+    assert_eq!(settings.hotkey, CaptureSettings::default().hotkey);
 }

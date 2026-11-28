@@ -14,8 +14,7 @@ use std::cell::RefCell;
 use rune::{Spring, TextStyle};
 
 use super::flow::{Done, Lead, Mode, Pen, Pres};
-use super::notch;
-use super::tuning::{self, CapsuleFlow};
+use super::tuning;
 use crate::desktop::i18n::tr;
 use crate::rune_hud::spring::REDUCED_FADE;
 use crate::rune_ui::controls::{CAPSULE, Paint};
@@ -103,12 +102,6 @@ pub(crate) const HEADER_H: f32 = 24.0;
 /// A list row, and the search field over them: the capsules' 32 pt action row.
 pub(crate) const ROW_H: f32 = CAPSULE.row_h;
 
-/// The cursor's and the notch's card: at least this wide, a row per
-/// guess under its top line.
-pub(crate) const CARD_W: f32 = 280.0;
-pub(crate) const PICK_H: f32 = 32.0;
-/// The card's hint line under its guesses.
-pub(crate) const CARD_HINTS_H: f32 = 28.0;
 /// The capsule is a rounded rect, its corners the list's, so the two
 /// match and the square thumbnail sits in a corner that follows it.
 pub(crate) const SHELL_RADIUS: f32 = CAPSULE.radius;
@@ -119,29 +112,6 @@ pub(crate) const CHIP_RADIUS: f32 = CAPSULE.inner(CAPSULE.chip_inset);
 pub(crate) fn corner(h: f32) -> f32 {
     (h * 0.5).min(SHELL_RADIUS)
 }
-/// Where the cursor's card rests in the panel, its top-left: the app moves
-/// the panel so the pointer sits just above and left of it.
-pub(crate) const CURSOR_X: f32 = 196.0;
-pub(crate) const CURSOR_Y: f32 = 132.0;
-/// The pointer's tip, up and left of the card's corner.
-pub(crate) const POINTER_OFFSET: [f32; 2] = [12.0, 16.0];
-/// The menu-bar flow folds the capsule toward the panel's top right, the
-/// way Hex's menu-bar item lies.
-pub(crate) const MENU_FOLD: [f32; 4] = [PANEL_W - 72.0, 2.0, 30.0, 14.0];
-
-/// Where the capsule rests in the panel.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum Anchor {
-    /// Under the menu bar, centred: every flow but the two below.
-    #[default]
-    Top,
-    /// Hanging from the notch's bottom edge (the panel's top), grown out
-    /// of the notch.
-    Notch,
-    /// The cursor's card, at [`CURSOR_X`], [`CURSOR_Y`].
-    Cursor,
-}
-
 /// The kit's type, the same in either appearance: its labels in
 /// `ui_medium`, its notes and hints in `small_medium`.
 pub(crate) fn medium() -> TextStyle {
@@ -265,13 +235,6 @@ pub(crate) enum Id {
     /// The open capsule's field.
     Field,
     Row(usize),
-    /// A guess in the capsule itself: a chip in the menu-bar flow, a row
-    /// in the cursor's and the notch's card.
-    Pick(usize),
-    /// The card's key hint under its guesses ("Search ⌥⇧S").
-    CardHints,
-    /// The toast's next guess (⇥).
-    Next,
     /// The recording's pen, lit while drawing; a click toggles drawing.
     Pen,
     /// The recording's source button beside the pen: it opens Area, Window,
@@ -315,9 +278,6 @@ impl Id {
             Id::Inspect => "inspect",
             Id::Field => "field",
             Id::Row(_) => "row",
-            Id::Pick(_) => "pick",
-            Id::CardHints => "card-hints",
-            Id::Next => "next",
             Id::Pen => "pen",
             Id::Source => "source",
         }
@@ -376,7 +336,7 @@ impl Id {
             // ✕'s circle has air of its own, so it tucks into a plain worded
             // action's right padding; drawn later, it takes the overlap's
             // presses.
-            (Id::Ask | Id::Next | Id::Pick(_), Id::Close) => -CLOSE_HUG,
+            (Id::Ask, Id::Close) => -CLOSE_HUG,
             _ if self.group() == next.group() => CHIP_GAP,
             _ => GROUP_GAP,
         }
@@ -410,11 +370,9 @@ impl Id {
             | Id::AlwaysToProject
             | Id::AlwaysSave
             | Id::OpenRules => 22,
-            Id::Next => 15,
-            Id::Pick(row) => 16 + row.min(1) as u8,
             Id::Ask | Id::Search => 18,
             Id::Close => 20,
-            Id::Row(_) | Id::CardHints => 21,
+            Id::Row(_) => 21,
         }
     }
 }
@@ -540,24 +498,6 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
     // send it lives in the list under the capsule, never in chips beside
     // the label.
     let listed = done.open.is_some();
-    if done.cycle {
-        raw.push((
-            Id::Next,
-            String::new(),
-            keyed_width(&["⇥"], tr("Next"), medium()),
-            false,
-        ));
-    }
-    if tuning::get().flow == CapsuleFlow::MenuBar {
-        for (row, (name, _)) in done.picks.iter().enumerate() {
-            raw.push((
-                Id::Pick(row),
-                name.clone(),
-                keyed_width(&[], name, medium()),
-                false,
-            ));
-        }
-    }
     if let Some(lit) = done.always_button {
         let label = tr("Always…");
         raw.push((
@@ -638,90 +578,14 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
 /// Every state is centred on [`CX`], except the recording capsule with its
 /// chips: it centres the chip row (`Area … ✕`) where the picker puts the
 /// same row and hangs the lead off its left, so switching to Area or Window
-/// moves no chip. At [`Anchor::Notch`] the whole capsule centres on the
-/// notch instead of the panel.
+/// moves no chip.
 #[cfg(test)]
 pub(crate) fn layout(pres: &Pres, clock: &str) -> ([f32; 4], Vec<Item>) {
-    layout_at(pres, clock, false, Anchor::Top, notch::Geometry::default())
+    layout_at(pres, clock, false)
 }
 
-/// The guesses `pres` lists as rows in a card, not as chips.
-fn card_picks(pres: &Pres) -> &[(String, String)] {
-    match pres {
-        Pres::Done(done) if tuning::get().flow != CapsuleFlow::MenuBar => &done.picks,
-        _ => &[],
-    }
-}
-
-/// [`layout`] resting at `anchor`, with a card's rows under the top line.
 /// A `metered` recording shows its microphone's level after the timer.
-pub(crate) fn layout_at(
-    pres: &Pres,
-    clock: &str,
-    metered: bool,
-    anchor: Anchor,
-    notch: notch::Geometry,
-) -> ([f32; 4], Vec<Item>) {
-    let (mut shell, mut items) = line(pres, clock, metered);
-    let picks = card_picks(pres);
-    let (dx, dy) = match anchor {
-        Anchor::Top => (0.0, 0.0),
-        Anchor::Notch => (notch.centre() - CX, -TOP),
-        Anchor::Cursor => (CURSOR_X - shell[0], CURSOR_Y - TOP),
-    };
-    shell[0] += dx;
-    shell[1] += dy;
-    for item in &mut items {
-        item.rect[0] += dx;
-        item.rect[1] += dy;
-    }
-    let rows_y = shell[1] + ISLAND_H - 2.0;
-    for (row, (name, why)) in picks.iter().enumerate() {
-        items.push(Item {
-            id: Id::Pick(row),
-            ident: format!("{name}{NOTE_OF}{why}"),
-            rect: [
-                shell[0] + ISLAND_INSET,
-                rows_y + row as f32 * PICK_H,
-                shell[2] - 2.0 * ISLAND_INSET,
-                PICK_H,
-            ],
-            active: false,
-        });
-    }
-    if !picks.is_empty() {
-        let hints_y = rows_y + picks.len() as f32 * PICK_H;
-        items.push(Item {
-            id: Id::CardHints,
-            ident: chord(&shortcut_keycaps()),
-            rect: [
-                shell[0] + ISLAND_INSET,
-                hints_y,
-                shell[2] - 2.0 * ISLAND_INSET,
-                CARD_HINTS_H,
-            ],
-            active: false,
-        });
-        shell[3] = hints_y + CARD_HINTS_H + ISLAND_INSET - shell[1];
-    }
-    // The notch's walls run up past the screen's top edge, so only its
-    // bottom corners round, and it's never narrower than the notch: widen
-    // it to the notch with 12 pt either side, about its own middle. `dx`
-    // centred the symmetric states on the notch already, so a minimum-width
-    // rest still covers it; a row that hangs left of its middle (the lead
-    // dot, the clock) keeps its walls where its items are.
-    if anchor == Anchor::Notch {
-        let wider = (notch.min_width() - shell[2]).max(0.0);
-        shell[0] -= wider * 0.5;
-        shell[2] += wider;
-        shell[1] -= notch::REACH;
-        shell[3] += notch::REACH;
-    }
-    (shell, items)
-}
-
-/// The capsule's one line: [`layout`] before any anchor or card.
-fn line(pres: &Pres, clock: &str, metered: bool) -> ([f32; 4], Vec<Item>) {
+pub(crate) fn layout_at(pres: &Pres, clock: &str, metered: bool) -> ([f32; 4], Vec<Item>) {
     let mut raw: Vec<(Id, String, f32, bool)> = Vec::with_capacity(8);
     let mut held_row = false;
     let modes = |raw: &mut Vec<(Id, String, f32, bool)>, active: Mode, phone: bool| {
@@ -816,8 +680,6 @@ fn line(pres: &Pres, clock: &str, metered: bool) -> ([f32; 4], Vec<Item>) {
         LIST_W
     } else if configuring {
         super::always_view::POP_W
-    } else if !card_picks(pres).is_empty() {
-        CARD_W
     } else {
         0.0
     };
@@ -865,11 +727,8 @@ fn line(pres: &Pres, clock: &str, metered: bool) -> ([f32; 4], Vec<Item>) {
 }
 
 /// Where the capsule enters from and leaves to: its own width,
-/// [`TOP_FROM`] of its height, or at the notch, the notch.
-fn pose(rest: [f32; 4], anchor: Anchor, notch: notch::Geometry) -> [f32; 4] {
-    if anchor == Anchor::Notch {
-        return notch.tucked();
-    }
+/// [`TOP_FROM`] of its height.
+fn pose(rest: [f32; 4]) -> [f32; 4] {
     [rest[0], rest[1], rest[2], rest[3] * TOP_FROM]
 }
 
@@ -896,11 +755,6 @@ impl Shown {
     pub(crate) fn text(&self) -> &str {
         self.ident.split(NOTE_OF).next().unwrap_or_default()
     }
-
-    /// A card row's quiet reason, after its name.
-    pub(crate) fn note(&self) -> &str {
-        self.ident.split(NOTE_OF).nth(1).unwrap_or_default()
-    }
 }
 
 pub(crate) struct Surface {
@@ -925,12 +779,6 @@ pub(crate) struct Surface {
     pub(crate) morph_settle: f32,
     /// Phase changes for the motion trace.
     pub(crate) events: Vec<String>,
-    /// Where the capsule rests (`capture.capsule_flow`): the app moves
-    /// the overlay when it changes.
-    pub(crate) anchor: Anchor,
-    /// The notch it hangs from, in panel points: the pretend one until the
-    /// app measures the screen under the pointer.
-    notch: notch::Geometry,
     /// An entry's second frame, from the origin pose to rest, and where it
     /// goes.
     entry: Option<(f64, [f32; 4], Vec<Item>)>,
@@ -945,14 +793,13 @@ impl Default for Surface {
 
 impl Surface {
     pub(crate) fn new() -> Self {
-        let notch = notch::Geometry::default();
         let shell = [CX - 60.0, TOP, 120.0, ISLAND_H];
         Self {
             pres: Pres::Hidden,
             clock: "0:00".into(),
             metered: false,
             reduced: false,
-            shell: pose(shell, Anchor::Top, notch),
+            shell: pose(shell),
             shell_on: false,
             shell_motion: tuning::get().island,
             shell_fade: tuning::get().island_scale,
@@ -962,8 +809,6 @@ impl Surface {
             morphs: 0,
             morph_settle: 0.0,
             events: Vec::new(),
-            anchor: Anchor::Top,
-            notch,
             entry: None,
             generation: 0,
         }
@@ -975,14 +820,9 @@ impl Surface {
         expect(dead_code, reason = "headless stills and motion runs")
     )]
     pub(crate) fn settled(mut self, pres: Pres) -> Self {
-        self.anchor = anchor_for(&pres, self.anchor);
-        let (rest, items) = layout_at(&pres, &self.clock, self.metered, self.anchor, self.notch);
+        let (rest, items) = layout_at(&pres, &self.clock, self.metered);
         self.shell_on = !matches!(pres, Pres::Hidden);
-        self.shell = if self.shell_on {
-            rest
-        } else {
-            pose(rest, self.anchor, self.notch)
-        };
+        self.shell = if self.shell_on { rest } else { pose(rest) };
         self.items = items
             .iter()
             .map(|item| self.shown(item, tuning::get().island))
@@ -990,42 +830,6 @@ impl Surface {
         self.highlight = self.highlight_for(&items, tuning::get().island);
         self.pres = pres;
         self
-    }
-
-    /// Fits the capsule to `notch`, re-laying out what it already shows: a
-    /// measured notch arrives after the entry or rest was computed from the
-    /// pretend one. True when the geometry changed.
-    pub(crate) fn set_notch(&mut self, notch: notch::Geometry) -> bool {
-        if self.notch == notch {
-            return false;
-        }
-        self.notch = notch;
-        if self.anchor != Anchor::Notch {
-            return true;
-        }
-        let (rest, items) = layout_at(&self.pres, &self.clock, self.metered, self.anchor, notch);
-        if let Some((_, due, due_items)) = self.entry.as_mut() {
-            *due = rest;
-            *due_items = items;
-            // The entry starts from the notch, so its origin pose follows;
-            // under Reduce Motion it waits at rest, as every entry does.
-            self.shell = if self.reduced {
-                rest
-            } else {
-                pose(rest, self.anchor, notch)
-            };
-        } else if self.shell_on {
-            self.apply(rest, items);
-        } else {
-            // Hidden or leaving: under Reduce Motion it stays where it is;
-            // otherwise its next entry starts from the notch.
-            if !self.reduced {
-                self.shell = pose(rest, self.anchor, notch);
-            }
-            self.items.clear();
-            self.highlight = None;
-        }
-        true
     }
 
     fn shown(&mut self, item: &Item, motion: Spring) -> Shown {
@@ -1101,28 +905,15 @@ impl Surface {
         let next = self.pres.clone();
         self.entry = None;
         self.instant = false;
-        let was = self.anchor;
-        self.anchor = anchor_for(&next, was);
-        // A move to the pointer is a new place: the capsule enters there.
-        let moved = was != self.anchor && self.anchor == Anchor::Cursor;
 
         if matches!(next, Pres::Hidden) {
             // Exit in place: the capsule settles back to its origin pose as
-            // it fades, and every item leaves with it. In the menu-bar flow
-            // a finished capture folds up into the menu bar instead. Under
-            // Reduce Motion it stays where it is and only fades.
-            let fold = !self.reduced
-                && tuning::get().flow == CapsuleFlow::MenuBar
-                && matches!(prev, Pres::Done(_));
-            let motion = if fold {
-                self.shell = MENU_FOLD;
-                tuning::get().island
-            } else {
-                if !self.reduced {
-                    self.shell = pose(self.shell, self.anchor, self.notch);
-                }
-                tuning::get().island_scale
-            };
+            // it fades, and every item leaves with it. Under Reduce Motion
+            // it stays where it is and only fades.
+            if !self.reduced {
+                self.shell = pose(self.shell);
+            }
+            let motion = tuning::get().island_scale;
             self.shell_on = false;
             self.shell_motion = motion;
             self.shell_fade = self.fade(motion);
@@ -1131,16 +922,12 @@ impl Surface {
             return;
         }
 
-        let (rest, items) = layout_at(&next, &self.clock, self.metered, self.anchor, self.notch);
-        if !self.shell_on || moved || matches!(prev, Pres::Hidden) {
+        let (rest, items) = layout_at(&next, &self.clock, self.metered);
+        if !self.shell_on || matches!(prev, Pres::Hidden) {
             // Entry: this commit puts the capsule at its origin pose,
             // invisibly and instantly; the next frame springs it to rest.
             // Under Reduce Motion it starts at rest and only fades in.
-            self.shell = if self.reduced {
-                rest
-            } else {
-                pose(rest, self.anchor, self.notch)
-            };
+            self.shell = if self.reduced { rest } else { pose(rest) };
             self.shell_on = false;
             self.instant = true;
             self.items.clear();
@@ -1237,22 +1024,6 @@ impl Surface {
     }
 }
 
-/// Where `pres` rests in the flow in use, `was` where it rested before:
-/// the cursor's card stays at the pointer through its send and Undo, and
-/// a new capture starts back under the menu bar.
-pub(crate) fn anchor_for(pres: &Pres, was: Anchor) -> Anchor {
-    match tuning::get().flow {
-        CapsuleFlow::Notch => Anchor::Notch,
-        CapsuleFlow::Cursor => match pres {
-            Pres::Done(done) if !done.picks.is_empty() => Anchor::Cursor,
-            Pres::Done(_) => was,
-            Pres::Hidden if was == Anchor::Cursor => was,
-            _ => Anchor::Top,
-        },
-        CapsuleFlow::List | CapsuleFlow::Toast | CapsuleFlow::MenuBar => Anchor::Top,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::flow::{Dest, Footer, Lead, List};
@@ -1309,253 +1080,15 @@ mod tests {
         })
     }
 
-    fn offered() -> Pres {
-        Pres::Done(Done {
-            text: "Send to".into(),
-            picks: vec![
-                ("SEER".into(), "same page".into()),
-                ("HEX".into(), "last sent".into()),
-                ("HOME".into(), "yesterday".into()),
-            ],
-            ..Done::plain(Lead::Check, "Send to")
-        })
-    }
-
-    /// The cursor's card: its top line, then a row per guess inside the
-    /// walls, at the pointer; its send stays there, and a new capture goes
-    /// back under the menu bar.
-    #[test]
-    fn the_cursor_card_lists_its_guesses_at_the_pointer() {
-        tuning::with_flow(CapsuleFlow::Cursor, || {
-            let mut s = Surface::new();
-            s.set(Pres::Processing, 0.0);
-            run(&mut s, 0.0, 1.0);
-            assert_eq!(s.anchor, Anchor::Top);
-            s.set(offered(), 1.0);
-            assert_eq!(s.anchor, Anchor::Cursor);
-            assert!(s.instant, "it enters at the pointer, not flying there");
-            run(&mut s, 1.0, 2.0);
-            let [x, y, w, h] = s.shell;
-            assert_eq!([x, y], [CURSOR_X, CURSOR_Y]);
-            assert!(w >= CARD_W - 0.5);
-            let rows: Vec<&Shown> = s
-                .items
-                .iter()
-                .filter(|i| matches!(i.id, Id::Pick(_)))
-                .collect();
-            assert_eq!(rows.len(), 3);
-            for row in rows {
-                let [rx, ry, rw, rh] = row.rect;
-                assert!(rx >= x && rx + rw <= x + w && ry >= y + ISLAND_H - 4.0);
-                assert!(ry + rh <= y + h, "{:?} inside the card", row.ident);
-            }
-            s.set(Pres::Done(Done::plain(Lead::Check, "Sent to SEER")), 2.0);
-            assert_eq!(s.anchor, Anchor::Cursor);
-            s.set(Pres::Hidden, 3.0);
-            s.set(recording(false), 4.0);
-            assert_eq!(s.anchor, Anchor::Top);
-        });
-    }
-
-    /// The notch hangs from the top edge: its walls run past it, so only
-    /// its bottom corners show, and its items sit just under the edge.
-    #[test]
-    fn the_notch_hangs_from_the_top_edge() {
-        tuning::with_flow(CapsuleFlow::Notch, || {
-            let s = Surface::new().settled(recording(false));
-            assert_eq!(s.anchor, Anchor::Notch);
-            assert!(s.shell[1] < 0.0 && s.shell[1] + s.shell[3] > ISLAND_H - 1.0);
-            assert!(
-                s.items
-                    .iter()
-                    .all(|i| (i.rect[1] - ISLAND_INSET).abs() < 1e-3)
-            );
-            let card = Surface::new().settled(offered());
-            assert_eq!(
-                card.items
-                    .iter()
-                    .filter(|i| matches!(i.id, Id::Pick(_)))
-                    .count(),
-                3
-            );
-        });
-    }
-
     /// A recording that shows its microphone's level makes room for it
     /// after the timer, and only then.
     #[test]
     fn a_metered_recording_makes_room_for_its_level() {
-        let (plain, _) = line(&recording(false), "0:07", false);
-        let (metered, _) = line(&recording(false), "0:07", true);
+        let (plain, _) = layout_at(&recording(false), "0:07", false);
+        let (metered, _) = layout_at(&recording(false), "0:07", true);
         assert!((metered[2] - plain[2] - (LEVEL_GAP + LEVEL_W)).abs() < 1e-3);
-        let (processing, _) = line(&Pres::Processing, "0:07", false);
-        assert_eq!(line(&Pres::Processing, "0:07", true).0, processing);
-    }
-
-    /// The default geometry is the pretend notch: the resting capsule is
-    /// exactly where it was before any notch was measured.
-    #[test]
-    fn the_default_notch_rests_where_it_always_has() {
-        let (shell, _) = layout_at(
-            &Pres::Processing,
-            "0:00",
-            false,
-            Anchor::Notch,
-            notch::Geometry::default(),
-        );
-        assert_eq!(
-            shell,
-            [
-                CX - notch::MIN_WIDTH * 0.5,
-                -notch::REACH,
-                notch::MIN_WIDTH,
-                ISLAND_H + notch::REACH,
-            ]
-        );
-    }
-
-    /// A measured notch fits the shell to its edges, wherever it sits on
-    /// the display: tucked, exactly the notch; at rest, the notch with 12 pt
-    /// either side.
-    #[test]
-    fn the_notch_shell_fits_a_measured_notch() {
-        // A 210 pt notch, 12 pt right of its 1512 pt display's middle.
-        let notch::Measured {
-            geometry, panel_x, ..
-        } = notch::fitted(663.0, 873.0, 1.0);
-        let tucked = geometry.tucked();
-        assert_eq!(tucked, [geometry.left, -notch::REACH, 210.0, notch::REACH]);
-        assert_eq!(
-            (panel_x + tucked[0], panel_x + tucked[0] + tucked[2]),
-            (663.0, 873.0),
-            "the tucked shell is the notch itself"
-        );
-        let (shell, items) = layout_at(&Pres::Processing, "0:00", false, Anchor::Notch, geometry);
-        assert_eq!(shell[2], 210.0 + 2.0 * 12.0);
-        assert_eq!(shell[0], geometry.left - 12.0);
-        assert_eq!(shell[0] + shell[2], geometry.right + 12.0);
-        assert_eq!(
-            (panel_x + shell[0], panel_x + shell[0] + shell[2]),
-            (663.0 - 12.0, 873.0 + 12.0),
-            "the resting shell covers the notch and 12 pt either side"
-        );
-        let item = items.first().expect("the processing label").rect;
-        assert_eq!(item[0] + item[2] * 0.5, geometry.centre());
-    }
-
-    /// The content centres on the notch, not the panel: a notch off the
-    /// panel's middle still holds the capsule's line.
-    #[test]
-    fn notch_content_centres_on_the_notch() {
-        let geometry = notch::Geometry {
-            left: 200.0,
-            right: 420.0,
-        };
-        let (shell, items) = layout_at(&Pres::Processing, "0:00", false, Anchor::Notch, geometry);
-        assert_eq!(shell[0], geometry.centre() - geometry.min_width() * 0.5);
-        let item = items.first().expect("the processing label").rect;
-        assert_eq!(item[0] + item[2] * 0.5, 310.0);
-    }
-
-    /// A notch measured after the capsule was laid out moves it: both a
-    /// pending entry's rest and a shown capsule's rest follow its edges.
-    #[test]
-    fn a_measured_notch_refreshes_the_entry_and_the_rest() {
-        tuning::with_flow(CapsuleFlow::Notch, || {
-            let notch::Measured { geometry, .. } = notch::fitted(663.0, 873.0, 1.0);
-            let mut entering = Surface::new();
-            entering.set(recording(false), 0.0);
-            assert!(entering.set_notch(geometry), "a new notch is a change");
-            assert!(!entering.set_notch(geometry), "the same notch isn't");
-            assert_eq!(
-                entering.shell,
-                geometry.tucked(),
-                "the origin pose follows too"
-            );
-            assert!(entering.tick(0.001));
-            // The recording (pen, source, stop, ✕) is wider than the notch,
-            // so it stays centred on it and spans at least its edges.
-            let spans = |shell: [f32; 4], g: notch::Geometry| {
-                assert!((shell[0] + shell[2] * 0.5 - g.centre()).abs() < 0.01);
-                assert!(shell[0] <= g.left - 12.0 && shell[0] + shell[2] >= g.right + 12.0);
-            };
-            spans(entering.shell, geometry);
-
-            let mut rest = Surface::new().settled(recording(false));
-            spans(rest.shell, notch::Geometry::default());
-            assert!(rest.set_notch(geometry));
-            spans(rest.shell, geometry);
-        });
-    }
-
-    /// A recording's chips row hangs left of its middle for the lead dot
-    /// and the clock; the notch widens it only when it's too narrow, about
-    /// the row's own middle, so every item stays inside the walls.
-    #[test]
-    fn a_wide_recording_row_stays_inside_the_notch_shell() {
-        // A 210 pt notch, 12 pt right of its 1512 pt display's middle.
-        let notch::Measured { geometry, .. } = notch::fitted(663.0, 873.0, 1.0);
-        let (row, _) = line(&recording(true), "0:00", false);
-        assert!(
-            row[2] > geometry.min_width(),
-            "the chips row is wider than the notch's minimum"
-        );
-        let (shell, items) = layout_at(&recording(true), "0:00", false, Anchor::Notch, geometry);
-        assert_eq!(shell[2], row[2], "the shell keeps the row's width");
-        assert_eq!(shell[0], row[0] + (geometry.centre() - CX));
-        for item in &items {
-            assert!(
-                item.rect[0] >= shell[0] && item.rect[0] + item.rect[2] <= shell[0] + shell[2],
-                "{:?} inside the shell",
-                item.id
-            );
-        }
-    }
-
-    /// Under Reduce Motion a measured notch never puts the shell in the
-    /// tucked pose: an entry waits at rest, and a hidden capsule stays
-    /// where it left instead of jumping back into the notch.
-    #[test]
-    fn a_measured_notch_never_tucks_under_reduce_motion() {
-        tuning::with_flow(CapsuleFlow::Notch, || {
-            let notch::Measured { geometry, .. } = notch::fitted(663.0, 873.0, 1.0);
-            let (rest, _) = layout_at(&recording(false), "0:00", false, Anchor::Notch, geometry);
-            let mut entering = Surface::new();
-            entering.reduced = true;
-            entering.set(recording(false), 0.0);
-            assert!(entering.set_notch(geometry));
-            assert_eq!(entering.shell, rest, "the entry waits at rest");
-            assert_ne!(entering.shell, geometry.tucked());
-            assert!(entering.tick(0.001));
-            assert_eq!(entering.shell, rest);
-
-            let mut leaving = Surface::new().settled(recording(false));
-            leaving.reduced = true;
-            leaving.set(Pres::Hidden, 1.0);
-            let left = leaving.shell;
-            assert!(leaving.set_notch(geometry));
-            assert_eq!(leaving.shell, left, "hidden, it stays where it left");
-            assert_ne!(leaving.shell, geometry.tucked());
-        });
-    }
-
-    /// The menu-bar flow's guesses are chips with their numbers, and the
-    /// capsule folds up toward the menu bar as it goes.
-    #[test]
-    fn the_menu_bar_flow_folds_up_toward_the_menu_bar() {
-        tuning::with_flow(CapsuleFlow::MenuBar, || {
-            let mut s = Surface::new().settled(offered());
-            let chips = s
-                .items
-                .iter()
-                .filter(|i| matches!(i.id, Id::Pick(_)))
-                .count();
-            assert_eq!(chips, 3);
-            assert_eq!(s.shell[3], ISLAND_H, "one line, no card");
-            s.set(Pres::Hidden, 1.0);
-            assert_eq!(s.shell, MENU_FOLD);
-            assert!(!s.shell_on);
-        });
+        let (processing, _) = layout_at(&Pres::Processing, "0:07", false);
+        assert_eq!(layout_at(&Pres::Processing, "0:07", true).0, processing);
     }
 
     /// Under Reduce Motion the capsule never travels: it comes in at rest,
@@ -1563,26 +1096,22 @@ mod tests {
     /// change of width lights the edge glow.
     #[test]
     fn reduce_motion_only_fades_the_capsule() {
-        for flow in [CapsuleFlow::List, CapsuleFlow::MenuBar, CapsuleFlow::Notch] {
-            tuning::with_flow(flow, || {
-                let mut s = Surface::new();
-                s.reduced = true;
-                s.set(recording(false), 0.0);
-                let (rest, _) = layout_at(&s.pres, &s.clock, s.metered, s.anchor, s.notch);
-                assert_eq!(s.shell, rest, "{flow:?} enters at rest");
-                let now = run(&mut s, 0.0, 1.0);
-                assert!(s.shell_on);
-                assert_eq!(s.shell_fade, tuning::spring(REDUCED_FADE));
-                s.set(Pres::Processing, now);
-                s.set(Pres::Done(Done::plain(Lead::Check, "Copied")), now + 1.0);
-                assert_eq!(s.morphs, 0, "{flow:?} lights no glow");
-                let shown = s.shell;
-                s.set(Pres::Hidden, now + 2.0);
-                assert_eq!(s.shell, shown, "{flow:?} leaves where it is");
-                assert!(!s.shell_on);
-                assert_eq!(s.shell_fade, tuning::spring(REDUCED_FADE));
-            });
-        }
+        let mut s = Surface::new();
+        s.reduced = true;
+        s.set(recording(false), 0.0);
+        let (rest, _) = layout_at(&s.pres, &s.clock, s.metered);
+        assert_eq!(s.shell, rest, "it enters at rest");
+        let now = run(&mut s, 0.0, 1.0);
+        assert!(s.shell_on);
+        assert_eq!(s.shell_fade, tuning::spring(REDUCED_FADE));
+        s.set(Pres::Processing, now);
+        s.set(Pres::Done(Done::plain(Lead::Check, "Copied")), now + 1.0);
+        assert_eq!(s.morphs, 0, "it lights no glow");
+        let shown = s.shell;
+        s.set(Pres::Hidden, now + 2.0);
+        assert_eq!(s.shell, shown, "it leaves where it is");
+        assert!(!s.shell_on);
+        assert_eq!(s.shell_fade, tuning::spring(REDUCED_FADE));
     }
 
     #[test]

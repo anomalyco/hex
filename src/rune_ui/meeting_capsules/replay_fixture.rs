@@ -971,8 +971,10 @@ fn reduced_motion_lands_the_surface_and_only_fades() {
         let rests = [
             (REST_WIDTH, REST_HEIGHT),
             (PANEL_WIDTH, replay_open_height()),
-            // Capture ended: the foot has gone with the recording.
+            // Capture ended: the foot has gone with the recording, then the
+            // title band takes the Stop band's place.
             (PANEL_WIDTH, panel::open_height_without_notice()),
+            (PANEL_WIDTH, panel::result_height()),
             (a[2], a[3]),
         ];
         assert!(

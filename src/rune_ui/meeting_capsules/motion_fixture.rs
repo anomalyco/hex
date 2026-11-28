@@ -266,7 +266,8 @@ fn stop_hits_its_center_edges_and_corners_but_not_its_neighbors() {
         rt.frame(0.);
         open_recording(&mut rt);
         let ([x, y, w, h], _) = rt.presented("stop").unwrap();
-        assert!(w >= 44. && h >= 44., "{corner:?}: {w}×{h}");
+        // Stop is the rows' full-width 32 pt action, the kit's row height.
+        assert!(w >= 44. && h >= 28., "{corner:?}: {w}×{h}");
         let ([_, cy, _, ch], _) = rt.presented("copy-prompt").unwrap();
         assert!(y + h <= cy || y >= cy + ch);
         let click = |rt: &mut Runtime<Capsule>, px, py| {
@@ -547,18 +548,7 @@ fn tab_focus_tracks_the_whole_action_row_without_changing_its_bounds() {
     rt.update(|c, _| c.live.entries = call());
     rt.frame(0.);
     open_recording(&mut rt);
-    // The header's ✕ comes first, in its own 28 pt box.
-    rt.key(rune::KeyEvent {
-        key: rune::Key::Tab,
-        mods: Default::default(),
-    });
-    rt.frame(0.);
-    let focused = rt
-        .elements()
-        .into_iter()
-        .find(|e| e.focus_visible && e.focused)
-        .unwrap();
-    assert_eq!(focused.key.as_deref(), Some("discard"));
+    // The open header has no bare ✕: the rows' actions come first.
     for key in ["stop", "copy-prompt", "copy-all"] {
         rt.key(rune::KeyEvent {
             key: rune::Key::Tab,
@@ -697,7 +687,7 @@ fn notes_grow_past_the_copies_without_a_height_dip_or_a_clock_hop() {
                 // Capture ending takes the recording's foot with it, once: until
                 // the panel has been down to the one the finished meeting grows
                 // from it may fall that far, no further. From there it never dips.
-                let base = panel::open_height_without_notice();
+                let base = panel::result_height();
                 retracted |= now <= base + 0.02;
                 let floor = if retracted { height } else { height.min(base) };
                 if !published || summarized {
@@ -735,8 +725,9 @@ fn notes_grow_past_the_copies_without_a_height_dip_or_a_clock_hop() {
                     }
                 }
             }
-            // The finished panel: its title band, the summary, the copies.
-            assert!(rt.find("open-meeting").is_some() && rt.find("summary").is_some());
+            // The finished panel: its title band and the copies. The notes'
+            // summary is not drawn, so their arrival moves nothing.
+            assert!(rt.find("open-meeting").is_some() && rt.find("copy-all").is_some());
         }
     }
 }

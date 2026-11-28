@@ -87,16 +87,7 @@ pub(super) fn hold_until(phase: &Phase) -> Option<f64> {
             taken_back,
             ..
         }) if open.as_ref().is_none_or(|open| !open.typing && !taken_back) => {
-            // The menu-bar flow's hint is brief: the capture waits in the
-            // menu bar.
-            let hint = open.is_some() && tuning::get().flow == CapsuleFlow::MenuBar;
-            Some(
-                at + if hint {
-                    MENU_HINT_S
-                } else {
-                    tuning::get().done_hold_s
-                },
-            )
+            Some(at + tuning::get().done_hold_s)
         }
         Phase::Kept { at } | Phase::TakenBack { at } | Phase::Failed { at, .. } => {
             Some(at + tuning::get().brief_hold_s)
@@ -539,51 +530,14 @@ pub(super) fn routed_done(routed: &Routed, now: f64) -> Done {
     }
 }
 
-/// The suggestions as the flow in use offers them (`capture.capsule_flow`).
+/// The suggestions, offered under the line: the search above the list.
 pub(super) fn offered(base: Done, list: List) -> Done {
-    let names = || {
-        list.rows()
-            .map(|dest| (short(&dest.name), dest.why.clone()))
-            .collect()
-    };
-    match tuning::get().flow {
-        // Local actions above, destinations below.
-        CapsuleFlow::List => Done {
-            ask: Some(tr("Search").into()),
-            ask_keys: true,
-            open: Some((TextEdit::default(), list)),
-            inspect: false,
-            ..base
-        },
-        // One guess at a time on one quiet line; ⏎ sends it, ⇥ moves on.
-        CapsuleFlow::Toast => Done {
-            text: tr_fill(
-                "Send to {}",
-                &list
-                    .selected_dest()
-                    .map(|dest| short(&dest.name))
-                    .unwrap_or_default(),
-            ),
-            why: Some("⏎".into()),
-            ask: None,
-            cycle: list.rows().count() > 1,
-            sends: true,
-            ..base
-        },
-        // The frame alone, then the guesses as chips.
-        CapsuleFlow::MenuBar => Done {
-            text: String::new(),
-            why: None,
-            ask: None,
-            picks: names(),
-            ..base
-        },
-        CapsuleFlow::Cursor | CapsuleFlow::Notch => Done {
-            text: tr("Send to").into(),
-            why: None,
-            ask: None,
-            picks: names(),
-            ..base
-        },
+    // Local actions above, destinations below.
+    Done {
+        ask: Some(tr("Search").into()),
+        ask_keys: true,
+        open: Some((TextEdit::default(), list)),
+        inspect: false,
+        ..base
     }
 }

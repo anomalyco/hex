@@ -27,7 +27,7 @@ use crate::dictation::vocabulary::{self, VocabularyEntry};
 
 /// The wire version of [`ControlRequest`] and [`ControlResponse`]. A change
 /// that breaks either shape increments it.
-pub const CONTROL_VERSION: u32 = 4;
+pub const CONTROL_VERSION: u32 = 5;
 
 /// What a capture command does. Commands are idempotent: starting while
 /// recording or stopping while idle changes nothing and succeeds.

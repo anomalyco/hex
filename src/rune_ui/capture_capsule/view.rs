@@ -15,67 +15,16 @@ pub(super) fn tone(cue: Cue) -> crate::feedback::Tone {
 }
 
 pub(super) fn view(s: &CapsuleState, cx: &mut Cx<CapsuleState>) -> El {
-    #[cfg(target_os = "macos")]
-    if s.playground.is_some() {
-        return playground::view(s, cx);
-    }
     s.reduced.set(cx.is_reduced_motion());
     let p = Paint::new(cx.system_dark(), cx.env().scale);
     let capsule = capsule(p, &s.surface, &s.live, cx);
     if s.backdrop {
-        let mut backdrop = el().size(PANEL_W, PANEL_H).fill(p.k.c.layer_03);
-        // Stills and clips have no pointer: the cursor's card draws one
-        // where the app would find it.
-        if s.surface.anchor == surface::Anchor::Cursor {
-            backdrop = backdrop.child(pointer(p));
-        }
-        if tuning::get().flow == tuning::CapsuleFlow::MenuBar {
-            backdrop = backdrop.child(menu_item(p));
-        }
-        return backdrop.child(capsule);
+        return el()
+            .size(PANEL_W, PANEL_H)
+            .fill(p.k.c.layer_03)
+            .child(capsule);
     }
     capsule
-}
-
-/// Hex's menu-bar item where the menu-bar flow folds the capsule, for
-/// stills and clips, which have no menu bar.
-pub(super) fn menu_item(p: Paint) -> El {
-    let [x, y, w, h] = surface::MENU_FOLD;
-    el().key("menu-item")
-        .absolute(x, y)
-        .size(w, h)
-        .radius(h * 0.5)
-        .border(1.2, p.muted())
-        .child(
-            el().absolute(w * 0.5 - 2.5, h * 0.5 - 2.5)
-                .size(5.0, 5.0)
-                .radius(2.5)
-                .fill(p.muted()),
-        )
-}
-
-/// The arrow pointer just above and left of the cursor's card.
-pub(super) fn pointer(p: Paint) -> El {
-    let arrow = Path::new()
-        .move_to([1.0, 1.0])
-        .line_to([1.0, 16.0])
-        .line_to([5.0, 12.5])
-        .line_to([7.6, 18.2])
-        .line_to([10.2, 17.0])
-        .line_to([7.7, 11.6])
-        .line_to([12.6, 11.2])
-        .close();
-    let shape = Shape::new()
-        .view_box(14.0, 20.0)
-        .fill_path(&arrow, p.k.c.text_base)
-        .stroke_path(&arrow, 1.2, LineCap::Round, p.k.c.bg_base);
-    canvas(shape)
-        .key("pointer")
-        .absolute(
-            surface::CURSOR_X - surface::POINTER_OFFSET[0],
-            surface::CURSOR_Y - surface::POINTER_OFFSET[1],
-        )
-        .size(14.0, 20.0)
 }
 
 /// How content comes and goes, all of it together over the walls' move:
@@ -108,12 +57,6 @@ pub(super) fn capsule(
     live: &Animated,
     cx: &mut Cx<CapsuleState>,
 ) -> El {
-    // The notch is black in either appearance, so what's on it is dark's.
-    let p = if surface.anchor == surface::Anchor::Notch {
-        Paint::new(true, 1.0 / p.hair)
-    } else {
-        p
-    };
     let reduced = cx.is_reduced_motion() || surface.reduced;
     if surface.reduced {
         cx.reduced_motion(true);
@@ -218,18 +161,6 @@ pub(super) fn shell(p: Paint, surface: &Surface, meter: &Meter) -> El {
         .absolute(x, y)
         .size(w, h)
         .radius(corner(h));
-    // At the notch it's the notch: black, with no edge or shadow, and
-    // tucked into the notch rather than gone when hidden. Under Reduce
-    // Motion it never travels, so it fades at rest instead.
-    if surface.anchor == surface::Anchor::Notch {
-        body = body.fill(k.c.black).motion(surface.shell_motion);
-        if surface.reduced {
-            body = body
-                .opacity(if surface.shell_on { 1.0 } else { 0.0 })
-                .opacity_motion(surface.shell_fade);
-        }
-        return body.role("group").label(tr("Annotate"));
-    }
     body = body.fill(k.c.bg_base);
     for shadow in &k.elevation.overlay {
         body = body.box_shadow(*shadow);
@@ -408,14 +339,7 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 _ => Lead::Check,
             };
             let strong = matches!(&surface.pres, Pres::Done(done) if done.strong_text);
-            let ink = if strong {
-                p.text()
-            } else {
-                match tuning::get().top_line {
-                    tuning::TopLine::Quiet => p.muted(),
-                    tuning::TopLine::Icons => p.text(),
-                }
-            };
+            let ink = if strong { p.text() } else { p.muted() };
             let mut done = placed(el(), shown).trace_name("done").child(glyph(
                 p,
                 lead,
@@ -429,17 +353,6 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                         .h(CHIP_H)
                         .child(label(&shown.ident, done_style(), ink)),
                 );
-            }
-            let sends = matches!(&surface.pres, Pres::Done(done) if done.sends);
-            if sends {
-                return done
-                    .radius(surface::CHIP_RADIUS)
-                    .hover(c.hover)
-                    .press(c.pressed)
-                    .role("button")
-                    .label(shown.ident.clone())
-                    .hit()
-                    .on_press_tx(press(id));
             }
             if matches!(&surface.pres, Pres::Done(d) if d.inspect_preview() && d.lead == Lead::Thumbnail)
             {
@@ -455,20 +368,6 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             }
             done.role("text").label(shown.ident.clone())
         }
-        Id::Next => {
-            keyed(p, base, boxed(shown), &["⇥"], tr("Next"), medium()).on_press_tx(press(id))
-        }
-        // A chip beside the frame in the menu-bar flow.
-        Id::Pick(_) if tuning::get().flow == tuning::CapsuleFlow::MenuBar => {
-            keyed(p, base, boxed(shown), &[], shown.text(), medium()).on_press_tx(press(id))
-        }
-        Id::Pick(row) => pick_row(p, base, shown, row),
-        Id::CardHints => base
-            .justify_start()
-            .px(ROW_PX)
-            .child(hint(p, tr("Search"), &surface::shortcut_keycaps()))
-            .role("text")
-            .label(tr_fill("Search {}", shown.text())),
         Id::Why => placed(row().center_y(), shown)
             .trace_name("why")
             .child(quiet(p, shown.text(), done_style())),
@@ -477,16 +376,11 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
         // Click only: Escape meant for another app was taking sends back.
         Id::Undo => {
             let bw = shown.rect[2] - 2.0 * surface::BUTTON_INSET;
-            let ground = if surface.anchor == surface::Anchor::Notch {
-                c.black
-            } else {
-                c.bg_base
-            };
             base.child(undo_ring::chip(
                 p,
                 button_box(p, bw),
                 [bw, BUTTON_H],
-                ground,
+                c.bg_base,
                 live.ring.as_ref(),
             ))
             .role("button")
@@ -686,34 +580,6 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
         | Id::AlwaysSave
         | Id::OpenRules => base,
     }
-}
-
-/// A guess in the cursor's or the notch's card, as the list's rows read:
-/// its name and its reason, the best one's in the accent.
-pub(super) fn pick_row(p: Paint, base: El, shown: &Shown, row: usize) -> El {
-    let c = &p.k.c;
-    let room = shown.rect[2] - 4.0 * ROW_PX - measure(shown.text(), medium());
-    let note = ellipsize(shown.note(), small(), room.max(24.0));
-    base.justify_start()
-        .px(ROW_PX)
-        .gap(ROW_PX)
-        .radius(ROW_RADIUS + 2.0)
-        .hover(c.hover)
-        .press(c.pressed)
-        .child(label(shown.text(), medium(), p.text()))
-        .child(el().grow(1.0))
-        .child(
-            label(
-                &note,
-                small(),
-                if row == 0 { p.accent() } else { p.muted() },
-            )
-            .offset(0.0, (medium().size - small().size) * BASELINE_DROP),
-        )
-        .role("button")
-        .label(shown.text().to_owned())
-        .hit()
-        .on_press_tx(press(Id::Pick(row)))
 }
 
 /// A chip's label, then its shortcut, if any, as one quiet word, in a

@@ -120,7 +120,7 @@ fn picking(mode: Mode) -> Vec<Beat> {
     let mut beats = vec![
         In(Input::Phone(mode == Mode::Iphone)),
         In(Input::Stage(Stage::Recording)),
-        In(Input::Chips),
+        Click(Id::Source),
         Click(Id::Mode(Mode::Window)),
     ];
     if mode != Mode::Window {
@@ -159,14 +159,14 @@ fn stills() -> Vec<(&'static str, Pres)> {
         ),
         (
             "recording-chips",
-            after(&[In(Input::Stage(Stage::Recording)), In(Input::Chips)]),
+            after(&[In(Input::Stage(Stage::Recording)), Click(Id::Source)]),
         ),
         (
             "recording-chips-iphone",
             after(&[
                 In(Input::Phone(true)),
                 In(Input::Stage(Stage::Recording)),
-                In(Input::Chips),
+                Click(Id::Source),
             ]),
         ),
         ("processing", after(&[processing()])),
@@ -578,7 +578,7 @@ fn the_widest_states_fit_the_panel() {
     let chips = [
         In(Input::Phone(true)),
         In(Input::Stage(Stage::Recording)),
-        In(Input::Chips),
+        Click(Id::Source),
     ];
     for pres in [
         after(&[processing(), In(Input::Routed(rule))]),
@@ -1013,7 +1013,7 @@ fn the_capsule_draws_keycaps_only_on_search_and_hints() {
                 .is_some_and(|k| k == "keys" || k.starts_with("keycap"));
             assert!(
                 !keycap
-                    || ["ask-keys", "footer", "card-hints", "send-hint"]
+                    || ["ask-keys", "footer", "send-hint"]
                         .iter()
                         .any(|at| e.path.contains(at)),
                 "{name}: {} is a keycap",
@@ -1074,15 +1074,7 @@ fn render(gpu: &rune::render::Gpu, pres: Pres, dark: bool) -> (u32, u32, Vec<u8>
             ..
         }) => super::surface::LIST_Y + super::always_view::always_height(config) + 28.0,
         _ => {
-            // A card's guesses hang under the line.
-            use super::surface::{Anchor, anchor_for, layout_at};
-            let (shell, _) = layout_at(
-                &pres,
-                "0:00",
-                false,
-                anchor_for(&pres, Anchor::Top),
-                super::notch::Geometry::default(),
-            );
+            let (shell, _) = super::surface::layout_at(&pres, "0:00", false);
             (shell[1] + shell[3] + 36.0).max(TOP + 40.0 + 36.0)
         }
     };
@@ -1182,41 +1174,14 @@ fn capture_capsule_goldens() {
     assert!(misses.is_empty(), "{}", misses.join("\n"));
 }
 
-/// `HEX_CAPSULE_TOP_LINE=quiet|icons` draws the finished capsule's top
-/// line that way and `HEX_CAPSULE_FOOTER=band|well` the list's footer, to
-/// compare them.
-fn top_line_from_env() {
+/// `HEX_CAPSULE_UNDO_S` shortens Undo's window for a short clip.
+fn undo_from_env() {
+    let Ok(secs) = std::env::var("HEX_CAPSULE_UNDO_S") else {
+        return;
+    };
     let mut tuning = super::tuning::DEFAULT;
-    if let Ok(name) = std::env::var("HEX_CAPSULE_TOP_LINE") {
-        tuning.top_line = super::tuning::TopLine::ALL
-            .into_iter()
-            .find(|m| format!("{m:?}").eq_ignore_ascii_case(&name))
-            .expect("HEX_CAPSULE_TOP_LINE is quiet or icons");
-    }
-    if let Ok(name) = std::env::var("HEX_CAPSULE_FOOTER") {
-        tuning.list_footer = super::tuning::ListFooter::ALL
-            .into_iter()
-            .find(|m| format!("{m:?}").eq_ignore_ascii_case(&name))
-            .expect("HEX_CAPSULE_FOOTER is band or well");
-    }
-    // `HEX_CAPSULE_FLOW=list|toast|menu_bar|cursor|notch` plays that flow,
-    // and `HEX_CAPSULE_UNDO_S` shortens Undo's window for a short clip.
-    if let Ok(name) = std::env::var("HEX_CAPSULE_FLOW") {
-        tuning.flow = super::tuning::CapsuleFlow::ALL
-            .into_iter()
-            .find(|f| {
-                format!("{f:?}")
-                    .replace('_', "")
-                    .eq_ignore_ascii_case(&name.replace('_', ""))
-            })
-            .expect("HEX_CAPSULE_FLOW is list, toast, menu_bar, cursor or notch");
-    }
-    if let Ok(secs) = std::env::var("HEX_CAPSULE_UNDO_S") {
-        tuning.undo_s = secs.parse().expect("HEX_CAPSULE_UNDO_S is seconds");
-    }
-    if tuning != super::tuning::DEFAULT {
-        super::tuning::set(tuning);
-    }
+    tuning.undo_s = secs.parse().expect("HEX_CAPSULE_UNDO_S is seconds");
+    super::tuning::set(tuning);
 }
 
 /// `HEX_CAPSULE_SNAPS=<folder>` writes every state, light and dark;
@@ -1227,7 +1192,7 @@ fn capture_capsule_snapshots() {
     let Some(folder) = std::env::var_os("HEX_CAPSULE_SNAPS") else {
         return;
     };
-    top_line_from_env();
+    undo_from_env();
     if let Ok(language) = std::env::var("HEX_CAPSULE_LANGUAGE") {
         crate::desktop::i18n::apply(Some(&language));
     }

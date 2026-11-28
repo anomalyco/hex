@@ -411,51 +411,31 @@ pub(super) fn badge_icon(kind: Badge, width: f32, color: Color) -> Shape {
 
 /// The footer's height, and the list's below its last row.
 pub(super) fn footer_height() -> f32 {
-    match tuning::get().list_footer {
-        ListFooter::Band => LIST_PAD + BAND_H,
-        ListFooter::Well => LIST_PAD + WELL_H + LIST_PAD,
-    }
+    LIST_PAD + BAND_H
 }
 
-/// The hints set apart from the rows: (A) a full-width band on a quiet
-/// fill under a rule, or (B) a rounded well inset like the rows.
+/// The hints set apart from the rows: a full-width band on a quiet fill
+/// under a rule.
 pub(super) fn footer_box(p: Paint, hints: El, w: f32, h: f32) -> El {
     let k = p.k;
-    match tuning::get().list_footer {
-        ListFooter::Band => el()
-            .key("footer")
-            .absolute(0.0, h - BAND_H)
-            .size(w, BAND_H)
-            .fill(k.c.layer_01)
-            .child(
-                el().key("rule")
-                    .absolute(0.0, 0.0)
-                    .size(w, p.hair)
-                    .fill(k.c.border_weak),
-            )
-            .child(
-                row()
-                    .absolute(0.0, 0.0)
-                    .size(w, BAND_H)
-                    .center_y()
-                    .px(LIST_PAD + ROW_PX - ACTION_PX)
-                    .child(hints.grow(1.0)),
-            ),
-        ListFooter::Well => el()
-            .key("footer")
-            .absolute(LIST_PAD, h - LIST_PAD - WELL_H)
-            .size(w - 2.0 * LIST_PAD, WELL_H)
-            .radius(ROW_RADIUS)
-            .fill(k.c.layer_01)
-            .child(
-                row()
-                    .absolute(0.0, 0.0)
-                    .size(w - 2.0 * LIST_PAD, WELL_H)
-                    .center_y()
-                    .px(ROW_PX - ACTION_PX)
-                    .child(hints.grow(1.0)),
-            ),
-    }
+    el().key("footer")
+        .absolute(0.0, h - BAND_H)
+        .size(w, BAND_H)
+        .fill(k.c.layer_01)
+        .child(
+            el().key("rule")
+                .absolute(0.0, 0.0)
+                .size(w, p.hair)
+                .fill(k.c.border_weak),
+        )
+        .child(
+            row()
+                .absolute(0.0, 0.0)
+                .size(w, BAND_H)
+                .center_y()
+                .px(LIST_PAD + ROW_PX - ACTION_PX)
+                .child(hints.grow(1.0)),
+        )
 }
 
 pub(super) fn list_panel(

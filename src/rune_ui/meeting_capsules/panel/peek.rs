@@ -220,7 +220,8 @@ mod tests {
 
     #[test]
     fn the_foot_is_the_plain_link_until_the_call_has_words() {
-        assert_eq!(LINK_FOOT, 38.0);
+        // A row's 2 pt gap and the link's 32 pt line.
+        assert_eq!(LINK_FOOT, 34.0);
         assert_eq!(PEEK_FOOT, 66.0);
     }
 }

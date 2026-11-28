@@ -20,10 +20,7 @@ pub(crate) mod feed;
 pub(crate) mod flow;
 pub(crate) mod ink;
 mod list_view;
-pub(crate) mod notch;
 pub(crate) mod picker;
-#[cfg(target_os = "macos")]
-pub(crate) mod playground;
 #[cfg(target_os = "macos")]
 pub(crate) mod recording_dim;
 pub(crate) mod surface;
@@ -56,7 +53,6 @@ use self::surface::{
     THUMB_RADIUS, THUMB_W, THUMB_X, chord, clock_width, corner, done_style, done_text_x, ellipsize,
     measure, medium, processing, small,
 };
-use self::tuning::ListFooter;
 use self::view::*;
 use super::controls::{CAPSULE, Paint};
 use crate::desktop::i18n::{tr, tr_fill};
@@ -75,9 +71,8 @@ const ROW_PX: f32 = CAPSULE.row_px;
 const HEADER_PB: f32 = 4.0;
 /// Between one hint and the next.
 const HINTS_GAP: f32 = 16.0;
-/// The list footer's band (A) and well (B).
+/// The list footer's band.
 const BAND_H: f32 = 32.0;
-const WELL_H: f32 = 28.0;
 /// The list slides down this far as it fades in.
 const LIST_DROP: f32 = 6.0;
 
@@ -388,23 +383,16 @@ enum Part {
     List,
 }
 
-/// The overlay's visibility, anchor, and pointer-follow lifecycle on screen.
+/// The overlay's visibility and pointer-follow lifecycle on screen.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Presence {
     /// Hidden: no overlay on screen.
     Down,
     /// Shown and active (`pres != Pres::Hidden`).
-    Up {
-        anchor: surface::Anchor,
-        follow: bool,
-    },
+    Up { follow: bool },
     /// `pres == Pres::Hidden`, staying up for [`HIDE_AFTER_S`] while the exit
     /// animation plays before hiding.
-    Leaving {
-        since: f64,
-        anchor: surface::Anchor,
-        follow: bool,
-    },
+    Leaving { since: f64, follow: bool },
 }
 
 impl Presence {
@@ -416,13 +404,6 @@ impl Presence {
         match self {
             Self::Up { follow, .. } | Self::Leaving { follow, .. } => follow,
             Self::Down => false,
-        }
-    }
-
-    fn anchor(self) -> Option<surface::Anchor> {
-        match self {
-            Self::Up { anchor, .. } | Self::Leaving { anchor, .. } => Some(anchor),
-            Self::Down => None,
         }
     }
 }
@@ -467,11 +448,8 @@ pub(crate) struct CapsuleState {
     reduced: Cell<bool>,
     act: Option<Act>,
     overlay: Option<OverlayHandle<CapsuleState>>,
-    /// Overlay visibility, placed anchor, and pointer-follow state.
+    /// Overlay visibility and pointer-follow state.
     presence: Presence,
-    /// The notch the capsule hangs from on the pointer's display, when it
-    /// could be measured.
-    notch: Option<notch::Measured>,
     /// Its place beside the meeting capsules (`desktop::overlay_dock`).
     dock: dock::Docked,
     /// The keys Hex's tap hands the capsule ([`Flow::keys`]): the overlay
@@ -491,9 +469,6 @@ pub(crate) struct CapsuleState {
     backdrop: bool,
     /// Plays the flow's cues; none in stills and tests, which stay silent.
     sound: Option<Arc<dyn Fn(Cue) + Send + Sync>>,
-    /// The playground's controls and fake host (`hex capsule-playground`).
-    #[cfg(target_os = "macos")]
-    playground: Option<Box<playground::Playground>>,
 }
 
 impl CapsuleState {
@@ -511,7 +486,6 @@ impl CapsuleState {
             act: None,
             overlay: None,
             presence: Presence::Down,
-            notch: None,
             dock: dock::Docked::default(),
             keys: None,
             hovering: [false; 2],
@@ -519,8 +493,6 @@ impl CapsuleState {
             still: false,
             backdrop: false,
             sound: None,
-            #[cfg(target_os = "macos")]
-            playground: None,
         }
     }
 
@@ -696,16 +668,6 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
     }
     s.now = now;
     s.surface.reduced = s.reduced.get();
-    // The app follows `capture.capsule_flow`; the playground and tests set
-    // the tuning themselves.
-    if s.overlay.is_some() {
-        let flow = crate::app_settings::capsule_flow();
-        let mut t = tuning::get();
-        if t.flow != flow {
-            t.flow = flow;
-            tuning::set(t);
-        }
-    }
     let mut changed = false;
     let mut replaced = false;
     for input in std::mem::take(&mut s.inbox) {
@@ -738,18 +700,11 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
     let following = matches!(s.surface.pres, Pres::Selecting { .. });
     let prev = s.presence;
     let (next, leaving_wake) = match (hidden, prev) {
-        (false, _) => (
-            Presence::Up {
-                anchor: s.surface.anchor,
-                follow: following,
-            },
-            None,
-        ),
+        (false, _) => (Presence::Up { follow: following }, None),
         (true, Presence::Down) => (Presence::Down, None),
         (true, Presence::Up { .. }) => (
             Presence::Leaving {
                 since: now,
-                anchor: s.surface.anchor,
                 follow: false,
             },
             Some(HIDE_AFTER_S),
@@ -760,7 +715,6 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
                 (
                     Presence::Leaving {
                         since,
-                        anchor: s.surface.anchor,
                         follow: false,
                     },
                     Some(remaining),
@@ -771,53 +725,14 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
         }
     };
     let shown = next.is_shown();
-    // Shown, the capsule stays put. It moves to the pointer's display when
-    // a new capture brings it, when its anchor changes, when it comes back
-    // from hidden, and while the picker is open; a notch read that changed
-    // on its own never moves it. Pinned to the measured screen, Rune's own
-    // follow never runs for it, so the picker's crossing is this block's:
-    // while the picker is open, the poll is woken every `DISPLAY_EVERY` to
-    // re-read the pointer's screen, and a changed read re-places display and
-    // inset together from one measurement, so the capsule crosses with the
-    // picker within that cadence. Only the fallback that couldn't read the
-    // screen keeps `UnderPointer`, where Rune can follow first and leave an
-    // inset from the other display for a frame. Without an overlay (the
-    // playground and stills) there is nothing to measure or place, so the
-    // pretend notch stays.
-    let moved = prev
-        .anchor()
-        .is_some_and(|anchor| anchor != s.surface.anchor);
-    let step = if shown {
-        move_of(
-            replaced && !hidden,
-            moved,
-            following,
-            shown && !prev.is_shown(),
-        )
-    } else {
-        Move::Stay
-    };
-    let mut remeasured = false;
-    if s.surface.anchor == surface::Anchor::Notch {
-        // The panel is fitted to the notch on the pointer's screen:
-        // measured on macOS, the pretend one elsewhere.
-        if step != Move::Stay && s.overlay.is_some() {
-            let notch = measured_notch();
-            if notch != s.notch {
-                s.notch = notch;
-                let geometry = notch.map_or_else(notch::Geometry::default, |m| m.geometry);
-                changed |= s.surface.set_notch(geometry);
-                remeasured = true;
-            }
-        }
-    } else {
-        s.notch = None;
-    }
-    if step.places(remeasured)
+    // Shown, the capsule stays put. It moves to the pointer's display when a
+    // new capture brings it or when it comes back from hidden.
+    if shown
+        && (replaced && !hidden || !prev.is_shown())
         && let Some(overlay) = &s.overlay
     {
-        s.dock.measure(s.notch);
-        place(overlay, s.surface.anchor, s.notch, s.dock.margin());
+        s.dock.measure();
+        place(overlay, s.dock.margin());
     }
 
     let earliest = |wake: Option<f64>, at: Option<f64>| match (wake, at) {
@@ -826,17 +741,6 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
     };
     let mut wake = s.surface.next_due().map(|due| due - now);
     wake = earliest(wake, s.flow.next_due(now).map(|due| due - now));
-    // Pinned to the measured screen, Rune doesn't follow the pointer for
-    // the capsule and nothing else wakes an idle poll, so look again at the
-    // picker's cadence while it is open: the read that crosses displays
-    // comes within one check of the picker's own.
-    if follows_display(
-        following,
-        s.surface.anchor == surface::Anchor::Notch,
-        s.overlay.is_some(),
-    ) {
-        wake = earliest(wake, Some(picker::DISPLAY_EVERY.as_secs_f64()));
-    }
     if let Some(since) = s.recording_since {
         let secs = (now - since).max(0.0);
         let whole = secs as u64;
@@ -867,11 +771,10 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
     crate::capture_host::set_capsule_pill(shown.then_some(s.surface.shell));
     // Under the menu bar it clears the meeting capsules, and moves again as
     // they move, show, or go.
-    if s.dock
-        .sync(shown, s.surface.anchor, s.notch, s.surface.shell)
+    if s.dock.sync(shown, s.surface.shell)
         && let Some(overlay) = &s.overlay
     {
-        place(overlay, s.surface.anchor, s.notch, s.dock.margin());
+        place(overlay, s.dock.margin());
     }
     // The picker follows the pointer between displays.
     if prev.follow() != next.follow()
@@ -901,126 +804,17 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
     changed
 }
 
-/// Moves the overlay to where the capsule rests: under the menu bar
-/// `margin` points from the top, at the screen's top edge (the notch), or
-/// at the pointer (the cursor's card, whose rect is global, so on the
-/// primary display's origin).
-/// `notch` is the notch measured on the pointer's screen; the panel is
-/// pinned to that screen and its left edge put `panel_x` points from the
-/// screen's, so it can't land on another display than the one measured.
-/// Without one it stays centred on the pointer's screen.
-fn place(
-    overlay: &OverlayHandle<CapsuleState>,
-    anchor: surface::Anchor,
-    notch: Option<notch::Measured>,
-    margin: f32,
-) {
-    use rune::{Align, DisplayTarget, NativeDisplayId, OverlayPlacement, ScreenEdge};
-    let edge = |margin| OverlayPlacement::Edge {
+/// Moves the overlay to where the capsule rests: under the menu bar,
+/// `margin` points from the top.
+fn place(overlay: &OverlayHandle<CapsuleState>, margin: f32) {
+    use rune::{Align, DisplayTarget, OverlayPlacement, ScreenEdge};
+    overlay.set_display(DisplayTarget::UnderPointer);
+    overlay.set_placement(Some(OverlayPlacement::Edge {
         edge: ScreenEdge::Top,
         margin,
         align: Align::Center,
         inset: 0.0,
-    };
-    match anchor {
-        surface::Anchor::Top => {
-            overlay.set_display(DisplayTarget::UnderPointer);
-            overlay.set_placement(Some(edge(margin)));
-        }
-        surface::Anchor::Notch => {
-            // The measured screen's, so the panel and its notch agree even
-            // if the pointer moves before Rune places it; the pointer's
-            // when it couldn't be read.
-            overlay.set_display(match notch.and_then(|m| m.display) {
-                Some(id) => DisplayTarget::Native(NativeDisplayId::MacOS(id)),
-                None => DisplayTarget::UnderPointer,
-            });
-            // The panel's left edge on the display, so its walls land on the
-            // notch's; its top stays on the screen's as it always has.
-            overlay.set_placement(Some(match notch {
-                Some(notch) => OverlayPlacement::Edge {
-                    edge: ScreenEdge::Top,
-                    margin: 0.0,
-                    align: Align::Start,
-                    inset: notch.panel_x,
-                },
-                None => edge(0.0),
-            }));
-        }
-        surface::Anchor::Cursor => {
-            let Some([x, y]) = scrawl_capture::screens::pointer() else {
-                return;
-            };
-            overlay.set_display(DisplayTarget::Primary);
-            overlay.set_placement(Some(OverlayPlacement::Rect {
-                x: x as f32 + surface::POINTER_OFFSET[0] - surface::CURSOR_X,
-                y: y as f32 + surface::POINTER_OFFSET[1] - surface::CURSOR_Y,
-                width: PANEL_W,
-                height: PANEL_H,
-            }));
-        }
-    }
-}
-
-/// What a poll does about the panel's place.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Move {
-    /// Nothing asked it to move: the notch isn't even read.
-    Stay,
-    /// The picker follows the pointer: read the notch, and place only if it
-    /// changed.
-    Follow,
-    /// A new capture or a new anchor: read the notch and place.
-    Place,
-}
-
-/// Decides a poll's [`Move`]. The panel goes to the pointer's display on a
-/// new capture (`replaced`), an anchor change (`moved`), a capsule coming
-/// back from hidden (`appearing`), or while the picker is open
-/// (`following`). A showing capsule that isn't following keeps its place
-/// however the pointer's screen's notch reads now: no new capture, no new
-/// anchor, and no show means nobody asked it to move.
-fn move_of(replaced: bool, moved: bool, following: bool, appearing: bool) -> Move {
-    if replaced || moved || appearing {
-        Move::Place
-    } else if following {
-        Move::Follow
-    } else {
-        Move::Stay
-    }
-}
-
-/// Whether a poll must look at the pointer's screen again on its own: the
-/// picker is open (`following`) over a capsule pinned to a measured notch
-/// (`pinned`), with an overlay to place (`resolved`). Pinned, Rune's own
-/// follow never runs, so this wake is what lets the capsule cross displays
-/// with the picker.
-fn follows_display(following: bool, pinned: bool, resolved: bool) -> bool {
-    following && pinned && resolved
-}
-
-impl Move {
-    /// Whether the poll places the panel now. `changed` is whether the
-    /// notch read this poll differs from the one the panel is fitted to.
-    fn places(self, changed: bool) -> bool {
-        match self {
-            Move::Stay => false,
-            Move::Follow => changed,
-            Move::Place => true,
-        }
-    }
-}
-
-/// The notch the capsule can hang from: the pointer's screen's on macOS,
-/// or `None` where there is no notch to read.
-#[cfg(target_os = "macos")]
-fn measured_notch() -> Option<notch::Measured> {
-    notch::measured()
-}
-
-#[cfg(not(target_os = "macos"))]
-fn measured_notch() -> Option<notch::Measured> {
-    None
+    }));
 }
 
 /// Takes, changes, or lets go of the keys the capsule wants from Hex's tap.
@@ -1346,75 +1140,5 @@ impl Compositor<CapsuleState> for TraceFrames {
         if f.rt.scene.trace_mut().is_some() {
             trace_channels(f.rt);
         }
-    }
-}
-
-#[cfg(test)]
-mod moves {
-    use super::{Move, follows_display, move_of};
-
-    /// Showing and not following the pointer, the capsule keeps its place:
-    /// whatever the pointer's screen's notch reads now, nothing asked it to
-    /// move, so no changed measurement re-places it.
-    #[test]
-    fn a_showing_capsule_that_is_not_following_stays_put() {
-        assert_eq!(move_of(false, false, false, false), Move::Stay);
-        assert!(
-            !Move::Stay.places(true),
-            "a notch that changed is no reason to move"
-        );
-    }
-
-    /// A new capture brings the capsule to the pointer's display, even when
-    /// the notch there reads the same as the one it was fitted to.
-    #[test]
-    fn a_new_capture_places_the_capsule_on_the_pointers_display() {
-        for following in [false, true] {
-            assert_eq!(move_of(true, false, following, false), Move::Place);
-        }
-        assert!(Move::Place.places(false));
-    }
-
-    /// A new anchor moves it too: its edge changed, so its place must.
-    #[test]
-    fn an_anchor_change_places_the_capsule_again() {
-        for following in [false, true] {
-            assert_eq!(move_of(false, true, following, false), Move::Place);
-        }
-        assert!(Move::Place.places(false));
-    }
-
-    /// A capsule coming back from hidden is placed on the pointer's display
-    /// before it shows: its display stays pinned while hidden, so without
-    /// this it would come back on the display it last hid on.
-    #[test]
-    fn a_capsule_coming_back_from_hidden_places_on_the_pointers_display() {
-        for following in [false, true] {
-            assert_eq!(move_of(false, false, following, true), Move::Place);
-        }
-        assert!(Move::Place.places(false));
-    }
-
-    /// Following the pointer, it re-places only when the notch on that
-    /// display read differently: moving within one display, or to a display
-    /// whose notch reads the same, leaves it be.
-    #[test]
-    fn following_places_only_for_a_changed_notch() {
-        assert_eq!(move_of(false, false, true, false), Move::Follow);
-        assert!(Move::Follow.places(true));
-        assert!(!Move::Follow.places(false));
-    }
-
-    /// Only an open picker over a capsule pinned to a measured notch that
-    /// has an overlay to place asks a poll to look at the pointer's screen
-    /// again: a settled capsule keeps its place, the cursor card follows the
-    /// pointer itself, and without an overlay (the playground and stills)
-    /// there is nothing to place.
-    #[test]
-    fn only_an_open_picker_over_a_pinned_capsule_looks_again() {
-        assert!(follows_display(true, true, true));
-        assert!(!follows_display(false, true, true));
-        assert!(!follows_display(true, false, true));
-        assert!(!follows_display(true, true, false));
     }
 }

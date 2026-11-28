@@ -1486,4 +1486,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Also stop an offered or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off", "Также останавливает запись, начатую по предложению или вручную, через 30 с после того, как её приложение звонка отпускает микрофон, даже если «Останавливать по окончании звонка» выключено"),
     ("Indicator on any display", "Индикатор на любом экране"),
     ("Drag the meeting recording indicator to another display and it stays there", "Перетащите индикатор записи встречи на другой экран, и он останется там"),
+    ("Suggested", "Предложенные"),
+    ("Recent", "Недавние"),
+    ("Search sessions…", "Искать сессии…"),
 ];

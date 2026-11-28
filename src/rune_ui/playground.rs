@@ -440,8 +440,6 @@ fn playground() -> Playground<Ui> {
     let playground = super::live_notes::add(playground);
     #[cfg(target_os = "macos")]
     let playground = super::hud_stories::add(playground);
-    #[cfg(all(hex_capture, target_os = "macos"))]
-    let playground = super::capture_capsule::playground::stories(playground);
     playground
 }
 
@@ -681,48 +679,6 @@ mod tests {
         }
     }
 
-    /// Every capture-capsule story, on every flow after a capture, opens
-    /// from its `hex://story` link.
-    #[cfg(all(hex_capture, target_os = "macos"))]
-    #[test]
-    fn every_capsule_story_and_flow_opens_from_its_link() {
-        let app = attach(App::new(spec(super::super::spec())));
-        let mut rt = app.headless_runtime(WINDOW_SIZE, rune::Env::new(false, 1.0));
-        rt.frame(0.0);
-        for story in [
-            "whole-flow",
-            "rule",
-            "suggestions",
-            "shift",
-            "sent-rule",
-            "search",
-            "picked",
-            "taken-back",
-            "recording",
-            "discard",
-            "permission",
-        ] {
-            for flow in ["tuned", "list", "toast", "menu-bar", "cursor", "notch"] {
-                open_link(
-                    &mut rt,
-                    &format!("hex://story/prototypes/capture-capsule/{story}?variant={flow}"),
-                );
-            }
-        }
-        for variant in ["Side%20by%20side", "1", "2", "3"] {
-            open_link(
-                &mut rt,
-                &format!("hex://story/prototypes/capture-capsule/notch?variant={variant}"),
-            );
-        }
-        for variant in ["braid", "bars", "line"] {
-            open_link(
-                &mut rt,
-                &format!("hex://story/prototypes/capture-capsule/family?variant={variant}"),
-            );
-        }
-    }
-
     /// Opens `link` as the URL handler does; panics when its story or
     /// variant isn't there.
     #[cfg(target_os = "macos")]
@@ -760,7 +716,6 @@ mod tests {
                 "onboarding-option-pill",
                 "prototypes-onboarding-option-pill",
             ),
-            ("capture-capsule-notch", "prototypes-capture-capsule-notch"),
         ] {
             assert_eq!(alias(old).as_deref(), Some(new), "{old}");
         }

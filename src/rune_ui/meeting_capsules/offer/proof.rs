@@ -140,7 +140,8 @@ fn the_offer_keeps_its_corner_controls_and_clear_input_margin() {
                         });
                         let [bx, by, bw, bh] = end.rect;
                         near(by - y, 8.);
-                        near(x + w - bx - bw, 8.);
+                        // The action sits on the capsule's 6 pt end inset.
+                        near(x + w - bx - bw, 6.);
                         near(bh, 28.);
                         near(get("pill").radius - end.radius, 8.);
                         let [_, _, mw, mh] = get("provider-mark").rect;

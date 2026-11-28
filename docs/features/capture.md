@@ -532,7 +532,7 @@ While a capture records                  // capture.quiet
 
 Switching target                         // capture.switch; the capsule's chips
 ├── The recording capsule shows no target chips: a recording is the screen.
-│   Switching (below) remains for the CLI, the picker, and the playground
+│   Switching (below) remains for the CLI and the picker
 ├── CaptureCommand::Switch(target) -> discard and start in one step: no snapshot
 │   shows nothing recording in between (Scrawl's switch_recording)
 │   ├── No room to start (two writing, Hex stopping) -> refused `busy` before
@@ -614,12 +614,12 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   `hex capture discard`) -> the capsule leaves; the picker a chip opened
 │   stays. A switch that can't start settles the recording it discarded as
 │   failed, which the capsule shows as "Couldn't start"
-├── Recording -> `● 0:07 │ ✎ │ ■ ✕`: the timer, the toolbar (the pen, its
-│   only tool, lit with the accent fill while drawing), a divider, stop
-│   (Finish) and ✕ (asks "Discard?" first), all equal square icon buttons
-│   with tooltips "Draw", "Stop", "Discard". Goldens: recording,
-│   recording-drawing (rendered on apollo)
-├── Target chips (playground stories only; feed sends no Input::Chips) ->
+├── Recording -> `● 0:07  ✎ ⌖ ■ ✕`: the timer, then the toolbar (the pen,
+│   its only tool, lit with the accent fill while drawing, and ⌖ for the
+│   target), stop (Finish) and ✕ (asks "Discard?" first), one row of equal
+│   28 pt boxes with no divider and tooltips "Draw", "Source", "Stop",
+│   "Discard". Goldens: recording, recording-drawing
+├── Target chips (⌖ opens them on demand) ->
 │   Area · Window · Screen, plus iPhone while a phone is cabled, for 3.5 s
 │   ├── `worked` -> they fold once seen for 0.9 s; never while the pointer is on
 │   │   the capsule, and 1.2 s after it leaves
@@ -834,9 +834,8 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   Inspect and ✕ are one row of 28 pt
 │   │   boxes 6 pt apart and 6 pt in from the walls; Paste's is filled, and
 │   │   its 32 pt chip is still what takes the click
-│   │   (`the_ready_line_and_its_list_share_their_edges`). Two looks while Kit picks (tuning `top_line`):
-│   │   TopLine::Quiet (default) says the label in quiet MEDIUM ink;
-│   │   TopLine::Icons uses stronger ink. Both retain the annotation label
+│   │   (`the_ready_line_and_its_list_share_their_edges`). The label is drawn
+│   │   in quiet MEDIUM ink beside the preview
 │   ├── The lead is the capture's first frame (`frames/frame-01.png`, else the
 │   │   contact sheet), cropped to a small rounded card once the bundle is
 │   │   written and decoded off the UI thread; until then, or without one, a
@@ -852,12 +851,8 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   was taking sends back
 │   ├── Search's tooltip and accessible name include the configured capture
 │   │   shortcut; no keycaps appear in the ordinary completed header. The
-│   │   search's footer reads "Send ⏎", "Remember ⇧⏎", "New capture ⌥⇧S"; the
-│   │   cursor's and the notch's cards end in "Search ⌥⇧S" under their guesses.
-│   │   The footer sits apart from the rows in one of
-│   │   two looks while Kit picks (tuning `list_footer`): ListFooter::Band
-│   │   (default), a full-width band on its own fill under a rule, or
-│   │   ListFooter::Well, a rounded well inset like the rows
+│   │   search's footer reads "Send ⏎", "Remember ⇧⏎", "New capture ⌥⇧S"; it
+│   │   sits apart from the rows on a full-width band under a rule
 │   └── Long names give way together so the widest row stays inside the panel
 ├── Every change moves at once, as Dynamic Island's: the walls and what stays
 │   travel on `island`, the dictation HUD's morph (`rune_hud::spring::MORPH`,
@@ -868,57 +863,14 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   (`content_in` 0.30 s, `content_out` 0.24 s). Nothing staggers, and nothing
 │   waits for a wall or for other content; only an entry takes two frames
 │   (the origin pose, then rest). The list under the capsule comes and goes
-│   on the same springs. The playground's Transition card tunes all of it
+│   on the same springs
 ├── Reduce Motion -> the capsule enters at rest and leaves where it is (no
-│   origin pose, menu-bar fold, or edge glow), changes jump, nothing blurs
-│   or scales; the shell, at the notch too, fades on the HUD's short fade
+│   origin pose or edge glow), changes jump, nothing blurs or scales; the
+│   shell fades on the HUD's short fade
 │   (`reduce_motion_only_fades_the_capsule`)
-└── After a capture, one of five flows (`capture.capsule_flow`, the
-    playground's "Flow after a capture"; prototypes to compare, clips in
-    r22-flows). Only the guesses' look changes; rules, Undo, ✕ and the
-    keys the capsule takes stay the same. Each capsule story's variants
-    pick one, so a link opens a state in a flow:
-    `hex://story/prototypes/capture-capsule/suggestions?variant=toast`
-    ├── list (default) -> today's list under the capsule, as above
-    ├── toast -> one line "Send to X ⏎" with "Next ⇥" for more than one
-    │   guess; ⇥/⇧⇥ cycle (CapsuleKeys::Suggest { cycle }), ⏎ or a click on
-    │   the line sends the one shown
-    ├── menu_bar -> the frame plus "NAME 1/2/3" chips for MENU_HINT_S (4 s),
-    │   then the capsule folds into the menu-bar item
-    ├── cursor -> recording stays under the menu bar; the "Send to" card
-    │   (number, name, reason) opens at the pointer and its Sent stays there
-    └── notch -> a black shape grows out of the notch (the measured one on
-        macOS's pointer screen, read when the panel may go to that display:
-        a new capture, an anchor change, the capsule coming back from
-        hidden, or while the picker is open. A capsule that is showing and
-        not following stays put when the pointer moves, whatever the notch
-        there reads; left and right edges snapped to the backing pixels, the
-        panel moved under its middle and pinned to the display it was
-        measured on, so the panel and the notch can't disagree. Pinned, Rune
-        doesn't follow the pointer for it; while the picker is open, Hex
-        re-reads the pointer's screen at the picker's display-check cadence
-        (`picker::DISPLAY_EVERY`, 100 ms) and re-places display and inset
-        together, so the capsule crosses with the picker within that
-        cadence. Only the fallback that couldn't read the screen keeps
-        `UnderPointer`, where Rune can show one frame at the previous inset
-        before Hex re-places it; 185 pt
-        on a flat display, a pretend one the menu bar's height, so its panel
-        lands within a point of the display's middle rather than exactly on
-        it) into the pill and the same card, its content under the notch,
-        and shrinks back into it
-        (capture_capsule/notch.rs). The playground's "Prototypes/Capture capsule/notch"
-        story plays it on a 14-inch MacBook Pro and a 27-inch display, side
-        by side or each whole, at their real sizes
-    The playground's "Prototypes/Capture capsule/family" story (playground/family.rs)
-    plays a dictation and then a capture in one shape on the same springs:
-    from the notch on a 14-inch MacBook Pro, and on a flat 27-inch display
-    inside the menu bar (hud_placement's 3 pt inset) or floating 6 pt under
-    it. Its variants draw the voice as Dot scope's braid (its real
-    simulation), bars, or a line; only the capture adds a red dot or a small
-    screen, the cue alternating each loop
-    Gap: only the shapes are prototyped; the menu-bar item's capture list
-    is not, the app reads the notch's edges but not its height (the walls
-    run up past the screen's top), and no flow but list has run live
+└── After a capture, the finished capsule offers the suggestions in one
+    list under it (`capture_capsule/list_view.rs`); rules, Undo, ✕ and the
+    keys the capsule takes stay the same in every state
 
 The on-screen picker                     // capture.picker (capture_capsule/picker.rs)
 ├── A full-screen Rune overlay on the pointer's display, under the capsule,
@@ -1535,17 +1487,8 @@ Checks:
   `a_written_copy_offers_paste_and_inspect_as_icons`,
   `every_change_moves_at_once`,
   `entry_lands_the_pose_instantly_then_springs_to_rest_with_its_content`,
-  `the_toast_cycles_its_guesses_and_return_sends_the_one_shown`,
-  `the_menu_bar_hint_is_brief_and_its_chips_send`,
-  `the_cursor_card_lists_its_guesses_at_the_pointer`,
-  `the_notch_hangs_from_the_top_edge`,
-  `the_default_notch_rests_where_it_always_has`,
-  `the_notch_shell_fits_a_measured_notch`,
-  `notch_content_centres_on_the_notch`,
-  `a_wide_recording_row_stays_inside_the_notch_shell`,
-  `a_measured_notch_refreshes_the_entry_and_the_rest`,
-  `a_measured_notch_never_tucks_under_reduce_motion`,
-  `the_menu_bar_flow_folds_up_toward_the_menu_bar`, goldens
+  goldens
+  `tests/golden/capture-capsule-*.png`, and  `the_menu_bar_flow_folds_up_toward_the_menu_bar`, goldens
   `tests/golden/capture-capsule-*.png`, and
   `the_capsule_moves_inside_its_panel_and_comes_to_rest`, which traces every
   scripted state change per frame, Calm and Reduce Motion, for no pops,
@@ -1553,40 +1496,7 @@ Checks:
   motion-lint. `cues_mark_start_stop_sent_and_taking_back`,
   `nothing_heard_says_so`, and `a_capture_with_no_words_says_nothing_was_heard`
   cover the tones and the empty transcript. Observed (Oct 27, worker, r19 motion): all 28
-  capsule runs, Calm and Reduce Motion, pass lint. In
-  [notch.rs](../../src/rune_ui/capture_capsule/notch.rs):
-  `the_default_geometry_is_the_pretend_notch`,
-  `a_measured_notch_moves_the_panel_with_its_edges`,
-  `a_two_x_notch_lands_on_whole_pixels`, and
-  `edges_between_pixels_snap_outward_or_inward`. Flat displays go through
-  the same measured path with the pretend notch, so their panel is
-  pixel-snapped within a point of the display's middle, not exactly on it.
-  Which poll re-measures and re-places is decided by `move_of` in
-  [mod.rs](../../src/rune_ui/capture_capsule/mod.rs), tested by
-  `a_showing_capsule_that_is_not_following_stays_put`,
-  `a_new_capture_places_the_capsule_on_the_pointers_display`,
-  `an_anchor_change_places_the_capsule_again`,
-  `a_capsule_coming_back_from_hidden_places_on_the_pointers_display`, and
-  `following_places_only_for_a_changed_notch`: a showing capsule that isn't
-  following never moves because the pointer's notch changed, a capsule coming
-  back from hidden is placed before it shows rather than on the display it
-  last hid on, and following moves it only for a changed notch. Whether a
-  poll looks at the pointer's screen on its own (an open picker over a
-  pinned capsule with an overlay) is `follows_display`, tested by
-  `only_an_open_picker_over_a_pinned_capsule_looks_again`. The native
-  read, the re-place, and the 100 ms wake itself have no test: they need two
-  real displays.
-- Playground: `hex capsule-playground` (feature builds; hidden), or
-  `scripts/build-capsule-playground.sh` for an ad-hoc signed
-  `Hex Playground.app`, runs the real capsule in a window of its own against a
-  fake host, with state buttons, the whole flow, slow motion, Reduce Motion,
-  the tones, and live tuning ([tuning.rs](../../src/rune_ui/capture_capsule/tuning.rs);
-  "Copy values" copies its `DEFAULT`). It reads and writes no Hex data and
-  records or sends nothing. The whole flow picks the first suggestion;
-  its "Saved rule" toggle plays a rule's send, sent at once, instead.
-  `--snap --scene suggestions|shift|sent-rule|search|typed|picked|rule|recording`
-  renders it. The tones were checked by waveform and level only, never on
-  speakers.
+  capsule runs, Calm and Reduce Motion, pass lint.
 - Picker, in capture_capsule/picker.rs and tests.rs: geometry, label, and
   target tests, `the_picker_records_what_it_shows_and_comes_to_rest`, and
   `picker_stills_and_motion`, which scripts window hover, an area drag, and

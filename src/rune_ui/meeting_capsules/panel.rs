@@ -49,10 +49,6 @@ impl Notice {
 /// A capsule ✕'s hit box: the open recording's discard and the ready
 /// panel's close.
 const CLOSE_BOX: f32 = CAPSULE.close;
-/// The panel's icon spine: the centre of its rows' 16 pt glyphs, where every
-/// ✕ is centred too.
-#[cfg(test)]
-pub(super) const SPINE: f32 = CAPSULE.icon_spine();
 /// What a discard ✕ would take from the open header's field. The open
 /// header is the waveform and the time alone: no bare ✕ beside them.
 pub(super) const DISCARD_ROOM: f32 = 0.0;
@@ -762,6 +758,13 @@ pub(super) fn open_height_without_notice() -> f32 {
     OPEN_HEADER + ROW_GAP + COPIES_HEIGHT + PANEL_PAD
 }
 
+/// The transcribing and finished panel: the title band over the copies,
+/// without the recording's foot, as the replay checks its rests.
+#[cfg(test)]
+pub(super) fn result_height() -> f32 {
+    ready_height()
+}
+
 /// Where Stop is while recording and where the title is afterwards: the same
 /// place, so Stop leaves from the row it was pressed in as the title arrives.
 fn stop_slot() -> El {
@@ -1327,10 +1330,10 @@ pub(super) fn ready_window_size(manifest: &MeetingManifest) -> (f32, f32) {
 
 /// What the ready panel draws, on every OS: its header, a summary while there
 /// is one or one is being written, and the two copies, with the inset.
-pub(super) fn ready_body(manifest: &MeetingManifest) -> (f32, f32) {
+pub(super) fn ready_body(_manifest: &MeetingManifest) -> (f32, f32) {
     (
         PANEL_WIDTH + 2.0 * CAPSULE_INSET,
-        ready_height(manifest).max(open_height_without_notice()) + 2.0 * CAPSULE_INSET,
+        ready_height().max(open_height_without_notice()) + 2.0 * CAPSULE_INSET,
     )
 }
 
@@ -1456,18 +1459,18 @@ mod tests {
 
     #[test]
     fn the_resting_window_is_the_pill_and_the_open_one_the_panel() {
-        // The 168 pt pill (its field, the red dot, and the time) and its inset.
-        assert_eq!(rest(), (176., 44.));
-        assert_eq!(open(), (260., 224.));
+        // The 150 pt pill (its field and the time) and its inset.
+        assert_eq!(rest(), (158., 44.));
+        assert_eq!(open(), (260., 184.));
         // With words, the foot is their last lines.
-        assert_eq!(open_window(None, peek::PEEK_FOOT), (260., 252.));
+        assert_eq!(open_window(None, peek::PEEK_FOOT), (260., 216.));
         // The discard question fits inside the open window.
         assert!(CONFIRM_HEIGHT + 2. * CAPSULE_INSET <= open().1);
         // A notice widens the resting pill to the panel, and adds its line
         // to the open one.
         let noticed = noticed();
         assert_eq!(rest_window(Some(&noticed)), (260., 44.));
-        assert_eq!(open_window(Some(&noticed), peek::LINK_FOOT), (260., 244.));
+        assert_eq!(open_window(Some(&noticed), peek::LINK_FOOT), (260., 204.));
     }
 
     #[test]
